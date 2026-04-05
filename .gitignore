@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.ipynb_checkpoints/
+.claude/worktrees/
+site-docs/site/
+scratchpad/
+
+terraform.tfvars
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup

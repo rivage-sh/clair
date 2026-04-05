@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>clair docs</title>
+    <style>
+        /* ─── Reset & Base ─────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                         "Helvetica Neue", Arial, sans-serif;
+            font-size: 15px;
+            line-height: 1.5;
+            color: #1e293b;
+            background: #ffffff;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ─── Three-Panel Layout ───────────────────────────────────── */
+        .app {
+            display: flex;
+            height: 100vh;
+            position: relative;
+        }
+
+        /* ─── Sidebar ──────────────────────────────────────────────── */
+        .sidebar {
+            width: 260px;
+            min-width: 260px;
+            border-right: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #ffffff;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            font-size: 16px;
+            font-weight: 700;
+            color: #4a90d9;
+            margin: 0 0 20px;
+            letter-spacing: -0.02em;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+
+        .logo .project-name {
+            color: #64748b;
+            font-weight: 400;
+            font-size: 13px;
+            text-align: right;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 7px 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s;
+            background: #f8fafc;
+            color: #1e293b;
+        }
+
+        .search-input:focus {
+            border-color: #4a90d9;
+            background: #ffffff;
+        }
+
+        .search-input::placeholder {
+            color: #94a3b8;
+        }
+
+        .select-filter-wrap {
+            position: relative;
+        }
+
+        .select-filter-wrap .search-input {
+            padding-right: 26px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .select-clear-btn {
+            position: absolute;
+            right: 7px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #94a3b8;
+            font-size: 15px;
+            line-height: 1;
+            padding: 0;
+            display: none;
+        }
+
+        .select-clear-btn.visible {
+            display: block;
+        }
+
+        .filter-dag-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+            margin-bottom: 6px;
+        }
+
+        .sidebar-search {
+            padding: 20px 20px 6px 20px;
+            flex-shrink: 0;
+        }
+
+        /* ─── Sidebar Tree ─────────────────────────────────────────── */
+        .sidebar-tree {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0px 20px 20px 20px;
+        }
+
+        .sidebar-tree::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .sidebar-tree::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+
+        .sidebar-group {
+            margin-bottom: 2px;
+        }
+
+        .group-header,
+        .subgroup-header {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 0;
+            font-size: 13px;
+            font-weight: 600;
+            color: #64748b;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .subgroup-header {
+            padding-left: 12px;
+            font-weight: 500;
+            text-transform: none;
+            letter-spacing: 0;
+            color: #475569;
+        }
+
+        .group-header:hover,
+        .subgroup-header:hover {
+            color: #1e293b;
+        }
+
+        .caret {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            transition: transform 0.15s;
+        }
+
+        .caret::before {
+            content: '';
+            display: block;
+            border-top: 4px solid transparent;
+            border-bottom: 4px solid transparent;
+            border-left: 6px solid #94a3b8;
+        }
+
+        .caret.open {
+            transform: rotate(90deg);
+        }
+
+        .group-children {
+            overflow: hidden;
+        }
+
+        .group-children.collapsed {
+            display: none;
+        }
+
+        .sidebar-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 0 4px 22px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #334155;
+            transition: background 0.1s;
+            border-left: 2px solid transparent;
+        }
+
+        .sidebar-item:hover {
+            background: #f1f5f9;
+        }
+
+        .sidebar-item.active {
+            background: #eff6ff;
+            border-left-color: #4a90d9;
+            color: #1e293b;
+            font-weight: 500;
+        }
+
+        .item-type-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .item-type-dot.type-source { background: #6b7280; }
+        .item-type-dot.type-table  { background: #4a90d9; }
+        .item-type-dot.type-view   { background: #93c5fd; }
+
+        .sidebar-count {
+            padding: 8px 14px;
+            font-size: 13px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+
+        /* ─── Graph Panel ──────────────────────────────────────────── */
+        .graph-panel {
+            flex: 1;
+            position: relative;
+            background: #f8fafc;
+        }
+
+        .graph-empty {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #94a3b8;
+            font-size: 16px;
+        }
+
+        /* ─── Detail Panel ─────────────────────────────────────────── */
+        .detail-panel {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 360px;
+            height: 100%;
+            border-left: 1px solid #e2e8f0;
+            overflow-y: auto;
+            display: none;
+            background: #ffffff;
+            z-index: 10;
+            box-shadow: -4px 0 16px rgba(0, 0, 0, 0.06);
+        }
+
+        .detail-panel.open {
+            display: block;
+        }
+
+        .detail-panel::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .detail-panel::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+
+        .detail-header {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .detail-close {
+            float: right;
+            background: none;
+            border: none;
+            font-size: 18px;
+            color: #94a3b8;
+            cursor: pointer;
+            padding: 0 4px;
+            line-height: 1;
+        }
+
+        .detail-close:hover {
+            color: #475569;
+        }
+
+        .type-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: #ffffff;
+            margin-bottom: 8px;
+        }
+
+        .type-badge.type-source { background: #6b7280; }
+        .type-badge.type-table  { background: #4a90d9; }
+        .type-badge.type-view   { background: #93c5fd; color: #1e3a5f; }
+
+        .detail-header h2 {
+            margin: 0 0 6px;
+            font-size: 17px;
+            font-weight: 600;
+            color: #0f172a;
+            word-break: break-all;
+        }
+
+        .detail-header .docs {
+            margin: 0;
+            font-size: 15px;
+            color: #475569;
+            line-height: 1.5;
+        }
+
+        .detail-header .docs.empty {
+            color: #94a3b8;
+            font-style: italic;
+        }
+
+        /* ─── Detail Sections ──────────────────────────────────────── */
+        .detail-section {
+            padding: 20px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .detail-section:last-child {
+            border-bottom: none;
+        }
+
+        .detail-section h3 {
+            margin: 0 0 6px;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+        }
+
+        .empty-state {
+            color: #94a3b8;
+            font-size: 14px;
+            font-style: italic;
+            margin: 0;
+        }
+
+        /* ─── Columns Table ────────────────────────────────────────── */
+        .columns-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .columns-table th {
+            text-align: left;
+            font-weight: 600;
+            color: #64748b;
+            padding: 4px 8px 4px 0;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 13px;
+        }
+
+        .columns-table td {
+            padding: 5px 8px 5px 0;
+            border-bottom: 1px solid #f1f5f9;
+            color: #334155;
+            vertical-align: top;
+        }
+
+        .columns-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .columns-table .col-name {
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+            font-size: 13.5px;
+            color: #1e293b;
+            font-weight: 500;
+        }
+
+        .columns-table .col-type {
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        .columns-table .col-nullable {
+            font-size: 13px;
+            color: #94a3b8;
+        }
+
+        .columns-table .col-docs {
+            font-size: 14px;
+            color: #475569;
+        }
+
+        /* ─── Column Inference Notice ─────────────────────────────── */
+        .column-inference-notice {
+            font-size: 13px;
+            line-height: 1.5;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .column-inference-notice.status-inferred {
+            background: #eff6ff;
+            color: #1e40af;
+            border: 1px solid #bfdbfe;
+        }
+
+        .column-inference-notice.status-select_star {
+            background: #fefce8;
+            color: #854d0e;
+            border: 1px solid #fde68a;
+        }
+
+        .column-inference-notice.status-no_sql {
+            background: #f8fafc;
+            color: #64748b;
+            border: 1px solid #e2e8f0;
+        }
+
+        .column-inference-notice.status-parse_failed {
+            background: #f8fafc;
+            color: #64748b;
+            border: 1px solid #e2e8f0;
+        }
+
+        /* ─── SQL Block ────────────────────────────────────────────── */
+        .sql-block {
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 12px 14px;
+            overflow-x: auto;
+            margin: 0;
+        }
+
+        .sql-block code {
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+            font-size: 13.5px;
+            line-height: 1.6;
+            color: #334155;
+            white-space: pre;
+        }
+
+        /* ─── Tests List ───────────────────────────────────────────── */
+        .tests-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .tests-list li {
+            padding: 4px 0;
+            font-size: 14px;
+            color: #334155;
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+        }
+
+        .test-type {
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+            font-size: 13px;
+            background: #ecfdf5;
+            color: #059669;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: 500;
+            flex-shrink: 0;
+        }
+
+        .test-params {
+            color: #64748b;
+            font-size: 13.5px;
+        }
+
+        /* ─── Run Config ───────────────────────────────────────────── */
+        .config-dl {
+            margin: 0;
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 4px 12px;
+            font-size: 14px;
+        }
+
+        .config-dl dt {
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        .config-dl dd {
+            margin: 0;
+            color: #334155;
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+            font-size: 13.5px;
+        }
+
+        .config-dl dd.null-value {
+            color: #cbd5e1;
+        }
+
+        /* ─── Lineage Lists ────────────────────────────────────────── */
+        .lineage-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .lineage-list li {
+            padding: 0;
+        }
+
+        .lineage-list-nodes li + li {
+            margin-top: 2px;
+        }
+
+        .lineage-list a {
+            color: #4a90d9;
+            text-decoration: none;
+            font-size: 14px;
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+            font-size: 13.5px;
+        }
+
+        .lineage-list a:hover {
+            text-decoration: underline;
+            color: #2563eb;
+        }
+
+        /* ─── File Path ────────────────────────────────────────────── */
+        .file-path {
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+            font-size: 13.5px;
+            color: #64748b;
+            word-break: break-all;
+        }
+
+        /* ─── Resize Handles ───────────────────────────────────────── */
+        .resize-handle {
+            width: 4px;
+            background: transparent;
+            cursor: col-resize;
+            flex-shrink: 0;
+            transition: background 0.15s;
+            z-index: 20;
+        }
+
+        .resize-handle:hover,
+        .resize-handle.dragging {
+            background: #4a90d9;
+        }
+
+        .detail-resize-handle {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 4px;
+            height: 100%;
+            background: transparent;
+            cursor: col-resize;
+            z-index: 20;
+            transition: background 0.15s;
+        }
+
+        .detail-resize-handle:hover,
+        .detail-resize-handle.dragging {
+            background: #4a90d9;
+        }
+
+        /* ─── Lineage Links ────────────────────────────────────────── */
+        .lineage-link {
+            color: #4a90d9;
+            text-decoration: none;
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+            font-size: 13.5px;
+            cursor: pointer;
+        }
+
+        .lineage-link:hover {
+            text-decoration: underline;
+            color: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h1 class="logo">clair <span class="project-name"></span></h1>
+                <div class="filter-dag-label">Filter DAG</div>
+                <div class="select-filter-wrap">
+                    <input type="text" class="search-input" id="select-filter" placeholder="--select e.g. +my_table+">
+                    <button class="select-clear-btn" id="select-filter-clear" title="Clear">&times;</button>
+                </div>
+            </div>
+            <div class="sidebar-search">
+                <input type="text" class="search-input" id="search" placeholder="Search trouves...">
+            </div>
+            <div class="sidebar-tree" id="sidebar-tree"></div>
+            <div class="sidebar-count" id="sidebar-count"></div>
+        </aside>
+        <div class="resize-handle" id="sidebar-resize-handle"></div>
+        <main class="graph-panel" id="graph-container">
+            <!-- Cytoscape.js renders here -->
+        </main>
+        <aside class="detail-panel" id="detail-panel">
+            <div class="detail-resize-handle" id="detail-resize-handle"></div>
+            <div id="detail-content"></div>
+        </aside>
+    </div>
+
+    <!-- JS dependencies: pinned CDN versions (requires internet) -->
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+    <!-- Application JS -->
+    <script src="graph.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

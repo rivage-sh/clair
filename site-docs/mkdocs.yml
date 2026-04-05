@@ -1,0 +1,98 @@
+site_name: clair
+site_description: Python-native data transformation framework for Snowflake
+site_url: https://omerbaddour.github.io/clair
+repo_url: https://github.com/OmerBaddour/clair
+repo_name: OmerBaddour/clair
+edit_uri: ""
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  logo: assets/clair_logo.png
+  favicon: assets/clair_logo.png
+  palette:
+    - scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+nav:
+  - Getting Started:
+    - index.md
+    - Installation: installation.md
+    - Quickstart: quickstart.md
+  - Concepts:
+    - concepts/index.md
+    - Trouve: concepts/trouve.md
+    - DAG: concepts/dag.md
+    - Project Layout: concepts/project-layout.md
+    - Environments: concepts/environments.md
+  - Guides:
+    - guides/index.md
+    - Pandas-Native Transformations: guides/pandas-native.md
+    - Incrementality: guides/incrementality.md
+    - Data Quality Tests: guides/data-quality-tests.md
+    - Selectors: guides/selectors.md
+    - Routing Policies: guides/routing.md
+    - Per-Database & Schema Config: guides/per-database-schema-config.md
+  - CLI:
+    - cli/overview.md
+    - clair init: cli/init.md
+    - clair run: cli/run.md
+    - clair compile: cli/compile.md
+    - clair test: cli/test.md
+    - clair dag: cli/dag.md
+    - clair docs: cli/docs.md
+    - clair clean: cli/clean.md
+  - Reference:
+    - reference/index.md
+    - Trouve: reference/trouve-api.md
+    - Column: reference/column-api.md
+    - RunConfig: reference/run-config-api.md
+    - Tests: reference/tests-api.md
