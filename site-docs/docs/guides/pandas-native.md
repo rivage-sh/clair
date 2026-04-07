@@ -18,7 +18,7 @@ For everything else, prefer `Trouve` with SQL — it runs entirely inside Snowfl
 `PandasTrouve` requires the pandas extra:
 
 ```bash
-uv tool install "clair[pandas] @ git+https://github.com/OmerBaddour/clair.git"
+uv tool install "clair[pandas] @ git+https://github.com/rivage-sh/clair.git"
 ```
 
 If pandas is not installed, constructing a `PandasTrouve` raises an `ImportError` with instructions.

@@ -10,7 +10,7 @@
 Install clair as a global CLI tool using uv:
 
 ```bash
-uv tool install git+https://github.com/OmerBaddour/clair.git
+uv tool install git+https://github.com/rivage-sh/clair.git
 ```
 
 This installs the `clair` command globally. uv isolates the tool's dependencies so they don't interfere with your project's virtualenv.
@@ -33,7 +33,7 @@ uv tool upgrade clair
 Clone the repo, then sync dependencies and run via uv:
 
 ```bash
-git clone https://github.com/OmerBaddour/clair.git
+git clone https://github.com/rivage-sh/clair.git
 cd clair
 uv sync
 uv run clair --version

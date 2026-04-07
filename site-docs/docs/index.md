@@ -34,7 +34,7 @@ Import the upstream, use it in the f-string — clair figures out the rest.
 ## Install
 
 ```bash
-uv tool install git+https://github.com/OmerBaddour/clair.git
+uv tool install git+https://github.com/rivage-sh/clair.git
 ```
 
 Verify:

@@ -111,6 +111,10 @@ Files beginning with `_` are ignored during discovery.
 
 ---
 
+## Documentation
+
+Full documentation — guides, CLI reference, and API reference — is at **[rivage-sh.github.io/clair](https://rivage-sh.github.io/clair)**.
+
 ## Installation
 
 Clair is not yet on PyPI. Install it as a global CLI tool directly from GitHub using [uv](https://github.com/astral-sh/uv):
@@ -410,6 +414,8 @@ uv tool install "clair[pandas] @ git+https://github.com/rivage-sh/clair.git"
 ```
 
 > **Note:** pandas transformations run on the machine executing clair, not inside Snowflake. Keep this in mind for large tables.
+
+See the [Pandas-Native Transformations guide](https://rivage-sh.github.io/clair/guides/pandas-native/) for the full field reference, DAG integration details, and limitations.
 
 ---
 
