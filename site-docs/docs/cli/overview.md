@@ -17,6 +17,13 @@ All commands share two common flags:
 | [`clair docs`](docs.md) | Start a local web UI showing the DAG and documentation | No |
 | [`clair clean`](clean.md) | Remove compiled artifacts from `_clairtifacts/` | No |
 
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAIR_ENV` | `dev` | Active environment name. Equivalent to passing `--env` on every command. `--env` takes precedence if both are set. |
+| `CLAIR_LOG_FORMAT` | _(text)_ | Set to `json` to emit structured JSON logs. Useful in CI/CD pipelines and container environments that ingest JSON logs. |
+
 ## Help
 
 ```bash
