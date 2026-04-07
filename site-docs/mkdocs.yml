@@ -1,8 +1,8 @@
 site_name: clair
 site_description: Python-native data transformation framework for Snowflake
-site_url: https://omerbaddour.github.io/clair
-repo_url: https://github.com/OmerBaddour/clair
-repo_name: OmerBaddour/clair
+site_url: https://rivage-sh.github.io/clair
+repo_url: https://github.com/rivage-sh/clair
+repo_name: rivage-sh/clair
 edit_uri: ""
 
 docs_dir: docs
