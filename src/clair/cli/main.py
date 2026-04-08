@@ -24,7 +24,7 @@ from clair.environments.routing import DatabaseOverrideRouting, SchemaIsolationR
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project, find_routing_collisions, recompile_for_selection
 from clair.core.runner import RunStatus, run_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
-from clair.core.selector import filter_by_selectors
+from clair.core.selector import expand_selectors, filter_by_selectors
 from clair.core.test_runner import format_test_output, run_tests
 from clair.docs.catalog import build_catalog
 from clair.docs.server import serve
@@ -228,7 +228,12 @@ def _prompt_and_write_environment() -> None:
 @click.option(
     "--select",
     multiple=True,
-    help="Glob pattern to filter Trouves; repeat to union patterns (e.g., --select='mydb.analytics.*' --select='mydb.reports.*')",
+    help="Selector pattern to filter Trouves; supports globs and + operators (e.g., --select='+mydb.analytics.orders' --select='mydb.reports.*')",
+)
+@click.option(
+    "--exclude",
+    multiple=True,
+    help="Selector pattern to exclude Trouves; same syntax as --select, applied after selection.",
 )
 @click.option(
     "--project",
@@ -247,7 +252,7 @@ def _prompt_and_write_environment() -> None:
     default="full_refresh",
     help="Run mode: full_refresh recreates all tables; incremental applies only new data.",
 )
-def compile_cmd(select: tuple[str, ...], project: str, env: str | None, run_mode: str) -> None:
+def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str) -> None:
     """Compile the project and show generated SQL (no Snowflake connection)."""
     project_root = Path(project).resolve()
     run_mode_enum = RunMode(run_mode)
@@ -270,8 +275,11 @@ def compile_cmd(select: tuple[str, ...], project: str, env: str | None, run_mode
         _print_routing_collision_warnings(discovered, env_name, routing)
         dag = build_dag(discovered)
 
-        executable = get_executable_nodes(dag)
-        selected = filter_by_selectors(executable, select)
+        expanded = expand_selectors(dag, select if select else None)
+        selected = [n for n in expanded if dag.get_trouve(n).type != TrouveType.SOURCE]
+        if exclude:
+            excluded_set = set(expand_selectors(dag, exclude))
+            selected = [n for n in selected if n not in excluded_set]
         recompile_for_selection(discovered, set(selected))
 
         source_count = sum(1 for n in dag.nodes if dag.get_trouve(n).type == TrouveType.SOURCE)
@@ -385,7 +393,12 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
 @click.option(
     "--select",
     multiple=True,
-    help="Glob pattern to filter Trouves; repeat to union patterns (e.g., --select='mydb.analytics.*' --select='mydb.reports.*')",
+    help="Selector pattern to filter Trouves; supports globs and + operators (e.g., --select='+mydb.analytics.orders' --select='mydb.reports.*')",
+)
+@click.option(
+    "--exclude",
+    multiple=True,
+    help="Selector pattern to exclude Trouves; same syntax as --select, applied after selection.",
 )
 @click.option(
     "--project",
@@ -416,7 +429,7 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     default=False,
     help="Run post-run tests against a sample of each Trouve (skips row count tests).",
 )
-def run(select: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool) -> None:
+def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool) -> None:
     """Run Trouves against Snowflake, then run data quality tests."""
     project_root = Path(project).resolve()
     run_mode_enum = RunMode(run_mode)
@@ -436,8 +449,11 @@ def run(select: tuple[str, ...], project: str, env: str | None, run_mode: str, n
         dag = build_dag(discovered)
 
         # Filter by selector
-        executable = get_executable_nodes(dag)
-        selected = filter_by_selectors(executable, select)
+        expanded = expand_selectors(dag, select if select else None)
+        selected = [n for n in expanded if dag.get_trouve(n).type != TrouveType.SOURCE]
+        if exclude:
+            excluded_set = set(expand_selectors(dag, exclude))
+            selected = [n for n in selected if n not in excluded_set]
 
         if not selected:
             click.echo("No Trouves selected to run.")
@@ -492,7 +508,12 @@ def run(select: tuple[str, ...], project: str, env: str | None, run_mode: str, n
 @click.option(
     "--select",
     multiple=True,
-    help="Glob pattern to filter Trouves; repeat to union patterns (e.g., --select='mydb.analytics.*' --select='mydb.reports.*')",
+    help="Selector pattern to filter Trouves; supports globs and + operators (e.g., --select='+mydb.analytics.orders' --select='mydb.reports.*')",
+)
+@click.option(
+    "--exclude",
+    multiple=True,
+    help="Selector pattern to exclude Trouves; same syntax as --select, applied after selection.",
 )
 @click.option(
     "--project",
@@ -512,7 +533,7 @@ def run(select: tuple[str, ...], project: str, env: str | None, run_mode: str, n
     help="Run tests against a sample of each Trouve (skips row count tests).",
 )
 def test(
-    select: tuple[str, ...], project: str, env: str | None, sample: bool
+    select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, sample: bool
 ) -> None:
     """Run data quality tests against Snowflake."""
     project_root = Path(project).resolve()
@@ -531,8 +552,10 @@ def test(
 
         # Filter by selector -- include all nodes (even SOURCEs) so that
         # the selector can match them; run_tests skips SOURCEs internally.
-        all_names = list(dag.nodes)
-        selected = filter_by_selectors(all_names, select)
+        selected = expand_selectors(dag, select if select else None)
+        if exclude:
+            excluded_set = set(expand_selectors(dag, exclude))
+            selected = [n for n in selected if n not in excluded_set]
 
         if not selected:
             logger.info("test.no_trouves_selected")
