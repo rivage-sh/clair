@@ -1,32 +1,32 @@
-"""Environment loading from ~/.clair/environments.yml."""
+"""Environment loading from ~/.clair/environments.py."""
 
 from __future__ import annotations
 
+import importlib.util
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 
-from clair.environments.routing import Routing
+from clair.environments.routing import RoutingConfig
 from clair.exceptions import (
     EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
-    InvalidRoutingConfigError,
-    InvalidRoutingPolicyError,
+    InvalidEnvironmentsFileError,
 )
 
-DEFAULT_ENVIRONMENTS_PATH = Path.home() / ".clair" / "environments.yml"
+DEFAULT_ENVIRONMENTS_PATH = Path.home() / ".clair" / "environments.py"
 
 
 class Environment(BaseModel):
-    """A single environment from environments.yml."""
+    """A single environment from environments.py."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
     # Identity
-    name: str
+    name: str = ""
 
     # Connection (required)
     account: str
@@ -44,8 +44,8 @@ class Environment(BaseModel):
     region: str | None = None
     account_locator: str | None = None
 
-    # Routing
-    routing: Routing | None = None
+    # Routing: a RoutingConfig subclass or any callable (db, schema, table) -> "db.schema.table"
+    routing: RoutingConfig | Callable[[str, str, str], str] | None = None
 
     def to_connection_dict(self) -> dict[str, Any]:
         """Return the connection dict expected by SnowflakeAdapter.connect()."""
@@ -68,26 +68,37 @@ class Environment(BaseModel):
         return d
 
 
-def _validate_routing_block(routing_raw: dict[str, Any]) -> None:
-    """Pre-validate routing block before Pydantic parses it.
+def _load_environments_module(path: Path) -> dict[str, Environment]:
+    """Load and execute an environments.py file, returning its environments dict."""
+    spec = importlib.util.spec_from_file_location("_clair_environments", path)
+    if spec is None or spec.loader is None:
+        raise EnvironmentsFileNotFoundError(str(path))
 
-    Catches missing/unknown policy values and re-raises as clair-specific
-    error types that the CLI already handles.
-    """
-    if "policy" not in routing_raw:
-        raise InvalidRoutingConfigError("routing block requires 'policy'")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+    except Exception as exc:
+        raise InvalidEnvironmentsFileError(str(path), str(exc)) from exc
 
-    policy = routing_raw["policy"]
-    valid_policies = {"database_override", "schema_isolation"}
-    if policy not in valid_policies:
-        raise InvalidRoutingPolicyError(policy)
+    if not hasattr(module, "environments"):
+        raise InvalidEnvironmentsFileError(
+            str(path), "file must define an 'environments' dict"
+        )
+
+    environments = module.environments
+    if not isinstance(environments, dict):
+        raise InvalidEnvironmentsFileError(
+            str(path), f"'environments' must be a dict, got {type(environments).__name__}"
+        )
+
+    return environments
 
 
 def load_environment(
     env_name: str | None = None,
     environments_path: Path | None = None,
 ) -> tuple[str, Environment]:
-    """Load an environment from environments.yml.
+    """Load an environment from environments.py.
 
     Resolution order for env name:
     1. env_name argument
@@ -96,16 +107,15 @@ def load_environment(
 
     Args:
         env_name: Explicit environment name.
-        environments_path: Path to environments.yml. Defaults to ~/.clair/environments.yml.
+        environments_path: Path to environments.py. Defaults to ~/.clair/environments.py.
 
     Returns:
         Tuple of (resolved_env_name, Environment).
 
     Raises:
-        EnvironmentsFileNotFoundError: If environments.yml does not exist.
-        EnvironmentNotFoundError: If the requested environment is not in environments.yml.
-        InvalidRoutingPolicyError: If an unknown routing policy is specified.
-        InvalidRoutingConfigError: If the routing block is malformed.
+        EnvironmentsFileNotFoundError: If environments.py does not exist.
+        InvalidEnvironmentsFileError: If environments.py is malformed.
+        EnvironmentNotFoundError: If the requested environment is not defined.
     """
     resolved_name = env_name or os.environ.get("CLAIR_ENV") or "dev"
     path = environments_path or DEFAULT_ENVIRONMENTS_PATH
@@ -113,25 +123,18 @@ def load_environment(
     if not path.exists():
         raise EnvironmentsFileNotFoundError(str(path))
 
-    with open(path) as f:
-        raw = yaml.safe_load(f)
+    environments = _load_environments_module(path)
 
-    if not isinstance(raw, dict):
-        raise EnvironmentsFileNotFoundError(str(path))
+    if resolved_name not in environments:
+        raise EnvironmentNotFoundError(resolved_name, [str(k) for k in environments])
 
-    if resolved_name not in raw:
-        raise EnvironmentNotFoundError(resolved_name, [str(k) for k in raw])
+    environment = environments[resolved_name]
+    if not isinstance(environment, Environment):
+        raise InvalidEnvironmentsFileError(
+            str(path),
+            f"environments['{resolved_name}'] must be an Environment instance, "
+            f"got {type(environment).__name__}",
+        )
 
-    env_data: dict[str, Any] = raw[resolved_name]
-
-    routing_raw = env_data.get("routing")
-    if isinstance(routing_raw, dict):
-        _validate_routing_block(routing_raw)
-
-    try:
-        environment = Environment(name=resolved_name, **env_data)
-        return resolved_name, environment
-    except ValidationError as exc:
-        # Surface Pydantic validation errors (e.g. missing schema_name for
-        # schema_isolation) as clair-specific errors the CLI already catches.
-        raise InvalidRoutingConfigError(str(exc)) from exc
+    environment.name = resolved_name
+    return resolved_name, environment

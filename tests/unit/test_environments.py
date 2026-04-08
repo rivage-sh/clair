@@ -11,8 +11,7 @@ from clair.environments.routing import SchemaIsolationRouting
 from clair.exceptions import (
     EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
-    InvalidRoutingConfigError,
-    InvalidRoutingPolicyError,
+    InvalidEnvironmentsFileError,
 )
 
 
@@ -34,7 +33,7 @@ class TestLoadEnvironment:
 
     def test_missing_file_raises(self, tmp_path: Path):
         with pytest.raises(EnvironmentsFileNotFoundError):
-            load_environment(environments_path=tmp_path / "nonexistent.yml")
+            load_environment(environments_path=tmp_path / "nonexistent.py")
 
     def test_env_var_resolution(self, tmp_environments: Path, monkeypatch):
         monkeypatch.setenv("CLAIR_ENV", "ci")
@@ -70,28 +69,43 @@ class TestLoadEnvironment:
         assert env.routing.database_name == "DEV"
         assert env.routing.schema_name == "obaddour"
 
+    def test_callable_routing_loaded(self, tmp_environments: Path):
+        _, env = load_environment(env_name="with_callable_routing", environments_path=tmp_environments)
+        assert callable(env.routing)
+        assert env.routing("refined", "products", "catalog") == "refined_dev.products.catalog"
+
     def test_no_routing_returns_none(self, tmp_environments: Path):
         _, env = load_environment(env_name="dev", environments_path=tmp_environments)
         assert env.routing is None
 
+    def test_name_is_set_on_returned_environment(self, tmp_environments: Path):
+        name, env = load_environment(env_name="ci", environments_path=tmp_environments)
+        assert env.name == "ci"
+
 
 class TestLoadEnvironmentValidation:
-    def test_missing_policy_raises(self, tmp_path: Path):
-        bad = tmp_path / "env.yml"
-        bad.write_text("dev:\n  account: x\n  user: y\n  warehouse: z\n  routing:\n    database_name: FOO\n")
-        with pytest.raises(InvalidRoutingConfigError, match="policy"):
+    def test_missing_environments_dict_raises(self, tmp_path: Path):
+        bad = tmp_path / "env.py"
+        bad.write_text("# no environments dict here\n")
+        with pytest.raises(InvalidEnvironmentsFileError, match="'environments'"):
             load_environment(environments_path=bad)
 
-    def test_unknown_policy_raises(self, tmp_path: Path):
-        bad = tmp_path / "env.yml"
-        bad.write_text("dev:\n  account: x\n  user: y\n  warehouse: z\n  routing:\n    policy: nonsense\n    database_name: FOO\n")
-        with pytest.raises(InvalidRoutingPolicyError, match="nonsense"):
+    def test_environments_not_a_dict_raises(self, tmp_path: Path):
+        bad = tmp_path / "env.py"
+        bad.write_text("environments = 'not a dict'\n")
+        with pytest.raises(InvalidEnvironmentsFileError, match="dict"):
             load_environment(environments_path=bad)
 
-    def test_schema_isolation_missing_schema_name_raises(self, tmp_path: Path):
-        bad = tmp_path / "env.yml"
-        bad.write_text("dev:\n  account: x\n  user: y\n  warehouse: z\n  routing:\n    policy: schema_isolation\n    database_name: DEV\n")
-        with pytest.raises(InvalidRoutingConfigError, match="schema_name"):
+    def test_environment_value_not_environment_instance_raises(self, tmp_path: Path):
+        bad = tmp_path / "env.py"
+        bad.write_text('environments = {"dev": {"account": "x"}}\n')
+        with pytest.raises(InvalidEnvironmentsFileError, match="Environment instance"):
+            load_environment(environments_path=bad)
+
+    def test_syntax_error_in_file_raises(self, tmp_path: Path):
+        bad = tmp_path / "env.py"
+        bad.write_text("environments = {this is not valid python}\n")
+        with pytest.raises(InvalidEnvironmentsFileError):
             load_environment(environments_path=bad)
 
 

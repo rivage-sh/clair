@@ -74,6 +74,26 @@ class TestRoute:
         result = route("analytics.finance.summary", TrouveType.VIEW, None)
         assert result == "analytics.finance.summary"
 
+    def test_callable_routing_table(self):
+        routing = lambda db, schema, table: f"{db}_dev.{schema}.{table}"
+        result = route("refined.products.catalog", TrouveType.TABLE, routing)
+        assert result == "refined_dev.products.catalog"
+
+    def test_callable_routing_source_passthrough(self):
+        routing = lambda db, schema, table: f"{db}_dev.{schema}.{table}"
+        result = route("source.raw.orders", TrouveType.SOURCE, routing)
+        assert result == "source.raw.orders"
+
+    def test_callable_routing_receives_split_parts(self):
+        received: list[str] = []
+
+        def capturing_routing(db: str, schema: str, table: str) -> str:
+            received.extend([db, schema, table])
+            return f"{db}.{schema}.{table}"
+
+        route("analytics.finance.revenue", TrouveType.TABLE, capturing_routing)
+        assert received == ["analytics", "finance", "revenue"]
+
 
 class TestDetectRoutingCollisions:
     def test_no_collision_returns_empty(self):
