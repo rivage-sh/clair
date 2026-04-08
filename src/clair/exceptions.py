@@ -16,46 +16,41 @@ class CyclicDependencyError(ClairError):
 
 
 class EnvironmentNotFoundError(ClairError):
-    """Raised when the requested environment doesn't exist in environments.yml."""
+    """Raised when the requested environment doesn't exist in environments.py."""
 
     def __init__(self, env_name: str, available: list[str]) -> None:
         self.env_name = env_name
         self.available = available
         super().__init__(
-            f"Environment '{env_name}' not found in environments.yml. "
+            f"Environment '{env_name}' not found in environments.py. "
             f"Available environments: {', '.join(available)}"
         )
 
 
 class EnvironmentsFileNotFoundError(ClairError):
-    """Raised when ~/.clair/environments.yml doesn't exist."""
+    """Raised when ~/.clair/environments.py doesn't exist."""
 
     def __init__(self, path: str) -> None:
         self.path = path
         super().__init__(
-            f"environments.yml not found at {path}. "
-            "Run `clair init` to create one, or rename your profiles.yml "
-            "and add a routing block."
+            f"environments.py not found at {path}. "
+            "Run `clair init` to create one."
         )
 
 
-class InvalidRoutingPolicyError(ClairError):
-    """Raised when an unknown routing policy is specified."""
+class InvalidEnvironmentsFileError(ClairError):
+    """Raised when environments.py exists but is malformed."""
 
-    def __init__(self, policy: str) -> None:
-        self.policy = policy
-        super().__init__(
-            f"Unknown routing policy '{policy}'. "
-            "Valid policies: database_override, schema_isolation"
-        )
+    def __init__(self, path: str, detail: str) -> None:
+        self.path = path
+        super().__init__(f"Invalid environments.py at {path}: {detail}")
 
 
 class InvalidRoutingConfigError(ClairError):
-    """Raised when a routing config block is malformed."""
+    """Raised when a routing config produces an invalid result."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
-
 
 
 class DiscoveryError(ClairError):

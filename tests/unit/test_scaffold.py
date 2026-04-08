@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from clair.core.scaffold import scaffold_project, write_environments_yml
+from clair.core.scaffold import scaffold_project, write_environments_py
 
 
 # ---------------------------------------------------------------------------
@@ -45,17 +45,17 @@ class TestScaffoldCreatesAllExpectedFiles:
             full_path = project_dir / relative_path
             assert full_path.exists(), f"Missing: {relative_path}"
 
-    def test_creates_environments_yml(self, tmp_path: Path) -> None:
+    def test_creates_environments_py(self, tmp_path: Path) -> None:
         fake_home = tmp_path / "fake_home"
         scaffold_project(tmp_path / "proj", **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
 
-        environments_path = fake_home / ".clair" / "environments.yml"
+        environments_path = fake_home / ".clair" / "environments.py"
         assert environments_path.exists()
 
     def test_returns_all_paths_as_created(self, tmp_path: Path) -> None:
         results = _run_scaffold(tmp_path)
 
-        # 1 project file + 1 environments.yml
+        # 1 project file + 1 environments.py
         assert len(results) == 2
         assert all(status == "created" for status, _ in results)
 
@@ -68,15 +68,15 @@ class TestFileContents:
         content = (project_dir / "source/raw/orders.py").read_text()
         assert "TrouveType.SOURCE" in content
 
-    def test_environments_yml_has_dev_environment(self, tmp_path: Path) -> None:
+    def test_environments_py_has_dev_environment(self, tmp_path: Path) -> None:
         fake_home = tmp_path / "home"
         scaffold_project(tmp_path / "proj", **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
 
-        content = (fake_home / ".clair" / "environments.yml").read_text()
-        assert "dev:" in content
-        assert "account:" in content
+        content = (fake_home / ".clair" / "environments.py").read_text()
+        assert '"dev"' in content
+        assert "account=" in content
         assert "externalbrowser" in content
-        assert "  routing:" not in content  # routing omitted by default; shown as comment only
+        assert "# routing=" in content  # routing shown as comment only, not active
 
 
 class TestDoesNotOverwriteExistingFiles:
@@ -93,9 +93,9 @@ class TestDoesNotOverwriteExistingFiles:
         results_dict = {path: status for status, path in results}
         assert results_dict[str(orders_path)] == "skipped"
 
-    def test_skips_existing_environments_yml(self, tmp_path: Path) -> None:
+    def test_skips_existing_environments_py(self, tmp_path: Path) -> None:
         fake_home = tmp_path / "home"
-        environments_path = fake_home / ".clair" / "environments.yml"
+        environments_path = fake_home / ".clair" / "environments.py"
         environments_path.parent.mkdir(parents=True)
         environments_path.write_text("# existing config\n")
 
@@ -129,7 +129,7 @@ class TestCustomSourceDbName:
         assert (project_dir / "mydb" / "myschema" / "mytable.py").exists()
 
 
-class TestWriteEnvironmentsYml:
+class TestWriteEnvironmentsPy:
     def test_writes_env_with_connection_fields(self, tmp_path: Path) -> None:
         env_data = {
             "account": "myorg-myaccount",
@@ -138,17 +138,17 @@ class TestWriteEnvironmentsYml:
             "warehouse": "COMPUTE_WH",
             "role": "ANALYST",
         }
-        path = write_environments_yml(
+        path = write_environments_py(
             env_data, env_name="dev", home_dir=tmp_path
         )
 
         assert path.exists()
         content = path.read_text()
-        assert "dev:" in content
-        assert "  account: myorg-myaccount" in content
-        assert "  user: me@example.com" in content
-        assert "  warehouse: COMPUTE_WH" in content
-        assert "  role: ANALYST" in content
+        assert '"dev"' in content
+        assert 'account="myorg-myaccount"' in content
+        assert 'user="me@example.com"' in content
+        assert 'warehouse="COMPUTE_WH"' in content
+        assert 'role="ANALYST"' in content
 
     def test_omits_routing(self, tmp_path: Path) -> None:
         env_data = {
@@ -156,11 +156,16 @@ class TestWriteEnvironmentsYml:
             "user": "me@example.com",
             "warehouse": "COMPUTE_WH",
         }
-        path = write_environments_yml(env_data, home_dir=tmp_path)
+        path = write_environments_py(env_data, home_dir=tmp_path)
         content = path.read_text()
-        assert "  routing:" not in content
+        assert "routing=" not in content  # write_environments_py doesn't emit routing
 
     def test_writes_to_correct_location(self, tmp_path: Path) -> None:
         env_data = {"account": "x", "user": "y", "warehouse": "z"}
-        path = write_environments_yml(env_data, home_dir=tmp_path)
-        assert path == tmp_path / ".clair" / "environments.yml"
+        path = write_environments_py(env_data, home_dir=tmp_path)
+        assert path == tmp_path / ".clair" / "environments.py"
+
+    def test_written_file_is_valid_python(self, tmp_path: Path) -> None:
+        env_data = {"account": "myorg-myaccount", "user": "me@example.com", "warehouse": "COMPUTE_WH"}
+        path = write_environments_py(env_data, home_dir=tmp_path)
+        compile(path.read_text(), str(path), "exec")  # raises SyntaxError if invalid

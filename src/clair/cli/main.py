@@ -23,7 +23,7 @@ from clair.core.dag_render import render_dag
 from clair.environments.routing import DatabaseOverrideRouting, SchemaIsolationRouting
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project, find_routing_collisions, recompile_for_selection
 from clair.core.runner import RunStatus, run_project
-from clair.core.scaffold import scaffold_project, write_environments_yml
+from clair.core.scaffold import scaffold_project, write_environments_py
 from clair.core.selector import filter_by_selectors
 from clair.core.test_runner import format_test_output, run_tests
 from clair.docs.catalog import build_catalog
@@ -58,12 +58,12 @@ def init(project: str | None) -> None:
     project_dir = Path(project).resolve()
 
     # Step 2 -- Environment setup
-    environments_path = Path.home() / ".clair" / "environments.yml"
+    environments_path = Path.home() / ".clair" / "environments.py"
     environments_existed = environments_path.exists()
     skip_environments_in_scaffold = False
 
     if environments_existed:
-        click.echo("  ~/.clair/environments.yml already exists, skipping.")
+        click.echo("  ~/.clair/environments.py already exists, skipping.")
         skip_environments_in_scaffold = True
     else:
         skip_environments_in_scaffold = True
@@ -128,6 +128,8 @@ def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> 
             policy_desc = f"database_override → {routing.database_name}"
         elif isinstance(routing, SchemaIsolationRouting):
             policy_desc = f"schema_isolation → {routing.database_name}.{routing.schema_name}"
+        elif callable(routing):
+            policy_desc = "callable"
 
     n = len(collisions)
     header = f"{'collision' if n == 1 else f'{n} collisions'} detected"
@@ -144,8 +146,8 @@ def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> 
             click.echo(f"    ↳ {source}")
 
     click.echo(
-        "\n  Fix: rename a colliding Trouve, adjust the routing policy in "
-        "environments.yml,\n  or use --select to exclude one from this run.\n"
+        "\n  Fix: rename a colliding Trouve, adjust the routing in "
+        "environments.py,\n  or use --select to exclude one from this run.\n"
     )
 
 
@@ -221,7 +223,7 @@ def _prompt_and_write_environment() -> None:
     env_data["account_locator"] = account_locator
 
     click.echo("")
-    write_environments_yml(env_data, env_name=env_name)
+    write_environments_py(env_data, env_name=env_name)
 
 
 @cli.command(name="compile")
@@ -239,7 +241,7 @@ def _prompt_and_write_environment() -> None:
 @click.option(
     "--env",
     default=None,
-    help="Environment name from ~/.clair/environments.yml",
+    help="Environment name from ~/.clair/environments.py",
 )
 @click.option(
     "--run-mode",
@@ -260,7 +262,7 @@ def compile_cmd(select: tuple[str, ...], project: str, env: str | None, run_mode
         env_name, environment = load_environment(env)
         routing = environment.routing
     except EnvironmentsFileNotFoundError:
-        logger.warning("compile.no_environments_file", detail="compiling without routing; run `clair init` to create environments.yml")
+        logger.warning("compile.no_environments_file", detail="compiling without routing; run `clair init` to create environments.py")
     except ClairError as e:
         logger.error("compile.error", error=str(e))
         sys.exit(1)
@@ -396,7 +398,7 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
 @click.option(
     "--env",
     default=None,
-    help="Environment name from ~/.clair/environments.yml",
+    help="Environment name from ~/.clair/environments.py",
 )
 @click.option(
     "--run-mode",
@@ -503,7 +505,7 @@ def run(select: tuple[str, ...], project: str, env: str | None, run_mode: str, n
 @click.option(
     "--env",
     default=None,
-    help="Environment name from ~/.clair/environments.yml",
+    help="Environment name from ~/.clair/environments.py",
 )
 @click.option(
     "--sample",

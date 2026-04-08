@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
@@ -79,7 +80,7 @@ Routing = Annotated[
 def route(
     logical_name: str,
     trouve_type: TrouveType,
-    routing: RoutingConfig | None,
+    routing: RoutingConfig | Callable[[str, str, str], str] | None,
 ) -> str:
     """Apply a routing policy to a logical full_name.
 
@@ -88,14 +89,17 @@ def route(
     Args:
         logical_name: Filesystem-derived "database.schema.table" name.
         trouve_type: SOURCE, TABLE, or VIEW.
-        routing: Active routing config, or None for passthrough.
+        routing: Active routing config, callable, or None for passthrough.
 
     Returns:
         The routed full_name string.
     """
     if routing is None or trouve_type == TrouveType.SOURCE:
         return logical_name
-    return routing.apply(logical_name)
+    if isinstance(routing, RoutingConfig):
+        return routing.apply(logical_name)
+    database, schema, table = logical_name.split(".")
+    return routing(database, schema, table)
 
 
 def detect_routing_collisions(logical_to_routed: dict[str, str]) -> list[tuple[str, list[str]]]:
