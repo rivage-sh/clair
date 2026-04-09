@@ -19,9 +19,25 @@ Examples:
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from fnmatch import fnmatch
 
 import networkx as nx
+
+
+@dataclass(frozen=True)
+class ParsedSelector:
+    """The result of parsing a selector pattern.
+
+    upstream_depth / downstream_depth:
+        None  — no traversal in that direction
+        0     — unlimited depth
+        n > 0 — exactly n levels
+    """
+
+    glob: str
+    upstream_depth: int | None
+    downstream_depth: int | None
 
 
 def match_selector(full_name: str, pattern: str) -> bool:
@@ -59,46 +75,41 @@ def filter_by_selectors(full_names: list[str], patterns: tuple[str, ...] | None)
     return [name for name in full_names if any(match_selector(name, pattern) for pattern in patterns)]
 
 
-def parse_selector(pattern: str) -> tuple[int | None, str, int | None]:
-    """Parse a selector pattern into (upstream_depth, glob, downstream_depth).
-
-    upstream_depth / downstream_depth:
-        None  — no traversal in that direction
-        0     — unlimited depth
-        n > 0 — exactly n levels
+def parse_selector(pattern: str) -> ParsedSelector:
+    """Parse a selector pattern into a ParsedSelector.
 
     Examples:
-        "mydb.analytics.*"      -> (None, "mydb.analytics.*", None)
-        "+mydb.analytics.*"     -> (0, "mydb.analytics.*", None)
-        "mydb.analytics.*+"     -> (None, "mydb.analytics.*", 0)
-        "+mydb.analytics.*+"    -> (0, "mydb.analytics.*", 0)
-        "2+mydb.analytics.*"    -> (2, "mydb.analytics.*", None)
-        "mydb.analytics.*+3"    -> (None, "mydb.analytics.*", 3)
-        "2+mydb.analytics.*+3"  -> (2, "mydb.analytics.*", 3)
+        "mydb.analytics.*"      -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=None, downstream_depth=None)
+        "+mydb.analytics.*"     -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=0,    downstream_depth=None)
+        "mydb.analytics.*+"     -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=None, downstream_depth=0)
+        "+mydb.analytics.*+"    -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=0,    downstream_depth=0)
+        "2+mydb.analytics.*"    -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=2,    downstream_depth=None)
+        "mydb.analytics.*+3"    -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=None, downstream_depth=3)
+        "2+mydb.analytics.*+3"  -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=2,    downstream_depth=3)
     """
     # Both sides: [N+]glob[+M]
     match = re.match(r'^(\d*)\+(.+)\+(\d*)$', pattern)
     if match:
         left, glob, right = match.groups()
-        upstream_depth = int(left) if left else 0
-        downstream_depth = int(right) if right else 0
-        return upstream_depth, glob, downstream_depth
+        return ParsedSelector(
+            glob=glob,
+            upstream_depth=int(left) if left else 0,
+            downstream_depth=int(right) if right else 0,
+        )
 
     # Left only: [N+]glob
     match = re.match(r'^(\d*)\+(.+)$', pattern)
     if match:
         left, glob = match.groups()
-        upstream_depth = int(left) if left else 0
-        return upstream_depth, glob, None
+        return ParsedSelector(glob=glob, upstream_depth=int(left) if left else 0, downstream_depth=None)
 
     # Right only: glob[+N]
     match = re.match(r'^(.+)\+(\d*)$', pattern)
     if match:
         glob, right = match.groups()
-        downstream_depth = int(right) if right else 0
-        return None, glob, downstream_depth
+        return ParsedSelector(glob=glob, upstream_depth=None, downstream_depth=int(right) if right else 0)
 
-    return None, pattern, None
+    return ParsedSelector(glob=pattern, upstream_depth=None, downstream_depth=None)
 
 
 def _traverse_upstream(dag: nx.DiGraph, start_nodes: set[str], depth: int) -> set[str]:
@@ -158,15 +169,15 @@ def expand_selector(dag: nx.DiGraph, pattern: str) -> set[str]:
 
     Returns the set of matching node full_names.
     """
-    upstream_depth, glob, downstream_depth = parse_selector(pattern)
+    parsed = parse_selector(pattern)
 
-    matched = {node for node in dag.nodes if fnmatch(node, glob)}
+    matched = {node for node in dag.nodes if fnmatch(node, parsed.glob)}
 
     extra: set[str] = set()
-    if upstream_depth is not None:
-        extra |= _traverse_upstream(dag, matched, upstream_depth)
-    if downstream_depth is not None:
-        extra |= _traverse_downstream(dag, matched, downstream_depth)
+    if parsed.upstream_depth is not None:
+        extra |= _traverse_upstream(dag, matched, parsed.upstream_depth)
+    if parsed.downstream_depth is not None:
+        extra |= _traverse_downstream(dag, matched, parsed.downstream_depth)
 
     return matched | extra
 

@@ -4,6 +4,7 @@ import networkx as nx
 import pytest
 
 from clair.core.selector import (
+    ParsedSelector,
     expand_selector,
     expand_selectors,
     filter_by_selector,
@@ -91,35 +92,35 @@ class TestFilterBySelectors:
 
 class TestParseSelector:
     def test_plain_glob(self):
-        assert parse_selector("mydb.analytics.*") == (None, "mydb.analytics.*", None)
+        assert parse_selector("mydb.analytics.*") == ParsedSelector(glob="mydb.analytics.*", upstream_depth=None, downstream_depth=None)
 
     def test_upstream_only(self):
-        assert parse_selector("+mydb.analytics.orders") == (0, "mydb.analytics.orders", None)
+        assert parse_selector("+mydb.analytics.orders") == ParsedSelector(glob="mydb.analytics.orders", upstream_depth=0, downstream_depth=None)
 
     def test_downstream_only(self):
-        assert parse_selector("mydb.analytics.orders+") == (None, "mydb.analytics.orders", 0)
+        assert parse_selector("mydb.analytics.orders+") == ParsedSelector(glob="mydb.analytics.orders", upstream_depth=None, downstream_depth=0)
 
     def test_both_directions(self):
-        assert parse_selector("+mydb.analytics.orders+") == (0, "mydb.analytics.orders", 0)
+        assert parse_selector("+mydb.analytics.orders+") == ParsedSelector(glob="mydb.analytics.orders", upstream_depth=0, downstream_depth=0)
 
     def test_bounded_upstream(self):
-        assert parse_selector("2+mydb.analytics.orders") == (2, "mydb.analytics.orders", None)
+        assert parse_selector("2+mydb.analytics.orders") == ParsedSelector(glob="mydb.analytics.orders", upstream_depth=2, downstream_depth=None)
 
     def test_bounded_downstream(self):
-        assert parse_selector("mydb.analytics.orders+3") == (None, "mydb.analytics.orders", 3)
+        assert parse_selector("mydb.analytics.orders+3") == ParsedSelector(glob="mydb.analytics.orders", upstream_depth=None, downstream_depth=3)
 
     def test_bounded_both(self):
-        assert parse_selector("2+mydb.analytics.orders+3") == (2, "mydb.analytics.orders", 3)
+        assert parse_selector("2+mydb.analytics.orders+3") == ParsedSelector(glob="mydb.analytics.orders", upstream_depth=2, downstream_depth=3)
 
     def test_wildcard_with_upstream(self):
-        assert parse_selector("+mydb.analytics.*") == (0, "mydb.analytics.*", None)
+        assert parse_selector("+mydb.analytics.*") == ParsedSelector(glob="mydb.analytics.*", upstream_depth=0, downstream_depth=None)
 
     def test_wildcard_with_downstream(self):
-        assert parse_selector("mydb.analytics.*+") == (None, "mydb.analytics.*", 0)
+        assert parse_selector("mydb.analytics.*+") == ParsedSelector(glob="mydb.analytics.*", upstream_depth=None, downstream_depth=0)
 
     def test_upstream_zero_is_explicit_unlimited(self):
         # 0+ means explicit zero (same as +, unlimited)
-        assert parse_selector("0+mydb.analytics.orders") == (0, "mydb.analytics.orders", None)
+        assert parse_selector("0+mydb.analytics.orders") == ParsedSelector(glob="mydb.analytics.orders", upstream_depth=0, downstream_depth=None)
 
 
 # Graph fixture shared by operator tests:
