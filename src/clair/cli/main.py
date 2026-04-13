@@ -18,13 +18,13 @@ from clair.adapters.snowflake import SnowflakeAdapter
 from clair.environments.environments import load_environment
 from clair.core.compiler import CompiledNodeInfo, write_compile_output
 from clair.trouves.trouve import ExecutionType
-from clair.core.dag import build_dag, get_executable_nodes
+from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
 from clair.environments.routing import DatabaseOverrideRouting, SchemaIsolationRouting
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project, find_routing_collisions, recompile_for_selection
 from clair.core.runner import RunStatus, run_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
-from clair.core.selector import expand_selectors, filter_by_selectors
+from clair.core.selector import expand_selectors
 from clair.core.test_runner import format_test_output, run_tests
 from clair.docs.catalog import build_catalog
 from clair.docs.server import serve
