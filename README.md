@@ -117,10 +117,16 @@ Full documentation — guides, CLI reference, and API reference — is at **[riv
 
 ## Installation
 
-Clair is not yet on PyPI. Install it as a global CLI tool directly from GitHub using [uv](https://github.com/astral-sh/uv):
+Install the CLI globally using [uv](https://github.com/astral-sh/uv):
 
 ```bash
-uv tool install git+https://github.com/rivage-sh/clair.git
+uv tool install rivage-clair
+```
+
+Then add clair as a project dependency so your Trouve files get IDE autocompletion and type checking:
+
+```bash
+uv add rivage-clair
 ```
 
 ---
@@ -405,12 +411,6 @@ trouve = PandasTrouve(
     tests=[TestNotNull(column="product_id")],
     docs="Top-rated products by average review score, computed in pandas.",
 )
-```
-
-Requires the pandas extra:
-
-```bash
-uv tool install "clair[pandas] @ git+https://github.com/rivage-sh/clair.git"
 ```
 
 > **Note:** pandas transformations run on the machine executing clair, not inside Snowflake. Keep this in mind for large tables.
