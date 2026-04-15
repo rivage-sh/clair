@@ -5,7 +5,7 @@
 - Python 3.11 or later
 - [uv](https://docs.astral.sh/uv/) installed
 
-## Install clair
+## Install the CLI
 
 Install clair as a global CLI tool using uv:
 
@@ -22,7 +22,15 @@ clair --version
 # clair, version 0.1.1
 ```
 
-## Upgrade
+## Add clair to your project
+
+Your Trouve files import from `clair` directly (e.g. `from clair import Trouve`). To get IDE autocompletion and type checking, add clair as a dependency in your project:
+
+```bash
+uv add rivage-clair
+```
+
+## Upgrade the CLI
 
 ```bash
 uv tool upgrade rivage-clair

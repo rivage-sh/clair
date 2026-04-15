@@ -117,10 +117,16 @@ Full documentation — guides, CLI reference, and API reference — is at **[riv
 
 ## Installation
 
-Install clair as a global CLI tool using [uv](https://github.com/astral-sh/uv):
+Install the CLI globally using [uv](https://github.com/astral-sh/uv):
 
 ```bash
 uv tool install rivage-clair
+```
+
+Then add clair as a project dependency so your Trouve files get IDE autocompletion and type checking:
+
+```bash
+uv add rivage-clair
 ```
 
 ---
