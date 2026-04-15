@@ -8,7 +8,7 @@ requires-python = ">=3.11"
 authors = [
     { name = "Omer Baddour", email = "contact.omerbaddour@gmail.com" },
 ]
-urls = { Homepage = "https://github.com/rivage-sh/clair" }
+urls = { Homepage = "https://rivage-sh.github.io/clair/" }
 dependencies = [
     "pydantic>=2.0",
     "networkx>=3.0",
