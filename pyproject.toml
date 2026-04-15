@@ -1,9 +1,14 @@
 [project]
-name = "clair"
-version = "0.1.0"
+name = "rivage-clair"
+version = "0.1.1"
 description = "Python-native data transformation framework for Snowflake"
+readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
+authors = [
+    { name = "Omer Baddour", email = "contact.omerbaddour@gmail.com" },
+]
+urls = { Homepage = "https://github.com/rivage-sh/clair" }
 dependencies = [
     "pydantic>=2.0",
     "networkx>=3.0",
@@ -32,9 +37,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/clair"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/clair/docs/static" = "clair/docs/static"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
