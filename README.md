@@ -413,12 +413,6 @@ trouve = PandasTrouve(
 )
 ```
 
-Requires the pandas extra:
-
-```bash
-uv tool install "rivage-clair[pandas]"
-```
-
 > **Note:** pandas transformations run on the machine executing clair, not inside Snowflake. Keep this in mind for large tables.
 
 See the [Pandas-Native Transformations guide](https://rivage-sh.github.io/clair/guides/pandas-native/) for the full field reference, DAG integration details, and limitations.
