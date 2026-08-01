@@ -19,7 +19,8 @@ def _multiline_renderer(_logger: Any, _method: str, event_dict: MutableMapping[s
     event = event_dict.pop("event", "")
     event_dict.pop("timestamp", None)  # replaced by our own below
 
-    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]  # millisecond precision
+    # Local wall-clock on purpose: these timestamps are read by a human watching the run.
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]  # noqa: DTZ005 — millisecond precision
     kv = {"timestamp": ts, **event_dict}
 
     if sys.stderr.isatty():

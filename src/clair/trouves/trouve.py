@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from clair.trouves._refs import register
 from clair.trouves.column import Column
-from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode, SOURCE, TARGET
+from clair.trouves.run_config import SOURCE, TARGET, IncrementalMode, RunConfig, RunMode
 from clair.trouves.test import AnyTest
 
 

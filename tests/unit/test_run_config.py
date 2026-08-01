@@ -2,7 +2,7 @@
 
 import pytest
 
-from clair.trouves.run_config import IncrementalMode, UpsertConfig, RunConfig, RunMode
+from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode, UpsertConfig
 
 
 class TestRunConfigValidation:

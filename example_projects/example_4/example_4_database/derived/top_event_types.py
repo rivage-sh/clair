@@ -1,5 +1,6 @@
-from clair import Column, ColumnType, Trouve
 from example_4_database.derived.daily_event_counts import trouve as example_4_database_derived_daily_event_counts
+
+from clair import Column, ColumnType, Trouve
 
 trouve = Trouve(
     docs="Top 10 event types ranked by total count across all time.",

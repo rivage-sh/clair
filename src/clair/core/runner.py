@@ -8,8 +8,8 @@ from collections.abc import Callable, Iterator
 from enum import StrEnum
 from typing import Any
 
-import pandas as pd
 import networkx as nx
+import pandas as pd
 import structlog
 from pydantic import BaseModel, model_validator
 
@@ -49,7 +49,7 @@ class RunResult(BaseModel):
     skipped_by: str | None = None
 
     @model_validator(mode='after')
-    def _check_skipped_has_cause(self) -> 'RunResult':
+    def _check_skipped_has_cause(self) -> RunResult:
         if self.status == RunStatus.SKIPPED and not self.skipped_by:
             raise ValueError("SKIPPED results must specify skipped_by")
         return self
@@ -188,7 +188,7 @@ def _run_df_fn_trouve(
         if isinstance(param.default, Trouve):
             try:
                 dataframe_kwargs[param_name] = adapter.fetch_dataframe(param.default.full_name)
-            except Exception as fetch_error:
+            except Exception as fetch_error:  # noqa: BLE001 — any adapter failure becomes a FAILURE RunResult
                 duration = time.monotonic() - start
                 return RunResult(
                     full_name=trouve.full_name,
@@ -200,7 +200,7 @@ def _run_df_fn_trouve(
     # 2. Call the df_fn function
     try:
         result_dataframe = trouve.df_fn(**dataframe_kwargs)
-    except Exception as transform_error:
+    except Exception as transform_error:  # noqa: BLE001 — arbitrary user transform code
         duration = time.monotonic() - start
         return RunResult(
             full_name=trouve.full_name,
@@ -244,7 +244,7 @@ def _run_df_fn_trouve(
             schema_name=schema_name,
             table_name=table_name,
         )
-    except Exception as write_error:
+    except Exception as write_error:  # noqa: BLE001 — any adapter failure becomes a FAILURE RunResult
         duration = time.monotonic() - start
         return RunResult(
             full_name=full_name,
@@ -312,7 +312,7 @@ def run_project(
         if context_warehouse or context_role:
             try:
                 adapter.set_context(warehouse=context_warehouse, role=context_role)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — any adapter failure becomes a FAILURE RunResult
                 logger.warning("run.node.context_error", trouve=name, warehouse=context_warehouse, role=context_role, error=str(e))
                 yield RunResult(
                     full_name=name,

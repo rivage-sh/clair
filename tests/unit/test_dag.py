@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from clair.core.dag import ClairDag, build_dag, get_executable_nodes, get_execution_order
+from clair.core.dag import (
+    ClairDag,
+    build_dag,
+    get_executable_nodes,
+    get_execution_order,
+)
 from clair.core.discovery import discover_project
 from clair.exceptions import CyclicDependencyError
 from clair.trouves.config import ResolvedConfig

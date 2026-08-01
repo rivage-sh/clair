@@ -68,8 +68,7 @@ class Test(BaseModel, ABC):
     def label(self) -> str:
         """Human-readable label derived from the class name (sans 'Test' prefix)."""
         name = type(self).__name__
-        if name.startswith("Test"):
-            name = name[4:]
+        name = name.removeprefix("Test")
         return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 

@@ -17,7 +17,6 @@ from clair.core.dag_render import (
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
-
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
@@ -221,8 +220,8 @@ class TestDepthAndIndentation:
         rendered = output.render()
         for line in rendered.split("\n"):
             if "db.s.d" in line and "(^)" not in line:
-                assert line.startswith("│   └── db.s.d") or line.startswith(
-                    "    └── db.s.d"
+                assert line.startswith(
+                    ("│   └── db.s.d", "    └── db.s.d")
                 ), f"db.s.d should be at depth 2, got: {line!r}"
                 break
         else:
@@ -276,9 +275,7 @@ class TestDiamondFanIn:
         rendered = output.render()
         for line in rendered.split("\n"):
             if "db.s.merged" in line and "(^)" not in line:
-                assert line.startswith("└── db.s.merged") or line.startswith(
-                    "├── db.s.merged"
-                )
+                assert line.startswith(("└── db.s.merged", "├── db.s.merged"))
                 break
         else:
             pytest.fail("db.s.merged not found in output")
@@ -660,7 +657,7 @@ class TestComputeVisibleNodes:
             ],
             [("db.s.a", "db.s.b")],
         )
-        visible, matched = _compute_visible_nodes(dag, ["db.s.b"])
+        visible, _matched = _compute_visible_nodes(dag, ["db.s.b"])
         assert "db.s.unrelated" not in visible
 
 

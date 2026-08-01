@@ -172,7 +172,7 @@ def _compute_visible_nodes(
     return visible, matched
 
 
-def _compute_depths(dag: ClairDag, visible: set[str]) -> dict[str, int]:  # noqa: F401
+def _compute_depths(dag: ClairDag, visible: set[str]) -> dict[str, int]:
     """Return {node: depth} for all visible nodes.
 
     Depth is the length of the longest path from any root to the node

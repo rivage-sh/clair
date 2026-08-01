@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from clair.exceptions import InvalidRoutingConfigError
 from clair.trouves.trouve import TrouveType
 
-
 _VALID_IDENTIFIER = re.compile(r"^[A-Z0-9_]+$")
 
 

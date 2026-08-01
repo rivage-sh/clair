@@ -11,7 +11,6 @@ from clair.adapters.base import WarehouseAdapter
 from clair.core.dag import ClairDag
 from clair.trouves.trouve import TrouveType
 
-
 logger = structlog.get_logger()
 
 
@@ -207,7 +206,7 @@ def run_tests(
                             query_url=query_result.query_url,
                         )
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — a failing test must not abort the whole run
                 logger.warning("test.exception", trouve=routed_name, test_type=test.label, column=column_name, error=str(e))
                 results.append(
                     TestResult(

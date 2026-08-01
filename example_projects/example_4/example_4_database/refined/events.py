@@ -1,5 +1,6 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_4_database.source.events import trouve as example_4_database_source_events
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,

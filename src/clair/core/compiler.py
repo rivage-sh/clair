@@ -42,8 +42,10 @@ class CompileOutput(BaseModel):
         lines = [
             "=== Clair Compile ===",
             "",
-            f"DAG: {trouve_count} Trouve{'s' if trouve_count != 1 else ''}, "
-            f"{source_count} source{'s' if source_count != 1 else ''}",
+            (
+                f"DAG: {trouve_count} Trouve{'s' if trouve_count != 1 else ''}, "
+                f"{source_count} source{'s' if source_count != 1 else ''}"
+            ),
             "",
         ]
 
@@ -153,7 +155,7 @@ def write_compile_output(
                 if isinstance(param.default, Trouve):
                     input_lines.append(f"#   {param.name}  ->  {param.default.full_name}")
 
-            header = "# clair compiled: {}\n# execution_type: pandas\n".format(trouve.full_name)
+            header = f"# clair compiled: {trouve.full_name}\n# execution_type: pandas\n"
             if input_lines:
                 header += "# inputs:\n" + "\n".join(input_lines) + "\n"
             header += "\n"

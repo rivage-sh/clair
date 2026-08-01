@@ -61,7 +61,11 @@ docs = [
 [tool.uv]
 exclude-newer = "7 days"
 
-[tool.ruff.lint]
-# Pinned to what ruff selected by default before 0.16 widened its defaults.
-# Stated explicitly so the rule set is a project decision, not a ruff release note.
-select = ["E4", "E7", "E9", "F"]
+[tool.ruff]
+# E501 is not in ruff's default rule set, so this governs one thing only: how wide
+# an import may be before isort wraps it. 88 (ruff's default) split single-name
+# aliased imports that are perfectly readable on one line.
+line-length = 130
+
+# split-on-trailing-comma is left at its default (true) on purpose: an import block
+# already exploded one-name-per-line stays that way, which is the preferred style here.

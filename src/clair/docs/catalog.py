@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from clair import __version__
@@ -49,7 +49,7 @@ def build_catalog(dag: ClairDag, project_root: Path) -> dict:
 
     return {
         "project_name": project_root.name,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "clair_version": __version__,
         "trouves": trouves_catalog,
         "edges": [{"source": source, "target": target} for source, target in dag.edges],

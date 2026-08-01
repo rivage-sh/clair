@@ -1,5 +1,14 @@
-from clair import Column, ColumnType, IncrementalMode, RunConfig, RunMode, Trouve, TrouveType
 from example_3_database.refined.orders import trouve as refined_orders
+
+from clair import (
+    Column,
+    ColumnType,
+    IncrementalMode,
+    RunConfig,
+    RunMode,
+    Trouve,
+    TrouveType,
+)
 
 trouve = Trouve(
     type=TrouveType.TABLE,
