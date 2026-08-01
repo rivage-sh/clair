@@ -1,7 +1,8 @@
 ---
-name: Defensive enum branching
+name: feedback_defensive_enum_branching
 description: Use if/elif/else with an explicit raise on exhaustive enum switches, not ternaries
-type: feedback
+metadata:
+  type: feedback
 ---
 
 Prefer `if/elif/else` over ternary expressions when branching on an enum. The `else` should raise `CompileError` (or the appropriate `ClairError` subclass) with a descriptive message. This catches unhandled enum values early instead of silently doing the wrong thing.
