@@ -1,4 +1,4 @@
-"""Environment loading from ~/.clair/environments.yml."""
+"""Clair reads the environments from ~/.clair/environments.yml."""
 
 from __future__ import annotations
 
@@ -21,34 +21,34 @@ DEFAULT_ENVIRONMENTS_PATH = Path.home() / ".clair" / "environments.yml"
 
 
 class Environment(BaseModel):
-    """A single environment from environments.yml."""
+    """One environment from environments.yml."""
 
     model_config = ConfigDict(populate_by_name=True)
 
-    # Identity
+    # The identity of the environment.
     name: str
 
-    # Connection (required)
+    # The connection fields. Each one is mandatory.
     account: str
     user: str
     warehouse: str
 
-    # Auth (one group used at connect time)
+    # The authentication fields. Clair uses one group when it connects.
     authenticator: str | None = None
     password: str | None = None
     private_key_path: str | None = None
     private_key_passphrase: str | None = None
 
-    # Optional connection
+    # The optional connection fields.
     role: str | None = None
     region: str | None = None
     account_locator: str | None = None
 
-    # Routing
+    # The routing policy.
     routing: Routing | None = None
 
     def to_connection_dict(self) -> dict[str, Any]:
-        """Return the connection dict expected by SnowflakeAdapter.connect()."""
+        """Give the connection dict that SnowflakeAdapter.connect() needs."""
         d: dict[str, Any] = {
             "account": self.account,
             "user": self.user,
@@ -69,10 +69,10 @@ class Environment(BaseModel):
 
 
 def _validate_routing_block(routing_raw: dict[str, Any]) -> None:
-    """Pre-validate routing block before Pydantic parses it.
+    """Examine the routing block before Pydantic reads it.
 
-    Catches missing/unknown policy values and re-raises as clair-specific
-    error types that the CLI already handles.
+    This function finds an absent policy value and an unknown policy value. Then
+    it raises a clair error type that the CLI already knows.
     """
     if "policy" not in routing_raw:
         raise InvalidRoutingConfigError("the routing block must have a 'policy' value")
@@ -87,25 +87,26 @@ def load_environment(
     env_name: str | None = None,
     environments_path: Path | None = None,
 ) -> tuple[str, Environment]:
-    """Load an environment from environments.yml.
+    """Load one environment from environments.yml.
 
-    Resolution order for env name:
-    1. env_name argument
-    2. CLAIR_ENV environment variable
-    3. "dev"
+    The function looks for the environment name in this order:
+    1. The env_name argument
+    2. The CLAIR_ENV environment variable
+    3. The name "dev"
 
     Args:
-        env_name: Explicit environment name.
-        environments_path: Path to environments.yml. Defaults to ~/.clair/environments.yml.
+        env_name: The environment name that you select.
+        environments_path: The path to environments.yml. The default path is
+            ~/.clair/environments.yml.
 
     Returns:
-        Tuple of (resolved_env_name, Environment).
+        A tuple of (resolved_env_name, Environment).
 
     Raises:
         EnvironmentsFileNotFoundError: If environments.yml does not exist.
-        EnvironmentNotFoundError: If the requested environment is not in environments.yml.
-        InvalidRoutingPolicyError: If an unknown routing policy is specified.
-        InvalidRoutingConfigError: If the routing block is malformed.
+        EnvironmentNotFoundError: If environments.yml has no such environment.
+        InvalidRoutingPolicyError: If the file names an unknown routing policy.
+        InvalidRoutingConfigError: If the routing block has a bad structure.
     """
     resolved_name = env_name or os.environ.get("CLAIR_ENV") or "dev"
     path = environments_path or DEFAULT_ENVIRONMENTS_PATH
@@ -132,6 +133,6 @@ def load_environment(
         environment = Environment(name=resolved_name, **env_data)
         return resolved_name, environment
     except ValidationError as exc:
-        # Surface Pydantic validation errors (e.g. missing schema_name for
-        # schema_isolation) as clair-specific errors the CLI already catches.
+        # Show each Pydantic error as a clair error that the CLI already knows.
+        # One example is an absent schema_name for the schema_isolation policy.
         raise InvalidRoutingConfigError(str(exc)) from exc

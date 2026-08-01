@@ -5,7 +5,7 @@ dist/
 build/
 *.ipynb_checkpoints/
 .claude/worktrees/
-site-docs/site/
+site_docs/site/
 scratchpad/
 
 terraform.tfvars

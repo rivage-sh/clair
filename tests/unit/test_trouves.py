@@ -1,4 +1,4 @@
-"""Comprehensive tests for Trouve, RunConfig, tests, refs, and build_sql."""
+"""The complete tests of Trouve, RunConfig, the test models, refs, and build_sql."""
 
 from pathlib import Path
 
@@ -22,7 +22,7 @@ from clair.trouves.test import (
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
 # ---------------------------------------------------------------------------
-# Helpers
+# The helper functions.
 # ---------------------------------------------------------------------------
 
 SAMPLE_SQL = "SELECT id, name FROM raw.users"
@@ -32,7 +32,7 @@ def _compiled_attrs(
     full_name: str = "db.schema.my_table",
     resolved_sql: str = SAMPLE_SQL,
 ) -> CompiledAttributes:
-    """Build a CompiledAttributes with sensible defaults."""
+    """Make a CompiledAttributes with good default values."""
     return CompiledAttributes(
         full_name=full_name,
         logical_name=full_name,
@@ -53,7 +53,7 @@ def _compiled_trouve(
     columns: list[Column] | None = None,
     run_config: RunConfig | None = None,
 ) -> Trouve:
-    """Build a compiled Trouve ready for build_sql()."""
+    """Make a compiled Trouve for build_sql()."""
     trouve = Trouve(
         type=trouve_type,
         sql=sql,
@@ -68,7 +68,7 @@ def _compiled_trouve(
 
 
 # ---------------------------------------------------------------------------
-# Trouve construction and validation
+# The Trouve build and the Trouve rules
 # ---------------------------------------------------------------------------
 
 
@@ -123,7 +123,7 @@ class TestTrouveConstruction:
             Trouve(type=TrouveType.SOURCE, sql="SELECT 1")
 
     def test_source_rejects_whitespace_sql(self):
-        """Source sql is checked with .strip(), so whitespace-only is fine."""
+        """The code applies .strip() to the SQL of a source. Thus only spaces are correct."""
         trouve = Trouve(type=TrouveType.SOURCE, sql="   ")
         assert trouve.type == TrouveType.SOURCE
 
@@ -147,7 +147,7 @@ class TestTrouveConstruction:
         assert t.sample() == "(SELECT TOP 1000 * FROM db.s.orders)"
 
     def test_sample_uses_routed_name_not_logical_name(self):
-        """sample() uses compiled.full_name (post-routing), not logical_name."""
+        """sample() uses compiled.full_name, the routed name, not logical_name."""
         from pathlib import Path
 
         from clair.trouves.config import ResolvedConfig
@@ -155,8 +155,8 @@ class TestTrouveConstruction:
 
         t = Trouve(type=TrouveType.TABLE, sql="select 1")
         t.compiled = CompiledAttributes(
-            full_name="dev_omer.s.orders",   # routed name (e.g. schema isolation)
-            logical_name="db.s.orders",       # original filesystem-derived name
+            full_name="dev_omer.s.orders",   # The routed name, for example from the schema isolation policy.
+            logical_name="db.s.orders",       # The initial name from the file path.
             resolved_sql="select 1",
             file_path=Path("/fake/db/s/orders.py"),
             module_name="db.s.orders",
@@ -204,7 +204,7 @@ class TestTrouveConstruction:
 
 
 class TestTrouveIncrementalValidation:
-    """Validate that incremental mode is only allowed on TABLE Trouves."""
+    """These tests show that only a TABLE Trouve accepts the incremental mode."""
 
     def test_view_with_incremental_raises(self):
         with pytest.raises(ValueError, match="only a TABLE Trouve can use the incremental mode"):
@@ -218,10 +218,11 @@ class TestTrouveIncrementalValidation:
             )
 
     def test_source_with_incremental_raises(self):
-        """SOURCE has no sql, but incremental mode validation fires first via RunConfig.
-        Actually SOURCE with incremental will fail because SOURCE requires empty sql,
-        and incremental only applies to TABLE. The validator checks run_mode == INCREMENTAL
-        and type != TABLE."""
+        """A SOURCE with the incremental mode causes an error.
+
+        A SOURCE has no sql. Also, only a TABLE accepts the incremental mode.
+        The validator looks for run_mode == INCREMENTAL and a type that is not
+        TABLE."""
         with pytest.raises(ValueError):
             Trouve(
                 type=TrouveType.SOURCE,
@@ -256,7 +257,7 @@ class TestTrouveIncrementalValidation:
 
 
 # ---------------------------------------------------------------------------
-# RunConfig validation
+# The RunConfig rules
 # ---------------------------------------------------------------------------
 
 
@@ -350,7 +351,7 @@ class TestRunConfigValidation:
 
 
 # ---------------------------------------------------------------------------
-# Trouve.__format__() and _refs registration
+# Trouve.__format__() and the _refs registry
 # ---------------------------------------------------------------------------
 
 
@@ -387,7 +388,7 @@ class TestRefsRegistration:
         assert token_first == token_second
 
     def test_format_in_fstring_sql(self):
-        """Simulates actual usage: referencing a Trouve in SQL via f-string."""
+        """This is the true use: an f-string in the SQL points to a Trouve."""
         source = Trouve(type=TrouveType.SOURCE)
         sql = f"SELECT * FROM {source}"
         assert sql.startswith("SELECT * FROM " + TROUVE_PLACEHOLDER_PREFIX)
@@ -408,7 +409,7 @@ class TestRefsRegistration:
         assert len(_registry) == 1
 
     def test_format_spec_is_ignored(self):
-        """__format__ receives _spec but ignores it; any spec should still work."""
+        """__format__ gets _spec, but it ignores the value. Each value operates."""
         trouve = Trouve(type=TrouveType.SOURCE)
         token = format(trouve, "some_spec")
         assert token.startswith(TROUVE_PLACEHOLDER_PREFIX)
@@ -466,7 +467,7 @@ class TestBuildSqlFullRefresh:
         )
 
     def test_resolved_sql_is_stripped(self):
-        """Leading/trailing whitespace in resolved_sql should be trimmed."""
+        """The code removes each space at the start and at the end of resolved_sql."""
         trouve = _compiled_trouve(resolved_sql="  \n  SELECT 1  \n  ")
         statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
         assert "SELECT 1" in statements[0]
@@ -492,7 +493,7 @@ class TestBuildSqlAppend:
 
 
 class TestBuildSqlUpsertWithPrimaryKey:
-    """UPSERT with primary_key_columns: 3 statements, auto-generated join condition."""
+    """An UPSERT with primary_key_columns gives 3 statements and a new join condition."""
 
     def setup_method(self):
         self.columns = [
@@ -531,7 +532,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
     def test_stmt2_update_set_excludes_primary_key(self):
         merge_stmt = self.statements[1]
         assert "UPDATE SET name = source.name, amount = source.amount" in merge_stmt
-        # primary key should NOT appear in UPDATE SET
+        # UPDATE SET does not contain the primary key.
         assert "id = source.id" not in merge_stmt.split("UPDATE SET")[1]
 
     def test_stmt2_insert_uses_all_columns(self):
@@ -546,7 +547,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
 
 
 class TestBuildSqlUpsertWithCompositePrimaryKey:
-    """UPSERT with multiple primary_key_columns."""
+    """An UPSERT with more than one column in primary_key_columns."""
 
     def test_composite_key_join_uses_and(self):
         columns = [
@@ -597,7 +598,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
 
 
 class TestBuildSqlUpsertWithJoinSql:
-    """UPSERT with join_sql: join condition from user, UPDATE includes all columns."""
+    """An UPSERT with join_sql. The user gives the join condition, and UPDATE holds each column."""
 
     def test_join_sql_used_as_on_clause(self):
         columns = [
@@ -621,7 +622,7 @@ class TestBuildSqlUpsertWithJoinSql:
         assert "ON target.id = source.id AND target.name IS NOT NULL" in merge_stmt
 
     def test_join_sql_update_includes_all_columns(self):
-        """When join_sql is used (no primary_key_columns), UPDATE SET includes all columns."""
+        """With join_sql and no primary_key_columns, UPDATE SET holds each column."""
         columns = [
             Column(name="id", type="INTEGER"),
             Column(name="name", type="STRING"),
@@ -648,7 +649,7 @@ class TestBuildSqlUpsertWithJoinSql:
 
 
 class TestBuildSqlUpsertWithUpsertConfig:
-    """UPSERT with upsert_config overrides for update_columns and insert_columns."""
+    """An UPSERT where upsert_config replaces update_columns and insert_columns."""
 
     def test_custom_update_columns(self):
         columns = [
@@ -672,7 +673,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
-        # Only email should be in UPDATE SET
+        # UPDATE SET holds email only.
         assert "email = source.email" in update_part
         assert "name = source.name" not in update_part
 
@@ -699,11 +700,11 @@ class TestBuildSqlUpsertWithUpsertConfig:
 
         assert "INSERT (id, name)" in merge_stmt
         assert "VALUES (source.id, source.name)" in merge_stmt
-        # email should NOT be in INSERT
+        # INSERT does not hold email.
         assert "source.email" not in merge_stmt.split("VALUES")[1]
 
     def test_custom_update_columns_with_join_sql(self):
-        """upsert_config.update_columns takes precedence over join_sql default (all cols)."""
+        """upsert_config.update_columns wins against the join_sql default of all the columns."""
         columns = [
             Column(name="id", type="INTEGER"),
             Column(name="name", type="STRING"),
@@ -768,7 +769,7 @@ class TestBuildSqlStagingTableName:
 
 
 # ---------------------------------------------------------------------------
-# Test models: TestUnique
+# The test model TestUnique
 # ---------------------------------------------------------------------------
 
 
@@ -791,7 +792,7 @@ class TestUniqueValidation:
 
 
 # ---------------------------------------------------------------------------
-# Test models: TestNotNull
+# The test model TestNotNull
 # ---------------------------------------------------------------------------
 
 
@@ -813,7 +814,7 @@ class TestNotNullValidation:
 
 
 # ---------------------------------------------------------------------------
-# Test models: TestRowCount
+# The test model TestRowCount
 # ---------------------------------------------------------------------------
 
 
@@ -860,7 +861,7 @@ class TestRowCountValidation:
             TestRowCount(min_rows=-1)
 
     def test_negative_max_with_no_min_is_allowed(self):
-        """max_rows has no >= 0 validation when min_rows is not set."""
+        """With no min_rows, the code accepts a max_rows below 0."""
         test = TestRowCount(max_rows=-5)
         assert test.max_rows == -5
 
@@ -884,7 +885,7 @@ class TestRowCountSqlGeneration:
         assert "HAVING COUNT(*) > 100" in sql
 
     def test_sql_min_rows_zero(self):
-        """min_rows=0 generates HAVING COUNT(*) < 0 which is always false (good: no failure)."""
+        """min_rows=0 gives HAVING COUNT(*) < 0. That condition is always false, and thus the test passes."""
         test = TestRowCount(min_rows=0)
         sql = test.to_sql("db.s.t")
         assert "HAVING COUNT(*) < 0" in sql
@@ -918,7 +919,7 @@ class TestIsRunWithSample:
 
 
 # ---------------------------------------------------------------------------
-# Test models: TestUniqueColumns
+# The test model TestUniqueColumns
 # ---------------------------------------------------------------------------
 
 
@@ -996,7 +997,7 @@ class TestColumn:
 
 
 # ---------------------------------------------------------------------------
-# Config models
+# The config models
 # ---------------------------------------------------------------------------
 
 
@@ -1018,15 +1019,15 @@ class TestConfig:
 
 
 # ---------------------------------------------------------------------------
-# Trouve with df_fn
+# A Trouve with a df_fn
 # ---------------------------------------------------------------------------
 
 
 class TestTrouveWithDfFn:
-    """Tests for the df_fn field on Trouve."""
+    """The tests of the df_fn field of Trouve."""
 
     def _make_upstream(self) -> Trouve:
-        """Create a compiled SOURCE Trouve for use as an upstream dependency."""
+        """Make a compiled SOURCE Trouve. A different Trouve can depend on it."""
         source = Trouve(type=TrouveType.SOURCE)
         source.compiled = _compiled_attrs(full_name="db.schema.upstream", resolved_sql="")
         return source

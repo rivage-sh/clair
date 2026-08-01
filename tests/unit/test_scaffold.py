@@ -1,4 +1,4 @@
-"""Tests for clair.core.scaffold -- project initialisation."""
+"""The tests of clair.core.scaffold. That module starts a new project."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from clair.core.scaffold import scaffold_project, write_environments_yml
 
 # ---------------------------------------------------------------------------
-# Helpers
+# The helper functions.
 # ---------------------------------------------------------------------------
 
 EXPECTED_PROJECT_FILES = [
@@ -22,14 +22,14 @@ DEFAULT_SOURCE_ARGS = {
 
 
 def _run_scaffold(tmp_path: Path) -> list[tuple[str, str]]:
-    """Run scaffold_project with a fake home dir so we never touch the real one."""
+    """Run scaffold_project with a false home directory. The real one stays as it is."""
     project_dir = tmp_path / "my_project"
     fake_home = tmp_path / "fake_home"
     return scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# The tests.
 # ---------------------------------------------------------------------------
 
 
@@ -53,7 +53,7 @@ class TestScaffoldCreatesAllExpectedFiles:
     def test_returns_all_paths_as_created(self, tmp_path: Path) -> None:
         results = _run_scaffold(tmp_path)
 
-        # 1 project file + 1 environments.yml
+        # 1 project file and 1 environments.yml file.
         assert len(results) == 2
         assert all(status == "created" for status, _ in results)
 
@@ -74,7 +74,7 @@ class TestFileContents:
         assert "dev:" in content
         assert "account:" in content
         assert "externalbrowser" in content
-        assert "  routing:" not in content  # routing omitted by default; shown as comment only
+        assert "  routing:" not in content  # By default the file has no routing block. The template shows one in a comment.
 
 
 class TestDoesNotOverwriteExistingFiles:

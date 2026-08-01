@@ -1,4 +1,4 @@
-"""Tests for clair clean helpers: _parse_before_spec and _run_id_to_time."""
+"""The tests of two clair clean functions: _parse_before_spec and _run_id_to_time."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ import pytest
 from clair.cli.main import _parse_before_spec, _run_id_to_time
 
 # ---------------------------------------------------------------------------
-# Helpers
+# The helper functions.
 # ---------------------------------------------------------------------------
 
 
 def _make_run_id(dt: datetime) -> str:
-    """Build a fake UUIDv7 hex run_id encoding the given UTC datetime."""
+    """Make a false UUIDv7 hex run_id that holds the given UTC time."""
     ts_ms = int(dt.timestamp() * 1000)
-    # 12 hex chars for the timestamp, padded to 32 chars total
+    # The time occupies 12 hex characters. Add more characters, to a total of 32.
     return f"{ts_ms:012x}" + "0" * 20
 
 
@@ -33,7 +33,7 @@ class TestRunIdToTime:
         run_id = _make_run_id(dt)
         result = _run_id_to_time(run_id)
         assert result is not None
-        # Round-trip precision is milliseconds
+        # The accuracy after the two steps is one millisecond.
         assert abs((result - dt).total_seconds()) < 0.001
 
     def test_returns_utc(self):
@@ -53,7 +53,7 @@ class TestRunIdToTime:
 
 
 # ---------------------------------------------------------------------------
-# _parse_before_spec — duration lookbacks
+# _parse_before_spec — a time span
 # ---------------------------------------------------------------------------
 
 
@@ -84,7 +84,7 @@ class TestParseDurations:
 
 
 # ---------------------------------------------------------------------------
-# _parse_before_spec — ISO dates
+# _parse_before_spec — an ISO date
 # ---------------------------------------------------------------------------
 
 
@@ -103,19 +103,20 @@ class TestParseIsoDates:
 
 
 # ---------------------------------------------------------------------------
-# _parse_before_spec — natural language
+# _parse_before_spec — the usual words
 # ---------------------------------------------------------------------------
 
 
 class TestParseNaturalLanguage:
-    # We mock datetime.now() (no-arg, for local time) to a fixed local time.
-    # Use a naive datetime to simulate what datetime.now() returns (no tzinfo).
-    _LOCAL_NOW = datetime(2026, 3, 19, 22, 30, 0)  # noqa: DTZ001 — naive on purpose, see above
+    # The tests replace datetime.now() with a constant local time. The call has
+    # no argument, and thus it gives the local time. The value has no tzinfo,
+    # as the true datetime.now() gives.
+    _LOCAL_NOW = datetime(2026, 3, 19, 22, 30, 0)  # noqa: DTZ001 — no tzinfo, as the comment above explains
 
     def _patch(self):
-        """Return a context manager that freezes local and UTC time."""
+        """Give a context manager that holds the local time and the UTC time constant."""
         local_now = self._LOCAL_NOW
-        utc_now = datetime(2026, 3, 20, 3, 30, 0, tzinfo=UTC)  # UTC+5h ahead
+        utc_now = datetime(2026, 3, 20, 3, 30, 0, tzinfo=UTC)  # 5 hours in front of the local time
 
         class _MockDatetime:
             @staticmethod
@@ -133,38 +134,39 @@ class TestParseNaturalLanguage:
     def test_today_is_local_midnight(self):
         with self._patch():
             result = _parse_before_spec("today")
-        # Local midnight 2026-03-19 00:00 converted to UTC
-        local_midnight = datetime(2026, 3, 19, 0, 0, 0)  # noqa: DTZ001 — naive local time
+        # The local midnight of 2026-03-19, changed to UTC.
+        local_midnight = datetime(2026, 3, 19, 0, 0, 0)  # noqa: DTZ001 — a local time with no tzinfo
         expected = local_midnight.astimezone(UTC)
         assert result == expected
 
     def test_yesterday_is_one_day_before_local_midnight(self):
         with self._patch():
             result = _parse_before_spec("yesterday")
-        local_midnight = datetime(2026, 3, 19, 0, 0, 0)  # noqa: DTZ001 — naive local time
+        local_midnight = datetime(2026, 3, 19, 0, 0, 0)  # noqa: DTZ001 — a local time with no tzinfo
         expected = (local_midnight - timedelta(days=1)).astimezone(UTC)
         assert result == expected
 
     def test_last_week_is_monday_of_prior_week(self):
-        # 2026-03-19 is a Thursday (weekday=3).
-        # This Monday = 2026-03-16; last Monday = 2026-03-09.
+        # 2026-03-19 is a Thursday, and thus weekday is 3.
+        # This Monday is 2026-03-16. The Monday before is 2026-03-09.
         with self._patch():
             result = _parse_before_spec("last_week")
-        last_monday_local = datetime(2026, 3, 9, 0, 0, 0)  # noqa: DTZ001 — naive local time
+        last_monday_local = datetime(2026, 3, 9, 0, 0, 0)  # noqa: DTZ001 — a local time with no tzinfo
         expected = last_monday_local.astimezone(UTC)
         assert result == expected
 
     def test_today_differs_from_utc_midnight_when_offset(self):
-        # Sanity check: local midnight != UTC midnight when there's an offset.
+        # An examination: the local midnight and the UTC midnight are different
+        # when the time zones are different.
         with self._patch():
             today_result = _parse_before_spec("today")
-        utc_midnight = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)  # UTC "today"
-        # They should differ (local is behind UTC in this scenario)
+        utc_midnight = datetime(2026, 3, 20, 0, 0, 0, tzinfo=UTC)  # The UTC value of "today".
+        # The two values are different, because the local time is behind UTC here.
         assert today_result != utc_midnight
 
 
 # ---------------------------------------------------------------------------
-# _parse_before_spec — invalid input
+# _parse_before_spec — an input that is not correct
 # ---------------------------------------------------------------------------
 
 

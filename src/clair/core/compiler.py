@@ -1,4 +1,4 @@
-"""Compiler -- resolve SQL and produce compile output."""
+"""The compiler. It completes the SQL and writes the compile output."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
 
 
 class CompiledNodeInfo(BaseModel):
-    """Structured info about a single compiled node."""
+    """The data of one compiled node."""
 
     name: str
     type: str
@@ -29,7 +29,7 @@ class CompiledNodeInfo(BaseModel):
 
 
 class CompileOutput(BaseModel):
-    """Structured result of a compile operation."""
+    """The result of one compile operation."""
 
     trouve_count: int
     source_count: int
@@ -38,7 +38,7 @@ class CompileOutput(BaseModel):
 
     @staticmethod
     def render_header(trouve_count: int, source_count: int, compiled_nodes: list[CompiledNodeInfo]) -> str:
-        """Render the compile header and execution order."""
+        """Make the text of the compile header and the execution order."""
         lines = [
             "=== Clair Compile ===",
             "",
@@ -59,7 +59,7 @@ class CompileOutput(BaseModel):
 
     @staticmethod
     def render_node(node: CompiledNodeInfo) -> str:
-        """Render the output for a single compiled node."""
+        """Make the output text of one compiled node."""
         lines: list[str] = []
         lines.append(f"--- {node.name} ---")
         deps_str = ", ".join(node.dependencies) if node.dependencies else "(none)"
@@ -73,11 +73,11 @@ class CompileOutput(BaseModel):
 
     @staticmethod
     def render_footer(artifacts_dir: Path) -> str:
-        """Render the final compile summary line."""
+        """Make the last line of the compile summary."""
         return f"Clair wrote the compiled SQL to {artifacts_dir}/"
 
     def render(self) -> str:
-        """Produce the formatted summary string for stdout."""
+        """Make the complete summary text for stdout."""
         parts = [self.render_header(self.trouve_count, self.source_count, self.compiled_nodes)]
 
         for node in self.compiled_nodes:
@@ -96,19 +96,21 @@ def write_compile_output(
     run_mode: RunMode = RunMode.FULL_REFRESH,
     run_id: str = "",
 ) -> CompileOutput:
-    """Write compiled SQL to _clairtifacts/<run_id>/ and return a structured output.
+    """Write the compiled SQL to _clairtifacts/<run_id>/ and give the output.
 
     Args:
-        dag: The full project DAG.
-        selected: Ordered list of full_names to compile (non-SOURCE, topological order).
-        project_root: The project root directory.
-        on_node_compiled: Callback invoked after each node is compiled and written
-            to disk, allowing callers to stream output.
-        run_mode: The run mode to use when generating SQL statements.
-        run_id: UUIDv7 hex string identifying this compile run.
+        dag: The complete project DAG.
+        selected: The full_names to compile, in topological order. The list
+            holds no SOURCE Trouve.
+        project_root: The root directory of the project.
+        on_node_compiled: A callback. Clair calls it after it compiles a node
+            and writes the node to the disk. Thus the caller can show the
+            output immediately.
+        run_mode: The run mode for the new SQL statements.
+        run_id: The UUIDv7 hex string that identifies this compile run.
 
     Returns:
-        A CompileOutput with structured data and a .render() method.
+        A CompileOutput. It holds the data and supplies a .render() method.
     """
     artifacts_dir = project_root / ARTIFACTS_DIR_NAME / run_id
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -131,7 +133,7 @@ def write_compile_output(
             try:
                 fn_source = inspect.getsource(trouve.df_fn)
             except (OSError, TypeError):
-                # Source unavailable for lambdas, built-ins, or compiled extensions
+                # A lambda, a built-in, or a compiled extension has no source text.
                 fn_source = repr(trouve.df_fn)
 
             imports_section = ""

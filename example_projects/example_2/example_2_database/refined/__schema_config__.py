@@ -1,5 +1,5 @@
 from clair import SchemaDefaults
 
-# No overrides — inherits warehouse and role from __database_config__.py.
-# Add schema-level overrides here as needed.
+# This schema has no override. It takes the warehouse and the role from
+# __database_config__.py. Add an override for the schema here, if you need one.
 defaults = SchemaDefaults()

@@ -109,43 +109,46 @@ trouve = Trouve(
 )
 ```
 
-## PandasTrouve
+## Pandas execution (`df_fn`)
 
-When SQL isn't the right tool, use `PandasTrouve`. Instead of an f-string query, you supply a Python function. Clair fetches the upstream tables from Snowflake as DataFrames, calls your function on the machine running clair, then writes the result back to Snowflake.
+When SQL is not the right tool, give the Trouve a `df_fn` in place of `sql`. You supply a Python function. Clair fetches the upstream tables from Snowflake as DataFrames, calls your function on the machine that runs clair, then writes the result back to Snowflake.
 
 ```python
 # derived/products/top_rated.py
 import pandas as pd
-from clair import PandasTrouve
-from refined.products.catalog import trouve as catalog
-from refined.products.reviews import trouve as reviews
+from refined.products.catalog import trouve as catalog_trouve
+from refined.products.reviews import trouve as reviews_trouve
 
-def top_rated(inputs):
-    df = inputs["catalog"].merge(inputs["reviews"], on="product_id")
+from clair import Trouve
+
+
+def top_rated(
+    catalog: pd.DataFrame = catalog_trouve,  # type: ignore
+    reviews: pd.DataFrame = reviews_trouve,  # type: ignore
+) -> pd.DataFrame:
+    df = catalog.merge(reviews, on="product_id")
     return (
-        df.groupby(["product_id", "name"])["rating"]
+        df.groupby(["product_id", "name"], as_index=False)["rating"]
         .mean()
-        .reset_index()
         .query("rating >= 4")
     )
 
-trouve = PandasTrouve(
-    inputs={"catalog": catalog, "reviews": reviews},
-    transform=top_rated,
-)
+
+trouve = Trouve(df_fn=top_rated)
 ```
 
-Key differences from `Trouve`:
+Each dependency is a parameter whose default value is the upstream Trouve.
 
-| | `Trouve` | `PandasTrouve` |
+Differences between the two execution types:
+
+| | `sql` | `df_fn` |
 |---|---|---|
 | Execution | Inside Snowflake | Locally on the clair machine |
 | Output type | TABLE or VIEW | TABLE only |
 | Incremental | Supported | Full-refresh only |
-| SQL | Required (TABLE/VIEW) | Not used |
-| Dependencies | f-string imports | `inputs` dict |
+| Dependencies | f-string references | Parameter default values |
 
-Everything else — DAG integration, `--select` filtering, data quality tests, `clair dag` output — works the same way.
+Everything else — DAG integration, `--select` filtering, data quality tests, `clair dag` output — operates the same way. The two fields are mutually exclusive: a Trouve with both `sql` and `df_fn` raises an error.
 
 See the [Pandas-native guide](../guides/pandas-native.md) for a full walkthrough.
 

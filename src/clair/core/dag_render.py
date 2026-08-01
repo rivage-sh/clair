@@ -1,4 +1,4 @@
-"""DAG rendering -- pure-function tree visualization of a ClairDag."""
+"""The DAG render code. A pure function draws a ClairDag as a tree."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from clair.trouves.trouve import ExecutionType, TrouveType
 
 
 class DagRenderOutput(BaseModel):
-    """Structured result of rendering a DAG."""
+    """The result after clair draws a DAG."""
 
     model_count: int
     source_count: int
@@ -22,29 +22,29 @@ class DagRenderOutput(BaseModel):
     selector: str | None
     no_match: bool
 
-    # Internal: the pre-rendered tree string. Built during construction
-    # so that .render() is byte-for-byte identical to the old return value.
+    # An internal field: the tree text. The constructor makes the text. Thus
+    # .render() gives the same bytes as the initial code gave.
     _rendered: str = PrivateAttr(default="")
 
     def render(self) -> str:
-        """Produce the formatted tree string for stdout."""
+        """Give the complete tree text for stdout."""
         return self._rendered
 
 
 def render_dag(dag: ClairDag, selected: list[str] | None = None) -> DagRenderOutput:
-    """Render a ClairDag as a tree with top-to-bottom data flow.
+    """Draw a ClairDag as a tree. The data flows from the top to the bottom.
 
-    Pure function with no side effects. Returns a DagRenderOutput with
-    structured data and a ``.render()`` method that produces the tree string.
+    This is a pure function. It changes no state. It gives a DagRenderOutput
+    that holds the data and supplies a ``.render()`` method for the tree text.
 
     Args:
-        dag: The dependency graph to render.
-        selected: Optional glob patterns to filter visible nodes.
-            When provided, only matched nodes and their transitive
-            upstream ancestors are shown.
+        dag: The dependency graph to draw.
+        selected: Optional glob patterns that limit the visible nodes. With
+            these patterns, the tree shows only the nodes that agree with a
+            pattern, and their parents at each level above.
 
     Returns:
-        A DagRenderOutput with structured fields and a .render() method.
+        A DagRenderOutput with the data fields and a .render() method.
     """
     selected = selected or []
     visible, matched = _compute_visible_nodes(dag, selected)
@@ -106,11 +106,11 @@ def _render_subtree(
     is_last: bool,
     is_root: bool = False,
 ) -> None:
-    """Recursively render a node and its children as a tree.
+    """Draw a node and its children as a tree. This function calls itself.
 
-    Nodes that were already rendered (shared dependencies / fan-in) are
-    shown as back-references with a ``(^)`` marker instead of expanding
-    their subtree again.
+    A node can occur two times or more, because more than one node depends on
+    it. The second time, the tree shows only a reference with a ``(^)`` marker,
+    and the function does not draw the subtree again.
     """
     trouve = dag.get_trouve(node)
     assert trouve.compiled is not None, f"Clair did not compile {node}"
@@ -151,9 +151,10 @@ def _render_subtree(
 def _compute_visible_nodes(
     dag: ClairDag, selected: list[str] | None
 ) -> tuple[set[str], set[str]]:
-    """Return (visible_nodes, matched_nodes).
+    """Give a (visible_nodes, matched_nodes) tuple.
 
-    If *selected* is empty or None, all nodes are visible and matched is empty.
+    If *selected* is empty or None, each node is visible and matched_nodes is
+    empty.
     """
     if not selected:
         return set(dag.nodes), set()
@@ -173,10 +174,10 @@ def _compute_visible_nodes(
 
 
 def _compute_depths(dag: ClairDag, visible: set[str]) -> dict[str, int]:
-    """Return {node: depth} for all visible nodes.
+    """Give a {node: depth} map for each visible node.
 
-    Depth is the length of the longest path from any root to the node
-    within the visible subgraph.
+    The depth is the length of the longest path from a root to the node in the
+    visible subgraph.
     """
     subgraph = dag.subgraph(visible)
     depth: dict[str, int] = {}
@@ -190,7 +191,7 @@ def _compute_depths(dag: ClairDag, visible: set[str]) -> dict[str, int]:
 
 
 def _format_header(n_models: int, n_sources: int, pattern: str | None) -> str:
-    """Return the === header line ===."""
+    """Give the === header line ===."""
     model_word = "model" if n_models == 1 else "models"
     source_word = "source" if n_sources == 1 else "sources"
 

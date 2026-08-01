@@ -1,4 +1,4 @@
-"""Tests for the runner (using mock adapter)."""
+"""The tests of the runner. They use a false adapter."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from clair.trouves.run_config import RunMode
 
 
 def _make_mock_adapter(fail_on: set[str] | None = None) -> WarehouseAdapter:
-    """Create a mock adapter that succeeds by default, or fails on specific Trouves."""
+    """Make a false adapter. By default it succeeds, but it can fail on some Trouves."""
     fail_on = fail_on or set()
     adapter = MagicMock(spec=WarehouseAdapter)
 
@@ -25,7 +25,7 @@ def _make_mock_adapter(fail_on: set[str] | None = None) -> WarehouseAdapter:
         call_count += 1
         query_id = f"test-qid-{call_count:04d}"
 
-        # Check if any of the fail_on names appear in the SQL
+        # Look for a fail_on name in the SQL.
         for name in fail_on:
             if name in sql:
                 return QueryResult(
@@ -55,7 +55,7 @@ class TestRunner:
         adapter = _make_mock_adapter()
         results = list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
 
-        assert len(results) == 1  # Only the TABLE, not the SOURCE
+        assert len(results) == 1  # The TABLE only, not the SOURCE.
         assert results[0].full_name == "analytics.revenue.daily_orders"
         assert results[0].status == RunStatus.SUCCESS
         assert len(results[0].query_ids) > 0
@@ -68,7 +68,7 @@ class TestRunner:
         adapter = _make_mock_adapter()
         list(run_project(dag, selected, adapter))
 
-        # Check the SQL that was passed to execute
+        # Examine the SQL that the code gave to execute.
         call_args = cast(Any, adapter.execute).call_args[0][0]
         assert "CREATE OR REPLACE TABLE" in call_args
         assert "analytics.revenue.daily_orders" in call_args
@@ -90,7 +90,7 @@ class TestRunner:
 
 class TestRunnerFailureHandling:
     def test_downstream_skipped_on_failure(self):
-        """When a Trouve fails, its downstream dependents should be skipped."""
+        """When a Trouve fails, clair skips each Trouve downstream of it."""
         from clair.trouves.config import ResolvedConfig
         from clair.trouves.trouve import (
             CompiledAttributes,
@@ -121,7 +121,7 @@ class TestRunnerFailureHandling:
         dag = build_dag(trouves)
         selected = get_executable_nodes(dag)
 
-        # Fail on staging
+        # Make staging fail.
         adapter = _make_mock_adapter(fail_on={"db.s.staging"})
         results = list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
 
@@ -158,7 +158,7 @@ class TestRunnerFailureHandling:
 
 
 class TestRunSummaryProperties:
-    """Test RunSummary computed properties on structured fields."""
+    """The tests of the RunSummary properties."""
 
     def test_empty_results_all_counts_zero(self):
         output = format_run_output([], "test_env")

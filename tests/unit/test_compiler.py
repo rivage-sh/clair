@@ -1,4 +1,4 @@
-"""Tests for the compiler."""
+"""The tests of the compiler."""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ class TestWriteCompileOutput:
         dag = build_dag(discover_project(simple_project))
         output = write_compile_output(dag, [], tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
-        # Even with no selection, the DAG-wide counts reflect the full DAG
+        # With no selection, the counts still show the complete DAG.
         assert output.trouve_count == 1
         assert output.source_count == 1
 

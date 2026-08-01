@@ -1,10 +1,37 @@
 # clair — Claude context
 
+## What clair is
+
+A Python-native data transformation framework for Snowflake. Users write Python files
+(Trouves). clair compiles them to SQL, builds a DAG from the references between them, and
+runs the DAG in topological order. No Jinja, no YAML configuration.
+
+**Start a feature request here, in this order:**
+
+1. `grep` `site_docs/docs/` for the behaviour. It is the source of truth, it is Markdown,
+   and it is small. Do not read `src/` to learn what a feature does.
+2. Read `.claude/MEMORY.md` for the design rules.
+3. Open only the two or three source files that the map below names.
+
 ## Layout
 
-| Package | Source | Tests |
-|---------|--------|-------|
-| `clair` | `src/clair/` | `tests/` |
+| Path | Holds |
+|------|-------|
+| `src/clair/` | The package. Tests are in `tests/`. |
+| `site_docs/docs/` | User documentation, published by CI. Source of truth for behaviour. |
+| `example_projects/`, `example_notebooks/` | Runnable examples. |
+
+Packages inside `src/clair/`:
+
+| Package | Holds |
+|---------|-------|
+| `cli/` | `main.py` — the click entrypoint. Read first for any CLI change. |
+| `trouves/` | The domain models: `trouve.py`, `column.py`, `test.py`, `config.py`, `run_config.py`, `_refs.py`. |
+| `core/` | The pipeline: `discovery.py`, `dag.py`, `compiler.py`, `runner.py`, `test_runner.py`, `dag_render.py`, `selector.py`, `scaffold.py`. |
+| `adapters/` | `base.py` holds the `WarehouseAdapter` ABC. `snowflake.py` is the only implementation. |
+| `environments/` | `environments.py` reads `~/.clair/environments.yml`. `routing.py` remaps targets. |
+| `docs/` | `clair docs` server: `catalog.py`, `columns.py`, `server.py`, bundled SPA in `static/`. |
+| (top level) | `__init__.py` is the public API surface. Also `lineage.py`, `exceptions.py`, `_logging.py`. |
 
 ## Tooling: uv
 
