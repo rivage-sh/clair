@@ -5,8 +5,8 @@ from clair import Column, ColumnType, Trouve, TrouveType
 trouve = Trouve(
     type=TrouveType.TABLE,
     docs="""
-        Refined layer: flattens the semi-structured PROPERTIES VARIANT into typed columns
-        and adds convenience fields. Downstream trouves reference this instead of the raw source.
+        The refined layer. It puts the semi-structured PROPERTIES VARIANT into typed columns
+        and adds more fields. The downstream Trouves read this Trouve, not the raw source.
     """,
     sql=f"""
         select

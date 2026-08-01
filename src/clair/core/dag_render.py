@@ -58,7 +58,7 @@ def render_dag(dag: ClairDag, selected: list[str] | None = None) -> DagRenderOut
             selector=selected[0] if selected else None,
             no_match=True,
         )
-        result._rendered = f"No Trouves match the selector '{selected[0]}'."
+        result._rendered = f"Clair found no Trouves for the selector '{selected[0]}'."
         return result
 
     n_sources = sum(
@@ -113,14 +113,14 @@ def _render_subtree(
     their subtree again.
     """
     trouve = dag.get_trouve(node)
-    assert trouve.compiled is not None, f"{node} has not been compiled"
+    assert trouve.compiled is not None, f"Clair did not compile {node}"
     type_tag = None
     if trouve.compiled.execution_type == ExecutionType.PANDAS:
         type_tag = ExecutionType.PANDAS.upper()
     elif trouve.compiled.execution_type == ExecutionType.SNOWFLAKE:
         type_tag = trouve.type.value.upper()
     else:
-        raise ClairError(f"Unknown execution_type '{trouve.compiled.execution_type}' for {node}")
+        raise ClairError(f"Clair does not know the execution_type '{trouve.compiled.execution_type}' for {node}")
     is_matched = node in matched
 
     if is_root:

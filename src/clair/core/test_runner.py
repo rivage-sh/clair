@@ -76,7 +76,7 @@ class TestSummary(BaseModel):
         lines = [
             "=== Clair Test ===",
             "",
-            f"Running {total} test{'s' if total != 1 else ''}...",
+            f"Clair runs {total} test{'s' if total != 1 else ''}...",
             "",
         ]
 

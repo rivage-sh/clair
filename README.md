@@ -409,7 +409,7 @@ trouve = PandasTrouve(
         Column(name="avg_rating", type=ColumnType.FLOAT),
     ],
     tests=[TestNotNull(column="product_id")],
-    docs="Top-rated products by average review score, computed in pandas.",
+    docs="The products with the highest average review score. This Trouve uses pandas.",
 )
 ```
 

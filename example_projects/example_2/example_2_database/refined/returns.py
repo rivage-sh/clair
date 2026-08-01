@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined returns with reason category classification.",
+    docs="Refined returns. Each row has a class for the reason.",
     sql=f"""
         select
             return_id,

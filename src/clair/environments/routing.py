@@ -57,13 +57,13 @@ class SchemaIsolationRouting(RoutingConfig):
         new_table = f"{db}_{schema}_{table}".upper()
         if not _VALID_IDENTIFIER.match(new_table):
             raise InvalidRoutingConfigError(
-                f"schema_isolation produced invalid identifier '{new_table}' "
-                "(only A-Z, 0-9, _ are allowed)"
+                f"schema_isolation made the incorrect identifier '{new_table}'. "
+                "Use only the characters A-Z, 0-9 and _."
             )
         if len(new_table) > 255:
             raise InvalidRoutingConfigError(
-                f"schema_isolation produced identifier '{new_table}' "
-                f"({len(new_table)} chars, max 255)"
+                f"schema_isolation made the identifier '{new_table}'. "
+                f"It has {len(new_table)} characters, but the maximum is 255."
             )
         return f"{self.database_name}.{self.schema_name}.{new_table}"
 

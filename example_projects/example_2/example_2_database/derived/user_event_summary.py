@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Per-user event engagement summary.",
+    docs="Summary of the events for each user.",
     sql=f"""
         select
             user_id,

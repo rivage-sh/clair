@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Categories ranked by month-over-month revenue growth.",
+    docs="The categories in the sequence of their monthly revenue increase.",
     sql=f"""
         with this_month as (
             select

@@ -107,19 +107,19 @@ class TestTrouveConstruction:
         assert trouve.run_config.incremental_mode is None
 
     def test_table_rejects_empty_sql(self):
-        with pytest.raises(ValueError, match="requires non-empty sql"):
+        with pytest.raises(ValueError, match="must have sql"):
             Trouve(type=TrouveType.TABLE, sql="")
 
     def test_table_rejects_whitespace_only_sql(self):
-        with pytest.raises(ValueError, match="requires non-empty sql"):
+        with pytest.raises(ValueError, match="must have sql"):
             Trouve(type=TrouveType.TABLE, sql="   \n\t  ")
 
     def test_view_rejects_empty_sql(self):
-        with pytest.raises(ValueError, match="requires non-empty sql"):
+        with pytest.raises(ValueError, match="must have sql"):
             Trouve(type=TrouveType.VIEW, sql="")
 
     def test_source_rejects_sql(self):
-        with pytest.raises(ValueError, match="SOURCE Trouve must not have sql"):
+        with pytest.raises(ValueError, match="a SOURCE Trouve must not have sql"):
             Trouve(type=TrouveType.SOURCE, sql="SELECT 1")
 
     def test_source_rejects_whitespace_sql(self):
@@ -170,7 +170,7 @@ class TestTrouveConstruction:
 
     def test_sample_raises_when_not_compiled(self):
         t = Trouve(type=TrouveType.TABLE, sql="select 1")
-        with pytest.raises(AssertionError, match="requires a compiled Trouve"):
+        with pytest.raises(AssertionError, match="needs a compiled Trouve"):
             t.sample()
 
     def test_trouve_with_tests(self):
@@ -207,7 +207,7 @@ class TestTrouveIncrementalValidation:
     """Validate that incremental mode is only allowed on TABLE Trouves."""
 
     def test_view_with_incremental_raises(self):
-        with pytest.raises(ValueError, match="only TABLE Trouves support incremental mode"):
+        with pytest.raises(ValueError, match="only a TABLE Trouve can use the incremental mode"):
             Trouve(
                 type=TrouveType.VIEW,
                 sql="SELECT 1",
@@ -267,18 +267,18 @@ class TestRunConfigValidation:
         assert config.incremental_mode is None
 
     def test_full_refresh_with_incremental_mode_raises(self):
-        with pytest.raises(ValueError, match="incremental_mode is only valid when run_mode is incremental"):
+        with pytest.raises(ValueError, match="you can set incremental_mode only when run_mode is incremental"):
             RunConfig(
                 run_mode=RunMode.FULL_REFRESH,
                 incremental_mode=IncrementalMode.APPEND,
             )
 
     def test_incremental_without_incremental_mode_raises(self):
-        with pytest.raises(ValueError, match="incremental run_mode requires incremental_mode"):
+        with pytest.raises(ValueError, match="the incremental run_mode needs incremental_mode"):
             RunConfig(run_mode=RunMode.INCREMENTAL)
 
     def test_append_with_primary_key_columns_raises(self):
-        with pytest.raises(ValueError, match="primary_key_columns is only valid for upsert mode"):
+        with pytest.raises(ValueError, match="you can set primary_key_columns only for the upsert mode"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.APPEND,
@@ -286,7 +286,7 @@ class TestRunConfigValidation:
             )
 
     def test_append_with_join_sql_raises(self):
-        with pytest.raises(ValueError, match="join_sql is only valid for upsert mode"):
+        with pytest.raises(ValueError, match="you can set join_sql only for the upsert mode"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.APPEND,
@@ -294,7 +294,7 @@ class TestRunConfigValidation:
             )
 
     def test_append_with_upsert_config_raises(self):
-        with pytest.raises(ValueError, match="upsert_config is only valid for upsert mode"):
+        with pytest.raises(ValueError, match="you can set upsert_config only for the upsert mode"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.APPEND,
@@ -302,7 +302,7 @@ class TestRunConfigValidation:
             )
 
     def test_upsert_with_both_primary_key_and_join_sql_raises(self):
-        with pytest.raises(ValueError, match="specify primary_key_columns or join_sql, not both"):
+        with pytest.raises(ValueError, match="set primary_key_columns or join_sql, but not both"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.UPSERT,
@@ -311,7 +311,7 @@ class TestRunConfigValidation:
             )
 
     def test_upsert_with_neither_primary_key_nor_join_sql_raises(self):
-        with pytest.raises(ValueError, match="upsert mode requires primary_key_columns or join_sql"):
+        with pytest.raises(ValueError, match="the upsert mode needs primary_key_columns or join_sql"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.UPSERT,
@@ -422,7 +422,7 @@ class TestRefsRegistration:
 class TestBuildSqlNotCompiled:
     def test_raises_runtime_error_when_not_compiled(self):
         trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1")
-        with pytest.raises(RuntimeError, match="build_sql\\(\\) requires a compiled Trouve"):
+        with pytest.raises(RuntimeError, match="build_sql\\(\\) needs a compiled Trouve"):
             trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
 
 
@@ -741,7 +741,7 @@ class TestBuildSqlUpsertErrors:
             columns=[],
             run_config=run_config,
         )
-        with pytest.raises(ValueError, match="upsert mode requires columns to be defined"):
+        with pytest.raises(ValueError, match="the upsert mode needs columns on the Trouve"):
             trouve.build_sql(RunMode.INCREMENTAL, "run_err")
 
 
@@ -848,7 +848,7 @@ class TestRowCountValidation:
         assert test.max_rows == 50
 
     def test_neither_raises(self):
-        with pytest.raises(ValueError, match="at least one of min_rows or max_rows must be set"):
+        with pytest.raises(ValueError, match="you must set min_rows or max_rows, or both"):
             TestRowCount()
 
     def test_max_less_than_min_raises(self):
@@ -938,11 +938,11 @@ class TestUniqueColumnsValidation:
         assert len(test.columns) == 5
 
     def test_one_column_raises(self):
-        with pytest.raises(ValueError, match="at least 2"):
+        with pytest.raises(ValueError, match="a minimum of 2 columns"):
             TestUniqueColumns(columns=["a"])
 
     def test_empty_columns_raises(self):
-        with pytest.raises(ValueError, match="at least 2"):
+        with pytest.raises(ValueError, match="a minimum of 2 columns"):
             TestUniqueColumns(columns=[])
 
 
@@ -1048,7 +1048,7 @@ class TestTrouveWithDfFn:
         def my_fn(events=upstream):
             return events
 
-        with pytest.raises(ValueError, match="cannot have both sql and df_fn"):
+        with pytest.raises(ValueError, match="must have sql or df_fn, but not both"):
             Trouve(df_fn=my_fn, sql="SELECT 1")
 
     def test_df_fn_with_view_type_raises_value_error(self):
@@ -1057,7 +1057,7 @@ class TestTrouveWithDfFn:
         def my_fn(events=upstream):
             return events
 
-        with pytest.raises(ValueError, match="df_fn Trouves must be TABLE type"):
+        with pytest.raises(ValueError, match="a df_fn Trouve must have the TABLE type"):
             Trouve(df_fn=my_fn, type=TrouveType.VIEW)
 
     def test_df_fn_with_source_type_raises_value_error(self):
@@ -1066,11 +1066,11 @@ class TestTrouveWithDfFn:
         def my_fn(events=upstream):
             return events
 
-        with pytest.raises(ValueError, match="df_fn Trouves must be TABLE type"):
+        with pytest.raises(ValueError, match="a df_fn Trouve must have the TABLE type"):
             Trouve(df_fn=my_fn, type=TrouveType.SOURCE)
 
     def test_df_fn_not_callable_raises_value_error(self):
-        with pytest.raises(ValueError, match="df_fn must be callable"):
+        with pytest.raises(ValueError, match="df_fn must be a callable object"):
             Trouve(df_fn="not_a_function")
 
     def test_df_fn_with_incremental_raises_value_error(self):
@@ -1079,7 +1079,7 @@ class TestTrouveWithDfFn:
         def my_fn(events=upstream):
             return events
 
-        with pytest.raises(ValueError, match="df_fn Trouves do not support incremental mode"):
+        with pytest.raises(ValueError, match="a df_fn Trouve cannot use the incremental mode"):
             Trouve(
                 df_fn=my_fn,
                 run_config=RunConfig(

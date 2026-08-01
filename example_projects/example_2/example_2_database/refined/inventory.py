@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined inventory with stock status classification.",
+    docs="Refined inventory. Each row has a class for the stock status.",
     sql=f"""
         select
             inventory_id,

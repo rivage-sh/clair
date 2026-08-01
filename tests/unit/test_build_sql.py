@@ -64,7 +64,7 @@ class TestBuildSqlFullRefresh:
 class TestBuildSqlNotCompiled:
     def test_raises_runtime_error(self):
         t = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id")
-        with pytest.raises(RuntimeError, match="build_sql\\(\\) requires a compiled Trouve"):
+        with pytest.raises(RuntimeError, match="build_sql\\(\\) needs a compiled Trouve"):
             t.build_sql(RunMode.FULL_REFRESH, run_id="abc")
 
 
@@ -151,7 +151,7 @@ class TestBuildSqlUpsert:
             primary_key_columns=["id"],
         )
         t = _make_compiled_trouve(run_config=rc, columns=[])
-        with pytest.raises(ValueError, match="upsert mode requires columns"):
+        with pytest.raises(ValueError, match="the upsert mode needs columns on the Trouve"):
             t.build_sql(RunMode.INCREMENTAL, run_id="abc")
 
     def test_multi_column_primary_key_joins_with_and(self):

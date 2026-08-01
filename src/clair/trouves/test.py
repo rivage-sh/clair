@@ -115,7 +115,7 @@ class TestRowCount(Test):
     @model_validator(mode="after")
     def _validate_bounds(self) -> TestRowCount:
         if self.min_rows is None and self.max_rows is None:
-            raise ValueError("at least one of min_rows or max_rows must be set")
+            raise ValueError("you must set min_rows or max_rows, or both")
         if self.min_rows is not None and self.min_rows < 0:
             raise ValueError("min_rows must be >= 0")
         if self.max_rows is not None and self.min_rows is not None and self.max_rows < self.min_rows:
@@ -146,7 +146,7 @@ class TestUniqueColumns(Test):
     def _validate_columns(self) -> TestUniqueColumns:
         if len(self.columns) < 2:
             raise ValueError(
-                "unique_columns test requires columns with at least 2 entries"
+                "the unique_columns test needs a minimum of 2 columns"
             )
         return self
 

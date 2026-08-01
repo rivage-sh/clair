@@ -21,19 +21,19 @@ _ENVIRONMENTS_TEMPLATE = '''\
 # Reference: https://github.com/your-org/clair
 
 dev:
-  account: your-org-your-account   # e.g. myorg-myaccount
+  account: your-org-your-account   # for example myorg-myaccount
   user: your@email.com
-  authenticator: externalbrowser   # SSO login via browser
+  authenticator: externalbrowser   # SSO login in the browser
   warehouse: your_warehouse
-  # region: us-east-1              # required for query URLs
-  # account_locator: abc12345      # required for query URLs
+  # region: us-east-1              # necessary for the query URLs
+  # account_locator: abc12345      # necessary for the query URLs
 
 # Production environment (key-pair auth):
 # prod:
 #   account: your-org-your-account
 #   user: ci_service_user
 #   private_key_path: ~/.clair/snowflake_key.p8
-#   # private_key_passphrase: your-passphrase   # only if key is encrypted
+#   # private_key_passphrase: your-passphrase   # only if the key is encrypted
 #   warehouse: your_warehouse
 #   region: us-east-1
 #   account_locator: abc12345
