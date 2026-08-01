@@ -1,8 +1,8 @@
-"""Trouve -- the fundamental unit in Clair.
+"""Trouve -- the basic unit in Clair.
 
-A Trouve maps 1:1 to a queryable object in Snowflake (a source table,
-a transformed table, or a view). Every Trouve lives in its own .py file
-and is discovered automatically by the framework.
+One Trouve maps to one object in Snowflake that you can query: a source table,
+a transformed table, or a view. Each Trouve stays in its own .py file. The
+framework finds each Trouve automatically.
 """
 
 from __future__ import annotations
@@ -31,34 +31,36 @@ class ExecutionType(StrEnum):
 
 
 class CompiledAttributes(BaseModel):
-    """Attributes set by discovery after a Trouve is loaded.
+    """The attributes that discovery sets after it loads a Trouve.
 
-    Only present when ``Trouve.is_compiled`` is True.
+    These attributes exist only when ``Trouve.is_compiled`` is True.
     """
 
-    full_name: str       # Routed name -- used in SQL and DDL
-    logical_name: str    # Filesystem-derived name -- used in DAG edges and selectors
+    full_name: str       # The routed name. Clair puts it in the SQL and the DDL.
+    logical_name: str    # The name from the file path. DAG edges and selectors use it.
     resolved_sql: str
     resolved_df_fn: str = ""
     file_path: Path
     module_name: str
     imports: list[str]
-    config: Any  # ResolvedConfig -- typed as Any to avoid circular import
+    config: Any  # A ResolvedConfig. The type is Any, to prevent a circular import.
     execution_type: ExecutionType
 
 
 class Trouve(BaseModel):
-    """The core class in Clair.
+    """The primary class in Clair.
 
     Attributes:
-        type: Whether this is a SOURCE, TABLE, or VIEW.
-        sql: The SQL query (required for TABLE/VIEW, must be empty for SOURCE).
-             Use ``f"SELECT * FROM {other_trouve}"`` to reference other Trouves --
-             the f-string placeholder is resolved to the real full_name by discovery.
-        columns: Column definitions for documentation and future validation.
-        tests: Data quality tests.
-        docs: Documentation string for this Trouve.
-        compiled: Set by discovery. None until the project has been discovered.
+        type: SOURCE, TABLE, or VIEW.
+        sql: The SQL query. A TABLE or a VIEW needs it. A SOURCE must leave it
+             empty. To point to a different Trouve, write
+             ``f"SELECT * FROM {other_trouve}"``. Discovery replaces the
+             f-string placeholder with the true full_name.
+        columns: The column definitions, for the docs and for future checks.
+        tests: The data quality tests.
+        docs: The documentation text for this Trouve.
+        compiled: Discovery sets this. It stays None until discovery reads the
+             project.
     """
 
     type: TrouveType = Field(default=TrouveType.TABLE)
@@ -96,24 +98,26 @@ class Trouve(BaseModel):
         return self
 
     def __format__(self, _spec: str) -> str:
-        """Return a placeholder token for use in f-string SQL.
+        """Give a placeholder token for f-string SQL.
 
-        When you write ``f"SELECT * FROM {other_trouve}"``, this method is called.
-        It registers the Trouve in the global refs registry and returns a token
-        like ``__CLAIR_TROUVE_140234567890__`` that discovery replaces with the real full_name.
+        Python calls this method when you write ``f"SELECT * FROM
+        {other_trouve}"``. The method adds the Trouve to the global refs
+        registry. Then it gives a token, for example
+        ``__CLAIR_TROUVE_140234567890__``. Discovery replaces the token with the
+        true full_name.
         """
         return register(self)
 
     @property
     def is_compiled(self) -> bool:
-        """True if this Trouve has been processed by discovery."""
+        """True if discovery processed this Trouve."""
         return self.compiled is not None
 
     @property
     def full_name(self) -> str:
-        """The fully-qualified Snowflake object name: database.schema.table.
+        """The full Snowflake object name: database.schema.table.
 
-        Raises RuntimeError if accessed before discovery has run.
+        This property raises a RuntimeError if you read it before discovery runs.
         """
         if self.compiled is None:
             raise RuntimeError(
@@ -123,27 +127,28 @@ class Trouve(BaseModel):
         return self.compiled.full_name
 
     def sample(self) -> str:
-        """Return a sampled subquery of this Trouve for use in test SQL.
+        """Give a subquery that reads a sample of this Trouve, for test SQL.
 
-        Returns ``(SELECT TOP 1000 * FROM {full_name})`` by default.
-        Override in a subclass to customise the sampling strategy.
+        The default result is ``(SELECT TOP 1000 * FROM {full_name})``. To change
+        how clair takes the sample, override this method in a subclass.
         """
         assert self.compiled is not None, "sample() requires a compiled Trouve"
         return f"(SELECT TOP 1000 * FROM {self.compiled.full_name})"
 
     def build_sql(self, effective_mode: RunMode, run_id: str) -> list[str]:
-        """Generate the SQL statements to materialize this Trouve.
+        """Make the SQL statements that materialize this Trouve.
 
         Args:
-            effective_mode: The resolved run mode (caller determines this).
-            run_id: Unique identifier for this clair run invocation.
+            effective_mode: The final run mode. The caller selects it.
+            run_id: The unique identifier of this clair run.
 
         Returns:
-            Ordered list of SQL statements to execute. Empty for SOURCE Trouves.
+            The SQL statements to execute, in order. The list is empty for a
+            SOURCE Trouve.
 
         Raises:
-            RuntimeError: If the Trouve has not been compiled.
-            ValueError: If UPSERT is requested but columns are not defined.
+            RuntimeError: If clair did not compile the Trouve.
+            ValueError: If the config asks for UPSERT but has no columns.
         """
         if not self.is_compiled:
             raise RuntimeError("build_sql() requires a compiled Trouve")
@@ -165,7 +170,7 @@ class Trouve(BaseModel):
                 f"INSERT INTO {self.full_name}\nSELECT * FROM (\n{resolved_sql}\n)"
             ]
 
-        # UPSERT
+        # The UPSERT mode.
         if not self.columns:
             raise ValueError(
                 "upsert mode requires columns to be defined on the Trouve"
@@ -212,5 +217,5 @@ class Trouve(BaseModel):
         return [stmt_1, stmt_2, stmt_3]
 
     def get_full_table_name(self) -> str:
-        """Convenience alias for .full_name. Use inside f-string SQL."""
+        """An alias for .full_name. Use it in f-string SQL."""
         return self.full_name

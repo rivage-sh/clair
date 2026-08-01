@@ -1,4 +1,4 @@
-"""Snowflake adapter implementation."""
+"""The Snowflake adapter."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from clair.adapters.base import QueryResult, WarehouseAdapter
 
 
 class SnowflakeAdapter(WarehouseAdapter):
-    """Snowflake warehouse adapter using snowflake-connector-python."""
+    """The Snowflake warehouse adapter. It uses snowflake-connector-python."""
 
     def __init__(self) -> None:
         self._conn: snowflake.connector.SnowflakeConnection | None = None
@@ -22,12 +22,12 @@ class SnowflakeAdapter(WarehouseAdapter):
         self._account_locator: str = ""
 
     def connect(self, profile: dict[str, Any]) -> None:
-        """Connect to Snowflake using profile credentials.
+        """Connect to Snowflake with the credentials from the profile.
 
-        Supports:
-        - SSO via authenticator=externalbrowser
-        - Key pair auth via private_key_path
-        - Standard username/password
+        The method accepts these authentication methods:
+        - SSO, with authenticator=externalbrowser
+        - Key pair, with private_key_path
+        - The usual user name and password
         """
         self._region = profile.get("region", "")
         self._account_locator = profile.get("account_locator", "")
@@ -37,7 +37,7 @@ class SnowflakeAdapter(WarehouseAdapter):
             "user": profile["user"],
         }
 
-        # Auth method
+        # The authentication method.
         if "authenticator" in profile:
             connect_args["authenticator"] = profile["authenticator"]
         elif "private_key_pem" in profile:
@@ -65,7 +65,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         elif "password" in profile:
             connect_args["password"] = profile["password"]
 
-        # Optional context
+        # The optional session context.
         for key in ("warehouse", "role", "database"):
             if key in profile:
                 connect_args[key] = profile[key]
@@ -73,7 +73,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         self._conn = snowflake.connector.connect(**connect_args)
 
     def execute(self, sql: str) -> QueryResult:
-        """Execute SQL and return a QueryResult with query ID and URL."""
+        """Execute the SQL and give a QueryResult with the query ID and the URL."""
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
@@ -87,7 +87,7 @@ class SnowflakeAdapter(WarehouseAdapter):
                 success=True,
                 row_count=cursor.rowcount or 0,
             )
-        except Exception as e:  # noqa: BLE001 — any driver error becomes a failed QueryResult
+        except Exception as e:  # noqa: BLE001 — each driver error becomes a QueryResult that failed
             query_id = getattr(cursor, "sfqid", None) or "unknown"
             return QueryResult(
                 query_id=query_id,
@@ -99,7 +99,7 @@ class SnowflakeAdapter(WarehouseAdapter):
             cursor.close()
 
     def table_exists(self, database_name: str, schema_name: str, table_name: str) -> bool:
-        """Check whether a table exists in Snowflake via INFORMATION_SCHEMA."""
+        """Tell you if the table exists in Snowflake. Reads INFORMATION_SCHEMA."""
         result = self.execute(
             f"SELECT 1 FROM {database_name}.INFORMATION_SCHEMA.TABLES "
             f"WHERE TABLE_CATALOG = '{database_name.upper()}' "
@@ -114,10 +114,11 @@ class SnowflakeAdapter(WarehouseAdapter):
         role: str | None = None,
         database_name: str | None = None,
     ) -> None:
-        """Set session context by executing USE commands.
+        """Set the session context with USE commands.
 
-        Only issues USE statements for values that are non-None and non-empty.
-        Order: ROLE first (affects permissions), then WAREHOUSE, then DATABASE.
+        The method sends a USE statement only for a value that is not None and
+        not empty. It sends ROLE first, because the role controls the
+        permissions. Then it sends WAREHOUSE, then DATABASE.
         """
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
@@ -134,7 +135,7 @@ class SnowflakeAdapter(WarehouseAdapter):
             cursor.close()
 
     def fetch_dataframe(self, full_name: str) -> pd.DataFrame:
-        """Fetch an entire Snowflake table as a pandas DataFrame."""
+        """Read a complete Snowflake table into a pandas DataFrame."""
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
@@ -155,7 +156,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         schema_name: str,
         table_name: str,
     ) -> QueryResult:
-        """Write a DataFrame to Snowflake, creating or replacing the table."""
+        """Write a DataFrame to Snowflake. This makes or replaces the table."""
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
@@ -169,8 +170,8 @@ class SnowflakeAdapter(WarehouseAdapter):
             overwrite=True,
             quote_identifiers=False,
         )
-        # query_id and query_url are empty: write_dataframe uses CREATE TEMP STAGE
-        # and PUT under the hood, not a single queryable SQL statement.
+        # query_id and query_url stay empty. Internally write_dataframe sends
+        # CREATE TEMP STAGE and PUT, not one SQL statement that you can look up.
         return QueryResult(
             query_id="",
             query_url="",
@@ -185,7 +186,7 @@ class SnowflakeAdapter(WarehouseAdapter):
             self._conn = None
 
     def _build_query_url(self, query_id: str) -> str:
-        """Build a Snowflake console URL for a query ID."""
+        """Make the Snowflake console URL for a query ID."""
         return (
             f"https://app.snowflake.com/{self._region}/{self._account_locator}"
             f"/#/compute/history/queries/{query_id}/detail"

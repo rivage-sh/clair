@@ -1,4 +1,4 @@
-"""Runner -- execute the DAG against Snowflake in topological order."""
+"""The runner. It executes the DAG on Snowflake in topological order."""
 
 from __future__ import annotations
 
@@ -26,17 +26,18 @@ class RunStatus(StrEnum):
 
 
 class RunResult(BaseModel):
-    """Result of materializing a single Trouve in the warehouse.
+    """The result after clair materializes one Trouve in the warehouse.
 
     Attributes:
-        full_name: Fully-qualified Snowflake object name.
-        status: Outcome of the materialization attempt.
-        query_ids: Warehouse query IDs for each executed statement.
-        query_urls: URLs to each statement in the Snowflake console.
-        error: Error message if the query failed.
-        sql: The full DDL executed; only set on FAILURE.
-        duration_seconds: Wall-clock time for the query.
-        skipped_by: full_name of the upstream that caused the skip; only set on SKIPPED.
+        full_name: The full Snowflake object name.
+        status: The result of the attempt.
+        query_ids: The warehouse query ID of each statement.
+        query_urls: The URL of each statement in the Snowflake console.
+        error: The error message if the query failed.
+        sql: The complete DDL. Clair sets it only for a FAILURE.
+        duration_seconds: The clock time of the query.
+        skipped_by: The full_name of the upstream Trouve that caused the skip.
+            Clair sets it only for a SKIPPED result.
     """
 
     full_name: str
@@ -56,7 +57,7 @@ class RunResult(BaseModel):
 
 
 def _append_query_urls(lines: list[str], query_ids: list[str], query_urls: list[str]) -> None:
-    """Append query ID and URL lines, labelled [i/n] when there are multiple statements."""
+    """Add a query ID line and a URL line. Add an [i/n] label if there are 2 or more statements."""
     n = len(query_ids)
     for i, (qid, url) in enumerate(zip(query_ids, query_urls), 1):
         prefix = f" [{i}/{n}]" if n > 1 else ""
@@ -65,7 +66,7 @@ def _append_query_urls(lines: list[str], query_ids: list[str], query_urls: list[
 
 
 class RunSummary(BaseModel):
-    """Structured result of a run operation."""
+    """The result of one run operation."""
 
     results: list[RunResult]
     env_name: str
@@ -96,7 +97,7 @@ class RunSummary(BaseModel):
 
     @staticmethod
     def render_header(total: int, env_name: str) -> str:
-        """Render the run header before any nodes execute."""
+        """Make the run header. Clair shows it before the first node starts."""
         return (
             f"=== Clair Run (env: {env_name}) ===\n"
             f"\n"
@@ -105,7 +106,7 @@ class RunSummary(BaseModel):
 
     @staticmethod
     def render_node(result: RunResult, index: int, total: int) -> str:
-        """Render the output lines for a single completed node."""
+        """Make the output lines of one node that completed."""
         lines: list[str] = []
 
         if result.status == RunStatus.SKIPPED:
@@ -136,11 +137,11 @@ class RunSummary(BaseModel):
 
     @staticmethod
     def render_footer(succeeded: int, failed: int, skipped: int) -> str:
-        """Render the final summary line."""
+        """Make the last line of the summary."""
         return f"=== Done: {succeeded} succeeded, {failed} failed, {skipped} skipped ==="
 
     def render(self) -> str:
-        """Produce the formatted summary string for stdout."""
+        """Make the complete summary text for stdout."""
         total = len(self.results)
         parts = [self.render_header(total, self.env_name)]
 
@@ -158,10 +159,11 @@ logger = structlog.get_logger()
 
 
 def resolve_effective_mode(trouve: Trouve, cli_run_mode: RunMode) -> RunMode:
-    """Determine the effective run mode for a Trouve without adapter checks.
+    """Find the effective run mode of a Trouve. This function needs no adapter.
 
-    Shared by the compiler (no connection) and the runner (which additionally
-    checks table existence before committing to incremental).
+    The compiler and the runner both call it. The compiler has no connection.
+    The runner also asks the warehouse if the table exists, before it accepts
+    the incremental mode.
     """
     if trouve.type == TrouveType.VIEW:
         return RunMode.FULL_REFRESH
@@ -176,19 +178,19 @@ def _run_df_fn_trouve(
     trouve: Trouve,
     adapter: WarehouseAdapter,
 ) -> RunResult:
-    """Execute a df_fn Trouve: fetch inputs, transform, write output.
+    """Execute a df_fn Trouve. Read the inputs, transform them, write the output.
 
-    Returns a RunResult with SUCCESS or FAILURE status.
+    Returns a RunResult with the SUCCESS status or the FAILURE status.
     """
     start = time.monotonic()
 
-    # 1. Fetch all input DataFrames via inspect.signature
+    # 1. Read each input DataFrame. inspect.signature gives the parameters.
     dataframe_kwargs: dict[str, Any] = {}
     for param_name, param in inspect.signature(trouve.df_fn).parameters.items():
         if isinstance(param.default, Trouve):
             try:
                 dataframe_kwargs[param_name] = adapter.fetch_dataframe(param.default.full_name)
-            except Exception as fetch_error:  # noqa: BLE001 — any adapter failure becomes a FAILURE RunResult
+            except Exception as fetch_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
                 duration = time.monotonic() - start
                 return RunResult(
                     full_name=trouve.full_name,
@@ -197,10 +199,10 @@ def _run_df_fn_trouve(
                     duration_seconds=duration,
                 )
 
-    # 2. Call the df_fn function
+    # 2. Call the df_fn function.
     try:
         result_dataframe = trouve.df_fn(**dataframe_kwargs)
-    except Exception as transform_error:  # noqa: BLE001 — arbitrary user transform code
+    except Exception as transform_error:  # noqa: BLE001 — the user transform code is unknown
         duration = time.monotonic() - start
         return RunResult(
             full_name=trouve.full_name,
@@ -209,7 +211,7 @@ def _run_df_fn_trouve(
             duration_seconds=duration,
         )
 
-    # 3. Validate the result is a DataFrame
+    # 3. Make sure that the result is a DataFrame.
     if not isinstance(result_dataframe, pd.DataFrame):
         duration = time.monotonic() - start
         return RunResult(
@@ -222,7 +224,7 @@ def _run_df_fn_trouve(
             duration_seconds=duration,
         )
 
-    # 4. Write the result to Snowflake
+    # 4. Write the result to Snowflake.
     full_name = trouve.full_name
     name_parts = full_name.split(".")
     if len(name_parts) != 3:
@@ -244,7 +246,7 @@ def _run_df_fn_trouve(
             schema_name=schema_name,
             table_name=table_name,
         )
-    except Exception as write_error:  # noqa: BLE001 — any adapter failure becomes a FAILURE RunResult
+    except Exception as write_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
         duration = time.monotonic() - start
         return RunResult(
             full_name=full_name,
@@ -280,14 +282,15 @@ def run_project(
     run_id: str = "",
     after_node_success: Callable[[str], bool] | None = None,
 ) -> Iterator[RunResult]:
-    """Execute selected Trouves in topological order, yielding each result as it completes.
+    """Execute the selected Trouves in topological order. Give each result immediately.
 
-    On failure: marks the failed node and all downstream dependents as skipped,
-    then continues with unrelated branches.
+    If a node fails, clair marks each node downstream of it as skipped. Then
+    clair continues with the other branches.
 
-    after_node_success: optional callback invoked after each successful node, before
-        the next node runs. Return False to treat the node as failed for downstream
-        dependency purposes (circuit breaker for eager testing).
+    after_node_success: an optional callback. Clair calls it after each node
+        that succeeds, before the next node starts. Give False to make clair
+        treat the node as a failure and skip each node downstream of it. This
+        stops the run early when a test fails.
     """
     all_executable = get_executable_nodes(dag)
     to_run = [name for name in all_executable if name in selected]
@@ -312,7 +315,7 @@ def run_project(
         if context_warehouse or context_role:
             try:
                 adapter.set_context(warehouse=context_warehouse, role=context_role)
-            except Exception as e:  # noqa: BLE001 — any adapter failure becomes a FAILURE RunResult
+            except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
                 logger.warning("run.node.context_error", trouve=name, warehouse=context_warehouse, role=context_role, error=str(e))
                 yield RunResult(
                     full_name=name,
@@ -330,7 +333,8 @@ def run_project(
                 adapter.execute(f"CREATE DATABASE IF NOT EXISTS {routed_parts[0]}")
                 adapter.execute(f"CREATE SCHEMA IF NOT EXISTS {routed_parts[0]}.{routed_parts[1]}")
 
-        # Branch: df_fn Trouves use fetch/transform/write instead of SQL execution
+        # A df_fn Trouve is different. Clair reads the data, transforms it and
+        # writes it. Clair does not execute SQL.
         if trouve.df_fn is not None:
             logger.info("run.node.start", trouve=name, effective_mode="full_refresh")
             result = _run_df_fn_trouve(trouve, adapter)
@@ -348,7 +352,7 @@ def run_project(
             continue
 
         effective_mode = resolve_effective_mode(trouve, run_mode)
-        # Incremental fallback: if target table doesn't exist yet, run full refresh
+        # If the target table does not exist yet, change to the full refresh mode.
         if effective_mode == RunMode.INCREMENTAL:
             assert trouve.compiled is not None
             routed_parts = trouve.compiled.full_name.split(".")
@@ -383,7 +387,8 @@ def run_project(
 
         duration = time.monotonic() - start
 
-        # UPSERT cleanup: if MERGE (stmt index 1) failed, still drop staging (stmt index 2)
+        # UPSERT cleanup. If the MERGE at index 1 failed, drop the staging table
+        # at index 2 anyway.
         if not all_succeeded and len(statements) == 3 and failed_at == 1:
             adapter.execute(statements[2])
 
@@ -416,13 +421,13 @@ def run_project(
 
 
 def format_run_output(results: list[RunResult], env_name: str) -> RunSummary:
-    """Build a structured RunSummary from run results.
+    """Make a RunSummary from the run results.
 
     Args:
-        results: List of RunResult objects.
-        env_name: Name of the active environment.
+        results: A list of RunResult objects.
+        env_name: The name of the active environment.
 
     Returns:
-        A RunSummary with structured data and a .render() method.
+        A RunSummary. It holds the data and supplies a .render() method.
     """
     return RunSummary(results=results, env_name=env_name)

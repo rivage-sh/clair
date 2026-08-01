@@ -1,4 +1,4 @@
-"""Clair CLI -- click entrypoint."""
+"""The Clair CLI. This module is the click entry point."""
 
 from __future__ import annotations
 
@@ -55,12 +55,12 @@ def cli() -> None:
 )
 def init(project: str | None) -> None:
     """Create a new Clair project with example Trouves and config."""
-    # Step 1 -- Project directory
+    # Step 1 -- The project directory.
     if project is None:
         project = click.prompt("Project directory", default=".", type=str)
     project_dir = Path(project).resolve()
 
-    # Step 2 -- Environment setup
+    # Step 2 -- The environment.
     environments_path = Path.home() / ".clair" / "environments.yml"
     environments_existed = environments_path.exists()
     skip_environments_in_scaffold = False
@@ -72,7 +72,7 @@ def init(project: str | None) -> None:
         skip_environments_in_scaffold = True
         _prompt_and_write_environment()
 
-    # Step 3 -- Source table
+    # Step 3 -- The source table.
     source_full_table_name: str = click.prompt(
         "What is an example Snowflake table that contains source data? (eg source.orders.raw)",
         default="source",
@@ -84,33 +84,33 @@ def init(project: str | None) -> None:
         sys.exit(1)
     source_database_name, source_schema_name, source_table_name = source_full_table_name_split
 
-    # Step 4 -- Scaffold files
+    # Step 4 -- The scaffold files.
     results = scaffold_project(
         project_dir,
         source_database_name=source_database_name,
         source_schema_name=source_schema_name,
         source_table_name=source_table_name,
-        # If we already handled profiles (existed or created interactively),
-        # pass a home_dir that ensures scaffold sees the existing file and
-        # reports "skipped". We use the real home so it finds the real file.
+        # The code above wrote the profiles, or found them. Give a home_dir
+        # that lets the scaffold find that file and report "skipped". The real
+        # home directory holds the real file.
     )
 
     click.echo("")
     for status, filepath in results:
-        # Suppress the environments.yml line if we already handled it above
-        # (either it pre-existed or the user filled it in interactively).
+        # Hide the environments.yml line. The code above found that file, or
+        # the user gave the values for it.
         if skip_environments_in_scaffold and filepath == str(environments_path):
             continue
         click.echo(f"  {status}  {filepath}")
     click.echo("")
 
-    # Step 5 -- .gitignore
+    # Step 5 -- The .gitignore file.
     gitignore_path = project_dir / ".gitignore"
     gitignore_path.write_text(f"/{ARTIFACTS_DIR_NAME}\n")
     click.echo(f"  created  {gitignore_path}")
     click.echo("")
 
-    # Step 6 -- Next steps
+    # Step 6 -- The next steps for the user.
     click.echo("\u2713 Project ready.")
     click.echo("")
     click.echo("Next steps:")
@@ -120,7 +120,7 @@ def init(project: str | None) -> None:
 
 
 def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> None:
-    """Print a prominent warning block for any routing collisions, before SQL runs."""
+    """Show a clear warning about each routing collision, before the SQL starts."""
     collisions = find_routing_collisions(trouves)
     if not collisions:
         return
@@ -153,7 +153,7 @@ def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> 
 
 
 def _prompt_and_write_environment() -> None:
-    """Interactively collect Snowflake connection details and write environments.yml."""
+    """Ask the user for the Snowflake connection data and write environments.yml."""
 
     def _hint(sql: str) -> None:
         click.echo(f"  hint: select {sql};", err=True)
@@ -256,7 +256,7 @@ def _prompt_and_write_environment() -> None:
     help="Run mode: full_refresh recreates all tables; incremental applies only new data.",
 )
 def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str) -> None:
-    """Compile the project and show generated SQL (no Snowflake connection)."""
+    """Compile the project and show the new SQL. This needs no Snowflake connection."""
     project_root = Path(project).resolve()
     run_mode_enum = RunMode(run_mode)
     run_id = uuid6.uuid7().hex
@@ -325,7 +325,7 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
     help="Path to the Clair project root",
 )
 def dag(select: tuple[str, ...], project: str) -> None:
-    """Show the project DAG as an indented tree."""
+    """Show the project DAG as a tree with indents."""
     project_root = Path(project).resolve()
 
     try:
@@ -365,7 +365,7 @@ def dag(select: tuple[str, ...], project: str) -> None:
     help="Do not open the browser automatically",
 )
 def docs(project: str, port: int, host: str, no_browser: bool) -> None:
-    """Start a local web UI showing project documentation and lineage."""
+    """Start a local web UI. It shows the project documentation and the lineage."""
     project_root = Path(project).resolve()
 
     try:
@@ -433,16 +433,16 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     help="Run post-run tests against a sample of each Trouve (skips row count tests).",
 )
 def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool) -> None:
-    """Run Trouves against Snowflake, then run data quality tests."""
+    """Run the Trouves on Snowflake. Then run the data quality tests."""
     project_root = Path(project).resolve()
     run_mode_enum = RunMode(run_mode)
     run_id = uuid6.uuid7().hex
 
     try:
-        # Load environment
+        # Load the environment.
         env_name, environment = load_environment(env)
 
-        # Discover and build DAG
+        # Find the Trouves and make the DAG.
         profile_defaults = {
             "warehouse": environment.warehouse,
             "role": environment.role,
@@ -451,7 +451,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
         _print_routing_collision_warnings(discovered, env_name, environment.routing)
         dag = build_dag(discovered)
 
-        # Filter by selector
+        # Keep only the Trouves that the selector gives.
         expanded = expand_selectors(dag, select if select else None)
         selected = [n for n in expanded if dag.get_trouve(n).type != TrouveType.SOURCE]
         if exclude:
@@ -465,11 +465,11 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
         recompile_for_selection(discovered, set(selected))
         write_compile_output(dag, selected, project_root, run_mode=run_mode_enum, run_id=run_id)
 
-        # Warn if account_locator is missing (query URLs will be incomplete)
+        # If account_locator is absent, tell the user. The query URLs stay empty.
         if not environment.account_locator:
             logger.warning("run.no_account_locator", env=env_name, detail="query URLs will not be available")
 
-        # Connect and run, streaming each node result as it completes
+        # Connect and run. Show the result of each node immediately.
         adapter = SnowflakeAdapter()
         adapter.connect(environment.to_connection_dict())
 
@@ -538,14 +538,14 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
 def test(
     select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, sample: bool
 ) -> None:
-    """Run data quality tests against Snowflake."""
+    """Run the data quality tests on Snowflake."""
     project_root = Path(project).resolve()
 
     try:
-        # Load environment
+        # Load the environment.
         _, environment = load_environment(env)
 
-        # Discover and build DAG
+        # Find the Trouves and make the DAG.
         profile_defaults = {
             "warehouse": environment.warehouse,
             "role": environment.role,
@@ -553,8 +553,8 @@ def test(
         discovered = discover_project(project_root, profile_defaults, routing=environment.routing, environment=environment)
         dag = build_dag(discovered)
 
-        # Filter by selector -- include all nodes (even SOURCEs) so that
-        # the selector can match them; run_tests skips SOURCEs internally.
+        # Keep the Trouves that the selector gives. Keep each SOURCE too, so
+        # that the selector can match a SOURCE. run_tests skips each SOURCE.
         selected = expand_selectors(dag, select if select else None)
         if exclude:
             excluded_set = set(expand_selectors(dag, exclude))
@@ -564,7 +564,7 @@ def test(
             logger.info("test.no_trouves_selected")
             return
 
-        # Connect and run tests
+        # Connect and run the tests.
         adapter = SnowflakeAdapter()
         adapter.connect(environment.to_connection_dict())
 
@@ -579,7 +579,7 @@ def test(
             output = format_test_output(results)
             logger.info("test.complete", passed=output.passed_count, failed=output.failed_count, errors=output.error_count)
 
-            # Exit with error if any failures or errors
+            # If one test failed, or one test caused an error, stop with an error.
             if any(not r.passed for r in results):
                 sys.exit(1)
         finally:
@@ -591,16 +591,16 @@ def test(
 
 
 def _parse_before_spec(spec: str) -> datetime:
-    """Parse a --before age into a UTC datetime cutoff.
+    """Read a --before age and give the equivalent UTC limit.
 
-    Accepts:
-        - Natural language: 'today', 'yesterday', 'last_week'
-        - Duration lookbacks: '7d', '24h', '30m'
-        - ISO date/datetime strings: '2026-03-01', '2026-03-01T12:00:00'
+    The function accepts these forms:
+        - Usual words: 'today', 'yesterday', 'last_week'
+        - A time span: '7d', '24h', '30m'
+        - An ISO date or time: '2026-03-01', '2026-03-01T12:00:00'
     """
     now = datetime.now(tz=UTC)
-    # Calendar boundaries use local midnight, then convert to UTC so that
-    # e.g. "today" means today in the user's timezone, not UTC.
+    # A calendar limit starts at local midnight. The code then changes the time
+    # to UTC. Thus "today" is today in the time zone of the user, not in UTC.
     local_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
 
     if spec == "today":
@@ -608,7 +608,7 @@ def _parse_before_spec(spec: str) -> datetime:
     if spec == "yesterday":
         return local_today - timedelta(days=1)
     if spec == "last_week":
-        # Monday of last calendar week (local time, converted to UTC)
+        # The Monday of the week before, in local time, changed to UTC.
         this_monday = local_today - timedelta(days=local_today.astimezone().weekday())
         return this_monday - timedelta(weeks=1)
 
@@ -630,10 +630,11 @@ def _parse_before_spec(spec: str) -> datetime:
 
 
 def _run_id_to_time(run_id: str) -> datetime | None:
-    """Extract the UTC creation time from a UUIDv7 hex run_id.
+    """Read the UTC creation time from a UUIDv7 hex run_id.
 
-    UUIDv7 encodes Unix timestamp in ms in the first 48 bits (12 hex chars).
-    Returns None if run_id is not a valid 32-char hex string.
+    A UUIDv7 holds the Unix time in milliseconds in the first 48 bits. Those
+    bits are the first 12 hex characters. The function gives None if the run_id
+    is not a hex string of 32 characters.
     """
     if len(run_id) != 32 or not all(c in "0123456789abcdef" for c in run_id):
         return None
@@ -665,7 +666,7 @@ def _run_id_to_time(run_id: str) -> datetime | None:
     help="Skip confirmation prompt.",
 )
 def clean(project: str, before: str | None, dry_run: bool, yes: bool) -> None:
-    """Remove compiled artifacts from _clairtifacts/."""
+    """Delete the compiled artifacts in _clairtifacts/."""
     project_root = Path(project).resolve()
     artifacts_root = project_root / ARTIFACTS_DIR_NAME
 
@@ -677,7 +678,7 @@ def clean(project: str, before: str | None, dry_run: bool, yes: bool) -> None:
     if before is not None:
         cutoff = _parse_before_spec(before)
 
-    # Collect run directories to remove
+    # Collect the run directories to delete.
     to_remove: list[Path] = []
     for entry in sorted(artifacts_root.iterdir()):
         if not entry.is_dir():

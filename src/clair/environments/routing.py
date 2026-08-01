@@ -1,4 +1,4 @@
-"""Routing policies -- remap logical (database, schema, table) triples to physical targets."""
+"""The routing policies. Each policy maps a logical name to a physical target."""
 
 from __future__ import annotations
 
@@ -15,27 +15,27 @@ _VALID_IDENTIFIER = re.compile(r"^[A-Z0-9_]+$")
 
 
 class RoutingConfig(BaseModel):
-    """Base class for all routing policies."""
+    """The parent class of all the routing policies."""
 
     policy: str
 
     @abstractmethod
     def apply(self, logical_name: str) -> str:
-        """Remap a logical full_name to its physical target.
+        """Map a logical full_name to its physical target.
 
         Args:
-            logical_name: Filesystem-derived "database.schema.table" name.
+            logical_name: The "database.schema.table" name from the file path.
 
         Returns:
-            The routed full_name string.
+            The routed full_name.
 
         Raises:
-            InvalidRoutingConfigError: If the routed identifier is invalid.
+            InvalidRoutingConfigError: If the routed identifier is not correct.
         """
 
 
 class DatabaseOverrideRouting(RoutingConfig):
-    """Replace the database component of every non-SOURCE Trouve's full_name."""
+    """Replace the database part of the full_name of each Trouve that is not a SOURCE."""
 
     policy: Literal["database_override"] = "database_override"
     database_name: str
@@ -46,7 +46,7 @@ class DatabaseOverrideRouting(RoutingConfig):
 
 
 class SchemaIsolationRouting(RoutingConfig):
-    """Collapse database.schema.table into a single table token under a fixed database and schema."""
+    """Join database.schema.table into one table name in a constant database and schema."""
 
     policy: Literal["schema_isolation"] = "schema_isolation"
     database_name: str
@@ -68,7 +68,7 @@ class SchemaIsolationRouting(RoutingConfig):
         return f"{self.database_name}.{self.schema_name}.{new_table}"
 
 
-# Discriminated union used for parsing routing blocks from YAML/dicts.
+# The tagged union that clair uses to read a routing block from YAML or a dict.
 Routing = Annotated[
     DatabaseOverrideRouting | SchemaIsolationRouting,
     Field(discriminator="policy"),
@@ -82,15 +82,15 @@ def route(
 ) -> str:
     """Apply a routing policy to a logical full_name.
 
-    SOURCE Trouves always pass through regardless of the routing policy.
+    A SOURCE Trouve always keeps its name, whatever the routing policy is.
 
     Args:
-        logical_name: Filesystem-derived "database.schema.table" name.
+        logical_name: The "database.schema.table" name from the file path.
         trouve_type: SOURCE, TABLE, or VIEW.
-        routing: Active routing config, or None for passthrough.
+        routing: The active routing config. Give None to keep the name.
 
     Returns:
-        The routed full_name string.
+        The routed full_name.
     """
     if routing is None or trouve_type == TrouveType.SOURCE:
         return logical_name
@@ -98,16 +98,18 @@ def route(
 
 
 def detect_routing_collisions(logical_to_routed: dict[str, str]) -> list[tuple[str, list[str]]]:
-    """Return (target, sources) pairs for any routing collisions.
+    """Give a (target, sources) pair for each routing collision.
 
-    A collision occurs when two TABLE/VIEW Trouves route to the same physical target.
-    The last write in execution order will determine the final state of that target.
+    A collision occurs when two TABLE or VIEW Trouves route to one physical
+    target. The last write sets the final content of that target.
 
     Args:
-        logical_to_routed: Mapping of logical_name -> routed_name for non-SOURCE Trouves.
+        logical_to_routed: A map of logical_name to routed_name. It holds each
+            Trouve that is not a SOURCE.
 
     Returns:
-        List of (routed_target, [logical_source, ...]) for each collision found.
+        A list of (routed_target, [logical_source, ...]), one item for each
+        collision.
     """
     target_to_sources: dict[str, list[str]] = {}
     for logical, routed in logical_to_routed.items():

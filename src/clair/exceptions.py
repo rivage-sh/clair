@@ -1,12 +1,12 @@
-"""All custom exceptions for Clair."""
+"""All the custom exceptions for Clair."""
 
 
 class ClairError(Exception):
-    """Base exception for all Clair errors."""
+    """The parent class of all the Clair errors."""
 
 
 class CyclicDependencyError(ClairError):
-    """Raised when the DAG contains a cycle."""
+    """Clair raises this error when the DAG contains a cycle."""
 
     def __init__(self, cycle: list[tuple[str, str]]) -> None:
         self.cycle = cycle
@@ -16,7 +16,7 @@ class CyclicDependencyError(ClairError):
 
 
 class EnvironmentNotFoundError(ClairError):
-    """Raised when the requested environment doesn't exist in environments.yml."""
+    """Clair raises this error when environments.yml has no such environment."""
 
     def __init__(self, env_name: str, available: list[str]) -> None:
         self.env_name = env_name
@@ -28,7 +28,7 @@ class EnvironmentNotFoundError(ClairError):
 
 
 class EnvironmentsFileNotFoundError(ClairError):
-    """Raised when ~/.clair/environments.yml doesn't exist."""
+    """Clair raises this error when ~/.clair/environments.yml does not exist."""
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -40,7 +40,7 @@ class EnvironmentsFileNotFoundError(ClairError):
 
 
 class InvalidRoutingPolicyError(ClairError):
-    """Raised when an unknown routing policy is specified."""
+    """Clair raises this error when the config names an unknown routing policy."""
 
     def __init__(self, policy: str) -> None:
         self.policy = policy
@@ -51,7 +51,7 @@ class InvalidRoutingPolicyError(ClairError):
 
 
 class InvalidRoutingConfigError(ClairError):
-    """Raised when a routing config block is malformed."""
+    """Clair raises this error when a routing config block has a bad structure."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -59,7 +59,7 @@ class InvalidRoutingConfigError(ClairError):
 
 
 class DiscoveryError(ClairError):
-    """Raised when a Trouve file cannot be loaded."""
+    """Clair raises this error when it cannot load a Trouve file."""
 
     def __init__(self, file_path: str, reason: str) -> None:
         self.file_path = file_path
@@ -68,8 +68,8 @@ class DiscoveryError(ClairError):
 
 
 class CompileError(ClairError):
-    """Raised when SQL compilation fails."""
+    """Clair raises this error when it cannot compile the SQL."""
 
 
 class RunError(ClairError):
-    """Raised when a critical runner error occurs (not per-Trouve failures)."""
+    """Clair raises this error for a fatal runner fault, not for a Trouve failure."""
