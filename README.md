@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="site_docs/docs/assets/clair_logo.png" alt="clair logo" width="200" />
+  <img src="https://raw.githubusercontent.com/rivage-sh/clair/main/site_docs/docs/assets/clair_logo.png" alt="clair logo" width="200" />
 </p>
 
 # clair
