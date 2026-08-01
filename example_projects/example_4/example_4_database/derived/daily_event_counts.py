@@ -1,7 +1,9 @@
 import pandas as pd
+from example_4_database.refined.events import (
+    trouve as example_4_database_refined_events,
+)
 
 from clair import Column, ColumnType, Trouve
-from example_4_database.refined.events import trouve as example_4_database_refined_events
 
 
 def daily_event_counts(

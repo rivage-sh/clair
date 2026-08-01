@@ -10,8 +10,9 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import clair as _clair_pkg
 import structlog
+
+import clair as _clair_pkg
 
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
@@ -19,11 +20,10 @@ if TYPE_CHECKING:
 from clair.environments.routing import RoutingConfig, detect_routing_collisions, route
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
-from clair.trouves.run_config import RunMode
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
+from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
-
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
 _SKIP_DIRS = {"clair", "tests", ARTIFACTS_DIR_NAME, "__pycache__", ".git", ".venv", "node_modules"}
@@ -63,8 +63,8 @@ def _load_config_file(
         defaults = getattr(module, "defaults", None)
         if isinstance(defaults, (DatabaseDefaults, SchemaDefaults)):
             return defaults
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001 — arbitrary user config code, never fatal
+        logger.debug("discovery.config_load_error", file=str(file_path), error=str(e))
     return None
 
 
@@ -146,7 +146,7 @@ def discover_project(
     project_root: Path,
     profile_defaults: dict[str, str | None] | None = None,
     routing: RoutingConfig | None = None,
-    environment: "Environment | None" = None,
+    environment: Environment | None = None,
     run_mode: RunMode | None = None,
 ) -> list[Trouve]:
     """Discover all Trouves in a project.
@@ -222,7 +222,7 @@ def discover_project(
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = module
                 spec.loader.exec_module(module)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — arbitrary user module code, reported as an error
                 logger.warning("discovery.load_error", file=str(file_path), error=str(e))
                 errors.append(f"{file_path}: {e}")
                 continue

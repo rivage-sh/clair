@@ -221,6 +221,6 @@ class TestBuildCatalogColumnInference:
         dag = build_dag(discovered)
         catalog = build_catalog(dag, simple_project)
 
-        for full_name, trouve_data in catalog["trouves"].items():
+        for trouve_data in catalog["trouves"].values():
             inference = trouve_data["column_inference"]
             assert inference["status"] == ColumnStatus.DECLARED

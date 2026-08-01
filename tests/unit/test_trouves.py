@@ -21,7 +21,6 @@ from clair.trouves.test import (
 )
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -130,6 +129,7 @@ class TestTrouveConstruction:
 
     def test_sample_returns_top_subquery(self):
         from pathlib import Path
+
         from clair.trouves.config import ResolvedConfig
         from clair.trouves.trouve import CompiledAttributes, ExecutionType
 
@@ -149,6 +149,7 @@ class TestTrouveConstruction:
     def test_sample_uses_routed_name_not_logical_name(self):
         """sample() uses compiled.full_name (post-routing), not logical_name."""
         from pathlib import Path
+
         from clair.trouves.config import ResolvedConfig
         from clair.trouves.trouve import CompiledAttributes, ExecutionType
 

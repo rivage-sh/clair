@@ -38,12 +38,12 @@ class TestLoadEnvironment:
 
     def test_env_var_resolution(self, tmp_environments: Path, monkeypatch):
         monkeypatch.setenv("CLAIR_ENV", "ci")
-        name, env = load_environment(environments_path=tmp_environments)
+        name, _env = load_environment(environments_path=tmp_environments)
         assert name == "ci"
 
     def test_explicit_overrides_env_var(self, tmp_environments: Path, monkeypatch):
         monkeypatch.setenv("CLAIR_ENV", "ci")
-        name, env = load_environment(env_name="dev", environments_path=tmp_environments)
+        name, _env = load_environment(env_name="dev", environments_path=tmp_environments)
         assert name == "dev"
 
     def test_private_key_environment(self, tmp_environments: Path):
@@ -53,7 +53,7 @@ class TestLoadEnvironment:
         assert env.private_key_passphrase is None
 
     def test_encrypted_private_key_environment(self, tmp_environments: Path):
-        name, env = load_environment(env_name="key_auth_encrypted", environments_path=tmp_environments)
+        _name, env = load_environment(env_name="key_auth_encrypted", environments_path=tmp_environments)
         assert env.private_key_path == "/secrets/snowflake_key_enc.p8"
         assert env.private_key_passphrase == "s3cr3t"
 

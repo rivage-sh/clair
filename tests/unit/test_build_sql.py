@@ -7,7 +7,7 @@ import pytest
 
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import ResolvedConfig
-from clair.trouves.run_config import IncrementalMode, UpsertConfig, RunConfig, RunMode
+from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode, UpsertConfig
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
 

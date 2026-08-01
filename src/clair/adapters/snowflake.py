@@ -7,8 +7,8 @@ from typing import Any
 
 import pandas as pd
 import snowflake.connector
-from snowflake.connector.pandas_tools import write_pandas
 from cryptography.hazmat.primitives import serialization
+from snowflake.connector.pandas_tools import write_pandas
 
 from clair.adapters.base import QueryResult, WarehouseAdapter
 
@@ -87,7 +87,7 @@ class SnowflakeAdapter(WarehouseAdapter):
                 success=True,
                 row_count=cursor.rowcount or 0,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — any driver error becomes a failed QueryResult
             query_id = getattr(cursor, "sfqid", None) or "unknown"
             return QueryResult(
                 query_id=query_id,
@@ -159,7 +159,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
-        success, num_chunks, num_rows, output = write_pandas(
+        success, _num_chunks, num_rows, _output = write_pandas(
             conn=self._conn,
             df=dataframe,
             table_name=table_name.upper(),

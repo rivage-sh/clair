@@ -1,5 +1,8 @@
+from example_2_database.source.promotions import (
+    trouve as example_2_database_source_promotions,
+)
+
 from clair import Column, ColumnType, Trouve, TrouveType
-from example_2_database.source.promotions import trouve as example_2_database_source_promotions
 
 trouve = Trouve(
     type=TrouveType.TABLE,

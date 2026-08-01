@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+import click
 import pytest
 
 from clair.cli.main import _parse_before_spec, _run_id_to_time
@@ -12,8 +13,6 @@ from clair.cli.main import _parse_before_spec, _run_id_to_time
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-UTC = timezone.utc
 
 
 def _make_run_id(dt: datetime) -> str:
@@ -111,7 +110,7 @@ class TestParseIsoDates:
 class TestParseNaturalLanguage:
     # We mock datetime.now() (no-arg, for local time) to a fixed local time.
     # Use a naive datetime to simulate what datetime.now() returns (no tzinfo).
-    _LOCAL_NOW = datetime(2026, 3, 19, 22, 30, 0)  # Wednesday 10:30pm local
+    _LOCAL_NOW = datetime(2026, 3, 19, 22, 30, 0)  # noqa: DTZ001 — naive on purpose, see above
 
     def _patch(self):
         """Return a context manager that freezes local and UTC time."""
@@ -135,14 +134,14 @@ class TestParseNaturalLanguage:
         with self._patch():
             result = _parse_before_spec("today")
         # Local midnight 2026-03-19 00:00 converted to UTC
-        local_midnight = datetime(2026, 3, 19, 0, 0, 0)
+        local_midnight = datetime(2026, 3, 19, 0, 0, 0)  # noqa: DTZ001 — naive local time
         expected = local_midnight.astimezone(UTC)
         assert result == expected
 
     def test_yesterday_is_one_day_before_local_midnight(self):
         with self._patch():
             result = _parse_before_spec("yesterday")
-        local_midnight = datetime(2026, 3, 19, 0, 0, 0)
+        local_midnight = datetime(2026, 3, 19, 0, 0, 0)  # noqa: DTZ001 — naive local time
         expected = (local_midnight - timedelta(days=1)).astimezone(UTC)
         assert result == expected
 
@@ -151,7 +150,7 @@ class TestParseNaturalLanguage:
         # This Monday = 2026-03-16; last Monday = 2026-03-09.
         with self._patch():
             result = _parse_before_spec("last_week")
-        last_monday_local = datetime(2026, 3, 9, 0, 0, 0)
+        last_monday_local = datetime(2026, 3, 9, 0, 0, 0)  # noqa: DTZ001 — naive local time
         expected = last_monday_local.astimezone(UTC)
         assert result == expected
 
@@ -171,9 +170,9 @@ class TestParseNaturalLanguage:
 
 class TestParseInvalidInput:
     def test_garbage_string_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(click.BadParameter):
             _parse_before_spec("not-a-date")
 
     def test_wrong_unit_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(click.BadParameter):
             _parse_before_spec("5y")

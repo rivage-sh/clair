@@ -70,7 +70,6 @@ class CatalogHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format: str, *args) -> None:
         """Suppress default stderr logging -- we use structlog."""
-        pass
 
 
 class CatalogServer(HTTPServer):

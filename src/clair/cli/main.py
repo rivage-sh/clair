@@ -6,7 +6,7 @@ import re
 import shutil
 import sys
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import click
@@ -15,23 +15,26 @@ import uuid6
 
 from clair._logging import configure_logging
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.environments.environments import load_environment
 from clair.core.compiler import CompiledNodeInfo, write_compile_output
-from clair.trouves.trouve import ExecutionType
 from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
-from clair.environments.routing import DatabaseOverrideRouting, SchemaIsolationRouting
-from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project, find_routing_collisions, recompile_for_selection
+from clair.core.discovery import (
+    ARTIFACTS_DIR_NAME,
+    discover_project,
+    find_routing_collisions,
+    recompile_for_selection,
+)
 from clair.core.runner import RunStatus, run_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import format_test_output, run_tests
 from clair.docs.catalog import build_catalog
 from clair.docs.server import serve
+from clair.environments.environments import load_environment
+from clair.environments.routing import DatabaseOverrideRouting, SchemaIsolationRouting
 from clair.exceptions import ClairError, CompileError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import TrouveType
-
+from clair.trouves.trouve import ExecutionType, TrouveType
 
 logger = structlog.get_logger()
 
@@ -595,10 +598,10 @@ def _parse_before_spec(spec: str) -> datetime:
         - Duration lookbacks: '7d', '24h', '30m'
         - ISO date/datetime strings: '2026-03-01', '2026-03-01T12:00:00'
     """
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     # Calendar boundaries use local midnight, then convert to UTC so that
     # e.g. "today" means today in the user's timezone, not UTC.
-    local_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    local_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
 
     if spec == "today":
         return local_today
@@ -617,7 +620,7 @@ def _parse_before_spec(spec: str) -> datetime:
     try:
         dt = datetime.fromisoformat(spec)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except ValueError:
         raise click.BadParameter(
@@ -635,7 +638,7 @@ def _run_id_to_time(run_id: str) -> datetime | None:
     if len(run_id) != 32 or not all(c in "0123456789abcdef" for c in run_id):
         return None
     ts_ms = int(run_id[:12], 16)
-    return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
 
 
 @cli.command()

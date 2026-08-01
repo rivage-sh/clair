@@ -15,15 +15,15 @@ from clair.core.test_runner import (
     format_test_output,
     run_tests,
 )
-from clair.trouves.config import ResolvedConfig
 from clair.trouves._refs import THIS_PLACEHOLDER
+from clair.trouves.config import ResolvedConfig
 from clair.trouves.test import (
+    THIS,
     TestNotNull,
     TestRowCount,
     TestSql,
     TestUnique,
     TestUniqueColumns,
-    THIS,
 )
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
@@ -319,7 +319,7 @@ class TestRunTestsEdgeCases:
         dag = build_dag([dt])
         adapter = _make_mock_adapter(row_count=0)
 
-        with pytest.raises(Exception):
+        with pytest.raises(KeyError):
             run_tests(dag, ["db.s.nonexistent"], adapter)
 
     def test_test_result_fields_populated(self):

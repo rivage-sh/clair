@@ -10,8 +10,6 @@ from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
 from clair.core.runner import RunResult, RunStatus, format_run_output, run_project
-
-
 from clair.trouves.run_config import RunMode
 
 
@@ -94,7 +92,12 @@ class TestRunnerFailureHandling:
     def test_downstream_skipped_on_failure(self):
         """When a Trouve fails, its downstream dependents should be skipped."""
         from clair.trouves.config import ResolvedConfig
-        from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
+        from clair.trouves.trouve import (
+            CompiledAttributes,
+            ExecutionType,
+            Trouve,
+            TrouveType,
+        )
 
         trouves = []
         for name, ttype, imports, sql in [

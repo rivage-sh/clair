@@ -1,6 +1,15 @@
-import clair
-from clair import Column, ColumnType, IncrementalMode, RunConfig, RunMode, Trouve, TrouveType
 from example_3_database.refined.orders import trouve as refined_orders
+
+import clair
+from clair import (
+    Column,
+    ColumnType,
+    IncrementalMode,
+    RunConfig,
+    RunMode,
+    Trouve,
+    TrouveType,
+)
 
 sql = f"""
     select

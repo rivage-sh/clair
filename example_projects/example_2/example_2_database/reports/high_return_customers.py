@@ -1,7 +1,12 @@
-from clair import Column, ColumnType, Trouve, TrouveType
-from example_2_database.refined.returns import trouve as example_2_database_refined_returns
-from example_2_database.refined.order_items import trouve as example_2_database_refined_order_items
+from example_2_database.refined.order_items import (
+    trouve as example_2_database_refined_order_items,
+)
+from example_2_database.refined.returns import (
+    trouve as example_2_database_refined_returns,
+)
 from example_2_database.refined.users import trouve as example_2_database_refined_users
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,

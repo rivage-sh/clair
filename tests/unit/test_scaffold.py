@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 from clair.core.scaffold import scaffold_project, write_environments_yml
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -16,11 +14,11 @@ EXPECTED_PROJECT_FILES = [
     "source/raw/orders.py",
 ]
 
-DEFAULT_SOURCE_ARGS = dict(
-    source_database_name="source",
-    source_schema_name="raw",
-    source_table_name="orders",
-)
+DEFAULT_SOURCE_ARGS = {
+    "source_database_name": "source",
+    "source_schema_name": "raw",
+    "source_table_name": "orders",
+}
 
 
 def _run_scaffold(tmp_path: Path) -> list[tuple[str, str]]:

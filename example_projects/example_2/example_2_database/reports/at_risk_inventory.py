@@ -1,7 +1,14 @@
+from example_2_database.derived.product_sales_summary import (
+    trouve as example_2_database_derived_product_sales_summary,
+)
+from example_2_database.refined.inventory import (
+    trouve as example_2_database_refined_inventory,
+)
+from example_2_database.refined.products import (
+    trouve as example_2_database_refined_products,
+)
+
 from clair import Column, ColumnType, Trouve, TrouveType
-from example_2_database.refined.inventory import trouve as example_2_database_refined_inventory
-from example_2_database.refined.products import trouve as example_2_database_refined_products
-from example_2_database.derived.product_sales_summary import trouve as example_2_database_derived_product_sales_summary
 
 trouve = Trouve(
     type=TrouveType.TABLE,

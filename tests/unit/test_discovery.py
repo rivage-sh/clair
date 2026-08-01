@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import sys
 import textwrap
 from pathlib import Path
 
-
-import sys
-
+from clair.core.discovery import (
+    compute_full_name,
+    discover_project,
+    find_routing_collisions,
+    recompile_for_selection,
+)
 from clair.environments.routing import DatabaseOverrideRouting, SchemaIsolationRouting
-from clair.core.discovery import compute_full_name, discover_project, find_routing_collisions, recompile_for_selection
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql

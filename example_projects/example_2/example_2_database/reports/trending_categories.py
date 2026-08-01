@@ -1,5 +1,8 @@
+from example_2_database.derived.category_sales_summary import (
+    trouve as example_2_database_derived_category_sales_summary,
+)
+
 from clair import Column, ColumnType, Trouve, TrouveType
-from example_2_database.derived.category_sales_summary import trouve as example_2_database_derived_category_sales_summary
 
 trouve = Trouve(
     type=TrouveType.TABLE,

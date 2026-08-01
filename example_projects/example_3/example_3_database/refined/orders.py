@@ -1,5 +1,6 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_3_database.source.orders import trouve as source_orders
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,

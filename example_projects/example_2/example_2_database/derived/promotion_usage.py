@@ -1,6 +1,11 @@
+from example_2_database.refined.orders import (
+    trouve as example_2_database_refined_orders,
+)
+from example_2_database.refined.promotions import (
+    trouve as example_2_database_refined_promotions,
+)
+
 from clair import Column, ColumnType, Trouve, TrouveType
-from example_2_database.refined.orders import trouve as example_2_database_refined_orders
-from example_2_database.refined.promotions import trouve as example_2_database_refined_promotions
 
 trouve = Trouve(
     type=TrouveType.TABLE,
