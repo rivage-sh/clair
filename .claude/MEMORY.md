@@ -6,7 +6,7 @@ user correction. See [Docs are the source of truth](memory/project_docs_are_the_
 ## Project
 
 - [Design invariants](memory/project_design_invariants.md) — seven rules clair never breaks: no Jinja, no config YAML, path is the table name, compile stays offline, eager validation, plain Python for shared SQL, adapter behind an ABC.
-- [Docs are the source of truth](memory/project_docs_are_the_source_of_truth.md) — grep `site_docs/docs/` to learn behaviour; update the page in the same PR that changes behaviour.
+- [Docs are the source of truth](memory/project_docs_are_the_source_of_truth.md) — grep `site_docs/docs/` for orientation, then confirm the API against `src/`; the code wins when they disagree.
 
 ## Feedback
 
