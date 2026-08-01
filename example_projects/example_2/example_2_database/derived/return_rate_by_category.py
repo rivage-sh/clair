@@ -1,9 +1,5 @@
-from example_2_database.derived.return_rate_by_product import (
-    trouve as example_2_database_derived_return_rate_by_product,
-)
-from example_2_database.refined.products import (
-    trouve as example_2_database_refined_products,
-)
+from example_2_database.derived.return_rate_by_product import trouve as example_2_database_derived_return_rate_by_product
+from example_2_database.refined.products import trouve as example_2_database_refined_products
 
 from clair import Column, ColumnType, Trouve, TrouveType
 

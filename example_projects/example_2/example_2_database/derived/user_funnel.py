@@ -1,6 +1,4 @@
-from example_2_database.refined.events import (
-    trouve as example_2_database_refined_events,
-)
+from example_2_database.refined.events import trouve as example_2_database_refined_events
 
 from clair import Column, ColumnType, Trouve, TrouveType
 

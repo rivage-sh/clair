@@ -1,6 +1,4 @@
-from example_2_database.source.returns import (
-    trouve as example_2_database_source_returns,
-)
+from example_2_database.source.returns import trouve as example_2_database_source_returns
 
 from clair import Column, ColumnType, Trouve, TrouveType
 

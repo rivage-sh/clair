@@ -1,9 +1,5 @@
-from example_2_database.derived.user_order_stats import (
-    trouve as example_2_database_derived_user_order_stats,
-)
-from example_2_database.refined.orders import (
-    trouve as example_2_database_refined_orders,
-)
+from example_2_database.derived.user_order_stats import trouve as example_2_database_derived_user_order_stats
+from example_2_database.refined.orders import trouve as example_2_database_refined_orders
 
 from clair import Column, ColumnType, Trouve, TrouveType
 

@@ -1,6 +1,4 @@
-from example_2_database.source.order_items import (
-    trouve as example_2_database_source_order_items,
-)
+from example_2_database.source.order_items import trouve as example_2_database_source_order_items
 
 from clair import Column, ColumnType, Trouve, TrouveType
 

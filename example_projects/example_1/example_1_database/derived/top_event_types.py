@@ -1,6 +1,4 @@
-from example_1_database.derived.daily_event_counts import (
-    trouve as example_1_database_derived_daily_event_counts,
-)
+from example_1_database.derived.daily_event_counts import trouve as example_1_database_derived_daily_event_counts
 
 from clair import Column, ColumnType, TestUnique, Trouve, TrouveType
 

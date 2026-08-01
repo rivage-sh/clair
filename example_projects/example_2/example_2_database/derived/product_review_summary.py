@@ -1,6 +1,4 @@
-from example_2_database.refined.reviews import (
-    trouve as example_2_database_refined_reviews,
-)
+from example_2_database.refined.reviews import trouve as example_2_database_refined_reviews
 
 from clair import Column, ColumnType, Trouve, TrouveType
 
