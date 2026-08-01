@@ -1,4 +1,4 @@
-"""Tests for RunConfig validation rules."""
+"""The tests of the RunConfig rules."""
 
 import pytest
 

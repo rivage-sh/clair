@@ -1,13 +1,13 @@
-// app.js -- Application logic for clair docs
+// app.js -- The application logic of clair docs
 
 (function () {
     "use strict";
 
     var catalog = null;
     var selectedId = null;
-    var selectFilterIds = null; // null = no filter; Set = active --select filter
+    var selectFilterIds = null; // A null value means no filter. A Set is an active --select filter.
 
-    // ─── Bootstrap ────────────────────────────────────────────────────
+    // ─── The start of the application ────────────────────────────────────────────────────
     document.addEventListener("DOMContentLoaded", async function () {
         try {
             var response = await fetch("/api/catalog.json");
@@ -18,34 +18,34 @@
             return;
         }
 
-        // Set project name in header
+        // Put the project name in the header.
         var projectNameEl = document.querySelector(".logo .project-name");
         if (projectNameEl) {
             projectNameEl.textContent = catalog.project_name;
         }
 
-        // Update page title
+        // Change the title of the page.
         document.title = "clair docs -- " + catalog.project_name;
 
-        // Render sidebar
+        // Draw the sidebar.
         renderSidebar(catalog.trouves);
         updateSidebarCount();
 
-        // Initialize graph
+        // Start the graph.
         ClairdocsGraph.init("graph-container", catalog, onNodeSelect);
 
-        // Wire interactions
+        // Connect the user actions.
         wireSearch();
         wireSelectFilter();
         wireResizeHandles();
     });
 
-    // ─── Sidebar Rendering ────────────────────────────────────────────
+    // ─── The sidebar ────────────────────────────────────────────
     function renderSidebar(trouves) {
         var tree = document.getElementById("sidebar-tree");
         tree.innerHTML = "";
 
-        // Group by database > schema
+        // Group the items by database, then by schema.
         var groups = {};
         var fullNames = Object.keys(trouves).sort();
 
@@ -65,7 +65,7 @@
             });
         }
 
-        // Render groups
+        // Draw the groups.
         var databases = Object.keys(groups).sort();
         for (var d = 0; d < databases.length; d++) {
             var dbName = databases[d];
@@ -113,7 +113,7 @@
                         (item.trouve.docs || "").toLowerCase()
                     );
 
-                    // Column names for search
+                    // The column names, for the search.
                     var colNames = (item.trouve.columns || [])
                         .map(function (c) {
                             return c.name;
@@ -170,7 +170,7 @@
         for (var i = 0; i < items.length; i++) {
             if (items[i].getAttribute("data-full-name") === fullName) {
                 items[i].classList.add("active");
-                // Scroll into view
+                // Move the item into the visible area.
                 items[i].scrollIntoView({ block: "nearest", behavior: "smooth" });
             } else {
                 items[i].classList.remove("active");
@@ -192,7 +192,7 @@
         }
     }
 
-    // ─── Node Selection (called from graph or sidebar) ────────────────
+    // ─── The node selection. The graph or the sidebar calls it. ────────────────
     function onNodeSelect(fullName) {
         if (fullName === null) {
             selectedId = null;
@@ -205,14 +205,14 @@
         highlightSidebarItem(fullName);
     }
 
-    // ─── Detail Panel ─────────────────────────────────────────────────
+    // ─── The detail panel ─────────────────────────────────────────────────
     function showDetail(trouveData, fullName) {
         var panel = document.getElementById("detail-panel");
         var content = document.getElementById("detail-content");
         content.innerHTML = "";
         panel.classList.add("open");
 
-        // Header
+        // The header.
         var header = document.createElement("div");
         header.className = "detail-header";
 
@@ -244,27 +244,27 @@
         header.appendChild(docsP);
         content.appendChild(header);
 
-        // Columns section
+        // The columns section.
         renderColumnsSection(content, trouveData.columns || [], trouveData.column_inference);
 
-        // SQL / df_fn section (TABLE and VIEW only)
+        // The SQL section and the df_fn section, for a TABLE and a VIEW only.
         if (trouveData.type !== "source" && trouveData.compiled) {
             renderSqlSection(content, trouveData.compiled.resolved_sql);
             renderDfFnSection(content, trouveData.compiled.resolved_df_fn);
         }
 
-        // Tests section
+        // The tests section.
         renderTestsSection(content, trouveData.tests || []);
 
-        // Run Config section (TABLE only)
+        // The run config section, for a TABLE only.
         if (trouveData.type === "table") {
             renderRunConfigSection(content, trouveData.run_config);
         }
 
-        // Lineage section
+        // The lineage section.
         renderLineageSection(content, fullName);
 
-        // File path section
+        // The file path section.
         if (trouveData.compiled && trouveData.compiled.file_path) {
             renderFileSection(content, trouveData.compiled.file_path);
         }
@@ -277,16 +277,16 @@
         content.innerHTML = "";
     }
 
-    // ─── Detail Sections ──────────────────────────────────────────────
+    // ─── The detail sections ──────────────────────────────────────────────
     function renderColumnsSection(panel, columns, columnInference) {
         var section = createSection("Columns");
 
-        // Determine which columns and status to display
+        // Select the columns and the status to show.
         var inference = columnInference || {};
         var displayColumns = inference.columns || columns || [];
         var status = inference.status || (displayColumns.length > 0 ? "declared" : null);
 
-        // Show a status badge for non-declared columns
+        // Show a status badge if the user declared no column.
         if (status && status !== "declared" && inference.message) {
             var notice = document.createElement("div");
             notice.className = "column-inference-notice status-" + status;
@@ -305,7 +305,8 @@
             var table = document.createElement("table");
             table.className = "columns-table";
 
-            // For inferred columns, skip Type/Nullable/Description since they're unknown
+            // For a column from the SQL, omit the type, the nullable flag and the
+                    // description, because those values are unknown.
             var isInferred = status === "inferred";
 
             var thead = document.createElement("thead");
@@ -461,7 +462,7 @@
         var upstream = ClairdocsGraph.getDirectPredecessors(fullName);
         var downstream = ClairdocsGraph.getDirectSuccessors(fullName);
 
-        // Upstream
+        // The upstream nodes.
         var upLabel = document.createElement("h3");
         upLabel.textContent = "Upstream";
         upLabel.style.marginTop = "14px";
@@ -492,7 +493,7 @@
             section.appendChild(upNodes);
         }
 
-        // Downstream
+        // The downstream nodes.
         var downLabel = document.createElement("h3");
         downLabel.textContent = "Downstream";
         downLabel.style.marginTop = "20px";
@@ -530,7 +531,7 @@
         var section = createSection("File");
         var code = document.createElement("code");
         code.className = "file-path";
-        // Convert PosixPath-style or WindowsPath to string
+        // Change a PosixPath value or a WindowsPath value to a string.
         code.textContent = String(filePath);
         section.appendChild(code);
         panel.appendChild(section);
@@ -544,7 +545,7 @@
         }
     }
 
-    // ─── Search ───────────────────────────────────────────────────────
+    // ─── The search ───────────────────────────────────────────────────────
     function wireSearch() {
         var searchInput = document.getElementById("search");
         if (!searchInput) return;
@@ -558,7 +559,7 @@
         var searchInput = document.getElementById("search");
         var query = (searchInput ? searchInput.value : "").toLowerCase();
 
-        // Filter items
+        // Keep the items that agree with the text.
         var items = document.querySelectorAll(".sidebar-item");
         for (var i = 0; i < items.length; i++) {
             var el = items[i];
@@ -578,13 +579,13 @@
             el.style.display = matchesSearch && matchesSelect ? "" : "none";
         }
 
-        // Update group visibility
+        // Show or hide each group.
         updateGroupVisibility();
         updateSidebarCount();
     }
 
     function updateGroupVisibility() {
-        // Hide subgroups where all children are hidden
+        // Hide a subgroup when each of its children is hidden.
         var subgroups = document.querySelectorAll(".sidebar-subgroup");
         for (var i = 0; i < subgroups.length; i++) {
             var sub = subgroups[i];
@@ -594,7 +595,7 @@
             sub.style.display = visibleItems.length > 0 ? "" : "none";
         }
 
-        // Hide groups where all subgroups are hidden
+        // Hide a group when each of its subgroups is hidden.
         var groups = document.querySelectorAll(".sidebar-group");
         for (var j = 0; j < groups.length; j++) {
             var grp = groups[j];
@@ -605,13 +606,13 @@
         }
     }
 
-    // ─── Filters ───────────────────────────────────────────────────────
+    // ─── The filters ───────────────────────────────────────────────────────
     function applyFilters() {
         ClairdocsGraph.applyVisibility(selectFilterIds);
         filterSidebar();
     }
 
-    // ─── Select Filter (--select syntax) ──────────────────────────────
+    // ─── The select filter, with the --select syntax ──────────────────────────────
     function wireSelectFilter() {
         var input = document.getElementById("select-filter");
         var clearBtn = document.getElementById("select-filter-clear");
@@ -646,9 +647,10 @@
         applyFilters();
     }
 
-    // Parse a --select expression into {upstream, pattern, downstream}.
-    // upstream/downstream are hop counts (Infinity = all, 0 = none).
-    // Pattern may contain * as a glob wildcard.
+    // Read a --select expression and make {upstream, pattern, downstream}.
+    // The upstream field and the downstream field hold a count of levels. A
+    // value of Infinity means each level. A value of 0 means no level.
+    // The pattern can contain * as a glob wildcard.
     function parseSelectExpr(expr) {
         if (expr === "*") return { upstream: Infinity, pattern: "*", downstream: Infinity };
         var m = expr.match(/^(\+(\d+)?)?([^+\s]+?)(\+(\d+)?)?$/);
@@ -679,7 +681,7 @@
         var visible = new Set(seeds);
         var edges = catalog.edges || [];
 
-        // Build adjacency maps
+        // Make the maps of the neighbour nodes.
         var predecessors = {};
         var successors = {};
         allIds.forEach(function (fn) { predecessors[fn] = []; successors[fn] = []; });
@@ -688,7 +690,7 @@
             if (predecessors[e.target]) predecessors[e.target].push(e.source);
         });
 
-        // BFS upstream
+        // A breadth-first search in the upstream direction.
         if (parsed.upstream > 0) {
             var upQueue = seeds.map(function (s) { return [s, 0]; });
             while (upQueue.length) {
@@ -704,7 +706,7 @@
             }
         }
 
-        // BFS downstream
+        // A breadth-first search in the downstream direction.
         if (parsed.downstream > 0) {
             var downQueue = seeds.map(function (s) { return [s, 0]; });
             while (downQueue.length) {
@@ -723,7 +725,7 @@
         return visible;
     }
 
-    // ─── Resize Handles ───────────────────────────────────────────────
+    // ─── The handles that change the size ───────────────────────────────────────────────
     function wireResizeHandles() {
         var sidebarHandle = document.getElementById("sidebar-resize-handle");
         var sidebar = document.getElementById("sidebar");
@@ -779,7 +781,7 @@
         }
     }
 
-    // ─── Utilities ────────────────────────────────────────────────────
+    // ─── The utility functions ────────────────────────────────────────────────────
     function createSection(title) {
         var section = document.createElement("div");
         section.className = "detail-section";

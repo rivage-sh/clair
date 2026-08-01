@@ -1,4 +1,4 @@
-"""Tests for environment loading."""
+"""The tests of the environment loader."""
 
 from __future__ import annotations
 
