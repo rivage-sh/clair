@@ -1,4 +1,4 @@
-"""Tests for DAG construction, topological sort, and cycle detection."""
+"""The tests of the DAG build, the topological sort, and the cycle detection."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def _make_trouve(
     trouve_type: TrouveType = TrouveType.TABLE,
     imports: list[str] | None = None,
 ) -> Trouve:
-    """Create a compiled Trouve directly for testing."""
+    """Make a compiled Trouve for a test."""
     sql = "select 1" if trouve_type != TrouveType.SOURCE else ""
     t = Trouve(type=trouve_type, sql=sql)
     t.compiled = CompiledAttributes(
@@ -70,14 +70,14 @@ class TestBuildDag:
 
 class TestCycleDetection:
     def test_cycle_detected_at_import_time(self, cyclic_project: Path, capsys):
-        """Circular imports between Trouve files fail at import time."""
+        """Two Trouve files that import each other cause an error at import time."""
         trouves = discover_project(cyclic_project)
         assert len(trouves) == 0
         captured = capsys.readouterr()
         assert "discovery.load_error" in captured.out
 
     def test_dag_level_cycle_detection(self):
-        """Manually constructed cycle raises CyclicDependencyError."""
+        """A cycle that the test makes causes a CyclicDependencyError."""
         trouves = [
             _make_trouve("db.s.a", imports=["db.s.b"]),
             _make_trouve("db.s.b", imports=["db.s.a"]),

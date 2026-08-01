@@ -1,4 +1,4 @@
-"""Tests for _run_df_fn_trouve (runner's pandas execution path)."""
+"""The tests of _run_df_fn_trouve, the pandas path of the runner."""
 
 from __future__ import annotations
 
@@ -38,10 +38,10 @@ def _make_df_adapter(
     fetch_side_effect: Exception | None = None,
     write_side_effect: Exception | None = None,
 ) -> MagicMock:
-    """Create a mock adapter that implements the DataFrameCapableAdapter protocol."""
+    """Make a false adapter that obeys the DataFrameCapableAdapter protocol."""
     adapter = MagicMock(spec=WarehouseAdapter)
 
-    # Add the DataFrame methods so isinstance() check against the Protocol passes
+    # Add the DataFrame methods. Thus isinstance() accepts the Protocol.
     adapter.fetch_dataframe = MagicMock()
     adapter.write_dataframe = MagicMock()
 
