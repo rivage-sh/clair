@@ -41,3 +41,29 @@ The worktree shares git history with the main repo but has its own `.venv/`. Alw
   - e.g. `trouve` instead of `t`
 - Use `database_name` instead of `database`, `schema_name` instead of `schema`, `table_name` instead of `table`
 - Address git merge conflicts by pulling main, resolving conflicts, and pushing. Favour simplicity over clean commit history — PRs are squash-merged anyway.
+
+## Comments: Simplified Technical English
+
+Write all code comments and docstrings in Simplified Technical English (ASD-STE100). STE is a controlled writing standard that makes technical text clear and unambiguous for readers who do not speak English as a first language.
+
+Grammar rules:
+
+- Use active verbs, not passive ones.
+- Keep sentences short: 20 words maximum for instructions, 25 words maximum for descriptions.
+- Use three nouns in a row maximum.
+- Do not use `-ing` verb forms, unless they are part of a technical name.
+- Do not use the present perfect tense.
+
+Vocabulary rules:
+
+- Give each word one meaning only.
+- Use each word as one part of speech only (a noun or a verb, not both).
+- Do not use words with many meanings or unclear actions, such as `check`, `verify`, or `ensure`. Use a specific word instead.
+- Technical terms for this project are permitted, such as `trouve`, `database_name`, or `worktree`.
+
+Examples:
+
+```python
+# Bad: "This function is used for checking if the schema has been loaded."
+# Good: "This function tells you if the loader read the schema."
+```
