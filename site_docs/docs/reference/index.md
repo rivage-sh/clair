@@ -14,7 +14,7 @@ from clair import (
 )
 ```
 
-- **[Trouve](trouve-api.md)** — the core class, for both SQL and pandas (`df_fn`) transformations
+- **[Trouve](trouve-api.md)** — the core classes: `TrouveAbc`, `Trouve` for SQL, and `PandasTrouve` for pandas
 - **[Column](column-api.md)** — column definitions
 - **[RunConfig](run-config-api.md)** — incremental materialization config
 - **[Tests](tests-api.md)** — data quality test classes

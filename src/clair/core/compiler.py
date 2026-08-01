@@ -14,6 +14,7 @@ from clair.core.dag import ClairDag
 from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.core.runner import resolve_effective_mode
 from clair.exceptions import CompileError
+from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
 
@@ -130,15 +131,16 @@ def write_compile_output(
         assert trouve.compiled is not None, f"{name} has not been compiled"
         node_info = None
         if trouve.compiled.execution_type == ExecutionType.PANDAS:
+            assert isinstance(trouve, PandasTrouve)
             try:
-                fn_source = inspect.getsource(trouve.df_fn)
+                fn_source = inspect.getsource(trouve.transform)
             except (OSError, TypeError):
                 # A lambda, a built-in, or a compiled extension has no source text.
-                fn_source = repr(trouve.df_fn)
+                fn_source = repr(trouve.transform)
 
             imports_section = ""
             try:
-                source_file = inspect.getfile(trouve.df_fn)
+                source_file = inspect.getfile(trouve.transform)
                 source_text = Path(source_file).read_text()
                 tree = ast.parse(source_text)
                 import_lines = [
@@ -152,10 +154,12 @@ def write_compile_output(
             except (OSError, SyntaxError):
                 pass
 
-            input_lines = []
-            for param in inspect.signature(trouve.df_fn).parameters.values():
-                if isinstance(param.default, Trouve):
-                    input_lines.append(f"#   {param.name}  ->  {param.default.full_name}")
+            input_lines = [
+                f"#   {parameter_name}  ->  {upstream.full_name}"
+                for parameter_name, upstream in zip(
+                    trouve.parameter_names(), trouve.upstream_trouves()
+                )
+            ]
 
             header = f"# clair compiled: {trouve.full_name}\n# execution_type: pandas\n"
             if input_lines:
@@ -177,6 +181,7 @@ def write_compile_output(
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text(artifact_content)
         elif trouve.compiled.execution_type == ExecutionType.SNOWFLAKE:
+            assert isinstance(trouve, Trouve)
             effective_mode = resolve_effective_mode(trouve, run_mode)
             statements = trouve.build_sql(effective_mode, run_id=run_id)
 

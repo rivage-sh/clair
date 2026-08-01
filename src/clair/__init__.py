@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
+from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import (
     SOURCE,
     TARGET,
@@ -63,7 +64,7 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import Trouve, TrouveType
+from clair.trouves.trouve import Trouve, TrouveAbc, TrouveType
 
 __version__ = "0.1.0"
 
@@ -84,6 +85,7 @@ __all__ = [
     "ColumnType",
     "DatabaseDefaults",
     "IncrementalMode",
+    "PandasTrouve",
     "RunConfig",
     "RunMode",
     "SchemaDefaults",
@@ -94,6 +96,7 @@ __all__ = [
     "TestUnique",
     "TestUniqueColumns",
     "Trouve",
+    "TrouveAbc",
     "TrouveType",
     "UpsertConfig",
 ]

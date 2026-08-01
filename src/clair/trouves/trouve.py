@@ -3,10 +3,19 @@
 One Trouve maps to one object in Snowflake that you can query: a source table,
 a transformed table, or a view. Each Trouve stays in its own .py file. The
 framework finds each Trouve automatically.
+
+This module holds two classes:
+
+* ``TrouveAbc`` -- the abstract base. It holds the attributes that every backend
+  shares: the columns, the tests, the docs, and the compiled attributes.
+* ``Trouve`` -- the SQL backend. Snowflake materializes it from SQL.
+
+The pandas backend, ``PandasTrouve``, stays in ``pandas_trouve.py``.
 """
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -33,13 +42,13 @@ class ExecutionType(StrEnum):
 class CompiledAttributes(BaseModel):
     """The attributes that discovery sets after it loads a Trouve.
 
-    These attributes exist only when ``Trouve.is_compiled`` is True.
+    These attributes exist only when ``TrouveAbc.is_compiled`` is True.
     """
 
     full_name: str       # The routed name. Clair puts it in the SQL and the DDL.
     logical_name: str    # The name from the file path. DAG edges and selectors use it.
     resolved_sql: str
-    resolved_df_fn: str = ""
+    resolved_transform: str = ""
     file_path: Path
     module_name: str
     imports: list[str]
@@ -47,25 +56,24 @@ class CompiledAttributes(BaseModel):
     execution_type: ExecutionType
 
 
-class Trouve(BaseModel):
-    """The primary class in Clair.
+class TrouveAbc(BaseModel, ABC):
+    """The base class of every Trouve backend.
+
+    A subclass supplies the backend. ``Trouve`` runs SQL in Snowflake.
+    ``PandasTrouve`` runs a Python function on the clair machine. Each subclass
+    gives its own ``execution_type`` and its own ``upstream_trouves``.
 
     Attributes:
         type: SOURCE, TABLE, or VIEW.
-        sql: The SQL query. A TABLE or a VIEW needs it. A SOURCE must leave it
-             empty. To point to a different Trouve, write
-             ``f"SELECT * FROM {other_trouve}"``. Discovery replaces the
-             f-string placeholder with the true full_name.
         columns: The column definitions, for the docs and for future checks.
         tests: The data quality tests.
         docs: The documentation text for this Trouve.
+        run_config: The materialization strategy.
         compiled: Discovery sets this. It stays None until discovery reads the
              project.
     """
 
     type: TrouveType = Field(default=TrouveType.TABLE)
-    sql: str = Field(default="", exclude=True)
-    df_fn: Any = Field(default=None, exclude=True)
     columns: list[Column] = []
     tests: list[AnyTest] = []
     docs: str = ""
@@ -74,28 +82,18 @@ class Trouve(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    @model_validator(mode="after")
-    def _validate_sql(self) -> Trouve:
-        if self.df_fn is not None:
-            if not callable(self.df_fn):
-                raise ValueError("df_fn must be callable")
-            if self.sql.strip():
-                raise ValueError("Trouve cannot have both sql and df_fn")
-            if self.type != TrouveType.TABLE:
-                raise ValueError(f"df_fn Trouves must be TABLE type, got '{self.type.value}'")
-            if self.run_config.run_mode == RunMode.INCREMENTAL:
-                raise ValueError("df_fn Trouves do not support incremental mode")
-            return self
+    @property
+    @abstractmethod
+    def execution_type(self) -> ExecutionType:
+        """The backend that materializes this Trouve."""
 
-        if self.type in (TrouveType.TABLE, TrouveType.VIEW) and not self.sql.strip():
-            raise ValueError(
-                f"Trouve of type '{self.type.value}' requires non-empty sql"
-            )
-        if self.type == TrouveType.SOURCE and self.sql.strip():
-            raise ValueError("SOURCE Trouve must not have sql")
-        if self.run_config.run_mode == RunMode.INCREMENTAL and self.type != TrouveType.TABLE:
-            raise ValueError("only TABLE Trouves support incremental mode")
-        return self
+    @abstractmethod
+    def upstream_trouves(self) -> list[TrouveAbc]:
+        """Give the Trouves that this Trouve reads, in a stable order.
+
+        A SQL Trouve gives an empty list. Its dependencies come from the
+        placeholder tokens in its SQL, and discovery reads those tokens.
+        """
 
     def __format__(self, _spec: str) -> str:
         """Give a placeholder token for f-string SQL.
@@ -134,6 +132,45 @@ class Trouve(BaseModel):
         """
         assert self.compiled is not None, "sample() requires a compiled Trouve"
         return f"(SELECT TOP 1000 * FROM {self.compiled.full_name})"
+
+    def get_full_table_name(self) -> str:
+        """An alias for .full_name. Use it in f-string SQL."""
+        return self.full_name
+
+
+class Trouve(TrouveAbc):
+    """A Trouve that Snowflake materializes from SQL.
+
+    Attributes:
+        sql: The SQL query. A TABLE or a VIEW needs it. A SOURCE must leave it
+             empty. To point to a different Trouve, write
+             ``f"SELECT * FROM {other_trouve}"``. Discovery replaces the
+             f-string placeholder with the true full_name.
+
+    ``TrouveAbc`` holds the attributes that every backend shares.
+    """
+
+    sql: str = Field(default="", exclude=True)
+
+    @property
+    def execution_type(self) -> ExecutionType:
+        return ExecutionType.SNOWFLAKE
+
+    def upstream_trouves(self) -> list[TrouveAbc]:
+        """Give an empty list. Discovery reads the SQL placeholder tokens."""
+        return []
+
+    @model_validator(mode="after")
+    def _validate_sql(self) -> Trouve:
+        if self.type in (TrouveType.TABLE, TrouveType.VIEW) and not self.sql.strip():
+            raise ValueError(
+                f"Trouve of type '{self.type.value}' requires non-empty sql"
+            )
+        if self.type == TrouveType.SOURCE and self.sql.strip():
+            raise ValueError("SOURCE Trouve must not have sql")
+        if self.run_config.run_mode == RunMode.INCREMENTAL and self.type != TrouveType.TABLE:
+            raise ValueError("only TABLE Trouves support incremental mode")
+        return self
 
     def build_sql(self, effective_mode: RunMode, run_id: str) -> list[str]:
         """Make the SQL statements that materialize this Trouve.
@@ -215,7 +252,3 @@ class Trouve(BaseModel):
         )
 
         return [stmt_1, stmt_2, stmt_3]
-
-    def get_full_table_name(self) -> str:
-        """An alias for .full_name. Use it in f-string SQL."""
-        return self.full_name
