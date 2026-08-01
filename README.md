@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/clair_logo.png" alt="clair logo" width="200" />
+  <img src="site_docs/docs/assets/clair_logo.png" alt="clair logo" width="200" />
 </p>
 
 # clair
