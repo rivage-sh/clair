@@ -15,6 +15,13 @@ from pydantic import BaseModel, model_validator
 
 from clair.adapters.base import WarehouseAdapter
 from clair.core.dag import ClairDag, get_executable_nodes
+from clair.core.strict import (
+    build_cleanup_statement,
+    build_clone_statement,
+    build_promote_statements,
+    strict_staging_name,
+)
+from clair.exceptions import ClairError, RunError
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import Trouve, TrouveType
 
@@ -175,8 +182,16 @@ def resolve_effective_mode(trouve: Trouve, cli_run_mode: RunMode) -> RunMode:
 def _run_df_fn_trouve(
     trouve: Trouve,
     adapter: WarehouseAdapter,
+    target_full_name: str | None = None,
 ) -> RunResult:
     """Execute a df_fn Trouve: fetch inputs, transform, write output.
+
+    Args:
+        trouve: The compiled df_fn Trouve to run.
+        adapter: Connected warehouse adapter.
+        target_full_name: Object to write into, overriding the Trouve's routed
+            name. Strict mode uses this to write into a staging table. The
+            returned RunResult always reports the routed name.
 
     Returns a RunResult with SUCCESS or FAILURE status.
     """
@@ -224,13 +239,14 @@ def _run_df_fn_trouve(
 
     # 4. Write the result to Snowflake
     full_name = trouve.full_name
-    name_parts = full_name.split(".")
+    write_target = target_full_name or full_name
+    name_parts = write_target.split(".")
     if len(name_parts) != 3:
         duration = time.monotonic() - start
         return RunResult(
             full_name=full_name,
             status=RunStatus.FAILURE,
-            error=f"Cannot parse full_name '{full_name}' into database.schema.table",
+            error=f"Cannot parse full_name '{write_target}' into database.schema.table",
             duration_seconds=duration,
         )
 
@@ -239,7 +255,7 @@ def _run_df_fn_trouve(
     try:
         query_result = adapter.write_dataframe(
             dataframe=result_dataframe,
-            full_name=full_name,
+            full_name=write_target,
             database_name=database_name,
             schema_name=schema_name,
             table_name=table_name,
@@ -249,7 +265,7 @@ def _run_df_fn_trouve(
         return RunResult(
             full_name=full_name,
             status=RunStatus.FAILURE,
-            error=f"Failed to write DataFrame to {full_name}: {write_error}",
+            error=f"Failed to write DataFrame to {write_target}: {write_error}",
             duration_seconds=duration,
         )
 
@@ -272,13 +288,73 @@ def _run_df_fn_trouve(
     )
 
 
+def _promote_or_discard(
+    trouve: Trouve,
+    adapter: WarehouseAdapter,
+    staging_name: str,
+    target_name: str,
+    tests_passed: bool,
+) -> tuple[list[str], list[str], str]:
+    """Finish a strict-mode node: swap the staging object in, or drop it.
+
+    Returns:
+        (query_ids, query_urls, error). The error is empty when the staging object
+        was promoted successfully.
+    """
+    query_ids: list[str] = []
+    query_urls: list[str] = []
+
+    def _execute(statement: str) -> str:
+        query_result = adapter.execute(statement)
+        if query_result.query_id:
+            query_ids.append(query_result.query_id)
+        if query_result.query_url:
+            query_urls.append(query_result.query_url)
+        return "" if query_result.success else (query_result.error or "unknown error")
+
+    if not tests_passed:
+        cleanup_error = _execute(build_cleanup_statement(trouve.type, staging_name))
+        error = (
+            f"strict mode: tests failed, {target_name} left unchanged "
+            f"(staging object {staging_name} discarded)"
+        )
+        if cleanup_error:
+            error += f"; staging cleanup also failed: {cleanup_error}"
+        return query_ids, query_urls, error
+
+    database_name, schema_name, table_name = target_name.split(".")
+    target_exists = adapter.table_exists(database_name, schema_name, table_name)
+
+    assert trouve.compiled is not None
+    for statement in build_promote_statements(
+        trouve.type,
+        staging_name=staging_name,
+        target_name=target_name,
+        target_exists=target_exists,
+        resolved_sql=trouve.compiled.resolved_sql,
+    ):
+        promote_error = _execute(statement)
+        if promote_error:
+            # Leave the staging object in place: it holds tested data and is the
+            # only record of what this run produced.
+            return (
+                query_ids,
+                query_urls,
+                f"strict mode: tests passed but promotion failed: {promote_error} "
+                f"(staging object {staging_name} retained)",
+            )
+
+    return query_ids, query_urls, ""
+
+
 def run_project(
     dag: ClairDag,
     selected: list[str],
     adapter: WarehouseAdapter,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     run_id: str = "",
-    after_node_success: Callable[[str], bool] | None = None,
+    after_node_success: Callable[[str, str], bool] | None = None,
+    strict: bool = False,
 ) -> Iterator[RunResult]:
     """Execute selected Trouves in topological order, yielding each result as it completes.
 
@@ -286,9 +362,19 @@ def run_project(
     then continues with unrelated branches.
 
     after_node_success: optional callback invoked after each successful node, before
-        the next node runs. Return False to treat the node as failed for downstream
-        dependency purposes (circuit breaker for eager testing).
+        the next node runs. Called with (node_name, physical_name) where
+        physical_name is the object that was actually written -- the staging object
+        under strict mode, the routed name otherwise. Return False to treat the node
+        as failed for downstream dependency purposes (circuit breaker for eager
+        testing).
+    strict: when True, materialize each node into a run-scoped staging object, let
+        after_node_success test it, and only then promote it into its real name. A
+        node whose tests fail leaves its target untouched and is reported as a
+        FAILURE. Requires after_node_success.
     """
+    if strict and after_node_success is None:
+        raise RunError("strict mode requires tests; after_node_success must be provided")
+
     all_executable = get_executable_nodes(dag)
     to_run = [name for name in all_executable if name in selected]
 
@@ -323,91 +409,133 @@ def run_project(
                     skip_reasons.setdefault(desc, name)
                 continue
 
+        routed_name = trouve.compiled.full_name
+
         if trouve.type != TrouveType.SOURCE:
-            assert trouve.compiled is not None
-            routed_parts = trouve.compiled.full_name.split(".")
+            routed_parts = routed_name.split(".")
             if len(routed_parts) >= 2:
                 adapter.execute(f"CREATE DATABASE IF NOT EXISTS {routed_parts[0]}")
                 adapter.execute(f"CREATE SCHEMA IF NOT EXISTS {routed_parts[0]}.{routed_parts[1]}")
 
-        # Branch: df_fn Trouves use fetch/transform/write instead of SQL execution
-        if trouve.df_fn is not None:
-            logger.info("run.node.start", trouve=name, effective_mode="full_refresh")
-            result = _run_df_fn_trouve(trouve, adapter)
-            yield result
-
-            if result.status == RunStatus.SUCCESS:
-                logger.info("run.node.success", trouve=name, duration_seconds=round(result.duration_seconds, 3))
-                if after_node_success is not None and not after_node_success(name):
-                    for desc in nx.descendants(dag, name):
-                        skip_reasons.setdefault(desc, name)
-            else:
-                logger.warning("run.node.failure", trouve=name, duration_seconds=round(result.duration_seconds, 3), error=result.error)
+        # Strict mode materializes into a run-scoped sibling object; the real name
+        # is only written once the tests against that object have passed.
+        staging_name: str | None = None
+        if strict:
+            try:
+                staging_name = strict_staging_name(routed_name, run_id)
+            except ClairError as naming_error:
+                logger.warning("run.node.failure", trouve=name, error=str(naming_error))
+                yield RunResult(
+                    full_name=name,
+                    status=RunStatus.FAILURE,
+                    error=str(naming_error),
+                )
                 for desc in nx.descendants(dag, name):
                     skip_reasons.setdefault(desc, name)
-            continue
+                continue
+        write_target = staging_name or routed_name
 
-        effective_mode = resolve_effective_mode(trouve, run_mode)
-        # Incremental fallback: if target table doesn't exist yet, run full refresh
-        if effective_mode == RunMode.INCREMENTAL:
-            assert trouve.compiled is not None
-            routed_parts = trouve.compiled.full_name.split(".")
-            if len(routed_parts) == 3 and not adapter.table_exists(routed_parts[0], routed_parts[1], routed_parts[2]):
-                logger.info("run.node.incremental_fallback", trouve=name, reason="table_not_found")
-                effective_mode = RunMode.FULL_REFRESH
-
-        logger.info("run.node.start", trouve=name, effective_mode=effective_mode.value)
-        statements = trouve.build_sql(effective_mode, run_id)
-
-        if not statements:
-            continue
-
-        start = time.monotonic()
-        last_result = None
-        all_succeeded = True
-        failed_at = None
         query_ids: list[str] = []
         query_urls: list[str] = []
+        statements: list[str] | None = None
 
-        for stmt_idx, stmt in enumerate(statements):
-            query_result = adapter.execute(stmt)
-            last_result = query_result
-            if query_result.query_id:
-                query_ids.append(query_result.query_id)
-            if query_result.query_url:
-                query_urls.append(query_result.query_url)
-            if not query_result.success:
-                all_succeeded = False
-                failed_at = stmt_idx
-                break
+        # Branch: df_fn Trouves use fetch/transform/write instead of SQL execution
+        if trouve.df_fn is not None:
+            logger.info("run.node.start", trouve=name, effective_mode="full_refresh", target=write_target)
+            df_result = _run_df_fn_trouve(trouve, adapter, target_full_name=write_target)
+            report_name = df_result.full_name
+            duration = df_result.duration_seconds
+            query_ids.extend(df_result.query_ids)
+            query_urls.extend(df_result.query_urls)
+            materialized = df_result.status == RunStatus.SUCCESS
+            error = df_result.error
+        else:
+            report_name = name
 
-        duration = time.monotonic() - start
+            effective_mode = resolve_effective_mode(trouve, run_mode)
+            # Incremental fallback: if target table doesn't exist yet, run full refresh
+            if effective_mode == RunMode.INCREMENTAL:
+                routed_parts = routed_name.split(".")
+                if len(routed_parts) == 3 and not adapter.table_exists(routed_parts[0], routed_parts[1], routed_parts[2]):
+                    logger.info("run.node.incremental_fallback", trouve=name, reason="table_not_found")
+                    effective_mode = RunMode.FULL_REFRESH
 
-        # UPSERT cleanup: if MERGE (stmt index 1) failed, still drop staging (stmt index 2)
-        if not all_succeeded and len(statements) == 3 and failed_at == 1:
-            adapter.execute(statements[2])
+            logger.info("run.node.start", trouve=name, effective_mode=effective_mode.value, target=write_target)
+            statements = trouve.build_sql(effective_mode, run_id, target_name=write_target)
 
-        if all_succeeded:
+            if not statements:
+                continue
+
+            # An incremental build needs its prior state; a zero-copy clone puts it
+            # in the staging table in constant time.
+            if staging_name is not None and effective_mode == RunMode.INCREMENTAL:
+                statements = [build_clone_statement(routed_name, staging_name)] + statements
+
+            start = time.monotonic()
+            last_result = None
+            materialized = True
+            failed_at = None
+
+            for stmt_idx, stmt in enumerate(statements):
+                query_result = adapter.execute(stmt)
+                last_result = query_result
+                if query_result.query_id:
+                    query_ids.append(query_result.query_id)
+                if query_result.query_url:
+                    query_urls.append(query_result.query_url)
+                if not query_result.success:
+                    materialized = False
+                    failed_at = stmt_idx
+                    break
+
+            duration = time.monotonic() - start
+
+            # UPSERT cleanup: if the MERGE failed, still drop the merge staging table.
+            # UPSERT always emits (create staging, merge, drop staging) as the last
+            # three statements -- strict mode may prepend a clone before them.
+            if not materialized and len(statements) >= 3:
+                merge_index = len(statements) - 2
+                if failed_at == merge_index:
+                    adapter.execute(statements[merge_index + 1])
+
+            error = "" if materialized else ((last_result.error if last_result else "") or "")
+
+        # Strict mode: test the staging object, then swap it in or throw it away.
+        if staging_name is not None and materialized:
+            assert after_node_success is not None
+            tests_passed = after_node_success(name, staging_name)
+            promote_ids, promote_urls, strict_error = _promote_or_discard(
+                trouve, adapter, staging_name, routed_name, tests_passed
+            )
+            query_ids.extend(promote_ids)
+            query_urls.extend(promote_urls)
+            if strict_error:
+                materialized = False
+                error = strict_error
+        elif staging_name is not None and not materialized:
+            adapter.execute(build_cleanup_statement(trouve.type, staging_name))
+
+        if materialized:
             logger.info("run.node.success", trouve=name, duration_seconds=round(duration, 3), query_ids=query_ids)
             yield RunResult(
-                full_name=name,
+                full_name=report_name,
                 status=RunStatus.SUCCESS,
                 query_ids=query_ids,
                 query_urls=query_urls,
                 duration_seconds=duration,
             )
-            if after_node_success is not None and not after_node_success(name):
+            # Non-strict: tests run after the target has already been written.
+            if not strict and after_node_success is not None and not after_node_success(name, routed_name):
                 for desc in nx.descendants(dag, name):
                     skip_reasons.setdefault(desc, name)
         else:
-            assert last_result is not None
-            logger.warning("run.node.failure", trouve=name, duration_seconds=round(duration, 3), error=last_result.error, query_ids=query_ids)
+            logger.warning("run.node.failure", trouve=name, duration_seconds=round(duration, 3), error=error, query_ids=query_ids)
             yield RunResult(
-                full_name=name,
+                full_name=report_name,
                 status=RunStatus.FAILURE,
                 query_ids=query_ids,
                 query_urls=query_urls,
-                error=last_result.error or "",
+                error=error,
                 sql=statements,
                 duration_seconds=duration,
             )

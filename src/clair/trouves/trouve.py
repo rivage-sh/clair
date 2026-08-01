@@ -131,12 +131,21 @@ class Trouve(BaseModel):
         assert self.compiled is not None, "sample() requires a compiled Trouve"
         return f"(SELECT TOP 1000 * FROM {self.compiled.full_name})"
 
-    def build_sql(self, effective_mode: RunMode, run_id: str) -> list[str]:
+    def build_sql(
+        self,
+        effective_mode: RunMode,
+        run_id: str,
+        target_name: str | None = None,
+    ) -> list[str]:
         """Generate the SQL statements to materialize this Trouve.
 
         Args:
             effective_mode: The resolved run mode (caller determines this).
             run_id: Unique identifier for this clair run invocation.
+            target_name: Object to write into, overriding ``full_name``. Used by
+                strict mode to build into a run-scoped staging table. References
+                to *upstream* Trouves inside the SQL are unaffected -- they always
+                resolve to their real names.
 
         Returns:
             Ordered list of SQL statements to execute. Empty for SOURCE Trouves.
@@ -153,16 +162,17 @@ class Trouve(BaseModel):
             return []
 
         resolved_sql = self.compiled.resolved_sql.strip()
+        write_target = target_name or self.full_name
 
         if effective_mode == RunMode.FULL_REFRESH:
             object_type = "TABLE" if self.type == TrouveType.TABLE else "VIEW"
             return [
-                f"CREATE OR REPLACE {object_type} {self.full_name} AS (\n{resolved_sql}\n)"
+                f"CREATE OR REPLACE {object_type} {write_target} AS (\n{resolved_sql}\n)"
             ]
 
         if self.run_config.incremental_mode == IncrementalMode.APPEND:
             return [
-                f"INSERT INTO {self.full_name}\nSELECT * FROM (\n{resolved_sql}\n)"
+                f"INSERT INTO {write_target}\nSELECT * FROM (\n{resolved_sql}\n)"
             ]
 
         # UPSERT
@@ -171,6 +181,8 @@ class Trouve(BaseModel):
                 "upsert mode requires columns to be defined on the Trouve"
             )
 
+        # Derived from full_name, not write_target, so that strict mode's staging
+        # suffix is not stacked on top of this one.
         staging_name = f"{self.full_name}__clair_staging_{run_id}"
         all_col_names = [c.name for c in self.columns]
         unique_keys = set(self.run_config.primary_key_columns or [])
@@ -198,7 +210,7 @@ class Trouve(BaseModel):
         )
         stmt_2 = (
             f"-- [2/3] merge into target\n"
-            f"MERGE INTO {self.full_name} AS {TARGET}\n"
+            f"MERGE INTO {write_target} AS {TARGET}\n"
             f"USING {staging_name} AS {SOURCE}\n"
             f"ON {join_condition}\n"
             f"WHEN MATCHED THEN UPDATE SET {update_clause}\n"

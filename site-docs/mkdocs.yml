@@ -78,6 +78,7 @@ nav:
     - Pandas-Native Transformations: guides/pandas-native.md
     - Incrementality: guides/incrementality.md
     - Data Quality Tests: guides/data-quality-tests.md
+    - Strict Mode: guides/strict-mode.md
     - Selectors: guides/selectors.md
     - Routing Policies: guides/routing.md
     - Per-Database & Schema Config: guides/per-database-schema-config.md

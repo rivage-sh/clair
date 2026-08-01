@@ -252,7 +252,13 @@ def _prompt_and_write_environment() -> None:
     default="full_refresh",
     help="Run mode: full_refresh recreates all tables; incremental applies only new data.",
 )
-def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str) -> None:
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help="Show the strict-mode plan: build into a run-scoped staging object, test, then swap.",
+)
+def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, strict: bool) -> None:
     """Compile the project and show generated SQL (no Snowflake connection)."""
     project_root = Path(project).resolve()
     run_mode_enum = RunMode(run_mode)
@@ -301,7 +307,7 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
             artifact_file = artifacts_dir / "/".join(parts[:-1]) / f"{parts[-1]}{extension}"
             logger.info("compile.node", trouve=node_info.name, dependencies=node_info.dependencies, artifact_file=str(artifact_file))
 
-        write_compile_output(dag, selected, project_root, on_node_compiled=_on_node_compiled, run_mode=run_mode_enum, run_id=run_id)
+        write_compile_output(dag, selected, project_root, on_node_compiled=_on_node_compiled, run_mode=run_mode_enum, run_id=run_id, strict=strict)
         logger.info("compile.complete", run_id=run_id, artifacts_dir=str(artifacts_dir))
 
     except ClairError as e:
@@ -429,11 +435,25 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     default=False,
     help="Run post-run tests against a sample of each Trouve (skips row count tests).",
 )
-def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool) -> None:
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Build each Trouve into a run-scoped staging object, test it, and only "
+        "promote it into its real name if every test passes. Tables are promoted "
+        "with a constant-time SWAP; a failing Trouve leaves its target untouched."
+    ),
+)
+def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool, strict: bool) -> None:
     """Run Trouves against Snowflake, then run data quality tests."""
     project_root = Path(project).resolve()
     run_mode_enum = RunMode(run_mode)
     run_id = uuid6.uuid7().hex
+
+    if strict and no_test:
+        logger.error("run.error", error="--strict cannot be combined with --no-test: strict mode promotes a Trouve only after its tests pass")
+        sys.exit(1)
 
     try:
         # Load environment
@@ -460,7 +480,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
             return
 
         recompile_for_selection(discovered, set(selected))
-        write_compile_output(dag, selected, project_root, run_mode=run_mode_enum, run_id=run_id)
+        write_compile_output(dag, selected, project_root, run_mode=run_mode_enum, run_id=run_id, strict=strict)
 
         # Warn if account_locator is missing (query URLs will be incomplete)
         if not environment.account_locator:
@@ -472,8 +492,12 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
 
         test_failures: list[str] = []
 
-        def on_node_success(node_name: str) -> bool:
-            node_test_results = run_tests(dag, [node_name], adapter, use_sample=sample)
+        def on_node_success(node_name: str, physical_name: str) -> bool:
+            node_test_results = run_tests(
+                dag, [node_name], adapter,
+                use_sample=sample,
+                physical_names={node_name: physical_name},
+            )
             passed = all(r.passed for r in node_test_results)
             if not passed:
                 test_failures.append(node_name)
@@ -481,13 +505,14 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
 
         try:
             total = len(selected)
-            logger.info("run.start", run_id=run_id, env=env_name, project=str(project_root), trouves=total, run_mode=run_mode)
+            logger.info("run.start", run_id=run_id, env=env_name, project=str(project_root), trouves=total, run_mode=run_mode, strict=strict)
 
             results = list(run_project(
                 dag, selected, adapter,
                 run_mode=run_mode_enum,
                 run_id=run_id,
                 after_node_success=on_node_success if not no_test else None,
+                strict=strict,
             ))
 
             counts = Counter(r.status for r in results)

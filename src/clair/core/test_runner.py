@@ -122,6 +122,7 @@ def run_tests(
     selected: list[str],
     adapter: WarehouseAdapter,
     use_sample: bool = False,
+    physical_names: dict[str, str] | None = None,
 ) -> list[TestResult]:
     """Execute data quality tests for selected Trouves.
 
@@ -137,11 +138,16 @@ def run_tests(
         use_sample: When True, enable per-Trouve native sampling via
                     ``trouve.sample()`` and skip tests not meaningful on
                     sampled data (e.g. ``TestRowCount``).
+        physical_names: Optional mapping of node name -> object to query instead
+                    of the Trouve's routed name. Strict mode uses this to test a
+                    staging table before it is promoted. Results still report the
+                    routed name so output is stable across modes.
 
     Returns:
         List of TestResult, one per test executed.
     """
     results: list[TestResult] = []
+    physical_names = physical_names or {}
 
     for name in selected:
         trouve = dag.get_trouve(name)
@@ -156,6 +162,7 @@ def run_tests(
 
             assert trouve.compiled is not None
             routed_name = trouve.compiled.full_name
+            queried_name = physical_names.get(name, routed_name)
 
             # Skip tests that are meaningless on sampled data.
             if use_sample and not test.is_run_with_sample:
@@ -168,11 +175,13 @@ def run_tests(
                 continue
 
             try:
-                sql = test.to_sql(routed_name)
+                sql = test.to_sql(queried_name)
 
                 if use_sample:
-                    sample_subquery = trouve.sample()
-                    pattern = re.compile(re.escape(f"FROM {routed_name}"), re.IGNORECASE)
+                    # sample() is written against the Trouve's own full_name; point
+                    # it at the object actually under test.
+                    sample_subquery = trouve.sample().replace(routed_name, queried_name)
+                    pattern = re.compile(re.escape(f"FROM {queried_name}"), re.IGNORECASE)
                     sql = pattern.sub(f"FROM {sample_subquery}", sql)
 
                 query_result = adapter.execute(sql)

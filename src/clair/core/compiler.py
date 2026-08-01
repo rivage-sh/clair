@@ -13,6 +13,11 @@ from pydantic import BaseModel
 from clair.core.dag import ClairDag
 from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.core.runner import resolve_effective_mode
+from clair.core.strict import (
+    build_clone_statement,
+    build_promote_statements,
+    strict_staging_name,
+)
 from clair.exceptions import CompileError
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
@@ -86,6 +91,46 @@ class CompileOutput(BaseModel):
         return "\n".join(parts)
 
 
+def build_statements(
+    trouve: Trouve,
+    run_mode: RunMode,
+    run_id: str,
+    strict: bool = False,
+) -> list[str]:
+    """Build the SQL statements for one Trouve, as they would be executed.
+
+    Under strict mode the plan is shown end to end: the optional clone, the build
+    into the staging object, and the promotion that follows a passing test run.
+    The runner decides between SWAP and RENAME by checking whether the target
+    exists; compile has no connection, so it shows the SWAP form.
+    """
+    effective_mode = resolve_effective_mode(trouve, run_mode)
+
+    if not strict:
+        return trouve.build_sql(effective_mode, run_id=run_id)
+
+    target_name = trouve.full_name
+    staging_name = strict_staging_name(target_name, run_id)
+
+    statements: list[str] = []
+    if effective_mode == RunMode.INCREMENTAL:
+        statements.append(build_clone_statement(target_name, staging_name))
+    statements.extend(trouve.build_sql(effective_mode, run_id=run_id, target_name=staging_name))
+
+    assert trouve.compiled is not None
+    statements.append("-- strict: tests run against the staging object here")
+    statements.extend(
+        build_promote_statements(
+            trouve.type,
+            staging_name=staging_name,
+            target_name=target_name,
+            target_exists=True,
+            resolved_sql=trouve.compiled.resolved_sql,
+        )
+    )
+    return statements
+
+
 def write_compile_output(
     dag: ClairDag,
     selected: list[str],
@@ -93,6 +138,7 @@ def write_compile_output(
     on_node_compiled: Callable[[CompiledNodeInfo], None] = lambda _: None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     run_id: str = "",
+    strict: bool = False,
 ) -> CompileOutput:
     """Write compiled SQL to _clairtifacts/<run_id>/ and return a structured output.
 
@@ -104,6 +150,8 @@ def write_compile_output(
             to disk, allowing callers to stream output.
         run_mode: The run mode to use when generating SQL statements.
         run_id: UUIDv7 hex string identifying this compile run.
+        strict: When True, emit the full strict-mode plan (staging build, test
+            checkpoint, promotion) rather than a direct write to the target.
 
     Returns:
         A CompileOutput with structured data and a .render() method.
@@ -173,8 +221,7 @@ def write_compile_output(
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text(artifact_content)
         elif trouve.compiled.execution_type == ExecutionType.SNOWFLAKE:
-            effective_mode = resolve_effective_mode(trouve, run_mode)
-            statements = trouve.build_sql(effective_mode, run_id=run_id)
+            statements = build_statements(trouve, run_mode, run_id, strict=strict)
 
             node_info = CompiledNodeInfo(
                 name=name,
