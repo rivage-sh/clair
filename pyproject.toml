@@ -60,3 +60,8 @@ docs = [
 
 [tool.uv]
 exclude-newer = "7 days"
+
+[tool.ruff.lint]
+# Pinned to what ruff selected by default before 0.16 widened its defaults.
+# Stated explicitly so the rule set is a project decision, not a ruff release note.
+select = ["E4", "E7", "E9", "F"]
