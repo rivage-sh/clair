@@ -75,60 +75,55 @@ Set by discovery on each `Trouve.compiled`. Available after `clair compile` or `
 | `imports` | `list[str]` | Logical names of upstream Trouves |
 | `execution_type` | `ExecutionType` | SNOWFLAKE or PANDAS |
 
-## `PandasTrouve`
+## Pandas execution (`df_fn`)
+
+A Trouve runs in pandas when you set `df_fn` in place of `sql`. There is no separate class.
 
 ```python
-from clair import PandasTrouve
+from clair import Trouve
 ```
 
-```python
-class PandasTrouve(BaseModel):
-    inputs:    dict[str, Trouve]
-    transform: Callable[[dict[str, pd.DataFrame]], pd.DataFrame]
-    columns:   list[Column] = []
-    tests:     list[AnyTest] = []
-    docs:      str = ""
-    compiled:  CompiledAttributes | None = None
-```
+### Behaviour
 
-### Fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `inputs` | `dict[str, Trouve]` | required | Maps string keys to upstream Trouves. Keys become the keys passed to `transform` at runtime. |
-| `transform` | `Callable` | required | Function that receives `dict[str, pd.DataFrame]` and returns a `pd.DataFrame`. Runs locally on the clair machine. |
-| `columns` | `list[Column]` | `[]` | Column definitions. Optional. |
-| `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](tests-api.md). |
-| `docs` | `str` | `""` | Documentation string shown in `clair docs`. |
-| `compiled` | `CompiledAttributes \| None` | `None` | Set by discovery. Do not set manually. |
+| Aspect | Detail |
+|--------|--------|
+| Dependencies | Each parameter of `df_fn` whose default value is a `Trouve` becomes an upstream dependency. Clair passes the fetched DataFrame as that keyword argument. |
+| Materialization | Always `TABLE`. Clair creates or replaces the table. |
+| Incremental | Not available. Full-refresh only. |
+| Return value | The function must return a `pd.DataFrame`. Any other type fails the run. |
+| Installation | No extra needed. pandas is a dependency of clair. |
 
 ### Constraints
 
-- Always materializes as `TABLE` (CREATE OR REPLACE).
-- Always full-refresh — `run_config` is not supported.
-- `transform` must return a `pd.DataFrame`; returning anything else raises an error at run time.
-- Requires `clair[pandas]` to be installed; raises `ImportError` at construction time otherwise.
+- `sql` and `df_fn` are mutually exclusive. A Trouve with both raises `ValueError`.
+- `df_fn` must be callable.
+- A `df_fn` Trouve must be `TrouveType.TABLE`. A VIEW or SOURCE raises `ValueError`.
+- A `df_fn` Trouve does not support incremental run modes.
 
 ### Example
 
 ```python
 import pandas as pd
-from clair import PandasTrouve, Column, ColumnType, TestNotNull
-from refined.products.catalog import trouve as catalog
-from refined.products.reviews import trouve as reviews
+from refined.products.catalog import trouve as catalog_trouve
+from refined.products.reviews import trouve as reviews_trouve
 
-def top_rated(inputs: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    df = inputs["catalog"].merge(inputs["reviews"], on="product_id")
+from clair import Column, ColumnType, TestNotNull, Trouve
+
+
+def top_rated(
+    catalog: pd.DataFrame = catalog_trouve,  # type: ignore
+    reviews: pd.DataFrame = reviews_trouve,  # type: ignore
+) -> pd.DataFrame:
+    df = catalog.merge(reviews, on="product_id")
     return (
-        df.groupby(["product_id", "name"])["rating"]
+        df.groupby(["product_id", "name"], as_index=False)["rating"]
         .mean()
-        .reset_index()
         .query("rating >= 4")
     )
 
-trouve = PandasTrouve(
-    inputs={"catalog": catalog, "reviews": reviews},
-    transform=top_rated,
+
+trouve = Trouve(
+    df_fn=top_rated,
     columns=[
         Column(name="product_id", type=ColumnType.STRING),
         Column(name="name",       type=ColumnType.STRING),

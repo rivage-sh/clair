@@ -1,8 +1,8 @@
 # Pandas-Native Transformations
 
-`PandasTrouve` lets you write any pipeline step as a plain Python function. Clair fetches your upstream tables from Snowflake as DataFrames, runs your function on the machine executing clair, and writes the result back to Snowflake — with full DAG integration, lineage, selectors, and data quality tests.
+A `Trouve` with a `df_fn` lets you write a pipeline step as a plain Python function. Clair fetches your upstream tables from Snowflake as DataFrames, runs your function on the machine executing clair, and writes the result back to Snowflake — with full DAG integration, lineage, selectors, and data quality tests.
 
-## When to use PandasTrouve
+## When to use `df_fn`
 
 Use it when SQL is the wrong tool for the job:
 
@@ -11,49 +11,53 @@ Use it when SQL is the wrong tool for the job:
 - Multi-step aggregations that depend on intermediate Python state
 - Logic you already have as pandas code
 
-For everything else, prefer `Trouve` with SQL — it runs entirely inside Snowflake and doesn't require moving data over the network.
+For everything else, give the `Trouve` a `sql` string — it runs entirely inside Snowflake and does not move data over the network.
 
 ## Installation
 
-`PandasTrouve` requires no additional installation — pandas is included in clair by default.
+`df_fn` needs no extra installation. pandas is a dependency of clair.
 
 ## Basic example
 
 ```python
 # derived/products/top_rated.py  →  derived.products.top_rated
 import pandas as pd
-from clair import PandasTrouve
-from refined.products.catalog import trouve as catalog
-from refined.products.reviews import trouve as reviews
+from refined.products.catalog import trouve as catalog_trouve
+from refined.products.reviews import trouve as reviews_trouve
 
-def top_rated(inputs: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    df = inputs["catalog"].merge(inputs["reviews"], on="product_id")
+from clair import Trouve
+
+
+def top_rated(
+    catalog: pd.DataFrame = catalog_trouve,  # type: ignore
+    reviews: pd.DataFrame = reviews_trouve,  # type: ignore
+) -> pd.DataFrame:
+    df = catalog.merge(reviews, on="product_id")
     return (
-        df.groupby(["product_id", "name"])["rating"]
+        df.groupby(["product_id", "name"], as_index=False)["rating"]
         .mean()
-        .reset_index()
         .rename(columns={"rating": "avg_rating"})
         .query("avg_rating >= 4")
     )
 
-trouve = PandasTrouve(
-    inputs={"catalog": catalog, "reviews": reviews},
-    transform=top_rated,
-)
+
+trouve = Trouve(df_fn=top_rated)
 ```
 
-`inputs` maps string keys to upstream Trouve objects (imported as usual). Those same keys are passed to your function at runtime.
+You declare each dependency as a **parameter default value**: annotate the parameter as `pd.DataFrame` and give it the upstream Trouve object as its default. At run time clair replaces each default with the fetched DataFrame and calls your function. The parameter name is the name you use in the function body — it does not need to match the import.
+
+!!! note
+    The `# type: ignore` comment is necessary. A type checker sees a `Trouve` object assigned to a `pd.DataFrame` parameter and reports a mismatch. clair substitutes the DataFrame before it calls the function, so the annotation is correct at run time.
 
 ## With columns and tests
 
-`columns` and `tests` work identically to SQL Trouves:
+`columns` and `tests` work the same as they do for SQL Trouves:
 
 ```python
-from clair import PandasTrouve, Column, ColumnType, TestNotNull, TestRowCount
+from clair import Column, ColumnType, TestNotNull, TestRowCount, Trouve
 
-trouve = PandasTrouve(
-    inputs={"catalog": catalog, "reviews": reviews},
-    transform=top_rated,
+trouve = Trouve(
+    df_fn=top_rated,
     columns=[
         Column(name="product_id", type=ColumnType.STRING),
         Column(name="name",       type=ColumnType.STRING),
@@ -69,31 +73,36 @@ trouve = PandasTrouve(
 
 ## How it runs
 
-When clair encounters a `PandasTrouve` node during `clair run`:
+`clair run` gives a `df_fn` Trouve these four steps:
 
-1. **Fetch** — for each entry in `inputs`, executes `SELECT * FROM <full_name>` and loads the result into a DataFrame
-2. **Transform** — calls `transform({"key": df, ...})` locally on the clair machine
-3. **Write** — writes the returned DataFrame back to Snowflake (`CREATE OR REPLACE TABLE`)
-4. **Test** — runs any attached tests against the output table in Snowflake
+1. **Fetch** — for each parameter whose default is a Trouve, run `SELECT * FROM <full_name>` and load the result into a DataFrame. Column names become lowercase.
+2. **Transform** — call your function locally on the clair machine, with one keyword argument for each parameter.
+3. **Write** — write the returned DataFrame back to Snowflake. The table is created or replaced.
+4. **Test** — run the attached tests against the output table in Snowflake.
+
+If your function returns something other than a `DataFrame`, the run fails with a clear message and the downstream nodes are skipped.
 
 !!! note
-    Data is fetched into memory on the machine running clair. For large upstream tables this can be slow and memory-intensive. Chunked reads are not supported in v1.
+    Clair reads the data into memory on the machine that runs clair. For large upstream tables this is slow and it uses much memory. Chunked reads are not available.
 
 ## DAG integration
 
-Dependencies are declared via the `inputs` dict — no separate configuration needed. `clair dag` renders `PandasTrouve` nodes with a `[pandas]` annotation:
+Dependencies come from the parameter defaults. No extra configuration is necessary. `clair dag` marks these nodes with a `[PANDAS]` tag, in place of the `[TABLE]` or `[VIEW]` tag:
 
 ```
-derived.products.top_rated [pandas]
-  refined.products.catalog [table]
-  refined.products.reviews [table]
+=== Clair DAG: 3 models, 1 source ===
+
+example_4_database.source.events  [SOURCE]
+└── example_4_database.refined.events  [TABLE]
+    └── example_4_database.derived.daily_event_counts  [PANDAS]
+        └── example_4_database.derived.top_event_types  [TABLE]
 ```
 
-SQL Trouves can depend on `PandasTrouve` output, and `PandasTrouve` nodes can depend on other `PandasTrouve` nodes.
+SQL Trouves can depend on the output of a `df_fn` Trouve, and a `df_fn` Trouve can depend on other `df_fn` Trouves. The tree above shows both: a `df_fn` node reads a SQL table, and a SQL table reads the `df_fn` output.
 
 ## Selectors
 
-`--select` filtering works the same way:
+`--select` filtering operates the same way:
 
 ```bash
 clair run --project=. --env=dev --select='derived.products.top_rated'
@@ -101,30 +110,42 @@ clair run --project=. --env=dev --select='derived.products.top_rated'
 
 ## Compile output
 
-`clair compile` writes a `.json` manifest for each `PandasTrouve` instead of a `.sql` file:
+`clair compile` writes a `.py` artifact for a `df_fn` Trouve, in place of the `.sql` file it writes for a SQL Trouve. The artifact holds a header, the imports of the source module, and the source of your function:
 
-```json
-{
-  "type": "pandas",
-  "full_name": "derived.products.top_rated",
-  "inputs": {"catalog": "refined.products.catalog", "reviews": "refined.products.reviews"},
-  "transform_fn": "top_rated",
-  "source_file": "derived/products/top_rated.py"
-}
+```python
+# clair compiled: derived.products.top_rated
+# execution_type: pandas
+# inputs:
+#   catalog  ->  refined.products.catalog
+#   reviews  ->  refined.products.reviews
+
+import pandas as pd
+
+def top_rated(
+    catalog: pd.DataFrame = catalog_trouve,  # type: ignore
+    reviews: pd.DataFrame = reviews_trouve,  # type: ignore
+) -> pd.DataFrame:
+    ...
 ```
 
-## Limitations (v1)
+## Limitations
 
-- **Full-refresh only.** Incremental strategies are not supported. `PandasTrouve` always runs `CREATE OR REPLACE TABLE`.
-- **TABLE output only.** Views are not supported.
-- **Full table fetch.** All upstream rows are loaded into memory. There is no chunking.
+- **Full-refresh only.** Incremental strategies are not available. A `df_fn` Trouve always replaces the table. A `RunConfig` with an incremental mode raises an error.
+- **TABLE output only.** Views are not available.
+- **Full table fetch.** Clair reads all upstream rows into memory. Chunking is not available.
+- **`sql` and `df_fn` are mutually exclusive.** A Trouve with both raises an error.
 
 ## Field reference
 
+These are the `Trouve` fields that apply to pandas execution. See the [Trouve API reference](../reference/trouve-api.md) for the full list.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `inputs` | `dict[str, Trouve]` | required | Maps keys to upstream Trouves. Keys become the keys in the dict passed to `transform`. |
-| `transform` | `Callable[[dict[str, DataFrame]], DataFrame]` | required | Python function that receives the input DataFrames and returns the output DataFrame. |
-| `columns` | `list[Column]` | `[]` | Column definitions. Optional — used for documentation and schema enforcement. |
-| `tests` | `list[AnyTest]` | `[]` | Data quality tests run after the output is written. |
+| `df_fn` | `Callable \| None` | `None` | Python function that returns the output DataFrame. Its parameter defaults declare the upstream Trouves. Mutually exclusive with `sql`. |
+| `columns` | `list[Column]` | `[]` | Column definitions. Optional — used for documentation. |
+| `tests` | `list[AnyTest]` | `[]` | Data quality tests, run after clair writes the output. |
 | `docs` | `str` | `""` | Documentation string shown in `clair docs`. |
+
+## Complete example
+
+`example_projects/example_4/` in the repository is a runnable project that uses `df_fn`. See `example_4_database/derived/daily_event_counts.py`.
