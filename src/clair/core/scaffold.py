@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from clair.environments.project_routing import ROUTING_FILE_NAME
+
 # ---------------------------------------------------------------------------
 # File templates
 # ---------------------------------------------------------------------------
@@ -16,9 +18,33 @@ trouve = Trouve(
 )
 '''
 
+_ROUTING_TEMPLATE = '''\
+"""Clair routing -- maps each environment to its physical write target.
+
+Each key matches a top-level key in ~/.clair/environments.yml. A rule accepts
+(database_name, schema_name, table_name) and returns the physical name
+"database_name.schema_name.table_name". SOURCE Trouves never route.
+
+Commit this file. It holds no credentials.
+Run `clair validate` to apply these rules to every Trouve in the project.
+"""
+
+import os
+
+routing = {
+    # Each person writes to a separate database. Set CLAIR_USER for each person.
+    "dev": lambda database_name, schema_name, table_name: (
+        f"{database_name}_{os.environ['CLAIR_USER'].upper()}.{schema_name}.{table_name}"
+    ),
+    # Production writes to the logical names, so it needs no rule.
+    "prod": None,
+}
+'''
+
 _ENVIRONMENTS_TEMPLATE = '''\
 # Clair environments — connection settings per environment.
-# Reference: https://github.com/your-org/clair
+# Routing is not here. It lives in the project __routing__.py file.
+# Reference: https://github.com/rivage-sh/clair
 
 dev:
   account: your-org-your-account   # e.g. myorg-myaccount
@@ -61,8 +87,8 @@ def scaffold_project(
 ) -> list[tuple[str, str]]:
     """Create a new Clair project at *project_dir*.
 
-    Generates an example source Trouve file and a global
-    ``~/.clair/environments.yml`` (if it does not already exist).
+    Writes an example source Trouve file, a project ``__routing__.py``, and a
+    global ``~/.clair/environments.yml`` if that file does not exist yet.
 
     Args:
         project_dir: Root directory for the new project.
@@ -80,6 +106,7 @@ def scaffold_project(
     # All project files: (relative_path, template_content)
     project_files: list[tuple[str, str]] = [
         (f"{source_database_name}/{source_schema_name}/{source_table_name}.py", _SOURCE_TROUVE_TEMPLATE),
+        (ROUTING_FILE_NAME, _ROUTING_TEMPLATE),
     ]
 
     results: list[tuple[str, str]] = []

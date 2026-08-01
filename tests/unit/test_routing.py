@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from clair.environments.routing import (
     DatabaseOverrideRouting,
     SchemaIsolationRouting,
+    describe_routing,
     detect_routing_collisions,
     route,
 )
@@ -72,6 +73,111 @@ class TestRoute:
     def test_no_routing_passthrough_for_view(self):
         result = route("analytics.finance.summary", TrouveType.VIEW, None)
         assert result == "analytics.finance.summary"
+
+
+class TestCallableRouting:
+    def test_callable_routes_a_table(self):
+        def routing(database_name, schema_name, table_name):
+            return f"{database_name}_dev.{schema_name}.{table_name}"
+
+        result = route("refined.products.catalog", TrouveType.TABLE, routing)
+        assert result == "refined_dev.products.catalog"
+
+    def test_callable_receives_three_separate_arguments(self):
+        seen = []
+
+        def routing(database_name, schema_name, table_name):
+            seen.append((database_name, schema_name, table_name))
+            return f"{database_name}.{schema_name}.{table_name}"
+
+        route("analytics.finance.revenue", TrouveType.TABLE, routing)
+        assert seen == [("analytics", "finance", "revenue")]
+
+    def test_source_passthrough_with_callable(self):
+        def routing(database_name, schema_name, table_name):
+            return f"{database_name}_dev.{schema_name}.{table_name}"
+
+        result = route("refined.products.catalog", TrouveType.SOURCE, routing)
+        assert result == "refined.products.catalog"
+
+    def test_callable_returning_two_parts_raises(self):
+        routing = lambda database_name, schema_name, table_name: f"{schema_name}.{table_name}"
+        with pytest.raises(InvalidRoutingConfigError, match="3 dot-separated parts"):
+            route("analytics.finance.revenue", TrouveType.TABLE, routing)
+
+    def test_callable_returning_non_string_raises(self):
+        routing = lambda database_name, schema_name, table_name: None
+        with pytest.raises(InvalidRoutingConfigError, match="NoneType"):
+            route("analytics.finance.revenue", TrouveType.TABLE, routing)
+
+    def test_callable_returning_invalid_identifier_raises(self):
+        routing = lambda database_name, schema_name, table_name: f"my-db.{schema_name}.{table_name}"
+        with pytest.raises(InvalidRoutingConfigError, match="invalid database_name"):
+            route("analytics.finance.revenue", TrouveType.TABLE, routing)
+
+    def test_callable_that_raises_is_wrapped(self, monkeypatch):
+        import os
+
+        monkeypatch.delenv("CLAIR_USER", raising=False)
+
+        def routing(database_name, schema_name, table_name):
+            return f"{database_name}_{os.environ['CLAIR_USER']}.{schema_name}.{table_name}"
+
+        with pytest.raises(InvalidRoutingConfigError, match="KeyError"):
+            route("analytics.finance.revenue", TrouveType.TABLE, routing)
+
+    def test_callable_reads_environment_variable(self, monkeypatch):
+        import os
+
+        monkeypatch.setenv("CLAIR_USER", "obaddour")
+
+        def routing(database_name, schema_name, table_name):
+            user = os.environ["CLAIR_USER"].upper()
+            return f"{database_name}_{user}.{schema_name}.{table_name}"
+
+        result = route("analytics.finance.revenue", TrouveType.TABLE, routing)
+        assert result == "analytics_OBADDOUR.finance.revenue"
+
+
+class TestTypedRoutingValidation:
+    """route() validates every rule kind, not schema_isolation alone."""
+
+    def test_database_override_rejects_an_invalid_identifier(self):
+        routing = _db_override("my-dev-db")
+        with pytest.raises(InvalidRoutingConfigError, match="invalid database_name"):
+            route("analytics.finance.revenue", TrouveType.TABLE, routing)
+
+    def test_database_override_accepts_a_valid_identifier(self):
+        routing = _db_override("MY_DEV_DB")
+        assert route("a.b.c", TrouveType.TABLE, routing) == "MY_DEV_DB.b.c"
+
+
+class TestDescribeRouting:
+    def test_describes_none(self):
+        assert describe_routing(None) == "none"
+
+    def test_describes_database_override(self):
+        assert "OMER_DEV" in describe_routing(_db_override("OMER_DEV"))
+
+    def test_describes_schema_isolation(self):
+        description = describe_routing(_schema_isolation("DEV", "obaddour"))
+        assert "DEV.obaddour" in description
+
+    def test_describes_a_named_function_by_its_source(self):
+        def dev_routing(database_name, schema_name, table_name):
+            return f"{database_name}_dev.{schema_name}.{table_name}"
+
+        description = describe_routing(dev_routing)
+        assert "_dev" in description
+
+    def test_description_stays_on_one_line(self):
+        def dev_routing(database_name, schema_name, table_name):
+            return (
+                f"{database_name}_dev"
+                f".{schema_name}.{table_name}"
+            )
+
+        assert "\n" not in describe_routing(dev_routing)
 
 
 class TestDetectRoutingCollisions:

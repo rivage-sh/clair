@@ -50,11 +50,17 @@ class TestScaffoldCreatesAllExpectedFiles:
         environments_path = fake_home / ".clair" / "environments.yml"
         assert environments_path.exists()
 
+    def test_creates_routing_file(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "my_project"
+        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
+
+        assert (project_dir / "__routing__.py").exists()
+
     def test_returns_all_paths_as_created(self, tmp_path: Path) -> None:
         results = _run_scaffold(tmp_path)
 
-        # 1 project file + 1 environments.yml
-        assert len(results) == 2
+        # 1 source Trouve + 1 __routing__.py + 1 environments.yml
+        assert len(results) == 3
         assert all(status == "created" for status, _ in results)
 
 
@@ -74,7 +80,17 @@ class TestFileContents:
         assert "dev:" in content
         assert "account:" in content
         assert "externalbrowser" in content
-        assert "  routing:" not in content  # routing omitted by default; shown as comment only
+        # Routing lives in the project __routing__.py, never in environments.yml.
+        assert "  routing:" not in content
+
+    def test_routing_file_defines_a_routing_table(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "proj"
+        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
+
+        content = (project_dir / "__routing__.py").read_text()
+        assert "routing = {" in content
+        assert "CLAIR_USER" in content
+        assert "database_name, schema_name, table_name" in content
 
 
 class TestDoesNotOverwriteExistingFiles:

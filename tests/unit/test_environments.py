@@ -7,12 +7,10 @@ from pathlib import Path
 import pytest
 
 from clair.environments.environments import load_environment
-from clair.environments.routing import SchemaIsolationRouting
 from clair.exceptions import (
     EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
-    InvalidRoutingConfigError,
-    InvalidRoutingPolicyError,
+    RoutingInEnvironmentsFileError,
 )
 
 
@@ -57,42 +55,28 @@ class TestLoadEnvironment:
         assert env.private_key_path == "/secrets/snowflake_key_enc.p8"
         assert env.private_key_passphrase == "s3cr3t"
 
-    def test_routing_parsed_for_database_override(self, tmp_environments: Path):
-        _, env = load_environment(env_name="with_routing", environments_path=tmp_environments)
-        assert env.routing is not None
-        assert env.routing.policy == "database_override"
-        assert env.routing.database_name == "OMER_DEV"
-
-    def test_routing_parsed_for_schema_isolation(self, tmp_environments: Path):
-        _, env = load_environment(env_name="with_schema_isolation", environments_path=tmp_environments)
-        assert isinstance(env.routing, SchemaIsolationRouting)
-        assert env.routing.policy == "schema_isolation"
-        assert env.routing.database_name == "DEV"
-        assert env.routing.schema_name == "obaddour"
-
-    def test_no_routing_returns_none(self, tmp_environments: Path):
+    def test_environment_has_no_routing_attribute(self, tmp_environments: Path):
         _, env = load_environment(env_name="dev", environments_path=tmp_environments)
-        assert env.routing is None
+        assert not hasattr(env, "routing")
 
 
-class TestLoadEnvironmentValidation:
-    def test_missing_policy_raises(self, tmp_path: Path):
-        bad = tmp_path / "env.yml"
-        bad.write_text("dev:\n  account: x\n  user: y\n  warehouse: z\n  routing:\n    database_name: FOO\n")
-        with pytest.raises(InvalidRoutingConfigError, match="policy"):
-            load_environment(environments_path=bad)
+class TestLegacyRoutingBlock:
+    """Routing moved to the project __routing__.py. The old block must not pass silently."""
 
-    def test_unknown_policy_raises(self, tmp_path: Path):
-        bad = tmp_path / "env.yml"
-        bad.write_text("dev:\n  account: x\n  user: y\n  warehouse: z\n  routing:\n    policy: nonsense\n    database_name: FOO\n")
-        with pytest.raises(InvalidRoutingPolicyError, match="nonsense"):
-            load_environment(environments_path=bad)
+    def test_legacy_routing_block_raises(self, tmp_environments: Path):
+        with pytest.raises(RoutingInEnvironmentsFileError, match="legacy_routing"):
+            load_environment(env_name="legacy_routing", environments_path=tmp_environments)
 
-    def test_schema_isolation_missing_schema_name_raises(self, tmp_path: Path):
-        bad = tmp_path / "env.yml"
-        bad.write_text("dev:\n  account: x\n  user: y\n  warehouse: z\n  routing:\n    policy: schema_isolation\n    database_name: DEV\n")
-        with pytest.raises(InvalidRoutingConfigError, match="schema_name"):
-            load_environment(environments_path=bad)
+    def test_error_names_the_new_file(self, tmp_environments: Path):
+        with pytest.raises(RoutingInEnvironmentsFileError, match=r"__routing__\.py"):
+            load_environment(env_name="legacy_routing", environments_path=tmp_environments)
+
+    def test_environment_without_routing_block_loads(self, tmp_path: Path):
+        good = tmp_path / "env.yml"
+        good.write_text("dev:\n  account: x\n  user: y\n  warehouse: z\n")
+        name, env = load_environment(environments_path=good)
+        assert name == "dev"
+        assert env.account == "x"
 
 
 class TestToConnectionDict:

@@ -17,7 +17,7 @@ import clair as _clair_pkg
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
 
-from clair.environments.routing import RoutingConfig, detect_routing_collisions, route
+from clair.environments.routing import RoutingRule, detect_routing_collisions, route
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
@@ -145,7 +145,7 @@ def _detect_imports(
 def discover_project(
     project_root: Path,
     profile_defaults: dict[str, str | None] | None = None,
-    routing: RoutingConfig | None = None,
+    routing: RoutingRule | None = None,
     environment: Environment | None = None,
     run_mode: RunMode | None = None,
 ) -> list[Trouve]:
@@ -157,7 +157,7 @@ def discover_project(
     Args:
         project_root: Absolute path to the project root directory.
         profile_defaults: Default warehouse/role from the active profile.
-        routing: Routing configuration for physical name overrides.
+        routing: Routing rule for physical name overrides, from __routing__.py.
         environment: Active environment. Exposed as ``clair.env`` so Trouve
             modules can read it during loading (e.g. for feature flags).
         run_mode: Requested run mode (FULL_REFRESH or INCREMENTAL). Exposed as

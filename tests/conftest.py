@@ -32,7 +32,7 @@ def clean_sys_modules():
     for mod_name in after - before:
         if any(
             part in mod_name
-            for part in ("source.", "analytics.", "db.", "tmp_project")
+            for part in ("source.", "analytics.", "db.", "tmp_project", "_clair_routing_")
         ):
             del sys.modules[mod_name]
 
@@ -68,7 +68,7 @@ key_auth_encrypted:
   private_key_passphrase: s3cr3t
   warehouse: key_wh
 
-with_routing:
+legacy_routing:
   account: test-account
   user: test-user
   authenticator: externalbrowser
@@ -76,17 +76,15 @@ with_routing:
   routing:
     policy: database_override
     database_name: OMER_DEV
-
-with_schema_isolation:
-  account: test-account
-  user: test-user
-  authenticator: externalbrowser
-  warehouse: test_wh
-  routing:
-    policy: schema_isolation
-    database_name: DEV
-    schema_name: obaddour
 """
     environments_file = tmp_path / "environments.yml"
     environments_file.write_text(environments_content)
     return environments_file
+
+
+@pytest.fixture
+def routing_project(tmp_path: Path) -> Path:
+    """Create a project directory that holds a __routing__.py file."""
+    project_dir = tmp_path / "routing_project"
+    project_dir.mkdir()
+    return project_dir

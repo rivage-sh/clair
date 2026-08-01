@@ -7,21 +7,23 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 
-from clair.environments.routing import Routing
 from clair.exceptions import (
     EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
-    InvalidRoutingConfigError,
-    InvalidRoutingPolicyError,
+    RoutingInEnvironmentsFileError,
 )
 
 DEFAULT_ENVIRONMENTS_PATH = Path.home() / ".clair" / "environments.yml"
 
 
 class Environment(BaseModel):
-    """A single environment from environments.yml."""
+    """A single environment from environments.yml.
+
+    An environment holds connection settings only. Routing lives in the project
+    ``__routing__.py``, under the same environment name.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -44,9 +46,6 @@ class Environment(BaseModel):
     region: str | None = None
     account_locator: str | None = None
 
-    # Routing
-    routing: Routing | None = None
-
     def to_connection_dict(self) -> dict[str, Any]:
         """Return the connection dict expected by SnowflakeAdapter.connect()."""
         d: dict[str, Any] = {
@@ -66,21 +65,6 @@ class Environment(BaseModel):
         if self.private_key_passphrase:
             d["private_key_passphrase"] = self.private_key_passphrase
         return d
-
-
-def _validate_routing_block(routing_raw: dict[str, Any]) -> None:
-    """Pre-validate routing block before Pydantic parses it.
-
-    Catches missing/unknown policy values and re-raises as clair-specific
-    error types that the CLI already handles.
-    """
-    if "policy" not in routing_raw:
-        raise InvalidRoutingConfigError("routing block requires 'policy'")
-
-    policy = routing_raw["policy"]
-    valid_policies = {"database_override", "schema_isolation"}
-    if policy not in valid_policies:
-        raise InvalidRoutingPolicyError(policy)
 
 
 def load_environment(
@@ -104,8 +88,7 @@ def load_environment(
     Raises:
         EnvironmentsFileNotFoundError: If environments.yml does not exist.
         EnvironmentNotFoundError: If the requested environment is not in environments.yml.
-        InvalidRoutingPolicyError: If an unknown routing policy is specified.
-        InvalidRoutingConfigError: If the routing block is malformed.
+        RoutingInEnvironmentsFileError: If the environment still has a routing block.
     """
     resolved_name = env_name or os.environ.get("CLAIR_ENV") or "dev"
     path = environments_path or DEFAULT_ENVIRONMENTS_PATH
@@ -124,14 +107,9 @@ def load_environment(
 
     env_data: dict[str, Any] = raw[resolved_name]
 
-    routing_raw = env_data.get("routing")
-    if isinstance(routing_raw, dict):
-        _validate_routing_block(routing_raw)
+    # Pydantic drops an unknown key without a word. A leftover routing block
+    # would then send every write to the production names.
+    if "routing" in env_data:
+        raise RoutingInEnvironmentsFileError(str(path), resolved_name)
 
-    try:
-        environment = Environment(name=resolved_name, **env_data)
-        return resolved_name, environment
-    except ValidationError as exc:
-        # Surface Pydantic validation errors (e.g. missing schema_name for
-        # schema_isolation) as clair-specific errors the CLI already catches.
-        raise InvalidRoutingConfigError(str(exc)) from exc
+    return resolved_name, Environment(name=resolved_name, **env_data)
