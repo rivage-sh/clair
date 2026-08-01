@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Per-product sales aggregates joined with product details.",
+    docs="Sales totals for each product, with the details of the product.",
     sql=f"""
         select
             p.product_id,

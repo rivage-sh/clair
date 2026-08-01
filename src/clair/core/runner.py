@@ -52,7 +52,7 @@ class RunResult(BaseModel):
     @model_validator(mode='after')
     def _check_skipped_has_cause(self) -> RunResult:
         if self.status == RunStatus.SKIPPED and not self.skipped_by:
-            raise ValueError("SKIPPED results must specify skipped_by")
+            raise ValueError("a SKIPPED result must have skipped_by")
         return self
 
 
@@ -101,7 +101,7 @@ class RunSummary(BaseModel):
         return (
             f"=== Clair Run (env: {env_name}) ===\n"
             f"\n"
-            f"Running {total} Trouve{'s' if total != 1 else ''}...\n"
+            f"Clair runs {total} Trouve{'s' if total != 1 else ''}...\n"
         )
 
     @staticmethod
@@ -111,7 +111,7 @@ class RunSummary(BaseModel):
 
         if result.status == RunStatus.SKIPPED:
             lines.append(f"[{index}/{total}] {result.full_name} ... SKIPPED")
-            lines.append(f"      Reason: upstream dependency {result.skipped_by} failed")
+            lines.append(f"      Reason: the upstream dependency {result.skipped_by} failed")
         elif result.status == RunStatus.SUCCESS:
             lines.append(
                 f"[{index}/{total}] {result.full_name} ... OK ({result.duration_seconds:.1f}s)"
@@ -195,7 +195,7 @@ def _run_df_fn_trouve(
                 return RunResult(
                     full_name=trouve.full_name,
                     status=RunStatus.FAILURE,
-                    error=f"Failed to fetch '{param_name}' ({param.default.full_name}): {fetch_error}",
+                    error=f"Clair cannot read the input '{param_name}' ({param.default.full_name}): {fetch_error}",
                     duration_seconds=duration,
                 )
 
@@ -207,7 +207,7 @@ def _run_df_fn_trouve(
         return RunResult(
             full_name=trouve.full_name,
             status=RunStatus.FAILURE,
-            error=f"Transform function failed: {transform_error}",
+            error=f"The transform function failed: {transform_error}",
             duration_seconds=duration,
         )
 
@@ -218,8 +218,8 @@ def _run_df_fn_trouve(
             full_name=trouve.full_name,
             status=RunStatus.FAILURE,
             error=(
-                f"Transform function must return a pandas DataFrame, "
-                f"got {type(result_dataframe).__name__}"
+                f"The transform function must return a pandas DataFrame, "
+                f"but it returned {type(result_dataframe).__name__}"
             ),
             duration_seconds=duration,
         )
@@ -232,7 +232,7 @@ def _run_df_fn_trouve(
         return RunResult(
             full_name=full_name,
             status=RunStatus.FAILURE,
-            error=f"Cannot parse full_name '{full_name}' into database.schema.table",
+            error=f"Clair cannot divide the full_name '{full_name}' into database.schema.table",
             duration_seconds=duration,
         )
 
@@ -251,7 +251,7 @@ def _run_df_fn_trouve(
         return RunResult(
             full_name=full_name,
             status=RunStatus.FAILURE,
-            error=f"Failed to write DataFrame to {full_name}: {write_error}",
+            error=f"Clair cannot write the DataFrame to {full_name}: {write_error}",
             duration_seconds=duration,
         )
 
@@ -320,7 +320,7 @@ def run_project(
                 yield RunResult(
                     full_name=name,
                     status=RunStatus.FAILURE,
-                    error=f"Failed to set session context: {e}",
+                    error=f"Clair cannot set the session context: {e}",
                 )
                 for desc in nx.descendants(dag, name):
                     skip_reasons.setdefault(desc, name)

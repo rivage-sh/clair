@@ -75,7 +75,7 @@ def _validate_routing_block(routing_raw: dict[str, Any]) -> None:
     it raises a clair error type that the CLI already knows.
     """
     if "policy" not in routing_raw:
-        raise InvalidRoutingConfigError("routing block requires 'policy'")
+        raise InvalidRoutingConfigError("the routing block must have a 'policy' value")
 
     policy = routing_raw["policy"]
     valid_policies = {"database_override", "schema_isolation"}

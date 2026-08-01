@@ -17,7 +17,7 @@ def daily_event_counts(
 
 trouve = Trouve(
     df_fn=daily_event_counts,
-    docs="Daily counts of each event type, aggregated from refined events.",
+    docs="Daily count of each event type. This Trouve reads the refined events.",
     columns=[
         Column(name="event_date", type=ColumnType.DATE),
         Column(name="event_type", type=ColumnType.STRING),

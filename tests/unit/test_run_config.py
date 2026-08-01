@@ -40,18 +40,18 @@ class TestRunConfigValidation:
         assert config.join_sql == "target.id = source.id"
 
     def test_full_refresh_rejects_incremental_mode(self):
-        with pytest.raises(ValueError, match="incremental_mode is only valid when run_mode is incremental"):
+        with pytest.raises(ValueError, match="you can set incremental_mode only when run_mode is incremental"):
             RunConfig(
                 run_mode=RunMode.FULL_REFRESH,
                 incremental_mode=IncrementalMode.APPEND,
             )
 
     def test_incremental_requires_strategy(self):
-        with pytest.raises(ValueError, match="incremental run_mode requires incremental_mode"):
+        with pytest.raises(ValueError, match="the incremental run_mode needs incremental_mode"):
             RunConfig(run_mode=RunMode.INCREMENTAL)
 
     def test_append_rejects_primary_key_columns(self):
-        with pytest.raises(ValueError, match="primary_key_columns is only valid for upsert mode"):
+        with pytest.raises(ValueError, match="you can set primary_key_columns only for the upsert mode"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.APPEND,
@@ -59,7 +59,7 @@ class TestRunConfigValidation:
             )
 
     def test_append_rejects_join_sql(self):
-        with pytest.raises(ValueError, match="join_sql is only valid for upsert mode"):
+        with pytest.raises(ValueError, match="you can set join_sql only for the upsert mode"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.APPEND,
@@ -67,7 +67,7 @@ class TestRunConfigValidation:
             )
 
     def test_upsert_rejects_both_primary_key_columns_and_join_sql(self):
-        with pytest.raises(ValueError, match="specify primary_key_columns or join_sql, not both"):
+        with pytest.raises(ValueError, match="set primary_key_columns or join_sql, but not both"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.UPSERT,
@@ -76,7 +76,7 @@ class TestRunConfigValidation:
             )
 
     def test_upsert_requires_primary_key_columns_or_join_sql(self):
-        with pytest.raises(ValueError, match="upsert mode requires primary_key_columns or join_sql"):
+        with pytest.raises(ValueError, match="the upsert mode needs primary_key_columns or join_sql"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.UPSERT,
@@ -94,7 +94,7 @@ class TestRunConfigValidation:
         assert config.upsert_config.insert_columns == ["id", "name"]
 
     def test_append_rejects_upsert_config(self):
-        with pytest.raises(ValueError, match="upsert_config is only valid for upsert mode"):
+        with pytest.raises(ValueError, match="you can set upsert_config only for the upsert mode"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.APPEND,

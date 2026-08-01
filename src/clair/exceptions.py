@@ -12,7 +12,7 @@ class CyclicDependencyError(ClairError):
         self.cycle = cycle
         nodes = [edge[0] for edge in cycle]
         cycle_str = " -> ".join(nodes + [nodes[0]])
-        super().__init__(f"Cyclic dependency detected: {cycle_str}")
+        super().__init__(f"Clair found a cyclic dependency: {cycle_str}")
 
 
 class EnvironmentNotFoundError(ClairError):
@@ -22,8 +22,8 @@ class EnvironmentNotFoundError(ClairError):
         self.env_name = env_name
         self.available = available
         super().__init__(
-            f"Environment '{env_name}' not found in environments.yml. "
-            f"Available environments: {', '.join(available)}"
+            f"Clair cannot find the environment '{env_name}' in environments.yml. "
+            f"These environments are available: {', '.join(available)}"
         )
 
 
@@ -33,9 +33,9 @@ class EnvironmentsFileNotFoundError(ClairError):
     def __init__(self, path: str) -> None:
         self.path = path
         super().__init__(
-            f"environments.yml not found at {path}. "
-            "Run `clair init` to create one, or rename your profiles.yml "
-            "and add a routing block."
+            f"Clair cannot find environments.yml at {path}. "
+            "Run `clair init` to make one. As an alternative, give your "
+            "profiles.yml the new name and add a routing block."
         )
 
 
@@ -45,8 +45,8 @@ class InvalidRoutingPolicyError(ClairError):
     def __init__(self, policy: str) -> None:
         self.policy = policy
         super().__init__(
-            f"Unknown routing policy '{policy}'. "
-            "Valid policies: database_override, schema_isolation"
+            f"Clair does not know the routing policy '{policy}'. "
+            "Use database_override or schema_isolation."
         )
 
 
@@ -64,7 +64,7 @@ class DiscoveryError(ClairError):
     def __init__(self, file_path: str, reason: str) -> None:
         self.file_path = file_path
         self.reason = reason
-        super().__init__(f"Failed to load {file_path}: {reason}")
+        super().__init__(f"Clair cannot load {file_path}: {reason}")
 
 
 class CompileError(ClairError):

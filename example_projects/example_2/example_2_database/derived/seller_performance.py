@@ -7,7 +7,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Seller-level performance combining sales and review metrics.",
+    docs="Performance of each seller. This Trouve joins the sales metrics and the review metrics.",
     sql=f"""
         select
             s.seller_id,

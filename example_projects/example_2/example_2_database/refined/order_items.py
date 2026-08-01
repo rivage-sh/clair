@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined order items with computed gross and net totals.",
+    docs="Refined order items. Each row has the gross total and the net total.",
     sql=f"""
         select
             order_item_id,

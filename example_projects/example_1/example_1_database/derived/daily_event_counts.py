@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Daily counts of each event type, aggregated from refined events.",
+    docs="Daily count of each event type. This Trouve reads the refined events.",
     sql=f"""
         select
             event_date,

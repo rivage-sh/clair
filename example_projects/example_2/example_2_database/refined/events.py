@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined events with flattened properties and event date.",
+    docs="Refined events. Each row has the properties in separate columns and the event date.",
     sql=f"""
         select
             event_id,

@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Top products by net revenue at or above the 90th percentile.",
+    docs="The products with a net revenue in the 90th percentile or higher.",
     sql=f"""
         with p90 as (
             select percentile_cont(0.9) within group (order by net_revenue) as threshold

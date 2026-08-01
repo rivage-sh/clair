@@ -101,8 +101,8 @@ def infer_columns(
             status=ColumnStatus.NO_SQL,
             columns=[],
             message=(
-                "This is a source trouve with no SQL. "
-                "Add columns=[] to document its schema."
+                "This is a source Trouve with no SQL. "
+                "Add columns=[] to the Trouve to show its columns here."
             ),
         )
 
@@ -113,9 +113,9 @@ def infer_columns(
             status=ColumnStatus.SELECT_STAR,
             columns=[],
             message=(
-                "This model uses SELECT * -- columns depend on the upstream "
-                "source and cannot be inferred from SQL alone. Add explicit "
-                "columns=[] to document them."
+                "This model uses SELECT *. The columns come from the upstream "
+                "source, thus Clair cannot find them in the SQL. Add columns=[] "
+                "to the Trouve to show them here."
             ),
         )
 
@@ -129,15 +129,15 @@ def infer_columns(
         return ColumnInference(
             status=ColumnStatus.INFERRED,
             columns=inferred_columns,
-            message="Columns inferred from SQL. Add explicit columns=[] for types and docs.",
+            message="Clair found these columns in the SQL. Add columns=[] to the Trouve to give types and documentation.",
         )
 
     return ColumnInference(
         status=ColumnStatus.PARSE_FAILED,
         columns=[],
         message=(
-            "Could not infer columns from SQL. "
-            "Add explicit columns=[] to document them."
+            "Clair cannot find the columns in the SQL. "
+            "Add columns=[] to the Trouve to show them here."
         ),
     )
 

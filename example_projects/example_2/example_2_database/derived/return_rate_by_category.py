@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Per-category return rates aggregated from product-level data.",
+    docs="Return rate for each category. This Trouve reads the data for each product.",
     sql=f"""
         select
             p.category,

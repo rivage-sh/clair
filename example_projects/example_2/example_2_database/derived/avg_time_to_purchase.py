@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Per-user time from first event to first purchase.",
+    docs="Time from the first event to the first purchase, for each user.",
     sql=f"""
         select
             e.user_id,

@@ -2,7 +2,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.SOURCE,
-    docs="Raw order line items linking orders to products.",
+    docs="Raw order line items. Each row connects one order to one product.",
     columns=[
         Column(name="order_item_id", type=ColumnType.STRING),
         Column(name="order_id", type=ColumnType.STRING),

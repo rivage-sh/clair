@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Monthly order aggregates including revenue and buyer counts.",
+    docs="Monthly totals for the orders. They contain the revenue and the count of the buyers.",
     sql=f"""
         select
             order_month,

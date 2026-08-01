@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined promotions with flattened rules and active flag.",
+    docs="Refined promotions. Each row has the rules in separate columns and an active flag.",
     sql=f"""
         select
             promotion_id,

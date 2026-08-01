@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Promotion usage statistics from orders with applied promos.",
+    docs="Statistics for the use of the promotions. This Trouve reads the orders that have a promotion.",
     sql=f"""
         select
             p.promotion_id,
