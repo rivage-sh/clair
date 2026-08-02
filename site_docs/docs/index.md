@@ -21,15 +21,15 @@ trouve = Trouve(
 )
 ```
 
-Import the upstream, use it in the f-string — clair figures out the rest.
+Import the upstream Trouve and use it in the f-string. clair does the rest.
 
 ## Why clair
 
-- **Dependencies are Python imports.** Lineage is derivable from the import graph, not from a separate metadata layer.
-- **Compile first, run second.** `clair compile` resolves the full DAG and writes SQL to `_clairtifacts/` before touching Snowflake.
-- **Incremental strategies built in.** APPEND and UPSERT modes with no boilerplate — attach a [`RunConfig`](reference/run-config-api.md) to any [`Trouve`](concepts/trouve.md).
+- **Dependencies are Python imports.** clair reads the lineage from the import graph, not from a separate metadata layer.
+- **Compile first, run second.** `clair compile` resolves the full DAG and writes SQL to `_clairtifacts/` before it connects to Snowflake.
+- **clair includes incremental strategies.** Use APPEND and UPSERT modes with no boilerplate. Attach a [`RunConfig`](reference/run-config-api.md) to any [`Trouve`](concepts/trouve.md).
 - **Data quality as code.** Tests are Pydantic objects on the Trouve itself, not a separate test file.
-- **Pandas-native transformations.** Give a Trouve a [`df_fn`](guides/pandas-native.md) to write any step as a Python function — clair fetches upstream tables as DataFrames, runs your code locally, and writes the result back to Snowflake.
+- **Pandas-native transformations.** Give a Trouve a [`df_fn`](guides/pandas-native.md) to write any step as a Python function. clair reads the upstream tables as DataFrames, runs your code on your machine, then writes the result to Snowflake.
 
 ## Install
 
@@ -37,7 +37,7 @@ Import the upstream, use it in the f-string — clair figures out the rest.
 uv tool install rivage-clair
 ```
 
-Verify:
+Show the version:
 
 ```bash
 clair --version

@@ -1,18 +1,18 @@
 # Trouve
 
-A Trouve is the fundamental unit in clair. One Python file = one queryable Snowflake object. Every Trouve is discovered automatically by the framework; you never register them manually.
+A Trouve is the basic unit in clair. One Python file is one Snowflake object that you can query. clair finds every Trouve automatically. You do not register them manually.
 
 ## Types
 
 | Type | Description | SQL required? |
 |------|-------------|---------------|
-| `SOURCE` | Pre-existing table managed by an external tool (e.g. Fivetran, Airbyte) | No |
-| `TABLE` | clair-managed Snowflake table | Yes |
-| `VIEW` | clair-managed Snowflake view | Yes |
+| `SOURCE` | A table that already exists. An external tool controls it (e.g. Fivetran, Airbyte). | No |
+| `TABLE` | A Snowflake table that clair controls | Yes |
+| `VIEW` | A Snowflake view that clair controls | Yes |
 
 ## The f-string pattern
 
-The most important thing to understand about Trouves is how they reference each other. When you write an f-string SQL query, you embed another Trouve directly:
+Trouves reference each other in one way only. Write an f-string SQL query, then put another Trouve into it:
 
 ```python
 from source.products.catalog import trouve as source_catalog
@@ -23,7 +23,7 @@ trouve = Trouve(
 )
 ```
 
-When `{source_catalog}` is evaluated, it calls `Trouve.__format__`, which registers a placeholder token. During discovery, clair replaces that token with the real Snowflake fully-qualified name (e.g. `source.products.catalog`). The Python import also tells clair about the dependency — no separate DAG configuration is needed.
+`{source_catalog}` calls `Trouve.__format__`, which registers a placeholder token. At discovery, clair replaces that token with the real fully-qualified Snowflake name, such as `source.products.catalog`. The Python import also tells clair about the dependency. clair does not need a separate DAG configuration.
 
 ## Field reference
 
@@ -33,7 +33,7 @@ When `{source_catalog}` is evaluated, it calls `Trouve.__format__`, which regist
 | `sql` | `str` | `""` | SQL query. Required for TABLE/VIEW, must be empty for SOURCE. |
 | `columns` | `list[Column]` | `[]` | Column definitions. Required for UPSERT mode. See [Column](../reference/column-api.md). |
 | `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](../guides/data-quality-tests.md). |
-| `docs` | `str` | `""` | Documentation string shown in `clair docs`. |
+| `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
 | `run_config` | `RunConfig` | full refresh | Materialization strategy. See [Incrementality](../guides/incrementality.md). |
 | `df_fn` | `Callable \| None` | `None` | Pandas execution mode (alternative to `sql`). TABLE-only, full-refresh-only. |
 
@@ -41,7 +41,7 @@ When `{source_catalog}` is evaluated, it calls `Trouve.__format__`, which regist
 
 ### SOURCE
 
-A pre-existing Snowflake table. No SQL — clair never writes to it.
+A Snowflake table that already exists. No SQL — clair does not write to it.
 
 ```python
 # source/orders/raw.py  →  source.orders.raw
@@ -49,7 +49,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.SOURCE,
-    docs="Raw orders table loaded by Fivetran.",
+    docs="Raw orders table. Fivetran loads it.",
     columns=[
         Column(name="order_id", type=ColumnType.STRING),
         Column(name="customer_id", type=ColumnType.STRING),
@@ -61,7 +61,7 @@ trouve = Trouve(
 
 ### TABLE
 
-A clair-managed table. Imports an upstream Trouve and references it in an f-string.
+A table that clair controls. It imports an upstream Trouve and references it in an f-string.
 
 ```python
 # refined/orders/daily.py  →  refined.orders.daily
@@ -86,13 +86,13 @@ trouve = Trouve(
         Column(name="created_date", type=ColumnType.DATE),
     ],
     tests=[TestNotNull(column="order_id")],
-    docs="Cleaned orders with date column extracted.",
+    docs="Cleaned orders with a date column.",
 )
 ```
 
 ### VIEW
 
-Same as TABLE but creates a `CREATE OR REPLACE VIEW` instead. Does not support incremental strategies.
+A VIEW is the same as a TABLE, but clair runs `CREATE OR REPLACE VIEW`. A VIEW cannot use incremental strategies.
 
 ```python
 # reports/orders/recent.py  →  reports.orders.recent
@@ -111,7 +111,7 @@ trouve = Trouve(
 
 ## Pandas execution (`df_fn`)
 
-When SQL is not the right tool, give the Trouve a `df_fn` in place of `sql`. You supply a Python function. Clair fetches the upstream tables from Snowflake as DataFrames, calls your function on the machine that runs clair, then writes the result back to Snowflake.
+If SQL is not the correct tool, give the Trouve a `df_fn` in place of `sql`. You supply a Python function. clair reads the upstream tables from Snowflake as DataFrames. Then it calls your function on the machine that runs clair, and writes the result to Snowflake.
 
 ```python
 # derived/products/top_rated.py
@@ -137,26 +137,26 @@ def top_rated(
 trouve = Trouve(df_fn=top_rated)
 ```
 
-Each dependency is a parameter whose default value is the upstream Trouve.
+Each dependency is a parameter with the upstream Trouve as its default value.
 
-Differences between the two execution types:
+The two run types have these differences:
 
 | | `sql` | `df_fn` |
 |---|---|---|
-| Execution | Inside Snowflake | Locally on the clair machine |
+| Runs | In Snowflake | On the clair machine |
 | Output type | TABLE or VIEW | TABLE only |
-| Incremental | Supported | Full-refresh only |
+| Incremental | Yes | Full refresh only |
 | Dependencies | f-string references | Parameter default values |
 
-Everything else — DAG integration, `--select` filtering, data quality tests, `clair dag` output — operates the same way. The two fields are mutually exclusive: a Trouve with both `sql` and `df_fn` raises an error.
+All the other behaviour is the same: the DAG, the `--select` flag, the data quality tests, and the `clair dag` output. You cannot use the two fields together. A Trouve with `sql` and `df_fn` causes an error.
 
-See the [Pandas-native guide](../guides/pandas-native.md) for a full walkthrough.
+See the [Pandas-native guide](../guides/pandas-native.md) for a full example.
 
 ## After discovery
 
-Once clair discovers a Trouve, it sets `compiled` attributes. Two useful properties become available:
+After clair discovers a Trouve, it sets the `compiled` attributes. Two properties become available:
 
-- `trouve.full_name` — the fully-qualified Snowflake name (e.g. `refined.orders.daily`)
-- `trouve.is_compiled` — `True` once the project has been discovered
+- `trouve.full_name` — the fully-qualified Snowflake name, such as `refined.orders.daily`
+- `trouve.is_compiled` — `True` after clair discovers the project
 
-Accessing `full_name` before discovery raises `RuntimeError`.
+If you read `full_name` before discovery, clair raises `RuntimeError`.

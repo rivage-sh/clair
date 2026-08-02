@@ -1,10 +1,10 @@
 # Selectors
 
-All clair commands accept `--select` to filter which Trouves to act on. This lets you run, compile, test, or inspect a subset of your project.
+The `clair run`, `clair compile`, `clair test`, and `clair dag` commands accept `--select`. Use it to filter the Trouves, then act on one part of your project only.
 
 ## Syntax
 
-`--select` takes a glob pattern matched against the Trouve's fully-qualified name (`database.schema.table`). The `*` wildcard matches within one segment.
+`--select` takes a glob pattern. clair matches the pattern against the fully-qualified name of the Trouve (`database.schema.table`). The `*` wildcard matches inside one segment.
 
 ```bash
 clair run --project=. --env=dev --select='refined.orders.*'
@@ -12,7 +12,7 @@ clair run --project=. --env=dev --select='refined.orders.*'
 
 ## Examples
 
-**Entire schema:**
+**A full schema:**
 
 ```bash
 clair run --project=. --env=dev --select='source.products.*'
@@ -36,9 +36,9 @@ clair compile --project=. --select='*.*.top_*'
 clair run --project=. --env=dev --select='refined.*.daily_*'
 ```
 
-## Unioning multiple selectors
+## Use more than one selector
 
-Repeat `--select` to union multiple patterns. Trouves matching any pattern are included:
+Repeat `--select` to add more patterns. clair includes each Trouve that matches one pattern or more:
 
 ```bash
 clair run --project=. --env=dev \
@@ -48,7 +48,7 @@ clair run --project=. --env=dev \
 
 ## No matches
 
-If no Trouves match the selector, clair exits cleanly:
+If no Trouve matches the selector, clair stops with success:
 
 ```
 No Trouves selected to run.
@@ -56,11 +56,11 @@ No Trouves selected to run.
 
 ## Selectors and tests
 
-`clair test --select` includes SOURCE Trouves in the filter for convenience, but the test runner skips them internally (SOURCEs don't have tests).
+`clair test --select` keeps SOURCE Trouves in the filter. But the test runner skips them, because SOURCE Trouves do not have tests.
 
-## Which commands support `--select`
+## Which commands accept `--select`
 
-| Command | Supports `--select` |
+| Command | Accepts `--select` |
 |---------|---------------------|
 | `clair run` | Yes |
 | `clair compile` | Yes |

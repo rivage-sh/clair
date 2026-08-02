@@ -1,8 +1,8 @@
 # Guides
 
-How-to guides for common clair tasks.
+These guides show you how to do the usual clair tasks.
 
-- **[Pandas-Native Transformations](pandas-native.md)** — write pipeline steps as Python functions using pandas
+- **[Pandas-Native Transformations](pandas-native.md)** — write pipeline steps as Python functions with pandas
 - **[Incrementality](incrementality.md)** — APPEND and UPSERT strategies for large tables
 - **[Data Quality Tests](data-quality-tests.md)** — attach tests to Trouves
 - **[Selectors](selectors.md)** — run only a subset of your project

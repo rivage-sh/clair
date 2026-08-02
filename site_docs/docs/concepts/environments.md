@@ -1,6 +1,6 @@
 # Environments
 
-An environment is a named Snowflake connection profile. Environments are stored in `~/.clair/environments.yml` — outside the project directory so credentials are never committed.
+An environment is a named Snowflake connection profile. clair keeps the environments in `~/.clair/environments.yml`. This file is outside the project directory, thus you do not commit your credentials.
 
 ## `~/.clair/environments.yml`
 
@@ -62,7 +62,7 @@ prod:
       warehouse: my_warehouse
     ```
 
-    Opens a browser window for Okta/SSO login. Not suitable for CI.
+    This method opens a browser window for the Okta/SSO login. Do not use it in CI.
 
 ## Field reference
 
@@ -75,14 +75,14 @@ prod:
 | `password` | — | Plain-text password |
 | `private_key_path` | — | Path to PEM private key file |
 | `private_key_passphrase` | — | Passphrase for encrypted private keys |
-| `role` | — | Default role (falls back to user's default if omitted) |
-| `region` | — | AWS/Azure region (required for query URLs in logs) |
-| `account_locator` | — | Classic account locator (required for query URLs) |
+| `role` | — | Default role. If you omit it, Snowflake uses the default role of the user. |
+| `region` | — | AWS/Azure region. clair needs it for the query URLs in the logs. |
+| `account_locator` | — | Classic account locator. clair needs it for the query URLs. |
 | `routing` | — | Routing policy. See [Routing Policies](../guides/routing.md). |
 
-## Selecting an environment
+## Select an environment
 
-The environment name is resolved in this order:
+clair resolves the environment name in this order:
 
 1. `--env` CLI flag
 2. `CLAIR_ENV` environment variable
@@ -95,7 +95,7 @@ CLAIR_ENV=prod clair run --project .
 
 ## CI usage
 
-In CI, set `CLAIR_ENV` and use key-pair authentication (no browser interaction required):
+In CI, set `CLAIR_ENV` and use key-pair authentication. This method does not need a browser:
 
 ```yaml
 # GitHub Actions example
@@ -108,4 +108,4 @@ In CI, set `CLAIR_ENV` and use key-pair authentication (no browser interaction r
 
 ## Routing policies
 
-Each environment can optionally include a routing policy that remaps logical Snowflake names to physical targets. See [Routing Policies](../guides/routing.md).
+Each environment can include a routing policy. The policy remaps logical Snowflake names to physical targets. See [Routing Policies](../guides/routing.md).

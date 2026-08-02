@@ -47,8 +47,8 @@ class Column(BaseModel):
 |-------|------|---------|-------------|
 | `name` | `str` | required | Column name as it appears in Snowflake |
 | `type` | `str` | required | Snowflake data type. Use `ColumnType` constants or a plain string for parameterised types. |
-| `docs` | `str` | `""` | Documentation shown in `clair docs` |
-| `nullable` | `bool` | `True` | Whether the column allows NULLs |
+| `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
+| `nullable` | `bool` | `True` | Tells you if the column accepts NULL values |
 
 ### Example
 
@@ -58,7 +58,7 @@ from clair import Column, ColumnType
 columns=[
     Column(name="order_id",    type=ColumnType.STRING,        nullable=False),
     Column(name="customer_id", type=ColumnType.STRING),
-    Column(name="amount",      type="NUMBER(18,2)",           docs="Order total in USD"),
+    Column(name="amount",      type="NUMBER(18,2)",           docs="The order total in USD"),
     Column(name="created_at",  type=ColumnType.TIMESTAMP_NTZ),
     Column(name="metadata",    type=ColumnType.VARIANT,       nullable=True),
 ]
@@ -66,4 +66,4 @@ columns=[
 
 ## When columns are required
 
-`columns` is optional for most Trouves. It is **required** for UPSERT mode — clair uses the column list to build the MERGE statement. If `columns` is not defined and UPSERT is configured, `clair run` raises `ValueError`.
+`columns` is optional for most Trouves. But UPSERT mode **needs** it, because clair uses the column list to build the MERGE statement. If you configure UPSERT but do not give `columns`, `clair run` raises `ValueError`.

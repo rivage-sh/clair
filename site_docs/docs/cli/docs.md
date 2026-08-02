@@ -1,6 +1,6 @@
 # clair docs
 
-Start a local web UI showing the project DAG and per-Trouve documentation. No Snowflake connection required.
+Start a local web UI for the project DAG and the documentation of each Trouve. The command does not need a Snowflake connection.
 
 ```bash
 clair docs [--project PATH] [--port PORT] [--host HOST] [--no-browser]
@@ -15,14 +15,14 @@ clair docs --project .
 # Custom port
 clair docs --project . --port 9000
 
-# Don't open browser automatically
+# Do not open the browser automatically
 clair docs --project . --no-browser
 ```
 
 ## What the UI shows
 
-- **Interactive DAG** — pan, zoom, and click nodes to explore the graph
-- **Sidebar** — searchable list of all Trouves, filterable by type (SOURCE / TABLE / VIEW)
+- **Interactive DAG** — pan, zoom, and click the nodes to explore the graph
+- **Sidebar** — a list of all the Trouves. You can search it, and filter it by type (SOURCE / TABLE / VIEW).
 - **Detail panel** — for each selected Trouve:
     - Full name and type
     - Documentation string
@@ -33,7 +33,7 @@ clair docs --project . --no-browser
     - Upstream and downstream lineage
     - File path
 
-## Stopping the server
+## Stop the server
 
 Press `Ctrl+C` to stop the server.
 
@@ -46,7 +46,7 @@ Press `Ctrl+C` to stop the server.
 | `--host` | `127.0.0.1` | Bind address |
 | `--no-browser` | `false` | Do not open the browser automatically |
 
-If the port is already in use, clair exits with an error suggesting `--port <other>`.
+If a different program uses the port, clair stops with an error. The error tells you to use `--port <other>`.
 
 ## See also
 

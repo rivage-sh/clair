@@ -9,10 +9,10 @@ clair clean [--project PATH] [--before AGE] [--dry-run] [--yes]
 ## Example
 
 ```bash
-# Preview what would be deleted (older than 7 days)
+# Show what clair will delete (older than 7 days)
 clair clean --project . --before 7d --dry-run
 
-# Delete after confirming
+# Delete after you confirm
 clair clean --project . --before 7d
 
 # Skip confirmation (useful in CI)
@@ -35,11 +35,11 @@ clair clean --project .
 | ISO date | `2026-03-01` | Before this date |
 | ISO datetime | `2026-03-01T12:00:00` | Before this datetime |
 
-Omitting `--before` targets all artifact runs.
+If you do not give `--before`, clair removes all the artifact runs.
 
 ## Dry run
 
-Always preview with `--dry-run` before deleting:
+Always use `--dry-run` to see the artifacts before you delete them:
 
 ```
 Would remove 3 artifact run(s):
@@ -53,9 +53,9 @@ Would remove 3 artifact run(s):
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
-| `--before` | (none — all runs) | Remove artifacts older than this age/date |
-| `--dry-run` | `false` | Preview without deleting |
-| `--yes` | `false` | Skip confirmation prompt |
+| `--before` | (none — all runs) | Remove the artifacts that are older than this age or date |
+| `--dry-run` | `false` | Show the artifacts, but do not delete them |
+| `--yes` | `false` | Skip the confirmation prompt |
 
 ## See also
 

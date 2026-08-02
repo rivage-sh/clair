@@ -1,16 +1,16 @@
 # Routing Policies
 
-Routing remaps the logical Snowflake names derived from your filesystem to different physical targets. Configure routing per environment in `~/.clair/environments.yml`.
+Routing remaps logical Snowflake names to different physical targets. clair reads the logical names from your file system. Configure routing for each environment in `~/.clair/environments.yml`.
 
-The most common use case: run a production project against a dev Snowflake database without changing any Trouve files.
+The usual use: run a production project against a dev Snowflake database. You do not change a Trouve file.
 
 ## SOURCE passthrough
 
-Regardless of the active routing policy, SOURCE Trouves always use their logical name. Routing only applies to TABLE and VIEW Trouves.
+SOURCE Trouves always use their logical name. The active routing policy has no effect on them. Routing applies to TABLE and VIEW Trouves only.
 
 ## `database_override`
 
-Replaces the database component of every non-SOURCE Trouve's name.
+This policy replaces the database part of the name of each TABLE and VIEW Trouve.
 
 ```yaml
 # ~/.clair/environments.yml
@@ -24,7 +24,7 @@ dev:
     database_name: dev
 ```
 
-With this policy active, a Trouve at `refined/orders/daily.py` (logical name `refined.orders.daily`) is written to `dev.orders.daily` in Snowflake. The source at `source/orders/raw.py` is still read from `source.orders.raw`.
+If this policy is active, clair writes the Trouve at `refined/orders/daily.py` to `dev.orders.daily` in Snowflake. Its logical name stays `refined.orders.daily`. clair still reads the source at `source/orders/raw.py` from `source.orders.raw`.
 
 **Example mapping:**
 
@@ -36,7 +36,7 @@ With this policy active, a Trouve at `refined/orders/daily.py` (logical name `re
 
 ## `schema_isolation`
 
-Collapses `database.schema.table` into a single table token (`DATABASE_SCHEMA_TABLE`) under a fixed database and schema. Use this to run multiple developers' projects in one shared Snowflake schema without conflicts — each developer gets their own prefixed table names.
+This policy joins `database.schema.table` into one table name (`DATABASE_SCHEMA_TABLE`), in a database and a schema that you set. Use it to run the projects of many developers in one shared Snowflake schema. Each developer gets different table names, thus the projects do not collide.
 
 ```yaml
 # alice's dev environment
@@ -60,26 +60,26 @@ dev:
 | `derived.orders.summary` | `dev.alice.DERIVED_ORDERS_SUMMARY` |
 
 !!! warning
-    `schema_isolation` produces identifiers by concatenating `database_schema_table` with underscores. Snowflake enforces a 255-character limit on identifiers, so very long Trouve names may exceed this limit. clair raises `InvalidRoutingConfigError` if the generated identifier is too long.
+    `schema_isolation` joins `database_schema_table` with underscores to make an identifier. Snowflake gives identifiers a limit of 255 characters. A very long Trouve name can go above this limit. clair then raises `InvalidRoutingConfigError`.
 
 ## Collision detection
 
-When two TABLE/VIEW Trouves route to the same physical target, clair prints a warning before running:
+If two TABLE or VIEW Trouves route to the same physical target, clair shows a warning before the run:
 
 ```
-Warning: routing 2 collisions detected (env: dev, policy: database_override → dev)
+Warning: Clair found 2 routing collisions (env: dev, policy: database_override → dev)
 
   dev.orders.daily
     ↳ refined.orders.daily
     ↳ analytics.orders.daily
 
-  Fix: rename a colliding Trouve, adjust the routing policy in
-  environments.yml, or use --select to exclude one from this run.
+  Fix: give one Trouve a different name, change the routing policy in environments.yml,
+  or use --select to remove one Trouve from this run.
 ```
 
 ## No routing
 
-Omit the `routing` block to use logical names as physical targets (suitable for production):
+Omit the `routing` block. clair then uses the logical names as the physical targets. This is correct for production:
 
 ```yaml
 prod:
@@ -87,5 +87,5 @@ prod:
   user: ci_user
   private_key_path: ~/.clair/snowflake_key.p8
   warehouse: prod_warehouse
-  # no routing block — logical names are used as-is
+  # no routing block — clair uses the logical names
 ```

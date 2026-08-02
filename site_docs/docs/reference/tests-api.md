@@ -4,11 +4,11 @@
 from clair import TestUnique, TestNotNull, TestRowCount, TestUniqueColumns
 ```
 
-All tests are Pydantic models. Zero rows returned by `to_sql()` = pass.
+All the tests are Pydantic models. Zero rows from `to_sql()` = pass.
 
 ## `TestUnique`
 
-Assert that a column contains no duplicate values.
+Assert that a column has no duplicate values.
 
 ```python
 class TestUnique(Test):
@@ -32,7 +32,7 @@ Run with `--sample`: **Yes**
 
 ## `TestNotNull`
 
-Assert that a column contains no NULL values.
+Assert that a column has no NULL values.
 
 ```python
 class TestNotNull(Test):
@@ -55,7 +55,7 @@ Run with `--sample`: **Yes**
 
 ## `TestRowCount`
 
-Assert that the table row count falls within the given bounds. At least one of `min_rows` or `max_rows` must be set.
+Assert that the number of rows is between two limits. You must set `min_rows` or `max_rows`, or both.
 
 ```python
 class TestRowCount(Test):
@@ -64,12 +64,12 @@ class TestRowCount(Test):
 ```
 
 ```python
-TestRowCount(min_rows=1)                      # at least 1 row
-TestRowCount(max_rows=1_000_000)              # no more than 1M rows
-TestRowCount(min_rows=100, max_rows=10_000)   # within range
+TestRowCount(min_rows=1)                      # 1 row minimum
+TestRowCount(max_rows=1_000_000)              # 1M rows maximum
+TestRowCount(min_rows=100, max_rows=10_000)   # between the two limits
 ```
 
-Generated SQL (for `min_rows=100, max_rows=10_000`):
+Generated SQL for `min_rows=100, max_rows=10_000`:
 
 ```sql
 SELECT 1 FROM mydb.myschema.mytable HAVING COUNT(*) < 100
@@ -77,15 +77,15 @@ UNION ALL
 SELECT 1 FROM mydb.myschema.mytable HAVING COUNT(*) > 10000
 ```
 
-Run with `--sample`: **No** — skipped because row counts on sampled data are meaningless.
+Run with `--sample`: **No** — clair skips it, because a row count has no meaning on sampled data.
 
 ## `TestUniqueColumns`
 
-Assert that a combination of columns is unique across all rows. Requires at least 2 columns.
+Assert that a group of columns is unique in all the rows. You must give 2 columns or more.
 
 ```python
 class TestUniqueColumns(Test):
-    columns: list[str]   # minimum 2 entries
+    columns: list[str]   # 2 entries minimum
 ```
 
 ```python
@@ -114,13 +114,13 @@ Run with `--sample`: **Yes**
 
 ## `AnyTest`
 
-The discriminated union used internally by clair to deserialize tests:
+clair uses this discriminated union internally to deserialize the tests:
 
 ```python
 AnyTest = TestUnique | TestNotNull | TestRowCount | TestUniqueColumns
 ```
 
-Each test class has a `type` literal field used as discriminator: `"unique"`, `"not_null"`, `"row_count"`, `"unique_columns"`.
+Each test class has a `type` literal field. clair uses it as the discriminator: `"unique"`, `"not_null"`, `"row_count"`, `"unique_columns"`.
 
 ## See also
 

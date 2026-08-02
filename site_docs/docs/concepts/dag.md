@@ -1,23 +1,23 @@
 # DAG
 
-clair represents your project as a directed acyclic graph (DAG) where each node is a Trouve and each edge is a dependency derived from Python imports.
+clair shows your project as a directed acyclic graph (DAG). Each node is a Trouve. Each edge is a dependency that clair reads from the Python imports.
 
-## How the DAG is built
+## How clair builds the DAG
 
-When you run any clair command, it performs discovery:
+Each clair command starts with discovery:
 
-1. Walk the project directory recursively, finding all `.py` files that don't start with `_`
-2. Import each file as a Python module
-3. Inspect imports — any `from some.path import trouve as alias` where `some.path` resolves to another Trouve file becomes a directed edge in the DAG
-4. Validate that the graph is acyclic (circular dependencies raise an error)
+1. Walks the full project directory and finds all the `.py` files that do not start with `_`
+2. Imports each file as a Python module
+3. Reads the imports. In `from some.path import trouve as alias`, if `some.path` is another Trouve file, clair adds a directed edge to the DAG.
+4. Tests the graph for cycles. A circular dependency causes an error.
 
-No separate config file is needed. The DAG is fully derived from your Python import graph.
+clair does not need a separate config file. It builds the full DAG from your Python import graph.
 
-## Execution order
+## Run order
 
-Trouves execute in topological order: dependencies always run before their dependents.
+Trouves run in topological order. Each dependency runs before its dependents.
 
-If a node fails, all of its downstream dependents are automatically skipped:
+If a node fails, clair skips all of its downstream dependents:
 
 ```
 source.orders.raw      ✓  (SOURCE — no SQL, passthrough)
@@ -25,7 +25,7 @@ source.orders.raw      ✓  (SOURCE — no SQL, passthrough)
         └── derived.orders.summary   —  SKIPPED (upstream failed)
 ```
 
-## Viewing the DAG
+## Read the DAG
 
 Use `clair dag` to print the dependency tree:
 
@@ -38,7 +38,7 @@ example_1_database.source.events (SOURCE)
     └── example_1_database.derived.top_event_types (TABLE)
 ```
 
-Use `--select` to view a subgraph:
+Use `--select` to see a subgraph:
 
 ```bash
 clair dag --project . --select='mydb.refined.*'
@@ -46,7 +46,7 @@ clair dag --project . --select='mydb.refined.*'
 
 ## Artifacts
 
-After `clair compile` or `clair run`, compiled SQL is written to `_clairtifacts/<run_id>/`, mirroring the directory structure:
+After `clair compile` or `clair run`, clair writes the compiled SQL to `_clairtifacts/<run_id>/`. The artifact tree has the same structure as your project:
 
 ```
 _clairtifacts/
@@ -61,10 +61,10 @@ _clairtifacts/
 
 Add `_clairtifacts/` to your `.gitignore`.
 
-## Files excluded from discovery
+## Files that discovery skips
 
-The following are skipped during discovery:
+Discovery skips these files:
 
-- Files and directories starting with `_` (including `_clairtifacts/`, `__pycache__/`)
+- Files and directories with a name that starts with `_`, such as `_clairtifacts/` and `__pycache__/`
 - `.git/`, `.venv/`
 - `__database_config__.py` and `__schema_config__.py` — these are configuration files, not Trouves (see [Per-Database & Schema Config](../guides/per-database-schema-config.md))
