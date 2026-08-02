@@ -35,7 +35,6 @@ trouve = Trouve(
 | `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](../guides/data-quality-tests.md). |
 | `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
 | `run_config` | `RunConfig` | full refresh | Materialization strategy. See [Incrementality](../guides/incrementality.md). |
-| `df_fn` | `Callable \| None` | `None` | Pandas execution mode (alternative to `sql`). TABLE-only, full-refresh-only. |
 
 ## Examples
 
@@ -109,9 +108,9 @@ trouve = Trouve(
 )
 ```
 
-## Pandas execution (`df_fn`)
+## Pandas execution (`PandasTrouve`)
 
-If SQL is not the correct tool, give the Trouve a `df_fn` in place of `sql`. You supply a Python function. clair reads the upstream tables from Snowflake as DataFrames. Then it calls your function on the machine that runs clair, and writes the result to Snowflake.
+If SQL is not the correct tool, use a `PandasTrouve` in place of a `Trouve`. You supply a Python function. clair reads the upstream tables from Snowflake as DataFrames. Then it calls your function on the machine that runs clair, and writes the result to Snowflake.
 
 ```python
 # derived/products/top_rated.py
@@ -119,36 +118,36 @@ import pandas as pd
 from refined.products.catalog import trouve as catalog_trouve
 from refined.products.reviews import trouve as reviews_trouve
 
-from clair import Trouve
+from clair import PandasTrouve
 
 
-def top_rated(
-    catalog: pd.DataFrame = catalog_trouve,  # type: ignore
-    reviews: pd.DataFrame = reviews_trouve,  # type: ignore
-) -> pd.DataFrame:
-    df = catalog.merge(reviews, on="product_id")
+def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
+    merged = catalog.merge(reviews, on="product_id")
     return (
-        df.groupby(["product_id", "name"], as_index=False)["rating"]
-        .mean()
+        merged.groupby(["product_id", "name"], as_index=False)
+        .agg(rating=("rating", "mean"))
         .query("rating >= 4")
     )
 
 
-trouve = Trouve(df_fn=top_rated)
+trouve = PandasTrouve(
+    transform=top_rated,
+    inputs=[catalog_trouve, reviews_trouve],
+)
 ```
 
-Each dependency is a parameter with the upstream Trouve as its default value.
+clair binds each item of `inputs` to a transform parameter by position. The transform takes plain DataFrames, thus you can call it directly in a test or in a notebook.
 
-The two run types have these differences:
+The two backends have these differences:
 
-| | `sql` | `df_fn` |
+| | `Trouve` | `PandasTrouve` |
 |---|---|---|
 | Runs | In Snowflake | On the clair machine |
 | Output type | TABLE or VIEW | TABLE only |
 | Incremental | Yes | Full refresh only |
-| Dependencies | f-string references | Parameter default values |
+| Dependencies | f-string references in `sql` | The `inputs` list |
 
-All the other behaviour is the same: the DAG, the `--select` flag, the data quality tests, and the `clair dag` output. You cannot use the two fields together. A Trouve with `sql` and `df_fn` causes an error.
+All the other behaviour is the same: the DAG, the `--select` flag, the data quality tests, and the `clair dag` output. The two classes have the same base class, `TrouveAbc`. That base class holds `columns`, `tests`, `docs`, and `run_config`.
 
 See the [Pandas-native guide](../guides/pandas-native.md) for a full example.
 

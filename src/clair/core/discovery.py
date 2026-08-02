@@ -7,6 +7,7 @@ import inspect
 import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,9 +22,10 @@ from clair.environments.routing import RoutingEntry, detect_routing_collisions, 
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
+from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
+from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveAbc, TrouveType
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
 _SKIP_DIRS = {"clair", "tests", ARTIFACTS_DIR_NAME, "__pycache__", ".git", ".venv", "node_modules"}
@@ -151,7 +153,7 @@ def discover_project(
     routing: RoutingEntry | None = None,
     environment: Environment | None = None,
     run_mode: RunMode | None = None,
-) -> list[Trouve]:
+) -> list[TrouveAbc]:
     """Find each Trouve in a project.
 
     The function reads the project root and loads each Trouve file. It replaces
@@ -209,7 +211,7 @@ def discover_project(
 
     # Load each candidate. A file can be in sys.modules already, because an
     # earlier candidate imported it as a dependency.
-    collected: list[tuple[Trouve, str, Path, str]] = []
+    collected: list[tuple[TrouveAbc, str, Path, str]] = []
     errors: list[str] = []
 
     for file_path in candidates:
@@ -234,7 +236,7 @@ def discover_project(
                 continue
 
         trouve_obj = getattr(module, "trouve", None)
-        if not isinstance(trouve_obj, Trouve):
+        if not isinstance(trouve_obj, TrouveAbc):
             continue
 
         collected.append((trouve_obj, full_name, file_path, module_name))
@@ -254,9 +256,9 @@ def discover_project(
         if trouve_obj.type != TrouveType.SOURCE:
             collision_check[full_name.upper()] = routed
 
-    # Make a map from an id to a logical name, for the df_fn dependencies. With
-    # this map, clair finds the logical name of each Trouve that a df_fn holds as
-    # a parameter default.
+    # Make a map from an id to a logical name, for the pandas dependencies. With
+    # this map, clair finds the logical name of each Trouve that a PandasTrouve
+    # names in its inputs.
     id_to_logical_name: dict[int, str] = {
         id(trouve_obj): logical_names[id(trouve_obj)]
         for trouve_obj, _, _, _ in collected
@@ -271,27 +273,27 @@ def discover_project(
         logical = logical_names[id(trouve_obj)]
         routed = routed_names[id(trouve_obj)]
 
-        if trouve_obj.df_fn is not None:
-            df_imports = []
-            for param in inspect.signature(trouve_obj.df_fn).parameters.values():
-                if isinstance(param.default, Trouve):
-                    dep_logical = id_to_logical_name.get(id(param.default))
-                    if dep_logical and dep_logical != logical and dep_logical not in df_imports:
-                        df_imports.append(dep_logical)
+        if trouve_obj.execution_type == ExecutionType.PANDAS:
+            assert isinstance(trouve_obj, PandasTrouve)
+            transform_imports = []
+            for upstream in trouve_obj.upstream_trouves():
+                dep_logical = id_to_logical_name.get(id(upstream))
+                if dep_logical and dep_logical != logical and dep_logical not in transform_imports:
+                    transform_imports.append(dep_logical)
 
             try:
-                resolved_df_fn = inspect.getsource(trouve_obj.df_fn)
+                resolved_transform = inspect.getsource(trouve_obj.transform)
             except OSError:
-                resolved_df_fn = repr(trouve_obj.df_fn)
+                resolved_transform = repr(trouve_obj.transform)
 
             trouve_obj.compiled = CompiledAttributes(
                 full_name=routed,
                 logical_name=logical,
                 resolved_sql="",
-                resolved_df_fn=resolved_df_fn,
+                resolved_transform=resolved_transform,
                 file_path=file_path.relative_to(project_root),
                 module_name=module_name,
-                imports=df_imports,
+                imports=transform_imports,
                 config=_resolve_config(file_path, project_root, profile_defaults),
                 execution_type=ExecutionType.PANDAS,
             )
@@ -299,6 +301,7 @@ def discover_project(
                 if isinstance(test, TestSql):
                     test.sql = _resolve_sql(test.sql, logical_names, this_name=logical)
         else:
+            assert isinstance(trouve_obj, Trouve)
             trouve_obj.compiled = CompiledAttributes(
                 full_name=routed,
                 logical_name=logical,
@@ -319,7 +322,7 @@ def discover_project(
     return [trouve for trouve, _, _, _ in collected]
 
 
-def find_routing_collisions(trouves: list[Trouve]) -> list[tuple[str, list[str]]]:
+def find_routing_collisions(trouves: Sequence[TrouveAbc]) -> list[tuple[str, list[str]]]:
     """Give a (routed_target, [logical_sources]) pair for each routing collision.
 
     A collision occurs when two Trouves that are not SOURCE Trouves route to one
@@ -337,7 +340,7 @@ def find_routing_collisions(trouves: list[Trouve]) -> list[tuple[str, list[str]]
     return detect_routing_collisions(logical_to_routed)
 
 
-def recompile_for_selection(trouves: list[Trouve], selected_names: set[str]) -> None:
+def recompile_for_selection(trouves: Sequence[TrouveAbc], selected_names: set[str]) -> None:
     """Change each selected upstream name in the SQL from logical to routed.
 
     After discover_project(), the resolved_sql of each Trouve holds the logical

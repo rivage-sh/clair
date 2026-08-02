@@ -2,11 +2,13 @@
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX, _registry, clear
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
+from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import (
     IncrementalMode,
     RunConfig,
@@ -19,7 +21,7 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
+from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveAbc, TrouveType
 
 # ---------------------------------------------------------------------------
 # The helper functions.
@@ -1019,12 +1021,12 @@ class TestConfig:
 
 
 # ---------------------------------------------------------------------------
-# A Trouve with a df_fn
+# PandasTrouve and the abstract base
 # ---------------------------------------------------------------------------
 
 
-class TestTrouveWithDfFn:
-    """The tests of the df_fn field of Trouve."""
+class TestPandasTrouve:
+    """The tests of PandasTrouve, the pandas backend."""
 
     def _make_upstream(self) -> Trouve:
         """Make a compiled SOURCE Trouve. A different Trouve can depend on it."""
@@ -1032,60 +1034,153 @@ class TestTrouveWithDfFn:
         source.compiled = _compiled_attrs(full_name="db.schema.upstream", resolved_sql="")
         return source
 
-    def test_valid_construction_with_df_fn(self):
+    def test_valid_construction(self):
         upstream = self._make_upstream()
 
-        def my_fn(events=upstream):
+        def my_fn(events):
             return events
 
-        trouve = Trouve(df_fn=my_fn)
-        assert trouve.df_fn is my_fn
+        trouve = PandasTrouve(transform=my_fn, inputs=[upstream])
+        assert trouve.transform is my_fn
         assert trouve.type == TrouveType.TABLE
-        assert trouve.sql == ""
+        assert trouve.execution_type == ExecutionType.PANDAS
 
-    def test_df_fn_with_sql_raises_value_error(self):
+    def test_inputs_keep_object_identity(self):
+        """Pydantic must not copy an input. Discovery matches each input by id()."""
         upstream = self._make_upstream()
 
-        def my_fn(events=upstream):
+        def my_fn(events):
             return events
 
-        with pytest.raises(ValueError, match="must have sql or df_fn, but not both"):
-            Trouve(df_fn=my_fn, sql="SELECT 1")
+        trouve = PandasTrouve(transform=my_fn, inputs=[upstream])
+        assert trouve.inputs[0] is upstream
+        assert trouve.upstream_trouves()[0] is upstream
 
-    def test_df_fn_with_view_type_raises_value_error(self):
+    def test_upstream_trouves_keeps_the_input_order(self):
+        first = self._make_upstream()
+        second = self._make_upstream()
+
+        def my_fn(a, b):
+            return a
+
+        trouve = PandasTrouve(transform=my_fn, inputs=[first, second])
+        assert trouve.upstream_trouves() == [first, second]
+
+    def test_parameter_names_gives_the_signature_order(self):
+        first = self._make_upstream()
+        second = self._make_upstream()
+
+        def my_fn(catalog, reviews):
+            return catalog
+
+        trouve = PandasTrouve(transform=my_fn, inputs=[first, second])
+        assert trouve.parameter_names() == ["catalog", "reviews"]
+
+    def test_transform_stays_directly_callable(self):
+        """A user must be able to call the transform in a test or a notebook."""
         upstream = self._make_upstream()
 
-        def my_fn(events=upstream):
+        def my_fn(events):
             return events
 
-        with pytest.raises(ValueError, match="a df_fn Trouve must have the TABLE type"):
-            Trouve(df_fn=my_fn, type=TrouveType.VIEW)
+        trouve = PandasTrouve(transform=my_fn, inputs=[upstream])
+        frame = pd.DataFrame({"a": [1, 2]})
+        assert trouve.transform(frame) is frame
 
-    def test_df_fn_with_source_type_raises_value_error(self):
-        upstream = self._make_upstream()
+    def test_no_inputs_and_no_parameters_is_valid(self):
+        def my_fn():
+            return pd.DataFrame()
 
-        def my_fn(events=upstream):
-            return events
+        trouve = PandasTrouve(transform=my_fn)
+        assert trouve.inputs == []
 
-        with pytest.raises(ValueError, match="a df_fn Trouve must have the TABLE type"):
-            Trouve(df_fn=my_fn, type=TrouveType.SOURCE)
+    def test_too_few_inputs_raises_value_error(self):
+        def my_fn(a, b):
+            return a
 
-    def test_df_fn_not_callable_raises_value_error(self):
-        with pytest.raises(ValueError, match="df_fn must be a callable object"):
-            Trouve(df_fn="not_a_function")
+        with pytest.raises(ValueError, match="takes 2 parameter\\(s\\) but inputs has 1"):
+            PandasTrouve(transform=my_fn, inputs=[self._make_upstream()])
 
-    def test_df_fn_with_incremental_raises_value_error(self):
-        upstream = self._make_upstream()
+    def test_too_many_inputs_raises_value_error(self):
+        def my_fn(a):
+            return a
 
-        def my_fn(events=upstream):
-            return events
+        with pytest.raises(ValueError, match="takes 1 parameter\\(s\\) but inputs has 2"):
+            PandasTrouve(
+                transform=my_fn,
+                inputs=[self._make_upstream(), self._make_upstream()],
+            )
 
-        with pytest.raises(ValueError, match="a df_fn Trouve cannot use the incremental mode"):
-            Trouve(
-                df_fn=my_fn,
+    def test_arity_error_names_the_parameters(self):
+        def my_fn(catalog, reviews):
+            return catalog
+
+        with pytest.raises(ValueError, match="Parameters: catalog, reviews"):
+            PandasTrouve(transform=my_fn, inputs=[])
+
+    def test_var_positional_raises_value_error(self):
+        def my_fn(*frames):
+            return frames
+
+        with pytest.raises(ValueError, match="must not have \\*args or \\*\\*kwargs"):
+            PandasTrouve(transform=my_fn, inputs=[self._make_upstream()])
+
+    def test_var_keyword_raises_value_error(self):
+        def my_fn(**frames):
+            return frames
+
+        with pytest.raises(ValueError, match="must not have \\*args or \\*\\*kwargs"):
+            PandasTrouve(transform=my_fn, inputs=[])
+
+    def test_view_type_raises_value_error(self):
+        def my_fn():
+            return pd.DataFrame()
+
+        with pytest.raises(ValueError, match="PandasTrouve must be TABLE type"):
+            PandasTrouve(transform=my_fn, type=TrouveType.VIEW)
+
+    def test_source_type_raises_value_error(self):
+        def my_fn():
+            return pd.DataFrame()
+
+        with pytest.raises(ValueError, match="PandasTrouve must be TABLE type"):
+            PandasTrouve(transform=my_fn, type=TrouveType.SOURCE)
+
+    def test_transform_not_callable_raises_value_error(self):
+        with pytest.raises(ValueError, match="transform"):
+            PandasTrouve(transform="not_a_function")
+
+    def test_incremental_raises_value_error(self):
+        def my_fn():
+            return pd.DataFrame()
+
+        with pytest.raises(ValueError, match="PandasTrouve does not support incremental mode"):
+            PandasTrouve(
+                transform=my_fn,
                 run_config=RunConfig(
                     run_mode=RunMode.INCREMENTAL,
                     incremental_mode=IncrementalMode.APPEND,
                 ),
             )
 
+    def test_pandas_trouve_is_a_trouve_abc(self):
+        """Discovery finds a node with isinstance(obj, TrouveAbc)."""
+        def my_fn():
+            return pd.DataFrame()
+
+        assert isinstance(PandasTrouve(transform=my_fn), TrouveAbc)
+
+
+class TestTrouveAbc:
+    """The tests of the abstract base of every backend."""
+
+    def test_trouve_abc_is_not_instantiable(self):
+        with pytest.raises(TypeError, match="abstract"):
+            TrouveAbc()  # type: ignore[abstract]
+
+    def test_sql_trouve_gives_no_upstream_trouves(self):
+        """A SQL Trouve declares its dependencies with placeholder tokens."""
+        assert Trouve(sql="SELECT 1").upstream_trouves() == []
+
+    def test_sql_trouve_execution_type(self):
+        assert Trouve(sql="SELECT 1").execution_type == ExecutionType.SNOWFLAKE

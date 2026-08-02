@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import inspect
 import time
 from collections.abc import Callable, Iterator
 from enum import StrEnum
-from typing import Any
 
 import networkx as nx
 import pandas as pd
@@ -15,8 +13,9 @@ from pydantic import BaseModel, model_validator
 
 from clair.adapters.base import WarehouseAdapter
 from clair.core.dag import ClairDag, get_executable_nodes
+from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import Trouve, TrouveType
+from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
 
 
 class RunStatus(StrEnum):
@@ -174,34 +173,33 @@ def resolve_effective_mode(trouve: Trouve, cli_run_mode: RunMode) -> RunMode:
     return RunMode.INCREMENTAL
 
 
-def _run_df_fn_trouve(
-    trouve: Trouve,
+def _run_pandas_trouve(
+    trouve: PandasTrouve,
     adapter: WarehouseAdapter,
 ) -> RunResult:
-    """Execute a df_fn Trouve. Read the inputs, transform them, write the output.
+    """Execute a PandasTrouve. Read the inputs, transform them, write the output.
 
     Returns a RunResult with the SUCCESS status or the FAILURE status.
     """
     start = time.monotonic()
 
-    # 1. Read each input DataFrame. inspect.signature gives the parameters.
-    dataframe_kwargs: dict[str, Any] = {}
-    for param_name, param in inspect.signature(trouve.df_fn).parameters.items():
-        if isinstance(param.default, Trouve):
-            try:
-                dataframe_kwargs[param_name] = adapter.fetch_dataframe(param.default.full_name)
-            except Exception as fetch_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
-                duration = time.monotonic() - start
-                return RunResult(
-                    full_name=trouve.full_name,
-                    status=RunStatus.FAILURE,
-                    error=f"Clair cannot read the input '{param_name}' ({param.default.full_name}): {fetch_error}",
-                    duration_seconds=duration,
-                )
+    # 1. Read each input DataFrame. Clair keeps the order of trouve.inputs.
+    input_dataframes: list[pd.DataFrame] = []
+    for parameter_name, upstream in zip(trouve.parameter_names(), trouve.upstream_trouves()):
+        try:
+            input_dataframes.append(adapter.fetch_dataframe(upstream.full_name))
+        except Exception as fetch_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
+            duration = time.monotonic() - start
+            return RunResult(
+                full_name=trouve.full_name,
+                status=RunStatus.FAILURE,
+                error=f"Clair cannot read the input '{parameter_name}' ({upstream.full_name}): {fetch_error}",
+                duration_seconds=duration,
+            )
 
-    # 2. Call the df_fn function.
+    # 2. Call the transform function. Clair binds each input by position.
     try:
-        result_dataframe = trouve.df_fn(**dataframe_kwargs)
+        result_dataframe = trouve.transform(*input_dataframes)
     except Exception as transform_error:  # noqa: BLE001 — the user transform code is unknown
         duration = time.monotonic() - start
         return RunResult(
@@ -333,11 +331,12 @@ def run_project(
                 adapter.execute(f"CREATE DATABASE IF NOT EXISTS {routed_parts[0]}")
                 adapter.execute(f"CREATE SCHEMA IF NOT EXISTS {routed_parts[0]}.{routed_parts[1]}")
 
-        # A df_fn Trouve is different. Clair reads the data, transforms it and
+        # A PandasTrouve is different. Clair reads the data, transforms it and
         # writes it. Clair does not execute SQL.
-        if trouve.df_fn is not None:
+        if trouve.execution_type == ExecutionType.PANDAS:
+            assert isinstance(trouve, PandasTrouve)
             logger.info("run.node.start", trouve=name, effective_mode="full_refresh")
-            result = _run_df_fn_trouve(trouve, adapter)
+            result = _run_pandas_trouve(trouve, adapter)
             yield result
 
             if result.status == RunStatus.SUCCESS:
@@ -351,6 +350,7 @@ def run_project(
                     skip_reasons.setdefault(desc, name)
             continue
 
+        assert isinstance(trouve, Trouve)
         effective_mode = resolve_effective_mode(trouve, run_mode)
         # If the target table does not exist yet, change to the full refresh mode.
         if effective_mode == RunMode.INCREMENTAL:

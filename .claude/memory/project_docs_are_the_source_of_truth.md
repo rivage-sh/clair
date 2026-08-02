@@ -12,11 +12,12 @@ metadata:
 `src/clair/auth/environments.py`, a path that does not exist. The documentation is the
 better source because users read it, so an error there gets a report.
 
-**But the documentation also rots.** The pandas guide, the landing page and the README
+**But the documentation also rots.** The pandas guide, the landing page and the README once
 documented a `PandasTrouve` class that was never built, while the API reference correctly
 documented the `df_fn` field that was. The pages came from a design spec, and nobody
 changed them when the implementation took a different shape. mkdocs does not execute the
-examples, so CI did not catch it.
+examples, so CI did not catch it. (The 2026-08-01 backend split built the real
+`PandasTrouve` and deleted `df_fn`, thus the two agree again — but the lesson holds.)
 
 **Therefore: the code is the final authority.** Read the documentation first for
 orientation, then confirm any API detail against `src/` or `example_projects/` before you
@@ -26,8 +27,8 @@ depend on it. When the two disagree, the code wins and the page is a bug.
 
 - To learn what a feature does, `grep` `site_docs/docs/` first. Then confirm the exact API
   against `src/` or a project in `example_projects/`.
-- Search for the field name, not only the class name. The pandas feature was invisible to a
-  search for `PandasTrouve`, because the real name is `df_fn`.
+- Search for the field name, not only the class name. The pandas feature was once invisible
+  to a search for `PandasTrouve`, because the name in the code was `df_fn`.
 - Map for orientation: `concepts/` (Trouve, DAG, project layout, environments),
   `guides/` (routing, incrementality, tests, selectors, pandas, per-database config),
   `cli/` (one page for each subcommand), `reference/` (API for Trouve, Column, RunConfig,

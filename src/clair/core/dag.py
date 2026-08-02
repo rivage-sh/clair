@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import networkx as nx
 
 from clair.exceptions import CyclicDependencyError
-from clair.trouves.trouve import Trouve, TrouveType
+from clair.trouves.trouve import TrouveAbc, TrouveType
 
 
 class ClairDag(nx.DiGraph):
@@ -16,7 +18,7 @@ class ClairDag(nx.DiGraph):
     (dependency, dependent) pair. Clair reads the pairs from the Trouve imports.
     """
 
-    def add_trouve(self, trouve: Trouve) -> None:
+    def add_trouve(self, trouve: TrouveAbc) -> None:
         """Add a compiled Trouve as a node. The key of the node is its full_name."""
         self.add_node(trouve.full_name, trouve=trouve)
 
@@ -38,7 +40,7 @@ class ClairDag(nx.DiGraph):
             )
         self.add_edge(dependency, dependent)
 
-    def get_trouve(self, full_name: str) -> Trouve:
+    def get_trouve(self, full_name: str) -> TrouveAbc:
         """Give the Trouve of a node.
 
         Raises:
@@ -63,9 +65,9 @@ class ClairDag(nx.DiGraph):
             assert trouve is not None, (
                 f"Node '{node}' is missing the 'trouve' attribute"
             )
-            assert isinstance(trouve, Trouve), (
+            assert isinstance(trouve, TrouveAbc), (
                 f"Node '{node}' has a 'trouve' attribute of type "
-                f"{type(trouve).__name__}, expected Trouve"
+                f"{type(trouve).__name__}, expected TrouveAbc"
             )
 
         if not nx.is_directed_acyclic_graph(self):
@@ -81,12 +83,12 @@ class ClairDag(nx.DiGraph):
             )
 
     @property
-    def trouves(self) -> list[Trouve]:
+    def trouves(self) -> list[TrouveAbc]:
         """Give each compiled Trouve object in the graph."""
         return [self.nodes[node]["trouve"] for node in self.nodes]
 
 
-def build_dag(trouves: list[Trouve]) -> ClairDag:
+def build_dag(trouves: Sequence[TrouveAbc]) -> ClairDag:
     """Make a directed acyclic graph from the compiled Trouves.
 
     Raises:

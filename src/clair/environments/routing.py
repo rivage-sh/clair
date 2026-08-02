@@ -32,7 +32,7 @@ from clair.exceptions import InvalidRoutingConfigError, InvalidTrouveAddressErro
 from clair.trouves.trouve import TrouveType
 
 if TYPE_CHECKING:
-    from clair.trouves.trouve import Trouve
+    from clair.trouves.trouve import TrouveAbc
 
 
 # Snowflake accepts these characters in an unquoted identifier.
@@ -278,7 +278,7 @@ def route(
 
 
 def collect_routing_problems(
-    trouves: list[Trouve],
+    trouves: list[TrouveAbc],
     routing: RoutingEntry | None,
 ) -> list[tuple[str, str]]:
     """Apply a routing entry to every Trouve and collect all the failures.

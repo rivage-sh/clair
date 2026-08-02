@@ -42,18 +42,15 @@ import pandas as pd
 from refined.products.catalog import trouve as catalog_trouve
 from refined.products.reviews import trouve as reviews_trouve
 
-from clair import Trouve
+from clair import PandasTrouve
 
 
-def summarize(
-    catalog: pd.DataFrame = catalog_trouve,  # type: ignore
-    reviews: pd.DataFrame = reviews_trouve,  # type: ignore
-) -> pd.DataFrame:
-    df = catalog.merge(reviews, on="product_id")
-    return df.groupby("name", as_index=False)["rating"].mean()
+def summarize(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
+    merged = catalog.merge(reviews, on="product_id")
+    return merged.groupby("name", as_index=False).agg(rating=("rating", "mean"))
 
 
-trouve = Trouve(df_fn=summarize)
+trouve = PandasTrouve(transform=summarize, inputs=[catalog_trouve, reviews_trouve])
 ```
 
 clair fetches the upstream tables from Snowflake, runs your function locally, then writes the result back. The DAG, lineage, `--select` filters, and data quality tests all work unchanged.
@@ -73,10 +70,10 @@ my_project/
         └── reviews.py   →   source.products.reviews
 ```
 
-A Trouve runs in one of two ways:
+Clair has one Trouve class for each backend. Both derive from `TrouveAbc`:
 
-- **`sql`** — compiles to a Snowflake `TABLE` or `VIEW`. Runs inside Snowflake.
-- **`df_fn`** — runs a Python function on the machine executing clair, then writes the result back to Snowflake.
+- **`Trouve`** — compiles `sql` to a Snowflake `TABLE` or `VIEW`. Runs inside Snowflake.
+- **`PandasTrouve`** — runs a Python function on the machine executing clair, then writes the result back to Snowflake.
 
 `Trouve` has three types:
 
@@ -388,31 +385,28 @@ Pass `--run-mode full_refresh` on the CLI to force a full rebuild of everything 
 
 ## Pandas-native transformations
 
-When SQL isn't the right tool — complex reshaping, ML feature engineering, multi-step aggregations — give the Trouve a `df_fn` in place of `sql`. Your function receives upstream tables as DataFrames, runs locally on the machine executing clair, and the result is written back to Snowflake automatically.
+When SQL isn't the right tool — complex reshaping, ML feature engineering, multi-step aggregations — use a `PandasTrouve` in place of a `Trouve`. Your function receives upstream tables as DataFrames, runs locally on the machine executing clair, and clair writes the result back to Snowflake.
 
 ```python
 import pandas as pd
 from refined.products.catalog import trouve as catalog_trouve
 from refined.products.reviews import trouve as reviews_trouve
 
-from clair import Column, ColumnType, TestNotNull, Trouve
+from clair import Column, ColumnType, PandasTrouve, TestNotNull
 
 
-def top_rated(
-    catalog: pd.DataFrame = catalog_trouve,  # type: ignore
-    reviews: pd.DataFrame = reviews_trouve,  # type: ignore
-) -> pd.DataFrame:
-    df = catalog.merge(reviews, on="product_id")
+def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
+    merged = catalog.merge(reviews, on="product_id")
     return (
-        df.groupby(["product_id", "name"], as_index=False)["rating"]
-        .mean()
-        .rename(columns={"rating": "avg_rating"})
+        merged.groupby(["product_id", "name"], as_index=False)
+        .agg(avg_rating=("rating", "mean"))
         .query("avg_rating >= 4")
     )
 
 
-trouve = Trouve(
-    df_fn=top_rated,
+trouve = PandasTrouve(
+    transform=top_rated,
+    inputs=[catalog_trouve, reviews_trouve],
     columns=[
         Column(name="product_id", type=ColumnType.STRING),
         Column(name="name",       type=ColumnType.STRING),
@@ -422,6 +416,8 @@ trouve = Trouve(
     docs="The products with the highest average review score. This Trouve uses pandas.",
 )
 ```
+
+Clair binds `inputs` to the transform parameters by position. Because the transform takes plain DataFrames, you can call it directly in a unit test or in a notebook.
 
 > **Note:** pandas transformations run on the machine executing clair, not inside Snowflake. Keep this in mind for large tables.
 

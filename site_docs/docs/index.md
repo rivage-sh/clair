@@ -29,7 +29,7 @@ Import the upstream Trouve and use it in the f-string. clair does the rest.
 - **Compile first, run second.** `clair compile` resolves the full DAG and writes SQL to `_clairtifacts/` before it connects to Snowflake.
 - **clair includes incremental strategies.** Use APPEND and UPSERT modes with no boilerplate. Attach a [`RunConfig`](reference/run-config-api.md) to any [`Trouve`](concepts/trouve.md).
 - **Data quality as code.** Tests are Pydantic objects on the Trouve itself, not a separate test file.
-- **Pandas-native transformations.** Give a Trouve a [`df_fn`](guides/pandas-native.md) to write any step as a Python function. clair reads the upstream tables as DataFrames, runs your code on your machine, then writes the result to Snowflake.
+- **Pandas-native transformations.** Use a [`PandasTrouve`](guides/pandas-native.md) to write any step as a Python function. clair reads the upstream tables as DataFrames, runs your code on your machine, then writes the result to Snowflake.
 
 ## Install
 

@@ -15,7 +15,7 @@ from clair.core.discovery import (
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve import Trouve, TrouveType
 from tests.helpers import DatabaseOverrideRouting, SchemaIsolationRouting
 
 
@@ -68,6 +68,7 @@ class TestDiscovery:
     def test_raw_sql_contains_placeholder(self, simple_project: Path):
         trouves = discover_project(simple_project)
         table = next(t for t in trouves if t.full_name == "analytics.revenue.daily_orders")
+        assert isinstance(table, Trouve)
         assert TROUVE_PLACEHOLDER_PREFIX in table.sql
 
     def test_config_resolution(self, simple_project: Path):
