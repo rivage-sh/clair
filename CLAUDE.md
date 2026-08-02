@@ -62,6 +62,20 @@ The worktree shares git history with the main repo but has its own `.venv/`. Alw
 
 - `clair = "clair.cli.main:cli"` — installed to `.venv/bin/clair` after `uv sync`
 
+## CI failures
+
+If CI fails, replicate the failure locally and iterate until all three jobs pass. Do not
+push commits to see if the remote turns green. The CI jobs are simple, and each one maps
+to one local command:
+
+```bash
+uvx ruff check                            # lint job
+uvx ty check --exclude example_notebooks  # typecheck job
+uv run pytest                             # test job
+```
+
+Push one commit after the three commands pass locally.
+
 ## Coding guidelines
 
 - Use descriptive variable names for all code in `src/clair/`
