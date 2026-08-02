@@ -135,7 +135,10 @@ uv add rivage-clair
 
 ### 1. Set up an environment
 
-Run `clair init` — it will prompt for your Snowflake connection details and write `~/.clair/environments.yml`.
+Run `clair init`. It asks for your Snowflake connection details and writes two files:
+
+- `~/.clair/environments.yml` — your connection settings. Do not commit this file.
+- `<project>/__routing__.py` — the [routing](https://clair.rivage.sh/guides/routing/) entry of each environment. Commit this file.
 
 ### 2. Create a project
 
@@ -410,7 +413,7 @@ trouve = PandasTrouve(
         Column(name="avg_rating", type=ColumnType.FLOAT),
     ],
     tests=[TestNotNull(column="product_id")],
-    docs="Top-rated products by average review score, computed in pandas.",
+    docs="The products with the highest average review score. This Trouve uses pandas.",
 )
 ```
 

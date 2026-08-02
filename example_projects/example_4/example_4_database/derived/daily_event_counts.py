@@ -13,7 +13,7 @@ def daily_event_counts(refined_events: pd.DataFrame) -> pd.DataFrame:
 trouve = PandasTrouve(
     transform=daily_event_counts,
     inputs=[example_4_database_refined_events],
-    docs="Daily counts of each event type, aggregated from refined events.",
+    docs="Daily count of each event type. This Trouve reads the refined events.",
     columns=[
         Column(name="event_date", type=ColumnType.DATE),
         Column(name="event_type", type=ColumnType.STRING),

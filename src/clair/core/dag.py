@@ -30,12 +30,12 @@ class ClairDag(nx.DiGraph):
         """
         if dependency not in self:
             raise KeyError(
-                f"Dependency node '{dependency}' not found in the DAG. "
+                f"Clair cannot find the dependency node '{dependency}' in the DAG. "
                 "Add it with add_trouve() first."
             )
         if dependent not in self:
             raise KeyError(
-                f"Dependent node '{dependent}' not found in the DAG. "
+                f"Clair cannot find the dependent node '{dependent}' in the DAG. "
                 "Add it with add_trouve() first."
             )
         self.add_edge(dependency, dependent)
@@ -48,8 +48,8 @@ class ClairDag(nx.DiGraph):
         """
         if full_name not in self:
             raise KeyError(
-                f"Node '{full_name}' not found in the DAG. "
-                f"Known nodes: {sorted(self.nodes)}"
+                f"Clair cannot find the node '{full_name}' in the DAG. "
+                f"The DAG contains these nodes: {sorted(self.nodes)}"
             )
         return self.nodes[full_name]["trouve"]
 

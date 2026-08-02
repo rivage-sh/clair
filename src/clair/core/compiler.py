@@ -75,7 +75,7 @@ class CompileOutput(BaseModel):
     @staticmethod
     def render_footer(artifacts_dir: Path) -> str:
         """Make the last line of the compile summary."""
-        return f"Compiled SQL written to {artifacts_dir}/"
+        return f"Clair wrote the compiled SQL to {artifacts_dir}/"
 
     def render(self) -> str:
         """Make the complete summary text for stdout."""
@@ -128,7 +128,7 @@ def write_compile_output(
         trouve = dag.get_trouve(name)
         deps = list(dag.predecessors(name))
 
-        assert trouve.compiled is not None, f"{name} has not been compiled"
+        assert trouve.compiled is not None, f"Clair did not compile {name}"
         node_info = None
         if trouve.compiled.execution_type == ExecutionType.PANDAS:
             assert isinstance(trouve, PandasTrouve)
@@ -200,7 +200,7 @@ def write_compile_output(
             sql_content = "\n\n---\n\n".join(s.strip() for s in statements)
             sql_file.write_text(sql_content + "\n")
         else:
-            raise CompileError(f"Unknown execution_type '{trouve.compiled.execution_type}' for {name}")
+            raise CompileError(f"Clair does not know the execution_type '{trouve.compiled.execution_type}' for {name}")
 
         on_node_compiled(node_info)
 

@@ -65,19 +65,19 @@ class RunConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_config(self) -> RunConfig:
         if self.run_mode == RunMode.FULL_REFRESH and self.incremental_mode is not None:
-            raise ValueError("incremental_mode is only valid when run_mode is incremental")
+            raise ValueError("you can set incremental_mode only when run_mode is incremental")
         if self.run_mode == RunMode.INCREMENTAL and self.incremental_mode is None:
-            raise ValueError("incremental run_mode requires incremental_mode")
+            raise ValueError("the incremental run_mode needs incremental_mode")
         if self.incremental_mode == IncrementalMode.APPEND:
             if self.primary_key_columns is not None:
-                raise ValueError("primary_key_columns is only valid for upsert mode")
+                raise ValueError("you can set primary_key_columns only for the upsert mode")
             if self.join_sql is not None:
-                raise ValueError("join_sql is only valid for upsert mode")
+                raise ValueError("you can set join_sql only for the upsert mode")
             if self.upsert_config is not None:
-                raise ValueError("upsert_config is only valid for upsert mode")
+                raise ValueError("you can set upsert_config only for the upsert mode")
         if self.incremental_mode == IncrementalMode.UPSERT:
             if self.primary_key_columns is not None and self.join_sql is not None:
-                raise ValueError("specify primary_key_columns or join_sql, not both")
+                raise ValueError("set primary_key_columns or join_sql, but not both")
             if self.primary_key_columns is None and self.join_sql is None:
-                raise ValueError("upsert mode requires primary_key_columns or join_sql")
+                raise ValueError("the upsert mode needs primary_key_columns or join_sql")
         return self

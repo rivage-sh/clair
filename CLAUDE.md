@@ -69,9 +69,42 @@ The worktree shares git history with the main repo but has its own `.venv/`. Alw
 - Use `database_name` instead of `database`, `schema_name` instead of `schema`, `table_name` instead of `table`
 - Address git merge conflicts by pulling main, resolving conflicts, and pushing. Favour simplicity over clean commit history — PRs are squash-merged anyway.
 
-## Comments: Simplified Technical English
+## Backwards compatibility
 
-Write all code comments and docstrings in Simplified Technical English (ASD-STE100). STE is a controlled writing standard that makes technical text clear and unambiguous for readers who do not speak English as a first language.
+The major version is 0. While the major version stays 0, clair does not keep backwards
+compatibility. clair has no users at this time, so the best design wins against a stable
+interface.
+
+- Change a public name, a file format, or a function signature when the change makes the
+  system better.
+- Do not add a deprecation shim, an alias for an old name, or a migration path.
+- Delete the old code path. Do not keep it beside the new one.
+- Name each behaviour change in the pull request description.
+
+## Keep site_docs/ up to date
+
+`site_docs/docs/` is the source of truth for behaviour. Before you complete a change, compare
+it against `site_docs/docs/` and update the pages that the change makes wrong.
+
+Do this for every change to:
+
+- The CLI: its commands, options, and output. See `site_docs/docs/cli/`.
+- The public API in `src/clair/__init__.py`. See `site_docs/docs/reference/`.
+- A behaviour that a guide or a concept page describes.
+
+The example code in `site_docs/docs/` must stay identical to the equivalent code in
+`example_projects/`. If you change one, change the other.
+
+## Simplified Technical English
+
+Write all text that you generate in Simplified Technical English (ASD-STE100). STE is a controlled writing standard that makes technical text clear and unambiguous for readers who do not speak English as a first language.
+
+This rule applies to every text that you write:
+
+- Code comments and docstrings.
+- User-facing strings: CLI output, log messages, and error messages.
+- Documentation in `site_docs/docs/`, `README.md`, and this file.
+- Commit messages and pull request descriptions.
 
 Grammar rules:
 

@@ -120,7 +120,7 @@ class TrouveAbc(BaseModel, ABC):
         if self.compiled is None:
             raise RuntimeError(
                 "Trouve.full_name is not set. "
-                "This Trouve was not loaded by clair's discovery layer."
+                "The discovery layer of clair did not load this Trouve."
             )
         return self.compiled.full_name
 
@@ -130,7 +130,7 @@ class TrouveAbc(BaseModel, ABC):
         The default result is ``(SELECT TOP 1000 * FROM {full_name})``. To change
         how clair takes the sample, override this method in a subclass.
         """
-        assert self.compiled is not None, "sample() requires a compiled Trouve"
+        assert self.compiled is not None, "sample() needs a compiled Trouve"
         return f"(SELECT TOP 1000 * FROM {self.compiled.full_name})"
 
     def get_full_table_name(self) -> str:
@@ -164,12 +164,12 @@ class Trouve(TrouveAbc):
     def _validate_sql(self) -> Trouve:
         if self.type in (TrouveType.TABLE, TrouveType.VIEW) and not self.sql.strip():
             raise ValueError(
-                f"Trouve of type '{self.type.value}' requires non-empty sql"
+                f"a Trouve with the type '{self.type.value}' must have sql"
             )
         if self.type == TrouveType.SOURCE and self.sql.strip():
-            raise ValueError("SOURCE Trouve must not have sql")
+            raise ValueError("a SOURCE Trouve must not have sql")
         if self.run_config.run_mode == RunMode.INCREMENTAL and self.type != TrouveType.TABLE:
-            raise ValueError("only TABLE Trouves support incremental mode")
+            raise ValueError("only a TABLE Trouve can use the incremental mode")
         return self
 
     def build_sql(self, effective_mode: RunMode, run_id: str) -> list[str]:
@@ -188,7 +188,7 @@ class Trouve(TrouveAbc):
             ValueError: If the config asks for UPSERT but has no columns.
         """
         if not self.is_compiled:
-            raise RuntimeError("build_sql() requires a compiled Trouve")
+            raise RuntimeError("build_sql() needs a compiled Trouve")
         assert self.compiled is not None
 
         if self.type == TrouveType.SOURCE:
@@ -210,7 +210,7 @@ class Trouve(TrouveAbc):
         # The UPSERT mode.
         if not self.columns:
             raise ValueError(
-                "upsert mode requires columns to be defined on the Trouve"
+                "the upsert mode needs columns on the Trouve"
             )
 
         staging_name = f"{self.full_name}__clair_staging_{run_id}"
@@ -235,11 +235,11 @@ class Trouve(TrouveAbc):
         all_source_columns = ", ".join(f"{SOURCE}.{c}" for c in insert_col_names)
 
         stmt_1 = (
-            f"-- [1/3] create staging table\n"
+            f"-- [1/3] create the staging table\n"
             f"CREATE OR REPLACE TABLE {staging_name} AS (\n{resolved_sql}\n)"
         )
         stmt_2 = (
-            f"-- [2/3] merge into target\n"
+            f"-- [2/3] merge the staging table into the target table\n"
             f"MERGE INTO {self.full_name} AS {TARGET}\n"
             f"USING {staging_name} AS {SOURCE}\n"
             f"ON {join_condition}\n"
@@ -247,7 +247,7 @@ class Trouve(TrouveAbc):
             f"WHEN NOT MATCHED THEN INSERT ({all_columns}) VALUES ({all_source_columns})"
         )
         stmt_3 = (
-            f"-- [3/3] drop staging table\n"
+            f"-- [3/3] drop the staging table\n"
             f"DROP TABLE IF EXISTS {staging_name}"
         )
 

@@ -1,17 +1,17 @@
 # Pandas-Native Transformations
 
-A `PandasTrouve` lets you write a pipeline step as a plain Python function. Clair fetches your upstream tables from Snowflake as DataFrames, runs your function on the machine executing clair, and writes the result back to Snowflake — with full DAG integration, lineage, selectors, and data quality tests.
+A `PandasTrouve` lets you write a pipeline step as a plain Python function. clair reads your upstream tables from Snowflake as DataFrames. Then it calls your function on the machine that runs clair, and writes the result to Snowflake. The DAG, the lineage, the selectors, and the data quality tests all apply.
 
 ## When to use `PandasTrouve`
 
-Use it when SQL is the wrong tool for the job:
+Use it if SQL is the incorrect tool for the task:
 
-- Complex reshaping that would require many CTEs
+- A complex reshape that needs many CTEs
 - ML feature engineering
-- Multi-step aggregations that depend on intermediate Python state
-- Logic you already have as pandas code
+- Aggregations of many steps that depend on Python state between the steps
+- Logic that you already have as pandas code
 
-For everything else, use a `Trouve` with a `sql` string — it runs entirely inside Snowflake and does not move data over the network.
+For all other work, use a `Trouve` with a `sql` string. The SQL runs in Snowflake, and the data does not move on the network.
 
 ## Installation
 
@@ -72,7 +72,7 @@ trouve = PandasTrouve(
         TestNotNull(column="product_id"),
         TestRowCount(min_rows=1),
     ],
-    docs="Top-rated products by average review score, computed in pandas.",
+    docs="The top-rated products, by the mean review score. pandas calculates them.",
 )
 ```
 
@@ -80,15 +80,15 @@ trouve = PandasTrouve(
 
 `clair run` gives a `PandasTrouve` these four steps:
 
-1. **Fetch** — for each Trouve in `inputs`, run `SELECT * FROM <full_name>` and load the result into a DataFrame. Column names become lowercase.
+1. **Read** — for each Trouve in `inputs`, run `SELECT * FROM <full_name>` and load the result into a DataFrame. Column names become lowercase.
 2. **Transform** — call your function locally on the clair machine, with one DataFrame for each parameter, in the order of `inputs`.
-3. **Write** — write the returned DataFrame back to Snowflake. The table is created or replaced.
+3. **Write** — write the DataFrame from your function to Snowflake. clair creates or replaces the table.
 4. **Test** — run the attached tests against the output table in Snowflake.
 
-If your function returns something other than a `DataFrame`, the run fails with a clear message and the downstream nodes are skipped.
+If your function returns a different type than `DataFrame`, the run fails with a clear message, and clair skips the downstream nodes.
 
 !!! note
-    Clair reads the data into memory on the machine that runs clair. For large upstream tables this is slow and it uses much memory. Chunked reads are not available.
+    clair reads the data into the memory of the machine that runs clair. For large upstream tables this is slow, and it uses much memory. Chunked reads are not available.
 
 ## Validation
 
@@ -114,7 +114,7 @@ A SQL `Trouve` can depend on the output of a `PandasTrouve`, and a `PandasTrouve
 
 ## Selectors
 
-`--select` filtering operates the same way:
+`--select` works in the same way:
 
 ```bash
 clair run --project=. --env=dev --select='derived.products.top_rated'
@@ -141,7 +141,7 @@ def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
 
 - **Full-refresh only.** Incremental strategies are not available. A `PandasTrouve` always replaces the table. A `RunConfig` with an incremental mode raises an error.
 - **TABLE output only.** Views and sources are not available.
-- **Full table fetch.** Clair reads all upstream rows into memory. Chunking is not available.
+- **A full table read.** clair reads all the upstream rows into memory. Chunked reads are not available.
 
 ## Field reference
 
@@ -150,10 +150,10 @@ These are the `PandasTrouve` fields. See the [Trouve API reference](../reference
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `transform` | `Callable[..., pd.DataFrame]` | required | Python function that gives the output DataFrame. |
-| `inputs` | `list[TrouveAbc]` | `[]` | The upstream Trouves. Clair binds them to the transform parameters by position. |
-| `columns` | `list[Column]` | `[]` | Column definitions. Optional — used for documentation. |
-| `tests` | `list[AnyTest]` | `[]` | Data quality tests, run after clair writes the output. |
-| `docs` | `str` | `""` | Documentation string shown in `clair docs`. |
+| `inputs` | `list[TrouveAbc]` | `[]` | The upstream Trouves. clair binds each one to a transform parameter by position. |
+| `columns` | `list[Column]` | `[]` | Column definitions. Optional — clair uses them for the documentation. |
+| `tests` | `list[AnyTest]` | `[]` | Data quality tests. They run after clair writes the output. |
+| `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
 
 ## Complete example
 

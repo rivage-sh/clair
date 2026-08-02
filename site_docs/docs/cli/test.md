@@ -15,20 +15,20 @@ clair test --project . --env dev
 # Run tests for a specific schema
 clair test --project . --env dev --select='refined.orders.*'
 
-# Run with sampling (faster; skips TestRowCount)
+# Run against a sample (faster; skips TestRowCount)
 clair test --project . --env dev --sample
 ```
 
 ## Behavior
 
-- Requires a Snowflake connection (unlike `clair compile` and `clair dag`)
-- Runs all tests attached to each selected Trouve
-- SOURCE Trouves are skipped (they don't have tests)
-- If no tests are attached to any selected Trouve, exits cleanly with a log message
+- The command needs a Snowflake connection. `clair compile` and `clair dag` do not.
+- The command runs all the tests that you attach to each selected Trouve.
+- clair skips SOURCE Trouves. They do not have tests.
+- If no selected Trouve has tests, the command writes a log message and stops with success.
 
 ## `--sample` mode
 
-When `--sample` is set, most tests run against `SELECT TOP 1000 *` instead of the full table. `TestRowCount` is skipped because row counts are meaningless on a sample.
+If you give `--sample`, most tests run against `SELECT TOP 1000 *` instead of the full table. clair skips `TestRowCount`, because a row count has no meaning on a sample.
 
 ## Flags
 
@@ -36,13 +36,13 @@ When `--sample` is set, most tests run against `SELECT TOP 1000 *` instead of th
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
 | `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
-| `--select` | all | Glob pattern to filter Trouves. Repeat to union patterns. |
-| `--sample` | `false` | Run tests against `SELECT TOP 1000 *` |
+| `--select` | all | Glob pattern that filters the Trouves. Repeat the flag to add more patterns. |
+| `--sample` | `false` | Run the tests against `SELECT TOP 1000 *` |
 
 ## Exit codes
 
-- `0` — all tests passed (or no tests found)
-- `1` — one or more tests failed or errored
+- `0` — all the tests passed, or the project has no tests
+- `1` — one or more tests failed, or gave an error
 
 ## See also
 

@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined users with flattened address and full name.",
+    docs="Refined users. Each row has the address in separate columns and the full name.",
     sql=f"""
         select
             user_id,

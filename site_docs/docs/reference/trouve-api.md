@@ -66,19 +66,19 @@ class Trouve(TrouveAbc):
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | `TrouveType` | `TABLE` | Whether this is a SOURCE, TABLE, or VIEW |
+| `type` | `TrouveType` | `TABLE` | Tells you if this is a SOURCE, a TABLE, or a VIEW |
 | `sql` | `str` | `""` | SQL query. Required for TABLE/VIEW. Must be empty for SOURCE. Use f-strings to reference other Trouves. |
 | `columns` | `list[Column]` | `[]` | Column definitions. Optional for TABLE/VIEW. Required for UPSERT. |
 | `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](tests-api.md). |
-| `docs` | `str` | `""` | Documentation string shown in `clair docs`. |
+| `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
 | `run_config` | `RunConfig` | full refresh | Materialization strategy. See [RunConfig](run-config-api.md). |
-| `compiled` | `CompiledAttributes \| None` | `None` | Set by discovery. Do not set manually. |
+| `compiled` | `CompiledAttributes \| None` | `None` | Discovery sets this. Do not set it manually. |
 
 ### Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `is_compiled` | `bool` | `True` once the project has been discovered |
+| `is_compiled` | `bool` | `True` after clair discovers the project |
 | `full_name` | `str` | Fully-qualified Snowflake name (`database.schema.table`). Raises `RuntimeError` if not compiled. |
 
 ### Validation rules
@@ -89,16 +89,16 @@ class Trouve(TrouveAbc):
 
 ## `CompiledAttributes`
 
-Set by discovery on each `Trouve.compiled`. Available after `clair compile` or `clair run`.
+Discovery sets these attributes on `Trouve.compiled`. They are available after `clair compile` or `clair run`.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `full_name` | `str` | Routed Snowflake name (used in SQL and DDL) |
-| `logical_name` | `str` | Filesystem-derived name (used in DAG edges and selectors) |
-| `resolved_sql` | `str` | SQL with all placeholder tokens replaced by real full_names. Empty for a `PandasTrouve`. |
-| `resolved_transform` | `str` | The source text of the transform function. Empty for a SQL `Trouve`. |
+| `full_name` | `str` | The routed Snowflake name. clair uses it in the SQL and the DDL. |
+| `logical_name` | `str` | The name from the file system. clair uses it for the DAG edges and the selectors. |
+| `resolved_sql` | `str` | The SQL. clair replaced each placeholder token with a real full_name. It is empty for a `PandasTrouve`. |
+| `resolved_transform` | `str` | The source text of the transform function. It is empty for a SQL `Trouve`. |
 | `file_path` | `Path` | Absolute path to the Trouve file |
-| `imports` | `list[str]` | Logical names of upstream Trouves |
+| `imports` | `list[str]` | The logical names of the upstream Trouves |
 | `execution_type` | `ExecutionType` | SNOWFLAKE or PANDAS |
 
 ## `PandasTrouve`
@@ -135,8 +135,8 @@ from clair import PandasTrouve
 
 | Aspect | Detail |
 |--------|--------|
-| Dependencies | Each Trouve in `inputs` becomes an upstream dependency. Clair binds them to the transform parameters by position. |
-| Materialization | Always `TABLE`. Clair creates or replaces the table. |
+| Dependencies | Each Trouve in `inputs` becomes an upstream dependency. clair binds each one to a transform parameter by position. |
+| Materialization | Always `TABLE`. clair creates or replaces the table. |
 | Incremental | Not available. Full-refresh only. |
 | Return value | The function must return a `pd.DataFrame`. Any other type fails the run. |
 | Installation | No extra needed. pandas is a dependency of clair. |
@@ -179,7 +179,7 @@ trouve = PandasTrouve(
 )
 ```
 
-See the [Pandas-native guide](../guides/pandas-native.md) for a full walkthrough.
+See the [Pandas-native guide](../guides/pandas-native.md) for a full example.
 
 ## The f-string pattern
 
@@ -192,6 +192,6 @@ sql=f"SELECT * FROM {other_trouve}"
 Python calls `Trouve.__format__`, which:
 
 1. Registers `other_trouve` in a global registry
-2. Returns a placeholder token like `__CLAIR_TROUVE_140234567890__`
+2. Returns a placeholder token, such as `__CLAIR_TROUVE_140234567890__`
 
-During discovery, clair replaces every placeholder with the real `full_name` of the referenced Trouve. This is how the dependency graph is built and how SQL names are resolved.
+At discovery, clair replaces every placeholder with the real `full_name` of the Trouve. Thus clair builds the dependency graph and resolves the SQL names.

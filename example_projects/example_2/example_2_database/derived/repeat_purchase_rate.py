@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Monthly repeat purchase rate among buyers.",
+    docs="Monthly rate of the buyers who purchase again.",
     sql=f"""
         select
             o.order_month,

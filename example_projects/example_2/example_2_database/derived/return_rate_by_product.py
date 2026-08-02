@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Per-product return rates based on order items.",
+    docs="Return rate for each product. This Trouve reads the order items.",
     sql=f"""
         select
             oi.product_id,

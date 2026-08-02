@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Top customers by lifetime value at or above the 90th percentile.",
+    docs="The customers with a lifetime value in the 90th percentile or higher.",
     sql=f"""
         with p90 as (
             select percentile_cont(0.9) within group (order by lifetime_value) as threshold

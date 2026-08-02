@@ -13,13 +13,14 @@ from clair import (
 trouve = Trouve(
     type=TrouveType.TABLE,
     docs="""
-        Per-customer order statistics, merged on customer_id.
+        Order statistics for each customer. clair merges the rows on customer_id.
 
-        On each incremental run, stats are recomputed from all refined orders and merged
-        into the target table. Existing customers are updated in-place; new customers are
-        inserted. This means the table always reflects current totals without a full rebuild.
+        In each incremental run, clair calculates the statistics again from all the refined
+        orders and merges them into the target table. clair updates the customers that exist
+        and inserts the new customers. Thus the table always shows the current totals, and
+        clair does not make the full table again.
 
-        On full refresh, the table is created from scratch with CREATE OR REPLACE.
+        In a full refresh, clair makes the table again with CREATE OR REPLACE.
     """,
     sql=f"""
         select

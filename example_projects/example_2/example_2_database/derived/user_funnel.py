@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Daily conversion funnel from page views to purchases.",
+    docs="Daily conversion funnel. It goes from the page views to the purchases.",
     sql=f"""
         select
             event_date,

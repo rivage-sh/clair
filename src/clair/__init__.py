@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
 
+from clair.environments.routing import RoutingEntry, RoutingTable, TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
 from clair.trouves.pandas_trouve import PandasTrouve
@@ -86,6 +87,8 @@ __all__ = [
     "DatabaseDefaults",
     "IncrementalMode",
     "PandasTrouve",
+    "RoutingEntry",
+    "RoutingTable",
     "RunConfig",
     "RunMode",
     "SchemaDefaults",
@@ -97,6 +100,7 @@ __all__ = [
     "TestUniqueColumns",
     "Trouve",
     "TrouveAbc",
+    "TrouveAddress",
     "TrouveType",
     "UpsertConfig",
 ]

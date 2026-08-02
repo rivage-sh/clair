@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined reviews with sentiment classification.",
+    docs="Refined reviews. Each row has a class for the sentiment.",
     sql=f"""
         select
             review_id,

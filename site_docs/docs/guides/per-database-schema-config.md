@@ -1,6 +1,6 @@
 # Per-Database & Schema Config
 
-You can set warehouse and role defaults per database or schema directory. This lets different parts of your project run with different compute or permissions without touching `~/.clair/environments.yml`.
+You can set warehouse and role defaults for each database directory or schema directory. Then different parts of your project can use different compute or permissions. You do not change `~/.clair/environments.yml`.
 
 ## `__database_config__.py`
 
@@ -19,7 +19,7 @@ my_project/
 from clair import DatabaseDefaults
 
 defaults = DatabaseDefaults(
-    warehouse="reporting_wh",   # larger warehouse for BI queries
+    warehouse="reporting_wh",   # a larger warehouse for the BI queries
     role="reporter",
 )
 ```
@@ -42,30 +42,30 @@ my_project/
 from clair import SchemaDefaults
 
 defaults = SchemaDefaults(
-    warehouse="orders_wh",  # override for this schema only
+    warehouse="orders_wh",  # applies to this schema only
 )
 ```
 
 ## Resolution order
 
-For each Trouve, the effective warehouse and role are resolved in this order (later values win):
+clair resolves the warehouse and the role of each Trouve in this order. A later value replaces an earlier value.
 
-1. Environment defaults (`warehouse` and `role` from `~/.clair/environments.yml`)
-2. `__database_config__.py` in the Trouve's database directory
-3. `__schema_config__.py` in the Trouve's schema directory
+1. The environment defaults: `warehouse` and `role` from `~/.clair/environments.yml`
+2. `__database_config__.py` in the database directory of the Trouve
+3. `__schema_config__.py` in the schema directory of the Trouve
 
 A `SchemaDefaults` value overrides a `DatabaseDefaults` value for the same field.
 
 ## Field reference
 
-Both `DatabaseDefaults` and `SchemaDefaults` support the same fields:
+`DatabaseDefaults` and `SchemaDefaults` have the same fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `warehouse` | `str \| None` | Snowflake warehouse to use for this directory |
-| `role` | `str \| None` | Snowflake role to use for this directory |
+| `warehouse` | `str \| None` | The Snowflake warehouse for this directory |
+| `role` | `str \| None` | The Snowflake role for this directory |
 
-Fields not set (left as `None`) fall through to the next level in the resolution order.
+If you do not set a field, it stays `None`. clair then uses the value from the next level.
 
 ## Example: mixed warehouses
 
@@ -79,4 +79,4 @@ my_project/
     └── __database_config__.py    # defaults = DatabaseDefaults(warehouse="reporting_wh", role="reporter")
 ```
 
-Each database runs on the appropriate compute without any per-command flags.
+Each database runs on the correct compute. You do not give flags on the command line.

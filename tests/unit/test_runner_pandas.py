@@ -168,7 +168,7 @@ class TestRunPandasTrouveFullNameParsing:
         result = _run_pandas_trouve(trouve, adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert "Cannot parse full_name" in result.error
+        assert "cannot divide the full_name" in result.error
 
 
 class TestRunPandasTrouveTransformErrors:
@@ -188,7 +188,7 @@ class TestRunPandasTrouveTransformErrors:
         result = _run_pandas_trouve(trouve, adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert "Transform function failed" in result.error
+        assert "The transform function failed" in result.error
         assert "something went wrong" in result.error
 
     def test_transform_returns_non_dataframe_results_in_failure(self):
@@ -246,7 +246,7 @@ class TestRunPandasTrouveFetchErrors:
         result = _run_pandas_trouve(trouve, adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert "Failed to fetch" in result.error
+        assert "cannot read the input" in result.error
         assert "events" in result.error
 
 
@@ -268,7 +268,7 @@ class TestRunPandasTrouveWriteErrors:
         result = _run_pandas_trouve(trouve, adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert "Failed to write DataFrame" in result.error
+        assert "cannot write the DataFrame" in result.error
 
     def test_write_returns_success_false_results_in_failure(self):
         source = _make_source("db.schema.events")

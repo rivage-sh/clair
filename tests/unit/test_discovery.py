@@ -12,11 +12,11 @@ from clair.core.discovery import (
     find_routing_collisions,
     recompile_for_selection,
 )
-from clair.environments.routing import DatabaseOverrideRouting, SchemaIsolationRouting
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
 from clair.trouves.trouve import Trouve, TrouveType
+from tests.helpers import DatabaseOverrideRouting, SchemaIsolationRouting
 
 
 class TestComputeFullName:

@@ -9,10 +9,10 @@ clair init [--project PATH]
 ## What it does
 
 1. Prompts for a project directory (default: current directory)
-2. If `~/.clair/environments.yml` doesn't exist, walks through an interactive Snowflake connection setup
+2. If `~/.clair/environments.yml` does not exist, asks for your Snowflake connection details
 3. Prompts for an example source table name in the format `database.schema.table`
 4. Creates a starter project with a SOURCE Trouve for that table
-5. Writes a `.gitignore` excluding `_clairtifacts/`
+5. Writes a `.gitignore` file that excludes `_clairtifacts/`
 
 ## Interactive session
 
@@ -42,7 +42,7 @@ Region (e.g. us-east-1): us-east-1
   hint: select current_account() as account_locator;
 Account locator (e.g. abc12345): abc12345
 
-What is an example Snowflake table that contains source data? (eg source.orders.raw) [source]: source.orders.raw
+Give an example Snowflake table that contains source data (for example source.orders.raw) [source]: source.orders.raw
 
 ✓ Project ready.
 

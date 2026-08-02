@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined orders with date dimensions and delivery metrics.",
+    docs="Refined orders. Each row has the date dimensions and the delivery metrics.",
     sql=f"""
         select
             order_id,
