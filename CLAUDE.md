@@ -108,9 +108,6 @@ The example code in `site_docs/docs/` must stay identical to the equivalent code
 When you write documentation, point to the source of truth. Do not copy it. A copy becomes
 wrong when the source changes, and many copies are difficult to maintain.
 
-- Name the file that holds the facts, such as `.github/workflows/ci.yml`.
-- Copy content only if the reader cannot follow the pointer.
-
 ## Simplified Technical English
 
 Write all text that you generate in Simplified Technical English (ASD-STE100). STE is a controlled writing standard that makes technical text clear and unambiguous for readers who do not speak English as a first language.
