@@ -1,4 +1,4 @@
-"""Tests for compiler output for df_fn Trouve nodes."""
+"""The tests of the compiler output for a df_fn Trouve node."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ FAKE_RUN_ID = "0" * 32
 
 
 def _make_pandas_project(tmp_path: Path) -> Path:
-    """Build a project with a SOURCE and a df_fn Trouve with columns."""
+    """Make a project with a SOURCE and a df_fn Trouve that has columns."""
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
@@ -44,7 +44,7 @@ def _make_pandas_project(tmp_path: Path) -> Path:
 
 
 def _make_mixed_project(tmp_path: Path) -> Path:
-    """Build a project with both SQL Trouve and df_fn Trouve."""
+    """Make a project with a SQL Trouve and a df_fn Trouve."""
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "refined").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
@@ -75,7 +75,7 @@ def _make_mixed_project(tmp_path: Path) -> Path:
 
 
 def _make_no_columns_project(tmp_path: Path) -> Path:
-    """Build a project with a df_fn Trouve that has no columns defined."""
+    """Make a project with a df_fn Trouve that has no columns."""
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 

@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Seller sales breakdown by product category.",
+    docs="Sales of each seller for each product category.",
     sql=f"""
         select
             ps.seller_id,

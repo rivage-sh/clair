@@ -1,4 +1,4 @@
-"""Test runner -- execute data quality tests against Snowflake."""
+"""The test runner. It executes the data quality tests on Snowflake."""
 
 from __future__ import annotations
 
@@ -16,18 +16,21 @@ logger = structlog.get_logger()
 
 
 class TestResult(BaseModel):
-    """Result of running a single data quality test.
+    """The result of one data quality test.
 
     Attributes:
-        full_name: Fully-qualified Snowflake object name of the tested Trouve.
-        test_index: Zero-based index of this test within the Trouve's test list.
-        test_type: Human-readable label (e.g. "unique", "not_null", "sql").
-        column_name: Column under test, or None for SQL-level tests.
-        passed: True if the test query returned zero rows (no violations).
-        failing_row_count: Number of rows violating the test condition.
-        query_id: Warehouse query ID.
-        query_url: URL to the query in the Snowflake console.
-        error: Error message if the query itself failed to execute.
+        full_name: The full Snowflake object name of the Trouve.
+        test_index: The index of this test in the test list of the Trouve. The
+            first index is 0.
+        test_type: A label for a person to read, such as "unique", "not_null",
+            or "sql".
+        column_name: The column that the test examines. It is None for a test
+            on the full table.
+        passed: True if the test query gave zero rows. Thus the data is correct.
+        failing_row_count: The number of rows that disobey the test condition.
+        query_id: The warehouse query ID.
+        query_url: The URL of the query in the Snowflake console.
+        error: The error message if the query itself did not execute.
     """
 
     full_name: str
@@ -42,7 +45,7 @@ class TestResult(BaseModel):
 
 
 class TestSummary(BaseModel):
-    """Structured result of a test run."""
+    """The result of one test run."""
 
     results: list[TestResult]
 
@@ -71,12 +74,12 @@ class TestSummary(BaseModel):
         return [r for r in self.results if r.error]
 
     def render(self) -> str:
-        """Produce the formatted summary string for stdout."""
+        """Make the complete summary text for stdout."""
         total = len(self.results)
         lines = [
             "=== Clair Test ===",
             "",
-            f"Running {total} test{'s' if total != 1 else ''}...",
+            f"Clair runs {total} test{'s' if total != 1 else ''}...",
             "",
         ]
 
@@ -122,41 +125,41 @@ def run_tests(
     adapter: WarehouseAdapter,
     use_sample: bool = False,
 ) -> list[TestResult]:
-    """Execute data quality tests for selected Trouves.
+    """Execute the data quality tests of the selected Trouves.
 
-    Iterates through each selected Trouve in the DAG, generates test SQL
-    for each Test declared on the Trouve, executes it, and collects results.
-    SOURCE Trouves are skipped because they have no materialized table to
-    test against.
+    The function reads each selected Trouve in the DAG. For each Test on the
+    Trouve, it makes the test SQL, executes the SQL, and keeps the result. The
+    function skips each SOURCE Trouve, because clair makes no table for a
+    SOURCE Trouve.
 
     Args:
         dag: The project DAG.
-        selected: Full_names of Trouves to test.
-        adapter: Connected warehouse adapter.
-        use_sample: When True, enable per-Trouve native sampling via
-                    ``trouve.sample()`` and skip tests not meaningful on
-                    sampled data (e.g. ``TestRowCount``).
+        selected: The full_names of the Trouves to test.
+        adapter: A warehouse adapter with an open connection.
+        use_sample: If True, the function takes a sample of each Trouve with
+            ``trouve.sample()``. It also skips each test that needs the
+            complete table, such as ``TestRowCount``.
 
     Returns:
-        List of TestResult, one per test executed.
+        A list of TestResult, one item for each test.
     """
     results: list[TestResult] = []
 
     for name in selected:
         trouve = dag.get_trouve(name)
 
-        # Skip SOURCEs -- there is no clair-created table to test against
+        # Skip each SOURCE. Clair makes no table for a SOURCE Trouve.
         if trouve.type == TrouveType.SOURCE:
             continue
 
         for test_index, test in enumerate(trouve.tests):
-            # Derive column_name from column-level tests, None otherwise
+            # A column test supplies column_name. A different test gives None.
             column_name = getattr(test, "column", None)
 
             assert trouve.compiled is not None
             routed_name = trouve.compiled.full_name
 
-            # Skip tests that are meaningless on sampled data.
+            # Skip each test that needs the complete table.
             if use_sample and not test.is_run_with_sample:
                 logger.info(
                     "test.skipped_for_sample",
@@ -206,7 +209,7 @@ def run_tests(
                             query_url=query_result.query_url,
                         )
                     )
-            except Exception as e:  # noqa: BLE001 — a failing test must not abort the whole run
+            except Exception as e:  # noqa: BLE001 — one test that fails must not stop the complete run
                 logger.warning("test.exception", trouve=routed_name, test_type=test.label, column=column_name, error=str(e))
                 results.append(
                     TestResult(
@@ -224,12 +227,12 @@ def run_tests(
 
 
 def format_test_output(results: list[TestResult]) -> TestSummary:
-    """Build a structured TestSummary from test results.
+    """Make a TestSummary from the test results.
 
     Args:
-        results: List of TestResult objects.
+        results: A list of TestResult objects.
 
     Returns:
-        A TestSummary with structured data and a .render() method.
+        A TestSummary. It holds the data and supplies a .render() method.
     """
     return TestSummary(results=results)

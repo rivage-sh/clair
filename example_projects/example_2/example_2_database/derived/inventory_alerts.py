@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Products with low or out-of-stock inventory levels.",
+    docs="The products with a low inventory level or no inventory.",
     sql=f"""
         select
             i.product_id,

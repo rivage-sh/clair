@@ -1,4 +1,4 @@
-"""Shared test fixtures for Clair tests."""
+"""The shared fixtures of the Clair tests."""
 
 from __future__ import annotations
 
@@ -10,21 +10,22 @@ import pytest
 
 @pytest.fixture
 def simple_project() -> Path:
-    """Path to the simple_project test fixture."""
+    """The path of the simple_project test fixture."""
     return Path(__file__).parent / "fixtures" / "simple_project"
 
 
 @pytest.fixture
 def cyclic_project() -> Path:
-    """Path to the cyclic_project test fixture."""
+    """The path of the cyclic_project test fixture."""
     return Path(__file__).parent / "fixtures" / "cyclic_project"
 
 
 @pytest.fixture(autouse=True)
 def clean_sys_modules():
-    """Remove any fixture-loaded modules from sys.modules between tests.
+    """Delete each fixture module from sys.modules after each test.
 
-    Prevents state leakage between tests that load Trouve files.
+    Thus no state moves from one test to the next test. This is important for
+    the tests that load a Trouve file.
     """
     before = set(sys.modules.keys())
     yield
@@ -39,7 +40,7 @@ def clean_sys_modules():
 
 @pytest.fixture
 def tmp_environments(tmp_path: Path) -> Path:
-    """Create a temporary environments.yml for testing."""
+    """Make a temporary environments.yml file for a test."""
     environments_content = """
 dev:
   account: test-account
@@ -68,14 +69,13 @@ key_auth_encrypted:
   private_key_passphrase: s3cr3t
   warehouse: key_wh
 
-legacy_routing:
+unknown_key:
   account: test-account
   user: test-user
   authenticator: externalbrowser
   warehouse: test_wh
   routing:
     policy: database_override
-    database_name: OMER_DEV
 """
     environments_file = tmp_path / "environments.yml"
     environments_file.write_text(environments_content)

@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Highly rated products with at least 10 reviews and avg rating >= 4.5.",
+    docs="The products with a minimum of 10 reviews and an average rating of 4.5 or more.",
     sql=f"""
         select
             p.product_id,

@@ -3,7 +3,7 @@ from example_4_database.derived.daily_event_counts import trouve as example_4_da
 from clair import Column, ColumnType, Trouve
 
 trouve = Trouve(
-    docs="Top 10 event types ranked by total count across all time.",
+    docs="The 10 event types with the highest total count for all time.",
     sql=f"""
         select
             event_type,

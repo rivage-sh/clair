@@ -1,63 +1,68 @@
-"""All custom exceptions for Clair."""
+"""All the custom exceptions for Clair."""
 
 
 class ClairError(Exception):
-    """Base exception for all Clair errors."""
+    """The parent class of all the Clair errors."""
 
 
 class CyclicDependencyError(ClairError):
-    """Raised when the DAG contains a cycle."""
+    """Clair raises this error when the DAG contains a cycle."""
 
     def __init__(self, cycle: list[tuple[str, str]]) -> None:
         self.cycle = cycle
         nodes = [edge[0] for edge in cycle]
         cycle_str = " -> ".join(nodes + [nodes[0]])
-        super().__init__(f"Cyclic dependency detected: {cycle_str}")
+        super().__init__(f"Clair found a cyclic dependency: {cycle_str}")
 
 
 class EnvironmentNotFoundError(ClairError):
-    """Raised when the requested environment doesn't exist in environments.yml."""
+    """Clair raises this error when environments.yml has no such environment."""
 
     def __init__(self, env_name: str, available: list[str]) -> None:
         self.env_name = env_name
         self.available = available
         super().__init__(
-            f"Environment '{env_name}' not found in environments.yml. "
-            f"Available environments: {', '.join(available)}"
+            f"Clair cannot find the environment '{env_name}' in environments.yml. "
+            f"These environments are available: {', '.join(available)}"
         )
 
 
 class EnvironmentsFileNotFoundError(ClairError):
-    """Raised when ~/.clair/environments.yml doesn't exist."""
+    """Clair raises this error when ~/.clair/environments.yml does not exist."""
 
     def __init__(self, path: str) -> None:
         self.path = path
         super().__init__(
-            f"environments.yml not found at {path}. Run `clair init` to create one."
+            f"Clair cannot find environments.yml at {path}. "
+            "Run `clair init` to make one."
         )
 
 
-class RoutingInEnvironmentsFileError(ClairError):
-    """Raised when environments.yml still holds a routing block.
+class InvalidTrouveAddressError(ClairError):
+    """Clair raises this error when a name is not a valid Trouve address."""
 
-    Routing moved out of environments.yml and into the project __routing__.py.
-    A silent skip of the old block would send writes to the production names, so
-    clair stops and asks the user to move the rule.
-    """
+    def __init__(self, full_name: str, detail: str) -> None:
+        self.full_name = full_name
+        self.detail = detail
+        super().__init__(f"Clair cannot use '{full_name}' as an address: {detail}")
 
-    def __init__(self, path: str, env_name: str) -> None:
-        self.path = path
+
+class InvalidEnvironmentError(ClairError):
+    """Clair raises this error when an environment block holds a bad value."""
+
+    def __init__(self, env_name: str, path: str, detail: str) -> None:
         self.env_name = env_name
+        self.path = path
+        self.detail = detail
         super().__init__(
-            f"Environment '{env_name}' in {path} has a 'routing' block, but "
-            "routing moved to the project. Delete the block, then add the rule "
-            f"to __routing__.py under the key '{env_name}'. "
-            "Run `clair validate` to test the new rule."
+            f"Clair cannot read the environment '{env_name}' in {path}. "
+            "An unknown key is a misspelt name, or a routing block that belongs "
+            f"in the project __routing__.py. Detail: {detail}"
         )
 
 
 class InvalidRoutingFileError(ClairError):
-    """Raised when the project __routing__.py exists but clair cannot use it."""
+    """Clair raises this error when it cannot use the project __routing__.py."""
 
     def __init__(self, path: str, detail: str) -> None:
         self.path = path
@@ -66,7 +71,7 @@ class InvalidRoutingFileError(ClairError):
 
 
 class InvalidRoutingConfigError(ClairError):
-    """Raised when a routing rule fails, or returns an unusable name."""
+    """Clair raises this error when a routing entry returns an unusable address."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -74,17 +79,17 @@ class InvalidRoutingConfigError(ClairError):
 
 
 class DiscoveryError(ClairError):
-    """Raised when a Trouve file cannot be loaded."""
+    """Clair raises this error when it cannot load a Trouve file."""
 
     def __init__(self, file_path: str, reason: str) -> None:
         self.file_path = file_path
         self.reason = reason
-        super().__init__(f"Failed to load {file_path}: {reason}")
+        super().__init__(f"Clair cannot load {file_path}: {reason}")
 
 
 class CompileError(ClairError):
-    """Raised when SQL compilation fails."""
+    """Clair raises this error when it cannot compile the SQL."""
 
 
 class RunError(ClairError):
-    """Raised when a critical runner error occurs (not per-Trouve failures)."""
+    """Clair raises this error for a fatal runner fault, not for a Trouve failure."""

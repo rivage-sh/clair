@@ -1,4 +1,4 @@
-"""Clair CLI -- click entrypoint."""
+"""The Clair CLI. This module is the click entry point."""
 
 from __future__ import annotations
 
@@ -48,6 +48,7 @@ from clair.exceptions import (
     CompileError,
     EnvironmentsFileNotFoundError,
     InvalidRoutingConfigError,
+    InvalidTrouveAddressError,
 )
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, TrouveType
@@ -67,66 +68,66 @@ def cli() -> None:
     "--project",
     default=None,
     type=click.Path(file_okay=False),
-    help="Directory to initialise as a Clair project (default: cwd)",
+    help="Directory for the new Clair project (default: the current directory)",
 )
 def init(project: str | None) -> None:
-    """Create a new Clair project with example Trouves and config."""
-    # Step 1 -- Project directory
+    """Create a new Clair project with example Trouves and configuration."""
+    # Step 1 -- The project directory.
     if project is None:
         project = click.prompt("Project directory", default=".", type=str)
     project_dir = Path(project).resolve()
 
-    # Step 2 -- Environment setup
+    # Step 2 -- The environment.
     environments_path = Path.home() / ".clair" / "environments.yml"
     environments_existed = environments_path.exists()
     skip_environments_in_scaffold = False
 
     if environments_existed:
-        click.echo("  ~/.clair/environments.yml already exists, skipping.")
+        click.echo("  ~/.clair/environments.yml exists. Clair keeps it.")
         skip_environments_in_scaffold = True
     else:
         skip_environments_in_scaffold = True
         _prompt_and_write_environment()
 
-    # Step 3 -- Source table
+    # Step 3 -- The source table.
     source_full_table_name: str = click.prompt(
-        "What is an example Snowflake table that contains source data? (eg source.orders.raw)",
+        "Give an example Snowflake table that contains source data (for example source.orders.raw)",
         default="source",
         type=str,
     )
     source_full_table_name_split = source_full_table_name.split('.')
     if len(source_full_table_name_split) != 3:
-        click.echo("Error: Please provide a fully qualified table name in the format database.schema.table (e.g. source.orders.raw)", err=True)
+        click.echo("Error: Give a full table name in the format database.schema.table (for example source.orders.raw)", err=True)
         sys.exit(1)
     source_database_name, source_schema_name, source_table_name = source_full_table_name_split
 
-    # Step 4 -- Scaffold files
+    # Step 4 -- The scaffold files.
     results = scaffold_project(
         project_dir,
         source_database_name=source_database_name,
         source_schema_name=source_schema_name,
         source_table_name=source_table_name,
-        # If we already handled profiles (existed or created interactively),
-        # pass a home_dir that ensures scaffold sees the existing file and
-        # reports "skipped". We use the real home so it finds the real file.
+        # The code above wrote the profiles, or found them. Give a home_dir
+        # that lets the scaffold find that file and report "skipped". The real
+        # home directory holds the real file.
     )
 
     click.echo("")
     for status, filepath in results:
-        # Suppress the environments.yml line if we already handled it above
-        # (either it pre-existed or the user filled it in interactively).
+        # Hide the environments.yml line. The code above found that file, or
+        # the user gave the values for it.
         if skip_environments_in_scaffold and filepath == str(environments_path):
             continue
         click.echo(f"  {status}  {filepath}")
     click.echo("")
 
-    # Step 5 -- .gitignore
+    # Step 5 -- The .gitignore file.
     gitignore_path = project_dir / ".gitignore"
     gitignore_path.write_text(f"/{ARTIFACTS_DIR_NAME}\n")
     click.echo(f"  created  {gitignore_path}")
     click.echo("")
 
-    # Step 6 -- Next steps
+    # Step 6 -- The next steps for the user.
     click.echo("\u2713 Project ready.")
     click.echo("")
     click.echo("Next steps:")
@@ -136,7 +137,7 @@ def init(project: str | None) -> None:
 
 
 def _resolve_project_routing(project_root: Path, env_name: str) -> ProjectRouting:
-    """Load the project routing rule and warn about a missing entry.
+    """Load the project routing entry and warn about an absent entry.
 
     A routing file that does not name the active environment is almost always a
     typo. Passthrough routing then writes to the production names, so clair
@@ -162,19 +163,19 @@ def _resolve_project_routing(project_root: Path, env_name: str) -> ProjectRoutin
 
 
 def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> None:
-    """Print a prominent warning block for any routing collisions, before SQL runs."""
+    """Show a clear warning about each routing collision, before the SQL starts."""
     collisions = find_routing_collisions(trouves)
     if not collisions:
         return
 
     n = len(collisions)
-    header = f"{'collision' if n == 1 else f'{n} collisions'} detected"
+    header = "1 routing collision" if n == 1 else f"{n} routing collisions"
     if routing is not None:
-        header += f" (env: {env_name}, rule: {describe_routing(routing)})"
+        header += f" (env: {env_name}, entry: {describe_routing(routing)})"
     else:
         header += f" (env: {env_name})"
 
-    click.echo(click.style(f"\nWarning: routing {header}", fg="yellow", bold=True))
+    click.echo(click.style(f"\nWarning: Clair found {header}", fg="yellow", bold=True))
 
     for routed_target, logical_sources in collisions:
         click.echo(f"\n  {routed_target}")
@@ -182,13 +183,13 @@ def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> 
             click.echo(f"    ↳ {source}")
 
     click.echo(
-        f"\n  Fix: rename a colliding Trouve, adjust the rule in "
-        f"{ROUTING_FILE_NAME},\n  or use --select to exclude one from this run.\n"
+        f"\n  Fix: give one Trouve a different name, change the routing entry in "
+        f"{ROUTING_FILE_NAME},\n  or use --select to remove one Trouve from this run.\n"
     )
 
 
 def _prompt_and_write_environment() -> None:
-    """Interactively collect Snowflake connection details and write environments.yml."""
+    """Ask the user for the Snowflake connection data and write environments.yml."""
 
     def _hint(sql: str) -> None:
         click.echo(f"  hint: select {sql};", err=True)
@@ -198,7 +199,7 @@ def _prompt_and_write_environment() -> None:
             value = click.prompt(prompt_text, **kwargs)
             if str(value).strip():
                 return str(value).strip()
-            click.echo(f"{prompt_text} is required.")
+            click.echo(f"You must give a value for {prompt_text}.")
 
     click.echo("")
     env_name = click.prompt("Environment name", default="dev", type=str)
@@ -226,7 +227,7 @@ def _prompt_and_write_environment() -> None:
     if auth_choice == "1":
         private_key_path = _require("Private key path")
         env_data["private_key_path"] = private_key_path
-        key_encrypted = click.confirm("Key is encrypted?", default=False)
+        key_encrypted = click.confirm("Is the key encrypted?", default=False)
         if key_encrypted:
             passphrase = click.prompt(
                 "Private key passphrase", hide_input=True, type=str
@@ -244,7 +245,7 @@ def _prompt_and_write_environment() -> None:
     env_data["warehouse"] = warehouse
 
     click.echo("")
-    role = click.prompt("Role (leave blank to use user default)", default="", type=str, show_default=False)
+    role = click.prompt("Role (leave empty to use the default role of the user)", default="", type=str, show_default=False)
     if role:
         env_data["role"] = role
 
@@ -266,12 +267,12 @@ def _prompt_and_write_environment() -> None:
 @click.option(
     "--select",
     multiple=True,
-    help="Selector pattern to filter Trouves; supports globs and + operators (e.g., --select='+mydb.analytics.orders' --select='mydb.reports.*')",
+    help="Pattern that selects Trouves. You can use globs and + operators. Example: --select='+mydb.analytics.orders' --select='mydb.reports.*'",
 )
 @click.option(
     "--exclude",
     multiple=True,
-    help="Selector pattern to exclude Trouves; same syntax as --select, applied after selection.",
+    help="Pattern that removes Trouves. The syntax is the same as --select. Clair applies it after the selection.",
 )
 @click.option(
     "--project",
@@ -288,10 +289,10 @@ def _prompt_and_write_environment() -> None:
     "--run-mode",
     type=click.Choice(["full_refresh", "incremental"], case_sensitive=False),
     default="full_refresh",
-    help="Run mode: full_refresh recreates all tables; incremental applies only new data.",
+    help="Run mode. full_refresh writes all tables again. incremental writes only the new data.",
 )
 def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str) -> None:
-    """Compile the project and show generated SQL (no Snowflake connection)."""
+    """Compile the project and show the new SQL. This needs no Snowflake connection."""
     project_root = Path(project).resolve()
     run_mode_enum = RunMode(run_mode)
     run_id = uuid6.uuid7().hex
@@ -301,13 +302,13 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
     try:
         env_name, environment = load_environment(env)
     except EnvironmentsFileNotFoundError:
-        logger.warning("compile.no_environments_file", detail="compiling without an environment; run `clair init` to create environments.yml")
+        logger.warning("compile.no_environments_file", detail="Clair compiles without an environment. Run `clair init` to make environments.yml.")
     except ClairError as e:
         logger.error("compile.error", error=str(e))
         sys.exit(1)
 
     try:
-        routing = _resolve_project_routing(project_root, env_name).rule
+        routing = _resolve_project_routing(project_root, env_name).entry
     except ClairError as e:
         logger.error("compile.error", error=str(e))
         sys.exit(1)
@@ -346,7 +347,7 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
         write_compile_output(dag, selected, project_root, on_node_compiled=_on_node_compiled, run_mode=run_mode_enum, run_id=run_id)
         logger.info("compile.complete", run_id=run_id, artifacts_dir=str(artifacts_dir))
 
-    except InvalidRoutingConfigError as e:
+    except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
         logger.error("compile.routing_error", error=str(e))
         click.echo("\n  Run `clair validate` to see every routing problem.\n", err=True)
         sys.exit(1)
@@ -364,10 +365,10 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
 @click.option(
     "--env",
     default=None,
-    help="Environment name to route for; matches a key in __routing__.py",
+    help="Environment name to route for; matches an entry in __routing__.py",
 )
 def validate(project: str, env: str | None) -> None:
-    """Apply the project routing rules to every Trouve.
+    """Apply the project routing entries to every Trouve.
 
     This command needs no Snowflake credentials, so CI runs it on every change.
     """
@@ -376,14 +377,14 @@ def validate(project: str, env: str | None) -> None:
 
     try:
         project_routing = _resolve_project_routing(project_root, env_name)
-        # Discover with routing off. A bad rule then reports as a routing
-        # problem, and does not stop discovery at the first Trouve.
+        # Find the Trouves with routing off. A bad entry then reports as a
+        # routing problem, and does not stop discovery at the first Trouve.
         discovered = discover_project(project_root, routing=None)
     except ClairError as e:
         logger.error("validate.error", error=str(e))
         sys.exit(1)
 
-    routing = project_routing.rule
+    routing = project_routing.entry
     routable = [
         trouve for trouve in discovered
         if trouve.compiled and trouve.type != TrouveType.SOURCE
@@ -391,7 +392,7 @@ def validate(project: str, env: str | None) -> None:
 
     click.echo(f"\n  environment: {env_name}")
     click.echo(f"  routing file: {project_routing.file_path or 'none'}")
-    click.echo(f"  rule: {describe_routing(routing)}")
+    click.echo(f"  entry: {describe_routing(routing)}")
     click.echo(f"  Trouves to route: {len(routable)}\n")
 
     problems = collect_routing_problems(discovered, routing)
@@ -428,7 +429,7 @@ def validate(project: str, env: str | None) -> None:
 @click.option(
     "--select",
     multiple=True,
-    help="Glob pattern to filter Trouves; repeat to union patterns (e.g., --select='mydb.analytics.*' --select='mydb.reports.*')",
+    help="Glob pattern that selects Trouves. Give the option again to add more patterns. Example: --select='mydb.analytics.*' --select='mydb.reports.*'",
 )
 @click.option(
     "--project",
@@ -437,7 +438,7 @@ def validate(project: str, env: str | None) -> None:
     help="Path to the Clair project root",
 )
 def dag(select: tuple[str, ...], project: str) -> None:
-    """Show the project DAG as an indented tree."""
+    """Show the project DAG as a tree with indents."""
     project_root = Path(project).resolve()
 
     try:
@@ -469,15 +470,15 @@ def dag(select: tuple[str, ...], project: str) -> None:
 @click.option(
     "--host",
     default="127.0.0.1",
-    help="Bind address for the local docs server",
+    help="Address for the local docs server",
 )
 @click.option(
     "--no-browser",
     is_flag=True,
-    help="Do not open the browser automatically",
+    help="Do not open the browser",
 )
 def docs(project: str, port: int, host: str, no_browser: bool) -> None:
-    """Start a local web UI showing project documentation and lineage."""
+    """Start a local web UI. It shows the project documentation and the lineage."""
     project_root = Path(project).resolve()
 
     try:
@@ -495,7 +496,7 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
 
     except OSError as e:
         if "Address already in use" in str(e) or "address already in use" in str(e):
-            logger.error("docs.port_in_use", port=port, detail=f"Port {port} is already in use. Try --port <other>")
+            logger.error("docs.port_in_use", port=port, detail=f"Port {port} is in use. Use --port with a different number.")
         else:
             logger.error("docs.error", error=str(e))
         sys.exit(1)
@@ -508,12 +509,12 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
 @click.option(
     "--select",
     multiple=True,
-    help="Selector pattern to filter Trouves; supports globs and + operators (e.g., --select='+mydb.analytics.orders' --select='mydb.reports.*')",
+    help="Pattern that selects Trouves. You can use globs and + operators. Example: --select='+mydb.analytics.orders' --select='mydb.reports.*'",
 )
 @click.option(
     "--exclude",
     multiple=True,
-    help="Selector pattern to exclude Trouves; same syntax as --select, applied after selection.",
+    help="Pattern that removes Trouves. The syntax is the same as --select. Clair applies it after the selection.",
 )
 @click.option(
     "--project",
@@ -530,41 +531,41 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     "--run-mode",
     type=click.Choice(["full_refresh", "incremental"], case_sensitive=False),
     default="full_refresh",
-    help="Run mode: full_refresh recreates all tables; incremental applies only new data.",
+    help="Run mode. full_refresh writes all tables again. incremental writes only the new data.",
 )
 @click.option(
     "--no-test",
     is_flag=True,
     default=False,
-    help="Skip running data quality tests after a successful run.",
+    help="Do not run the data quality tests after a successful run.",
 )
 @click.option(
     "--sample",
     is_flag=True,
     default=False,
-    help="Run post-run tests against a sample of each Trouve (skips row count tests).",
+    help="Run the tests on a sample of each Trouve. Clair does not run the row count tests.",
 )
 def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool) -> None:
-    """Run Trouves against Snowflake, then run data quality tests."""
+    """Run the Trouves on Snowflake. Then run the data quality tests."""
     project_root = Path(project).resolve()
     run_mode_enum = RunMode(run_mode)
     run_id = uuid6.uuid7().hex
 
     try:
-        # Load environment
+        # Load the environment.
         env_name, environment = load_environment(env)
 
-        # Discover and build DAG
+        # Find the Trouves and make the DAG.
         profile_defaults = {
             "warehouse": environment.warehouse,
             "role": environment.role,
         }
-        routing = _resolve_project_routing(project_root, env_name).rule
+        routing = _resolve_project_routing(project_root, env_name).entry
         discovered = discover_project(project_root, profile_defaults, routing=routing, environment=environment, run_mode=run_mode_enum)
         _print_routing_collision_warnings(discovered, env_name, routing)
         dag = build_dag(discovered)
 
-        # Filter by selector
+        # Keep only the Trouves that the selector gives.
         expanded = expand_selectors(dag, select if select else None)
         selected = [n for n in expanded if dag.get_trouve(n).type != TrouveType.SOURCE]
         if exclude:
@@ -572,17 +573,17 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
             selected = [n for n in selected if n not in excluded_set]
 
         if not selected:
-            click.echo("No Trouves selected to run.")
+            click.echo("Clair found no Trouves to run.")
             return
 
         recompile_for_selection(discovered, set(selected))
         write_compile_output(dag, selected, project_root, run_mode=run_mode_enum, run_id=run_id)
 
-        # Warn if account_locator is missing (query URLs will be incomplete)
+        # If account_locator is absent, tell the user. The query URLs stay empty.
         if not environment.account_locator:
-            logger.warning("run.no_account_locator", env=env_name, detail="query URLs will not be available")
+            logger.warning("run.no_account_locator", env=env_name, detail="Clair cannot show the query URLs.")
 
-        # Connect and run, streaming each node result as it completes
+        # Connect and run. Show the result of each node immediately.
         adapter = SnowflakeAdapter()
         adapter.connect(environment.to_connection_dict())
 
@@ -615,7 +616,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
         finally:
             adapter.close()
 
-    except InvalidRoutingConfigError as e:
+    except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
         logger.error("run.routing_error", error=str(e))
         click.echo("\n  Run `clair validate` to see every routing problem.\n", err=True)
         sys.exit(1)
@@ -628,12 +629,12 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
 @click.option(
     "--select",
     multiple=True,
-    help="Selector pattern to filter Trouves; supports globs and + operators (e.g., --select='+mydb.analytics.orders' --select='mydb.reports.*')",
+    help="Pattern that selects Trouves. You can use globs and + operators. Example: --select='+mydb.analytics.orders' --select='mydb.reports.*'",
 )
 @click.option(
     "--exclude",
     multiple=True,
-    help="Selector pattern to exclude Trouves; same syntax as --select, applied after selection.",
+    help="Pattern that removes Trouves. The syntax is the same as --select. Clair applies it after the selection.",
 )
 @click.option(
     "--project",
@@ -650,29 +651,29 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
     "--sample",
     is_flag=True,
     default=False,
-    help="Run tests against a sample of each Trouve (skips row count tests).",
+    help="Run the tests on a sample of each Trouve. Clair does not run the row count tests.",
 )
 def test(
     select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, sample: bool
 ) -> None:
-    """Run data quality tests against Snowflake."""
+    """Run the data quality tests on Snowflake."""
     project_root = Path(project).resolve()
 
     try:
-        # Load environment
+        # Load the environment.
         env_name, environment = load_environment(env)
 
-        # Discover and build DAG
+        # Find the Trouves and make the DAG.
         profile_defaults = {
             "warehouse": environment.warehouse,
             "role": environment.role,
         }
-        routing = _resolve_project_routing(project_root, env_name).rule
+        routing = _resolve_project_routing(project_root, env_name).entry
         discovered = discover_project(project_root, profile_defaults, routing=routing, environment=environment)
         dag = build_dag(discovered)
 
-        # Filter by selector -- include all nodes (even SOURCEs) so that
-        # the selector can match them; run_tests skips SOURCEs internally.
+        # Keep the Trouves that the selector gives. Keep each SOURCE too, so
+        # that the selector can match a SOURCE. run_tests skips each SOURCE.
         selected = expand_selectors(dag, select if select else None)
         if exclude:
             excluded_set = set(expand_selectors(dag, exclude))
@@ -682,7 +683,7 @@ def test(
             logger.info("test.no_trouves_selected")
             return
 
-        # Connect and run tests
+        # Connect and run the tests.
         adapter = SnowflakeAdapter()
         adapter.connect(environment.to_connection_dict())
 
@@ -697,7 +698,7 @@ def test(
             output = format_test_output(results)
             logger.info("test.complete", passed=output.passed_count, failed=output.failed_count, errors=output.error_count)
 
-            # Exit with error if any failures or errors
+            # If one test failed, or one test caused an error, stop with an error.
             if any(not r.passed for r in results):
                 sys.exit(1)
         finally:
@@ -709,16 +710,16 @@ def test(
 
 
 def _parse_before_spec(spec: str) -> datetime:
-    """Parse a --before age into a UTC datetime cutoff.
+    """Read a --before age and give the equivalent UTC limit.
 
-    Accepts:
-        - Natural language: 'today', 'yesterday', 'last_week'
-        - Duration lookbacks: '7d', '24h', '30m'
-        - ISO date/datetime strings: '2026-03-01', '2026-03-01T12:00:00'
+    The function accepts these forms:
+        - Usual words: 'today', 'yesterday', 'last_week'
+        - A time span: '7d', '24h', '30m'
+        - An ISO date or time: '2026-03-01', '2026-03-01T12:00:00'
     """
     now = datetime.now(tz=UTC)
-    # Calendar boundaries use local midnight, then convert to UTC so that
-    # e.g. "today" means today in the user's timezone, not UTC.
+    # A calendar limit starts at local midnight. The code then changes the time
+    # to UTC. Thus "today" is today in the time zone of the user, not in UTC.
     local_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
 
     if spec == "today":
@@ -726,7 +727,7 @@ def _parse_before_spec(spec: str) -> datetime:
     if spec == "yesterday":
         return local_today - timedelta(days=1)
     if spec == "last_week":
-        # Monday of last calendar week (local time, converted to UTC)
+        # The Monday of the week before, in local time, changed to UTC.
         this_monday = local_today - timedelta(days=local_today.astimezone().weekday())
         return this_monday - timedelta(weeks=1)
 
@@ -742,16 +743,17 @@ def _parse_before_spec(spec: str) -> datetime:
         return dt
     except ValueError:
         raise click.BadParameter(
-            f"Cannot parse '{spec}'. Use 'today', 'yesterday', 'last_week', a duration like '7d'/'24h', or an ISO date like '2026-03-01'.",
+            f"Clair cannot read '{spec}'. Use 'today', 'yesterday', 'last_week', a duration such as '7d' or '24h', or an ISO date such as '2026-03-01'.",
             param_hint="--before",
         )
 
 
 def _run_id_to_time(run_id: str) -> datetime | None:
-    """Extract the UTC creation time from a UUIDv7 hex run_id.
+    """Read the UTC creation time from a UUIDv7 hex run_id.
 
-    UUIDv7 encodes Unix timestamp in ms in the first 48 bits (12 hex chars).
-    Returns None if run_id is not a valid 32-char hex string.
+    A UUIDv7 holds the Unix time in milliseconds in the first 48 bits. Those
+    bits are the first 12 hex characters. The function gives None if the run_id
+    is not a hex string of 32 characters.
     """
     if len(run_id) != 32 or not all(c in "0123456789abcdef" for c in run_id):
         return None
@@ -770,32 +772,32 @@ def _run_id_to_time(run_id: str) -> datetime | None:
     "--before",
     default=None,
     metavar="AGE",
-    help="Remove artifacts older than AGE. Accepts 'today', 'yesterday', 'last_week', lookbacks like '7d'/'24h', or ISO dates like '2026-03-01'.",
+    help="Remove the artifacts that are older than AGE. AGE can be 'today', 'yesterday', 'last_week', a lookback such as '7d' or '24h', or an ISO date such as '2026-03-01'.",
 )
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Show what would be deleted without deleting anything.",
+    help="Show the artifacts to remove, but do not remove them.",
 )
 @click.option(
     "--yes",
     is_flag=True,
-    help="Skip confirmation prompt.",
+    help="Do not ask for confirmation.",
 )
 def clean(project: str, before: str | None, dry_run: bool, yes: bool) -> None:
-    """Remove compiled artifacts from _clairtifacts/."""
+    """Delete the compiled artifacts in _clairtifacts/."""
     project_root = Path(project).resolve()
     artifacts_root = project_root / ARTIFACTS_DIR_NAME
 
     if not artifacts_root.exists():
-        click.echo(f"No {ARTIFACTS_DIR_NAME}/ directory found — nothing to clean.")
+        click.echo(f"Clair found no {ARTIFACTS_DIR_NAME}/ directory. There is nothing to remove.")
         return
 
     cutoff: datetime | None = None
     if before is not None:
         cutoff = _parse_before_spec(before)
 
-    # Collect run directories to remove
+    # Collect the run directories to delete.
     to_remove: list[Path] = []
     for entry in sorted(artifacts_root.iterdir()):
         if not entry.is_dir():
@@ -807,10 +809,10 @@ def clean(project: str, before: str | None, dry_run: bool, yes: bool) -> None:
         to_remove.append(entry)
 
     if not to_remove:
-        click.echo("Nothing to clean.")
+        click.echo("There is nothing to remove.")
         return
 
-    click.echo(f"{'Would remove' if dry_run else 'Removing'} {len(to_remove)} artifact run(s):")
+    click.echo(f"{'Clair will remove' if dry_run else 'Clair removes'} {len(to_remove)} artifact run(s):")
     for path in to_remove:
         ts = _run_id_to_time(path.name)
         ts_str = ts.strftime("%Y-%m-%d %H:%M:%S UTC") if ts else "unknown time"
@@ -820,12 +822,12 @@ def clean(project: str, before: str | None, dry_run: bool, yes: bool) -> None:
         return
 
     if not yes:
-        click.confirm(f"\nDelete {len(to_remove)} run(s)?", abort=True)
+        click.confirm(f"\nRemove {len(to_remove)} run(s)?", abort=True)
 
     for path in to_remove:
         shutil.rmtree(path)
 
-    click.echo(f"Removed {len(to_remove)} run(s).")
+    click.echo(f"Clair removed {len(to_remove)} run(s).")
 
 
 if __name__ == "__main__":

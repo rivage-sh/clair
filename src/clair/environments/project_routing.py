@@ -3,13 +3,13 @@
 Routing lives in the project, not in ``~/.clair/environments.yml``:
 
 * Routing is not a secret. A team commits it and reviews it like other code.
-* Routing gains the most from Python. A rule reads an environment variable, so
-  one committed rule gives each developer a separate target.
+* Routing gains the most from Python. An entry reads an environment variable, so
+  one committed entry gives each developer a separate target.
 * A project-local file matches the clair version that the project pins.
 
-The file defines a ``routing`` dict. Each key is an environment name. That name
-is the join key: it matches a top-level key in ``~/.clair/environments.yml``.
-Each value is a ``RoutingConfig``, a callable, or None for passthrough.
+The file defines a ``routing`` name and gives it a ``RoutingTable``. Each entry
+in the table names one environment. That name is the join key: it matches a
+top-level key in ``~/.clair/environments.yml``.
 """
 
 from __future__ import annotations
@@ -20,22 +20,22 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from clair.environments.routing import RoutingConfig, RoutingRule
+from clair.environments.routing import RoutingEntry, RoutingTable
 from clair.exceptions import InvalidRoutingFileError
 
 ROUTING_FILE_NAME = "__routing__.py"
 ROUTING_TABLE_ATTRIBUTE = "routing"
 
 # Cache key is (resolved path, modification time), so an edit reloads the file
-# but repeated loads in one process do not run the file again. A rule that reads
-# a keychain or a secret store must not run two times.
-_routing_table_cache: dict[tuple[str, int], dict[str, RoutingRule | None]] = {}
+# but repeated loads in one process do not run the file again. An entry that
+# reads a keychain or a secret store must not run two times.
+_routing_table_cache: dict[tuple[str, int], RoutingTable] = {}
 
 
 class ProjectRouting(NamedTuple):
     """The outcome of a routing file lookup for one environment."""
 
-    rule: RoutingRule | None
+    entry: RoutingEntry | None
     file_path: Path | None
     environment_names: list[str]
     has_entry: bool = False
@@ -47,10 +47,10 @@ class ProjectRouting(NamedTuple):
 
     @property
     def is_unnamed_environment(self) -> bool:
-        """Tell the caller if the file omits this environment.
+        """Tell the caller if the table omits this environment.
 
-        An explicit ``"prod": None`` entry is a decision, so it reads as named.
-        A missing key is almost always a typo, so it reads as unnamed.
+        An absent entry is almost always a typo. Clair then writes to the
+        logical names, which are the production names.
         """
         return self.file_exists and not self.has_entry
 
@@ -61,18 +61,18 @@ def _module_name_for(path: Path) -> str:
     return f"_clair_routing_{digest}"
 
 
-def _load_routing_table(path: Path) -> dict[str, RoutingRule | None]:
-    """Run a routing file and return its validated routing table.
+def _load_routing_table(path: Path) -> RoutingTable:
+    """Run a routing file and give back its routing table.
 
     Args:
-        path: Path to the ``__routing__.py`` file.
+        path: The path of the ``__routing__.py`` file.
 
     Returns:
-        The routing table, as a dict of environment name to routing rule.
+        The ``RoutingTable`` that the file defines.
 
     Raises:
-        InvalidRoutingFileError: If clair cannot run the file, or the table is
-            not in the expected shape.
+        InvalidRoutingFileError: If clair cannot run the file, or the file does
+            not define a ``RoutingTable``.
     """
     cache_key = (str(path), path.stat().st_mtime_ns)
     cached = _routing_table_cache.get(cache_key)
@@ -102,26 +102,11 @@ def _load_routing_table(path: Path) -> dict[str, RoutingRule | None]:
         )
 
     table = getattr(module, ROUTING_TABLE_ATTRIBUTE)
-    if not isinstance(table, dict):
+    if not isinstance(table, RoutingTable):
         raise InvalidRoutingFileError(
             str(path),
-            f"'{ROUTING_TABLE_ATTRIBUTE}' must be a dict, "
+            f"'{ROUTING_TABLE_ATTRIBUTE}' must be a RoutingTable, "
             f"but it is a {type(table).__name__}",
-        )
-
-    for env_name, rule in table.items():
-        if not isinstance(env_name, str):
-            raise InvalidRoutingFileError(
-                str(path),
-                f"every key must be an environment name string, "
-                f"but one key is a {type(env_name).__name__}",
-            )
-        if rule is None or isinstance(rule, RoutingConfig) or callable(rule):
-            continue
-        raise InvalidRoutingFileError(
-            str(path),
-            f"the rule for '{env_name}' is a {type(rule).__name__}. A rule must "
-            "be a RoutingConfig, a callable, or None",
         )
 
     _routing_table_cache[cache_key] = table
@@ -129,19 +114,19 @@ def _load_routing_table(path: Path) -> dict[str, RoutingRule | None]:
 
 
 def load_project_routing(project_root: Path, env_name: str) -> ProjectRouting:
-    """Find the routing rule for one environment.
+    """Find the routing entry for one environment.
 
     A project without a ``__routing__.py`` gets passthrough routing. An
     environment without an entry in the table also gets passthrough routing, and
     the caller warns about it, because passthrough writes to production names.
 
     Args:
-        project_root: Root directory of the clair project.
-        env_name: Resolved environment name, such as "dev".
+        project_root: The root directory of the clair project.
+        env_name: The resolved environment name, such as "dev".
 
     Returns:
-        A ``ProjectRouting`` with the rule, the file path, and all environment
-        names that the table defines.
+        A ``ProjectRouting`` with the entry, the file path, and all the
+        environment names that the table holds.
 
     Raises:
         InvalidRoutingFileError: If the file exists but clair cannot use it.
@@ -149,13 +134,14 @@ def load_project_routing(project_root: Path, env_name: str) -> ProjectRouting:
     path = project_root / ROUTING_FILE_NAME
     if not path.exists():
         return ProjectRouting(
-            rule=None, file_path=None, environment_names=[], has_entry=False
+            entry=None, file_path=None, environment_names=[], has_entry=False
         )
 
     table = _load_routing_table(path)
+    entry = table.entry_for(env_name)
     return ProjectRouting(
-        rule=table.get(env_name),
+        entry=entry,
         file_path=path,
-        environment_names=sorted(table),
-        has_entry=env_name in table,
+        environment_names=table.environment_names,
+        has_entry=entry is not None,
     )

@@ -29,11 +29,11 @@ if clair.run_mode == RunMode.INCREMENTAL:
 trouve = Trouve(
     type=TrouveType.TABLE,
     docs="""
-        Incremental append of recent orders. On each incremental run, orders created in the
-        last 3 days are appended. Intended to accumulate a running log of recent activity.
+        Incremental append of the recent orders. In each incremental run, clair adds the
+        orders from the last 3 days. Thus the table keeps a log of the recent activity.
 
-        Note: the 3-day lookback provides a small overlap window to handle late-arriving rows.
-        On full refresh, all rows are selected without a date filter.
+        Note: the lookback of 3 days gives a small overlap. The overlap catches the rows that
+        come late. In a full refresh, clair selects all rows and uses no date filter.
     """,
     sql=sql,
     run_config=RunConfig(

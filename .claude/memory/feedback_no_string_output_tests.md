@@ -1,7 +1,8 @@
 ---
-name: no-string-output-tests
-description: Functions should return structured Pydantic objects, not strings. Tests must assert on object fields, not formatted output strings.
-type: feedback
+name: feedback_no_string_output_tests
+description: Functions return structured Pydantic objects, not strings. Tests assert on object fields, not formatted output strings.
+metadata:
+  type: feedback
 ---
 
 Do NOT test output strings for properties. Functions should return Pydantic objects with data that is then formattable to strings.

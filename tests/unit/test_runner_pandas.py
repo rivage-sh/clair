@@ -1,4 +1,4 @@
-"""Tests for _run_df_fn_trouve (runner's pandas execution path)."""
+"""The tests of _run_df_fn_trouve, the pandas path of the runner."""
 
 from __future__ import annotations
 
@@ -38,10 +38,10 @@ def _make_df_adapter(
     fetch_side_effect: Exception | None = None,
     write_side_effect: Exception | None = None,
 ) -> MagicMock:
-    """Create a mock adapter that implements the DataFrameCapableAdapter protocol."""
+    """Make a false adapter that obeys the DataFrameCapableAdapter protocol."""
     adapter = MagicMock(spec=WarehouseAdapter)
 
-    # Add the DataFrame methods so isinstance() check against the Protocol passes
+    # Add the DataFrame methods. Thus isinstance() accepts the Protocol.
     adapter.fetch_dataframe = MagicMock()
     adapter.write_dataframe = MagicMock()
 
@@ -167,7 +167,7 @@ class TestRunDfFnTrouveFullNameParsing:
         result = _run_df_fn_trouve(trouve, adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert "Cannot parse full_name" in result.error
+        assert "cannot divide the full_name" in result.error
 
 
 class TestRunDfFnTrouveTransformErrors:
@@ -187,7 +187,7 @@ class TestRunDfFnTrouveTransformErrors:
         result = _run_df_fn_trouve(trouve, adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert "Transform function failed" in result.error
+        assert "The transform function failed" in result.error
         assert "something went wrong" in result.error
 
     def test_df_fn_returns_non_dataframe_results_in_failure(self):
@@ -245,7 +245,7 @@ class TestRunDfFnTrouveFetchErrors:
         result = _run_df_fn_trouve(trouve, adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert "Failed to fetch" in result.error
+        assert "cannot read the input" in result.error
         assert "events" in result.error
 
 
@@ -267,7 +267,7 @@ class TestRunDfFnTrouveWriteErrors:
         result = _run_df_fn_trouve(trouve, adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert "Failed to write DataFrame" in result.error
+        assert "cannot write the DataFrame" in result.error
 
     def test_write_returns_success_false_results_in_failure(self):
         source = _make_source("db.schema.events")

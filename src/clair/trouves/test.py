@@ -1,8 +1,8 @@
-"""Test definitions -- data quality tests attached to Trouves.
+"""The test definitions -- the data quality tests that a Trouve holds.
 
-Each test type is a separate Pydantic model with its own validation and
-SQL generation logic. The discriminated union ``AnyTest`` lets Pydantic
-deserialize any test from a ``{"type": "..."}`` dict automatically.
+Each test type is a different Pydantic model. Each model has its own checks and
+makes its own SQL. The tagged union ``AnyTest`` lets Pydantic build any test
+automatically from a ``{"type": "..."}`` dict.
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ from clair.trouves._refs import THIS_PLACEHOLDER
 
 
 class _ThisSentinel:
-    """Sentinel for the owning Trouve's table name in TestSql SQL strings.
+    """A marker for the table name of the parent Trouve in a TestSql string.
 
-    When used in an f-string, emits ``THIS_PLACEHOLDER`` as a placeholder.
-    Discovery resolves this token to the owning Trouve's full name via
+    In an f-string, this class gives the ``THIS_PLACEHOLDER`` token. Discovery
+    replaces the token with the full name of the parent Trouve. It uses
     ``_resolve_sql(sql, id_to_full_name, this_name=logical_name)``.
     """
 
@@ -29,9 +29,9 @@ class _ThisSentinel:
 
 
 THIS = _ThisSentinel()
-"""Sentinel for the owning Trouve's table name inside ``TestSql`` SQL strings.
+"""A marker for the table name of the parent Trouve in a ``TestSql`` string.
 
-Use in an f-string to reference the table being tested::
+Put it in an f-string to point to the table that the test examines::
 
     TestSql(sql=f"SELECT * FROM {THIS} WHERE amount < 0")
 """
@@ -39,41 +39,42 @@ Use in an f-string to reference the table being tested::
 
 
 class Test(BaseModel, ABC):
-    """Abstract base for all data quality tests.
+    """The abstract parent of all the data quality tests.
 
-    Every concrete subclass must define ``type`` as a Literal string
-    (used as discriminator) and implement ``to_sql(full_name)``.
+    Each subclass must set ``type`` to a Literal string, which is the tag of the
+    union. Each subclass must also supply a ``to_sql(full_name)`` method.
 
-    The ``label`` property is derived automatically from the class name:
-    the ``Test`` prefix is stripped and the remainder converted to snake_case.
+    The ``label`` property comes from the class name. Clair removes the ``Test``
+    prefix and makes the remainder snake_case.
     """
 
     type: str
 
     @abstractmethod
     def to_sql(self, full_name: str) -> str:
-        """Generate the SQL for this test. Zero returned rows means pass."""
+        """Make the SQL for this test. Zero rows in the result means a pass."""
         ...
 
     @property
     def is_run_with_sample(self) -> bool:
-        """Whether this test should run when native sampling is active.
+        """Tell you if clair can run this test on a sample of the data.
 
-        Most tests are valid on sampled data. Override to return False for
-        tests (like row counts) whose results are meaningless on a subset.
+        A sample is correct input for most tests. Override this property and
+        give False for a test that needs the complete table, such as a row
+        count test.
         """
         return True
 
     @property
     def label(self) -> str:
-        """Human-readable label derived from the class name (sans 'Test' prefix)."""
+        """A label for a person to read. It comes from the class name."""
         name = type(self).__name__
         name = name.removeprefix("Test")
         return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
 class TestUnique(Test):
-    """Assert that a column contains no duplicate values."""
+    """A test that a column has no duplicate value."""
 
     type: Literal["unique"] = "unique"
     column: str
@@ -88,7 +89,7 @@ class TestUnique(Test):
 
 
 class TestNotNull(Test):
-    """Assert that a column contains no NULL values."""
+    """A test that a column has no NULL value."""
 
     type: Literal["not_null"] = "not_null"
     column: str
@@ -103,9 +104,9 @@ class TestNotNull(Test):
 
 
 class TestRowCount(Test):
-    """Assert that the table row count falls within the given bounds.
+    """A test that the row count of the table stays between two limits.
 
-    At least one of ``min_rows`` or ``max_rows`` must be set.
+    You must set ``min_rows`` or ``max_rows``, or both.
     """
 
     type: Literal["row_count"] = "row_count"
@@ -115,7 +116,7 @@ class TestRowCount(Test):
     @model_validator(mode="after")
     def _validate_bounds(self) -> TestRowCount:
         if self.min_rows is None and self.max_rows is None:
-            raise ValueError("at least one of min_rows or max_rows must be set")
+            raise ValueError("you must set min_rows or max_rows, or both")
         if self.min_rows is not None and self.min_rows < 0:
             raise ValueError("min_rows must be >= 0")
         if self.max_rows is not None and self.min_rows is not None and self.max_rows < self.min_rows:
@@ -124,7 +125,7 @@ class TestRowCount(Test):
 
     @property
     def is_run_with_sample(self) -> bool:
-        """Row count tests are meaningless on sampled data."""
+        """A row count test needs the complete table, not a sample."""
         return False
 
     def to_sql(self, full_name: str) -> str:
@@ -137,7 +138,7 @@ class TestRowCount(Test):
 
 
 class TestUniqueColumns(Test):
-    """Assert that a combination of columns is unique across all rows."""
+    """A test that a set of columns has a different value in each row."""
 
     type: Literal["unique_columns"] = "unique_columns"
     columns: list[str]
@@ -146,7 +147,7 @@ class TestUniqueColumns(Test):
     def _validate_columns(self) -> TestUniqueColumns:
         if len(self.columns) < 2:
             raise ValueError(
-                "unique_columns test requires columns with at least 2 entries"
+                "the unique_columns test needs a minimum of 2 columns"
             )
         return self
 
@@ -161,12 +162,12 @@ class TestUniqueColumns(Test):
 
 
 class TestSql(Test):
-    """Arbitrary SQL test against the owning Trouve. Zero returned rows = pass.
+    """Your own SQL test on the parent Trouve. Zero rows means a pass.
 
-    Use ``{THIS}`` in an f-string to reference the owning Trouve's table name.
-    Use ``{other_trouve}`` to reference other Trouves (same as ``Trouve.sql``).
-    Discovery resolves cross-Trouve placeholder tokens; ``{THIS}`` is substituted
-    at test execution time via ``to_sql(full_name)``::
+    Put ``{THIS}`` in an f-string to point to the table name of the parent
+    Trouve. Put ``{other_trouve}`` to point to a different Trouve, as in
+    ``Trouve.sql``. Discovery replaces each token that points to a different
+    Trouve. ``to_sql(full_name)`` replaces ``{THIS}`` when the test runs::
 
         from clair import THIS
         from db.schema.customers import trouve as customers
@@ -179,7 +180,7 @@ class TestSql(Test):
 
     @property
     def is_run_with_sample(self) -> bool:
-        """Custom SQL may aggregate or span tables — skip during sample runs."""
+        """Your own SQL can group rows or read many tables, so a sample is not safe."""
         return False
 
     def to_sql(self, full_name: str) -> str:

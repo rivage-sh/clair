@@ -1,4 +1,4 @@
-"""Environment loading from ~/.clair/environments.yml."""
+"""Clair reads the environments from ~/.clair/environments.yml."""
 
 from __future__ import annotations
 
@@ -7,47 +7,63 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from clair.exceptions import (
     EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
-    RoutingInEnvironmentsFileError,
+    InvalidEnvironmentError,
 )
 
 DEFAULT_ENVIRONMENTS_PATH = Path.home() / ".clair" / "environments.yml"
 
 
+def _first_error_message(exc: ValidationError) -> str:
+    """Take the first message out of a Pydantic error.
+
+    Pydantic prints a report of many lines. A CLI message needs one sentence.
+    """
+    errors = exc.errors()
+    if not errors:
+        return str(exc)
+    first = errors[0]
+    key_name = ".".join(str(part) for part in first.get("loc", ()))
+    message = str(first.get("msg", ""))
+    return f"'{key_name}': {message}" if key_name else message
+
+
 class Environment(BaseModel):
-    """A single environment from environments.yml.
+    """One environment from environments.yml.
 
     An environment holds connection settings only. Routing lives in the project
     ``__routing__.py``, under the same environment name.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    # "forbid" makes an unknown key an error. A leftover routing block, or a
+    # misspelt key, would otherwise disappear without a word.
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    # Identity
+    # The identity of the environment.
     name: str
 
-    # Connection (required)
+    # The connection fields. Each one is mandatory.
     account: str
     user: str
     warehouse: str
 
-    # Auth (one group used at connect time)
+    # The authentication fields. Clair uses one group when it connects.
     authenticator: str | None = None
     password: str | None = None
     private_key_path: str | None = None
     private_key_passphrase: str | None = None
 
-    # Optional connection
+    # The optional connection fields.
     role: str | None = None
     region: str | None = None
     account_locator: str | None = None
 
     def to_connection_dict(self) -> dict[str, Any]:
-        """Return the connection dict expected by SnowflakeAdapter.connect()."""
+        """Give the connection dict that SnowflakeAdapter.connect() needs."""
         d: dict[str, Any] = {
             "account": self.account,
             "user": self.user,
@@ -71,24 +87,25 @@ def load_environment(
     env_name: str | None = None,
     environments_path: Path | None = None,
 ) -> tuple[str, Environment]:
-    """Load an environment from environments.yml.
+    """Load one environment from environments.yml.
 
-    Resolution order for env name:
-    1. env_name argument
-    2. CLAIR_ENV environment variable
-    3. "dev"
+    The function looks for the environment name in this order:
+    1. The env_name argument
+    2. The CLAIR_ENV environment variable
+    3. The name "dev"
 
     Args:
-        env_name: Explicit environment name.
-        environments_path: Path to environments.yml. Defaults to ~/.clair/environments.yml.
+        env_name: The environment name that you select.
+        environments_path: The path to environments.yml. The default path is
+            ~/.clair/environments.yml.
 
     Returns:
-        Tuple of (resolved_env_name, Environment).
+        A tuple of (resolved_env_name, Environment).
 
     Raises:
         EnvironmentsFileNotFoundError: If environments.yml does not exist.
-        EnvironmentNotFoundError: If the requested environment is not in environments.yml.
-        RoutingInEnvironmentsFileError: If the environment still has a routing block.
+        EnvironmentNotFoundError: If environments.yml has no such environment.
+        InvalidEnvironmentError: If the environment block holds an unknown key.
     """
     resolved_name = env_name or os.environ.get("CLAIR_ENV") or "dev"
     path = environments_path or DEFAULT_ENVIRONMENTS_PATH
@@ -107,9 +124,11 @@ def load_environment(
 
     env_data: dict[str, Any] = raw[resolved_name]
 
-    # Pydantic drops an unknown key without a word. A leftover routing block
-    # would then send every write to the production names.
-    if "routing" in env_data:
-        raise RoutingInEnvironmentsFileError(str(path), resolved_name)
-
-    return resolved_name, Environment(name=resolved_name, **env_data)
+    try:
+        return resolved_name, Environment(name=resolved_name, **env_data)
+    except ValidationError as exc:
+        # An unknown key is almost always a typo, or a routing block that the user
+        # did not move to __routing__.py. Both send writes to the wrong target.
+        raise InvalidEnvironmentError(
+            resolved_name, str(path), _first_error_message(exc)
+        ) from exc

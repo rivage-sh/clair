@@ -6,7 +6,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Monthly category-level sales aggregates.",
+    docs="Monthly sales totals for each category.",
     sql=f"""
         select
             p.category,

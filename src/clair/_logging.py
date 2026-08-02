@@ -1,4 +1,4 @@
-"""Structlog configuration for the Clair CLI."""
+"""The structlog configuration of the Clair CLI."""
 
 from __future__ import annotations
 
@@ -17,10 +17,11 @@ _LEVEL_FG = {"debug": "blue", "info": "green", "warning": "yellow", "error": "re
 def _multiline_renderer(_logger: Any, _method: str, event_dict: MutableMapping[str, Any]) -> str:
     level = event_dict.pop("level", "info")
     event = event_dict.pop("event", "")
-    event_dict.pop("timestamp", None)  # replaced by our own below
+    event_dict.pop("timestamp", None)  # The code below writes a different timestamp.
 
-    # Local wall-clock on purpose: these timestamps are read by a human watching the run.
-    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]  # noqa: DTZ005 — millisecond precision
+    # The local clock time is correct here, because a person reads these times
+    # during the run.
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]  # noqa: DTZ005 — an accuracy of one millisecond
     kv = {"timestamp": ts, **event_dict}
 
     if sys.stderr.isatty():
@@ -45,7 +46,7 @@ def configure_logging() -> None:
                 structlog.processors.TimeStamper(fmt="iso", utc=True),
                 structlog.processors.JSONRenderer(),
             ],
-            wrapper_class=structlog.make_filtering_bound_logger(20),  # INFO
+            wrapper_class=structlog.make_filtering_bound_logger(20),  # The INFO level.
             context_class=dict,
             logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
         )
@@ -56,7 +57,7 @@ def configure_logging() -> None:
                 structlog.processors.TimeStamper(fmt="%H:%M:%S", utc=False),
                 _multiline_renderer,
             ],
-            wrapper_class=structlog.make_filtering_bound_logger(20),  # INFO
+            wrapper_class=structlog.make_filtering_bound_logger(20),  # The INFO level.
             context_class=dict,
             logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
         )

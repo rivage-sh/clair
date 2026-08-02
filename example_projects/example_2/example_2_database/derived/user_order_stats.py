@@ -4,7 +4,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Per-user lifetime order statistics.",
+    docs="Order statistics for each user, for the full life of the account.",
     sql=f"""
         select
             user_id,

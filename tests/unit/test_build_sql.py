@@ -1,4 +1,4 @@
-"""Tests for Trouve.build_sql() method."""
+"""The tests of the Trouve.build_sql() method."""
 
 from pathlib import Path
 from typing import Any
@@ -18,7 +18,7 @@ def _make_compiled_trouve(
     columns: list[Column] | None = None,
     run_config: RunConfig | None = None,
 ) -> Trouve:
-    """Create a compiled Trouve for testing."""
+    """Make a compiled Trouve for a test."""
     kwargs: dict[str, Any] = {"type": type, "sql": sql}
     if columns is not None:
         kwargs["columns"] = columns
@@ -64,7 +64,7 @@ class TestBuildSqlFullRefresh:
 class TestBuildSqlNotCompiled:
     def test_raises_runtime_error(self):
         t = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id")
-        with pytest.raises(RuntimeError, match="build_sql\\(\\) requires a compiled Trouve"):
+        with pytest.raises(RuntimeError, match="build_sql\\(\\) needs a compiled Trouve"):
             t.build_sql(RunMode.FULL_REFRESH, run_id="abc")
 
 
@@ -117,7 +117,7 @@ class TestBuildSqlUpsert:
     def test_update_set_excludes_primary_key_columns(self):
         t = self._upsert_trouve(primary_key_columns=["id"])
         stmts = t.build_sql(RunMode.INCREMENTAL, run_id="abc123")
-        # UPDATE SET should have name and value, not id
+        # UPDATE SET must contain name and value, but not id.
         assert "UPDATE SET name = source.name, value = source.value" in stmts[1]
         assert "id = source.id" not in stmts[1].split("UPDATE SET")[1].split("WHEN")[0]
 
@@ -141,7 +141,7 @@ class TestBuildSqlUpsert:
     def test_join_sql_updates_all_columns(self):
         t = self._upsert_trouve(join_sql="target.id = source.id")
         stmts = t.build_sql(RunMode.INCREMENTAL, run_id="x")
-        # With join_sql, all columns appear in UPDATE SET
+        # With join_sql, UPDATE SET contains each column.
         assert "id = source.id, name = source.name, value = source.value" in stmts[1]
 
     def test_empty_columns_raises_value_error(self):
@@ -151,7 +151,7 @@ class TestBuildSqlUpsert:
             primary_key_columns=["id"],
         )
         t = _make_compiled_trouve(run_config=rc, columns=[])
-        with pytest.raises(ValueError, match="upsert mode requires columns"):
+        with pytest.raises(ValueError, match="the upsert mode needs columns on the Trouve"):
             t.build_sql(RunMode.INCREMENTAL, run_id="abc")
 
     def test_multi_column_primary_key_joins_with_and(self):

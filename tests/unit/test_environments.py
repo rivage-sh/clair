@@ -1,4 +1,4 @@
-"""Tests for environment loading."""
+"""The tests of the environment loader."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from clair.environments.environments import load_environment
 from clair.exceptions import (
     EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
-    RoutingInEnvironmentsFileError,
+    InvalidEnvironmentError,
 )
 
 
@@ -60,16 +60,22 @@ class TestLoadEnvironment:
         assert not hasattr(env, "routing")
 
 
-class TestLegacyRoutingBlock:
-    """Routing moved to the project __routing__.py. The old block must not pass silently."""
+class TestUnknownKey:
+    """Routing moved to the project __routing__.py. An old block must not pass silently."""
 
-    def test_legacy_routing_block_raises(self, tmp_environments: Path):
-        with pytest.raises(RoutingInEnvironmentsFileError, match="legacy_routing"):
-            load_environment(env_name="legacy_routing", environments_path=tmp_environments)
+    def test_unknown_key_raises(self, tmp_environments: Path):
+        with pytest.raises(InvalidEnvironmentError, match="unknown_key"):
+            load_environment(env_name="unknown_key", environments_path=tmp_environments)
 
-    def test_error_names_the_new_file(self, tmp_environments: Path):
-        with pytest.raises(RoutingInEnvironmentsFileError, match=r"__routing__\.py"):
-            load_environment(env_name="legacy_routing", environments_path=tmp_environments)
+    def test_the_error_names_the_new_file(self, tmp_environments: Path):
+        with pytest.raises(InvalidEnvironmentError, match=r"__routing__\.py"):
+            load_environment(env_name="unknown_key", environments_path=tmp_environments)
+
+    def test_a_misspelt_key_raises(self, tmp_path: Path):
+        bad = tmp_path / "env.yml"
+        bad.write_text("dev:\n  account: x\n  user: y\n  warehouse: z\n  wharehouse: z\n")
+        with pytest.raises(InvalidEnvironmentError, match="wharehouse"):
+            load_environment(environments_path=bad)
 
     def test_environment_without_routing_block_loads(self, tmp_path: Path):
         good = tmp_path / "env.yml"

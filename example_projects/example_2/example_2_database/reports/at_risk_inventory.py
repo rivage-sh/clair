@@ -6,7 +6,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Products with fewer than 30 days of stock remaining.",
+    docs="The products with less than 30 days of stock.",
     sql=f"""
         with daily_sales_rate as (
             select

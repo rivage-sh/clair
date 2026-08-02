@@ -5,7 +5,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Users with no order in the last 90 days, likely churned.",
+    docs="The users with no order in the last 90 days. These users possibly left.",
     sql=f"""
         select
             s.user_id,

@@ -1,4 +1,4 @@
-"""Tests for discovery of df_fn Trouve nodes."""
+"""The tests of the discovery of a df_fn Trouve node."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from clair.trouves.trouve import Trouve
 
 
 def _make_pandas_project(tmp_path: Path) -> Path:
-    """Build a minimal project with a SOURCE and a df_fn Trouve.
+    """Make a small project with a SOURCE and a df_fn Trouve.
 
-    Structure:
+    The structure is:
         mydb/source/events.py       [SOURCE]
-        mydb/derived/summary.py     [df_fn Trouve] reads source.events
+        mydb/derived/summary.py     [a df_fn Trouve] reads source.events
     """
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
@@ -46,12 +46,12 @@ def _make_pandas_project(tmp_path: Path) -> Path:
 
 
 def _make_mixed_project(tmp_path: Path) -> Path:
-    """Build a project with SQL Trouve + df_fn Trouve.
+    """Make a project with a SQL Trouve and a df_fn Trouve.
 
-    Structure:
+    The structure is:
         mydb/source/events.py       [SOURCE]
-        mydb/refined/events.py      [TABLE, SQL] reads source.events
-        mydb/derived/summary.py     [df_fn Trouve] reads refined.events
+        mydb/refined/events.py      [a TABLE with SQL] reads source.events
+        mydb/derived/summary.py     [a df_fn Trouve] reads refined.events
     """
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "refined").mkdir(parents=True)
@@ -83,12 +83,12 @@ def _make_mixed_project(tmp_path: Path) -> Path:
 
 
 def _make_chained_pandas_project(tmp_path: Path) -> Path:
-    """Build a project where a df_fn Trouve depends on another df_fn Trouve.
+    """Make a project where one df_fn Trouve depends on a different df_fn Trouve.
 
-    Structure:
+    The structure is:
         mydb/source/events.py       [SOURCE]
-        mydb/derived/step_one.py    [df_fn Trouve] reads source.events
-        mydb/derived/step_two.py    [df_fn Trouve] reads derived.step_one
+        mydb/derived/step_one.py    [a df_fn Trouve] reads source.events
+        mydb/derived/step_two.py    [a df_fn Trouve] reads derived.step_one
     """
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)

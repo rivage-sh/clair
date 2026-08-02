@@ -4,7 +4,7 @@ from clair import Column, ColumnType, TestUnique, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Top 10 event types ranked by total count across all days.",
+    docs="The 10 event types with the highest total count for all days.",
     sql=f"""
         select
             event_type,
