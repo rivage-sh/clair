@@ -138,7 +138,10 @@ uv add rivage-clair
 
 ### 1. Set up an environment
 
-Run `clair init` — it will prompt for your Snowflake connection details and write `~/.clair/environments.yml`.
+Run `clair init`. It asks for your Snowflake connection details and writes two files:
+
+- `~/.clair/environments.yml` — your connection settings. Do not commit this file.
+- `<project>/__routing__.py` — the [routing](https://clair.rivage.sh/guides/routing/) entry of each environment. Commit this file.
 
 ### 2. Create a project
 

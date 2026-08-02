@@ -1,91 +1,151 @@
-# Routing Policies
+# Routing
 
-Routing remaps logical Snowflake names to different physical targets. clair reads the logical names from your file system. Configure routing for each environment in `~/.clair/environments.yml`.
+Routing remaps logical Snowflake names to different physical targets. clair reads the logical names from your file system. You write the routing rules in `__routing__.py`, at the root of your project.
 
 The usual use: run a production project against a dev Snowflake database. You do not change a Trouve file.
 
-## SOURCE passthrough
+## Where routing lives
 
-SOURCE Trouves always use their logical name. The active routing policy has no effect on them. Routing applies to TABLE and VIEW Trouves only.
+Routing is in the project, not in `~/.clair/environments.yml`:
 
-## `database_override`
+| File | Holds | Commit it? |
+|---|---|---|
+| `~/.clair/environments.yml` | Connection settings and credentials | No |
+| `<project>/__routing__.py` | The routing rules | Yes |
 
-This policy replaces the database part of the name of each TABLE and VIEW Trouve.
+The environment name joins the two files. An entry with `environment_name = "dev"` applies when clair loads the `dev` environment from `environments.yml`.
 
-```yaml
-# ~/.clair/environments.yml
-dev:
-  account: myorg-myaccount
-  user: alice@example.com
-  authenticator: externalbrowser
-  warehouse: dev_warehouse
-  routing:
-    policy: database_override
-    database_name: dev
-```
-
-If this policy is active, clair writes the Trouve at `refined/orders/daily.py` to `dev.orders.daily` in Snowflake. Its logical name stays `refined.orders.daily`. clair still reads the source at `source/orders/raw.py` from `source.orders.raw`.
-
-**Example mapping:**
-
-| Logical name | Physical target |
-|---|---|
-| `source.orders.raw` | `source.orders.raw` (SOURCE — passthrough) |
-| `refined.orders.daily` | `dev.orders.daily` |
-| `derived.orders.summary` | `dev.orders.summary` |
-
-## `schema_isolation`
-
-This policy joins `database.schema.table` into one table name (`DATABASE_SCHEMA_TABLE`), in a database and a schema that you set. Use it to run the projects of many developers in one shared Snowflake schema. Each developer gets different table names, thus the projects do not collide.
-
-```yaml
-# alice's dev environment
-dev:
-  account: myorg-myaccount
-  user: alice@example.com
-  authenticator: externalbrowser
-  warehouse: dev_warehouse
-  routing:
-    policy: schema_isolation
-    database_name: dev
-    schema_name: alice
-```
-
-**Example mapping:**
-
-| Logical name | Physical target |
-|---|---|
-| `source.orders.raw` | `source.orders.raw` (SOURCE — passthrough) |
-| `refined.orders.daily` | `dev.alice.REFINED_ORDERS_DAILY` |
-| `derived.orders.summary` | `dev.alice.DERIVED_ORDERS_SUMMARY` |
+The routing file holds no credentials, so you commit it and your team reviews it like other code. Because it is Python, one committed rule gives each developer a separate target.
 
 !!! warning
-    `schema_isolation` joins `database_schema_table` with underscores to make an identifier. Snowflake gives identifiers a limit of 255 characters. A very long Trouve name can go above this limit. clair then raises `InvalidRoutingConfigError`.
+    A `routing:` block in `environments.yml` is now an error. Move the rule to `__routing__.py`.
+
+## The three types
+
+```python
+from clair import RoutingEntry, RoutingTable, TrouveAddress
+```
+
+`TrouveAddress` holds a `database_name`, a `schema_name`, and a `table_name`. It validates each name when you make it, so an address that exists is a valid Snowflake identifier.
+
+`RoutingEntry` is the base class for one environment's rule. You write a subclass with an `environment_name` and a `route` method.
+
+`RoutingTable` holds the entries. Your `__routing__.py` makes one and gives it the name `routing`.
+
+## A routing file
+
+```python
+# <project>/__routing__.py
+"""Clair routing -- gives each environment its physical write target."""
+
+import os
+
+from clair import RoutingEntry, RoutingTable, TrouveAddress
+
+
+class DeveloperRouting(RoutingEntry):
+    """Each person writes to a separate database."""
+
+    environment_name: str = "dev"
+    user_variable: str = "CLAIR_USER"
+
+    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+        user_name = os.environ[self.user_variable].upper()
+        return trouve_address.model_copy(
+            update={"database_name": f"{trouve_address.database_name}_{user_name}"}
+        )
+
+
+class ProductionRouting(RoutingEntry):
+    """Production writes to the logical names, so the address stays the same."""
+
+    environment_name: str = "prod"
+
+    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+        return trouve_address
+
+
+routing = RoutingTable(entries=[DeveloperRouting(), ProductionRouting()])
+```
+
+With `CLAIR_USER=alice` and the `dev` environment:
+
+| Logical name | Physical target |
+|---|---|
+| `source.orders.raw` | `source.orders.raw` (SOURCE — passthrough) |
+| `refined.orders.daily` | `refined_ALICE.orders.daily` |
+| `derived.orders.summary` | `derived_ALICE.orders.summary` |
+
+## Write a route method
+
+`route` accepts one `TrouveAddress` and gives one `TrouveAddress`. To change one part, call `model_copy`:
+
+```python
+def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+    return trouve_address.model_copy(update={"database_name": "DEV"})
+```
+
+To build a new address, name all three parts:
+
+```python
+def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+    collapsed_table_name = (
+        f"{trouve_address.database_name}_{trouve_address.schema_name}_"
+        f"{trouve_address.table_name}"
+    ).upper()
+    return TrouveAddress(
+        database_name="DEV",
+        schema_name="alice",
+        table_name=collapsed_table_name,
+    )
+```
+
+This second shape puts the projects of many developers in one shared schema. Each developer gets different table names, thus the projects do not collide.
+
+Add a field for each value that the rule needs. Pydantic validates the fields, and the field values show in the CLI messages.
+
+## SOURCE passthrough
+
+SOURCE Trouves always use their logical name. clair never calls `route` for a SOURCE Trouve. Routing applies to TABLE and VIEW Trouves only.
+
+## No entry for an environment
+
+An environment with no entry in the table gets passthrough routing: clair writes to the logical names. Those are the production names, so clair warns you first:
+
+```
+Warning: __routing__.py does not name the environment 'staging'.
+  Trouves write to their logical (production) names.
+  The file names: dev, prod
+```
+
+To make the passthrough deliberate, write an entry that gives the address back, as `ProductionRouting` does above. clair then stays quiet.
+
+## Validation
+
+`TrouveAddress` validates every name that it holds. A name must start with a letter or an underscore, hold only letters, digits, underscores or dollar signs, and stay under 255 characters. This applies to the logical names that your directories give, and to the physical names that your rules build.
+
+Run [`clair validate`](../cli/validate.md) to apply your rules to every Trouve without a Snowflake connection.
 
 ## Collision detection
 
 If two TABLE or VIEW Trouves route to the same physical target, clair shows a warning before the run:
 
 ```
-Warning: Clair found 2 routing collisions (env: dev, policy: database_override → dev)
+Warning: Clair found 2 routing collisions (env: dev, entry: DeveloperRouting(environment_name='dev', user_variable='CLAIR_USER'))
 
   dev.orders.daily
     ↳ refined.orders.daily
     ↳ analytics.orders.daily
 
-  Fix: give one Trouve a different name, change the routing policy in environments.yml,
+  Fix: give one Trouve a different name, change the routing entry in __routing__.py,
   or use --select to remove one Trouve from this run.
 ```
 
-## No routing
+## One entry for each environment
 
-Omit the `routing` block. clair then uses the logical names as the physical targets. This is correct for production:
+Two entries with one environment name are an error. Only one can win, and a silent choice sends the writes to a target that you do not expect:
 
-```yaml
-prod:
-  account: myorg-myaccount
-  user: ci_user
-  private_key_path: ~/.clair/snowflake_key.p8
-  warehouse: prod_warehouse
-  # no routing block — clair uses the logical names
+```
+Invalid routing file at __routing__.py: ValidationError: ...
+the routing table has more than one entry for: dev. Give each environment one entry.
 ```

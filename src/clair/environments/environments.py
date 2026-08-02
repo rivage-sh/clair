@@ -9,21 +9,39 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from clair.environments.routing import Routing
 from clair.exceptions import (
     EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
-    InvalidRoutingConfigError,
-    InvalidRoutingPolicyError,
+    InvalidEnvironmentError,
 )
 
 DEFAULT_ENVIRONMENTS_PATH = Path.home() / ".clair" / "environments.yml"
 
 
-class Environment(BaseModel):
-    """One environment from environments.yml."""
+def _first_error_message(exc: ValidationError) -> str:
+    """Take the first message out of a Pydantic error.
 
-    model_config = ConfigDict(populate_by_name=True)
+    Pydantic prints a report of many lines. A CLI message needs one sentence.
+    """
+    errors = exc.errors()
+    if not errors:
+        return str(exc)
+    first = errors[0]
+    key_name = ".".join(str(part) for part in first.get("loc", ()))
+    message = str(first.get("msg", ""))
+    return f"'{key_name}': {message}" if key_name else message
+
+
+class Environment(BaseModel):
+    """One environment from environments.yml.
+
+    An environment holds connection settings only. Routing lives in the project
+    ``__routing__.py``, under the same environment name.
+    """
+
+    # "forbid" makes an unknown key an error. A leftover routing block, or a
+    # misspelt key, would otherwise disappear without a word.
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     # The identity of the environment.
     name: str
@@ -44,9 +62,6 @@ class Environment(BaseModel):
     region: str | None = None
     account_locator: str | None = None
 
-    # The routing policy.
-    routing: Routing | None = None
-
     def to_connection_dict(self) -> dict[str, Any]:
         """Give the connection dict that SnowflakeAdapter.connect() needs."""
         d: dict[str, Any] = {
@@ -66,21 +81,6 @@ class Environment(BaseModel):
         if self.private_key_passphrase:
             d["private_key_passphrase"] = self.private_key_passphrase
         return d
-
-
-def _validate_routing_block(routing_raw: dict[str, Any]) -> None:
-    """Examine the routing block before Pydantic reads it.
-
-    This function finds an absent policy value and an unknown policy value. Then
-    it raises a clair error type that the CLI already knows.
-    """
-    if "policy" not in routing_raw:
-        raise InvalidRoutingConfigError("the routing block must have a 'policy' value")
-
-    policy = routing_raw["policy"]
-    valid_policies = {"database_override", "schema_isolation"}
-    if policy not in valid_policies:
-        raise InvalidRoutingPolicyError(policy)
 
 
 def load_environment(
@@ -105,8 +105,7 @@ def load_environment(
     Raises:
         EnvironmentsFileNotFoundError: If environments.yml does not exist.
         EnvironmentNotFoundError: If environments.yml has no such environment.
-        InvalidRoutingPolicyError: If the file names an unknown routing policy.
-        InvalidRoutingConfigError: If the routing block has a bad structure.
+        InvalidEnvironmentError: If the environment block holds an unknown key.
     """
     resolved_name = env_name or os.environ.get("CLAIR_ENV") or "dev"
     path = environments_path or DEFAULT_ENVIRONMENTS_PATH
@@ -125,14 +124,11 @@ def load_environment(
 
     env_data: dict[str, Any] = raw[resolved_name]
 
-    routing_raw = env_data.get("routing")
-    if isinstance(routing_raw, dict):
-        _validate_routing_block(routing_raw)
-
     try:
-        environment = Environment(name=resolved_name, **env_data)
-        return resolved_name, environment
+        return resolved_name, Environment(name=resolved_name, **env_data)
     except ValidationError as exc:
-        # Show each Pydantic error as a clair error that the CLI already knows.
-        # One example is an absent schema_name for the schema_isolation policy.
-        raise InvalidRoutingConfigError(str(exc)) from exc
+        # An unknown key is almost always a typo, or a routing block that the user
+        # did not move to __routing__.py. Both send writes to the wrong target.
+        raise InvalidEnvironmentError(
+            resolved_name, str(path), _first_error_message(exc)
+        ) from exc

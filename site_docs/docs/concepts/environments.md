@@ -78,7 +78,6 @@ prod:
 | `role` | — | Default role. If you omit it, Snowflake uses the default role of the user. |
 | `region` | — | AWS/Azure region. clair needs it for the query URLs in the logs. |
 | `account_locator` | — | Classic account locator. clair needs it for the query URLs. |
-| `routing` | — | Routing policy. See [Routing Policies](../guides/routing.md). |
 
 ## Select an environment
 
@@ -106,6 +105,8 @@ In CI, set `CLAIR_ENV` and use key-pair authentication. This method does not nee
   run: clair run --project .
 ```
 
-## Routing policies
+## Routing
 
-Each environment can include a routing policy. The policy remaps logical Snowflake names to physical targets. See [Routing Policies](../guides/routing.md).
+An environment holds connection settings only. The routing rules are in `__routing__.py`, at the root of your project. clair joins the two files by the environment name.
+
+An unknown key in an environment block is an error. A `routing:` block from an older version of clair therefore stops the run, and the message tells you to move the rule. See [Routing](../guides/routing.md).

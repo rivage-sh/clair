@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import sys
@@ -31,8 +32,24 @@ from clair.core.test_runner import format_test_output, run_tests
 from clair.docs.catalog import build_catalog
 from clair.docs.server import serve
 from clair.environments.environments import load_environment
-from clair.environments.routing import DatabaseOverrideRouting, SchemaIsolationRouting
-from clair.exceptions import ClairError, CompileError, EnvironmentsFileNotFoundError
+from clair.environments.project_routing import (
+    ROUTING_FILE_NAME,
+    ProjectRouting,
+    load_project_routing,
+)
+from clair.environments.routing import (
+    collect_routing_problems,
+    describe_routing,
+    detect_routing_collisions,
+    route,
+)
+from clair.exceptions import (
+    ClairError,
+    CompileError,
+    EnvironmentsFileNotFoundError,
+    InvalidRoutingConfigError,
+    InvalidTrouveAddressError,
+)
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, TrouveType
 
@@ -119,23 +136,42 @@ def init(project: str | None) -> None:
     click.echo("")
 
 
+def _resolve_project_routing(project_root: Path, env_name: str) -> ProjectRouting:
+    """Load the project routing entry and warn about an absent entry.
+
+    A routing file that does not name the active environment is almost always a
+    typo. Passthrough routing then writes to the production names, so clair
+    tells the user before any SQL runs.
+    """
+    project_routing = load_project_routing(project_root, env_name)
+
+    if project_routing.is_unnamed_environment:
+        click.echo(
+            click.style(
+                f"\nWarning: {ROUTING_FILE_NAME} does not name the environment "
+                f"'{env_name}'.",
+                fg="yellow",
+                bold=True,
+            )
+        )
+        click.echo(
+            f"  Trouves write to their logical (production) names.\n"
+            f"  The file names: {', '.join(project_routing.environment_names) or 'nothing'}\n"
+        )
+
+    return project_routing
+
+
 def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> None:
     """Show a clear warning about each routing collision, before the SQL starts."""
     collisions = find_routing_collisions(trouves)
     if not collisions:
         return
 
-    policy_desc = ""
-    if routing is not None:
-        if isinstance(routing, DatabaseOverrideRouting):
-            policy_desc = f"database_override → {routing.database_name}"
-        elif isinstance(routing, SchemaIsolationRouting):
-            policy_desc = f"schema_isolation → {routing.database_name}.{routing.schema_name}"
-
     n = len(collisions)
     header = "1 routing collision" if n == 1 else f"{n} routing collisions"
-    if policy_desc:
-        header += f" (env: {env_name}, policy: {policy_desc})"
+    if routing is not None:
+        header += f" (env: {env_name}, entry: {describe_routing(routing)})"
     else:
         header += f" (env: {env_name})"
 
@@ -147,8 +183,8 @@ def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> 
             click.echo(f"    ↳ {source}")
 
     click.echo(
-        "\n  Fix: give one Trouve a different name, change the routing policy in "
-        "environments.yml,\n  or use --select to remove one Trouve from this run.\n"
+        f"\n  Fix: give one Trouve a different name, change the routing entry in "
+        f"{ROUTING_FILE_NAME},\n  or use --select to remove one Trouve from this run.\n"
     )
 
 
@@ -261,14 +297,18 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
     run_mode_enum = RunMode(run_mode)
     run_id = uuid6.uuid7().hex
 
-    routing = None
     environment = None
     env_name = env or "dev"
     try:
         env_name, environment = load_environment(env)
-        routing = environment.routing
     except EnvironmentsFileNotFoundError:
-        logger.warning("compile.no_environments_file", detail="Clair compiles without routing. Run `clair init` to make environments.yml.")
+        logger.warning("compile.no_environments_file", detail="Clair compiles without an environment. Run `clair init` to make environments.yml.")
+    except ClairError as e:
+        logger.error("compile.error", error=str(e))
+        sys.exit(1)
+
+    try:
+        routing = _resolve_project_routing(project_root, env_name).entry
     except ClairError as e:
         logger.error("compile.error", error=str(e))
         sys.exit(1)
@@ -307,9 +347,83 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
         write_compile_output(dag, selected, project_root, on_node_compiled=_on_node_compiled, run_mode=run_mode_enum, run_id=run_id)
         logger.info("compile.complete", run_id=run_id, artifacts_dir=str(artifacts_dir))
 
+    except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
+        logger.error("compile.routing_error", error=str(e))
+        click.echo("\n  Run `clair validate` to see every routing problem.\n", err=True)
+        sys.exit(1)
     except ClairError as e:
         logger.error("compile.error", error=str(e))
         sys.exit(1)
+
+
+@cli.command()
+@click.option(
+    "--project",
+    default=".",
+    help="Path to the Clair project root (defaults to current directory)",
+)
+@click.option(
+    "--env",
+    default=None,
+    help="Environment name to route for; matches an entry in __routing__.py",
+)
+def validate(project: str, env: str | None) -> None:
+    """Apply the project routing entries to every Trouve.
+
+    This command needs no Snowflake credentials, so CI runs it on every change.
+    """
+    project_root = Path(project).resolve()
+    env_name = env or os.environ.get("CLAIR_ENV") or "dev"
+
+    try:
+        project_routing = _resolve_project_routing(project_root, env_name)
+        # Find the Trouves with routing off. A bad entry then reports as a
+        # routing problem, and does not stop discovery at the first Trouve.
+        discovered = discover_project(project_root, routing=None)
+    except ClairError as e:
+        logger.error("validate.error", error=str(e))
+        sys.exit(1)
+
+    routing = project_routing.entry
+    # Keep the (logical name, type) pair, not the Trouve. The name is the only
+    # part that the collision report needs, and here it is never None.
+    routable: list[tuple[str, TrouveType]] = [
+        (trouve.compiled.logical_name, trouve.type)
+        for trouve in discovered
+        if trouve.compiled is not None and trouve.type != TrouveType.SOURCE
+    ]
+
+    click.echo(f"\n  environment: {env_name}")
+    click.echo(f"  routing file: {project_routing.file_path or 'none'}")
+    click.echo(f"  entry: {describe_routing(routing)}")
+    click.echo(f"  Trouves to route: {len(routable)}\n")
+
+    problems = collect_routing_problems(discovered, routing)
+    for logical_name, problem in problems:
+        click.echo(click.style(f"  ✗ {logical_name}", fg="red", bold=True))
+        click.echo(f"    {problem}\n")
+
+    collisions: list[tuple[str, list[str]]] = []
+    if not problems:
+        logical_to_routed = {
+            logical_name: route(logical_name, trouve_type, routing)
+            for logical_name, trouve_type in routable
+        }
+        collisions = detect_routing_collisions(logical_to_routed)
+        for routed_target, logical_sources in collisions:
+            click.echo(click.style(f"  ✗ {routed_target}", fg="red", bold=True))
+            click.echo("    Two or more Trouves route to this one target:")
+            for source in logical_sources:
+                click.echo(f"      ↳ {source}")
+            click.echo("")
+
+    problem_count = len(problems) + len(collisions)
+    if problem_count:
+        label = "problem" if problem_count == 1 else "problems"
+        click.echo(click.style(f"  {problem_count} {label} found.\n", fg="red", bold=True))
+        sys.exit(1)
+
+    click.echo(click.style("  ✓ Every routed name is valid. No collisions.\n", fg="green"))
 
 
 @cli.command()
@@ -447,8 +561,9 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
             "warehouse": environment.warehouse,
             "role": environment.role,
         }
-        discovered = discover_project(project_root, profile_defaults, routing=environment.routing, environment=environment, run_mode=run_mode_enum)
-        _print_routing_collision_warnings(discovered, env_name, environment.routing)
+        routing = _resolve_project_routing(project_root, env_name).entry
+        discovered = discover_project(project_root, profile_defaults, routing=routing, environment=environment, run_mode=run_mode_enum)
+        _print_routing_collision_warnings(discovered, env_name, routing)
         dag = build_dag(discovered)
 
         # Keep only the Trouves that the selector gives.
@@ -502,6 +617,10 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
         finally:
             adapter.close()
 
+    except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
+        logger.error("run.routing_error", error=str(e))
+        click.echo("\n  Run `clair validate` to see every routing problem.\n", err=True)
+        sys.exit(1)
     except ClairError as e:
         logger.error("run.error", error=str(e))
         sys.exit(1)
@@ -543,14 +662,15 @@ def test(
 
     try:
         # Load the environment.
-        _, environment = load_environment(env)
+        env_name, environment = load_environment(env)
 
         # Find the Trouves and make the DAG.
         profile_defaults = {
             "warehouse": environment.warehouse,
             "role": environment.role,
         }
-        discovered = discover_project(project_root, profile_defaults, routing=environment.routing, environment=environment)
+        routing = _resolve_project_routing(project_root, env_name).entry
+        discovered = discover_project(project_root, profile_defaults, routing=routing, environment=environment)
         dag = build_dag(discovered)
 
         # Keep the Trouves that the selector gives. Keep each SOURCE too, so

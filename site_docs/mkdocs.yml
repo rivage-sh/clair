@@ -79,7 +79,7 @@ nav:
     - Incrementality: guides/incrementality.md
     - Data Quality Tests: guides/data-quality-tests.md
     - Selectors: guides/selectors.md
-    - Routing Policies: guides/routing.md
+    - Routing: guides/routing.md
     - Per-Database & Schema Config: guides/per-database-schema-config.md
   - CLI:
     - cli/overview.md
@@ -87,6 +87,7 @@ nav:
     - clair run: cli/run.md
     - clair compile: cli/compile.md
     - clair test: cli/test.md
+    - clair validate: cli/validate.md
     - clair dag: cli/dag.md
     - clair docs: cli/docs.md
     - clair clean: cli/clean.md

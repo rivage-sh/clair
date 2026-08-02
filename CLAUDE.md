@@ -69,6 +69,18 @@ The worktree shares git history with the main repo but has its own `.venv/`. Alw
 - Use `database_name` instead of `database`, `schema_name` instead of `schema`, `table_name` instead of `table`
 - Address git merge conflicts by pulling main, resolving conflicts, and pushing. Favour simplicity over clean commit history — PRs are squash-merged anyway.
 
+## Backwards compatibility
+
+The major version is 0. While the major version stays 0, clair does not keep backwards
+compatibility. clair has no users at this time, so the best design wins against a stable
+interface.
+
+- Change a public name, a file format, or a function signature when the change makes the
+  system better.
+- Do not add a deprecation shim, an alias for an old name, or a migration path.
+- Delete the old code path. Do not keep it beside the new one.
+- Name each behaviour change in the pull request description.
+
 ## Keep site_docs/ up to date
 
 `site_docs/docs/` is the source of truth for behaviour. Before you complete a change, compare

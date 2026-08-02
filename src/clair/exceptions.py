@@ -34,24 +34,44 @@ class EnvironmentsFileNotFoundError(ClairError):
         self.path = path
         super().__init__(
             f"Clair cannot find environments.yml at {path}. "
-            "Run `clair init` to make one. As an alternative, give your "
-            "profiles.yml the new name and add a routing block."
+            "Run `clair init` to make one."
         )
 
 
-class InvalidRoutingPolicyError(ClairError):
-    """Clair raises this error when the config names an unknown routing policy."""
+class InvalidTrouveAddressError(ClairError):
+    """Clair raises this error when a name is not a valid Trouve address."""
 
-    def __init__(self, policy: str) -> None:
-        self.policy = policy
+    def __init__(self, full_name: str, detail: str) -> None:
+        self.full_name = full_name
+        self.detail = detail
+        super().__init__(f"Clair cannot use '{full_name}' as an address: {detail}")
+
+
+class InvalidEnvironmentError(ClairError):
+    """Clair raises this error when an environment block holds a bad value."""
+
+    def __init__(self, env_name: str, path: str, detail: str) -> None:
+        self.env_name = env_name
+        self.path = path
+        self.detail = detail
         super().__init__(
-            f"Clair does not know the routing policy '{policy}'. "
-            "Use database_override or schema_isolation."
+            f"Clair cannot read the environment '{env_name}' in {path}. "
+            "An unknown key is a misspelt name, or a routing block that belongs "
+            f"in the project __routing__.py. Detail: {detail}"
         )
+
+
+class InvalidRoutingFileError(ClairError):
+    """Clair raises this error when it cannot use the project __routing__.py."""
+
+    def __init__(self, path: str, detail: str) -> None:
+        self.path = path
+        self.detail = detail
+        super().__init__(f"Invalid routing file at {path}: {detail}")
 
 
 class InvalidRoutingConfigError(ClairError):
-    """Clair raises this error when a routing config block has a bad structure."""
+    """Clair raises this error when a routing entry returns an unusable address."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)

@@ -50,7 +50,7 @@ _clairtifacts/
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
-| `--env` | optional | Environment name. Necessary if clair must apply routing to the generated SQL. |
+| `--env` | optional | Environment name. It selects the entry in `__routing__.py` that clair applies to the generated SQL. |
 | `--select` | all | Glob pattern that filters the Trouves. Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Selects which SQL variant clair generates. |
 

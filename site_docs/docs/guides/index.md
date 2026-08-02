@@ -6,5 +6,5 @@ These guides show you how to do the usual clair tasks.
 - **[Incrementality](incrementality.md)** — APPEND and UPSERT strategies for large tables
 - **[Data Quality Tests](data-quality-tests.md)** — attach tests to Trouves
 - **[Selectors](selectors.md)** — run only a subset of your project
-- **[Routing Policies](routing.md)** — remap Snowflake targets per environment
+- **[Routing](routing.md)** — remap the Snowflake target of each environment
 - **[Per-Database & Schema Config](per-database-schema-config.md)** — warehouse and role overrides per directory

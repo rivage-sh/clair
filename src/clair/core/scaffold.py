@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from clair.environments.project_routing import ROUTING_FILE_NAME
+
 # ---------------------------------------------------------------------------
 # The file templates.
 # ---------------------------------------------------------------------------
@@ -16,9 +18,54 @@ trouve = Trouve(
 )
 '''
 
+_ROUTING_TEMPLATE = '''\
+"""Clair routing -- gives each environment its physical write target.
+
+Each entry names one environment. The name matches a top-level key in
+~/.clair/environments.yml. The route method accepts the logical TrouveAddress
+and gives the physical TrouveAddress. SOURCE Trouves never route.
+
+Commit this file. It holds no credentials.
+Run `clair validate` to apply the entries to every Trouve in the project.
+"""
+
+import os
+
+from clair import RoutingEntry, RoutingTable, TrouveAddress
+
+
+class DeveloperRouting(RoutingEntry):
+    """Each person writes to a separate database.
+
+    Set CLAIR_USER to your name before you run clair.
+    """
+
+    environment_name: str = "dev"
+    user_variable: str = "CLAIR_USER"
+
+    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+        user_name = os.environ[self.user_variable].upper()
+        return trouve_address.model_copy(
+            update={"database_name": f"{trouve_address.database_name}_{user_name}"}
+        )
+
+
+class ProductionRouting(RoutingEntry):
+    """Production writes to the logical names, so the address stays the same."""
+
+    environment_name: str = "prod"
+
+    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+        return trouve_address
+
+
+routing = RoutingTable(entries=[DeveloperRouting(), ProductionRouting()])
+'''
+
 _ENVIRONMENTS_TEMPLATE = '''\
 # The Clair environments. Each environment has its own connection settings.
-# Reference: https://github.com/your-org/clair
+# Routing is not here. It lives in the project __routing__.py file.
+# Reference: https://github.com/rivage-sh/clair
 
 dev:
   account: your-org-your-account   # for example, myorg-myaccount
@@ -62,7 +109,8 @@ def scaffold_project(
 ) -> list[tuple[str, str]]:
     """Make a new Clair project in *project_dir*.
 
-    The function writes an example source Trouve file. It also writes the global
+    The function writes an example source Trouve file and a project
+    ``__routing__.py`` file. It also writes the global
     ``~/.clair/environments.yml`` file, if that file does not exist.
 
     Args:
@@ -81,6 +129,7 @@ def scaffold_project(
     # Each project file, as a (relative_path, template_content) pair.
     project_files: list[tuple[str, str]] = [
         (f"{source_database_name}/{source_schema_name}/{source_table_name}.py", _SOURCE_TROUVE_TEMPLATE),
+        (ROUTING_FILE_NAME, _ROUTING_TEMPLATE),
     ]
 
     results: list[tuple[str, str]] = []

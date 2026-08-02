@@ -19,6 +19,8 @@ A clair project in production usually has 3 or 4 layers:
 
 ```
 my_project/
+├── __routing__.py                   # The routing entry of each environment
+│
 ├── source/                          # Tables that already exist — TrouveType.SOURCE
 │   ├── orders/
 │   │   ├── raw.py                   # source.orders.raw
@@ -46,6 +48,7 @@ my_project/
 
 | File | Location | Purpose |
 |------|----------|---------|
+| `__routing__.py` | project root | The [routing](../guides/routing.md) entry of each environment |
 | `__database_config__.py` | database directory | Warehouse/role defaults for all Trouves in that database |
 | `__schema_config__.py` | schema directory | Warehouse/role defaults for all Trouves in that schema |
 
@@ -81,4 +84,4 @@ Python imports work in the usual way. A Trouve in `refined/` can import from `so
 from source.orders.raw import trouve as raw_orders
 ```
 
-clair resolves `source.orders.raw` to the Snowflake object at `source.orders.raw`. An active [routing policy](../guides/routing.md) can change this target.
+clair resolves `source.orders.raw` to the Snowflake object at `source.orders.raw`. An active [routing entry](../guides/routing.md) can change this target.
