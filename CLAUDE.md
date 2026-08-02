@@ -62,6 +62,14 @@ The worktree shares git history with the main repo but has its own `.venv/`. Alw
 
 - `clair = "clair.cli.main:cli"` — installed to `.venv/bin/clair` after `uv sync`
 
+## CI failures
+
+If CI fails, replicate the failure locally and iterate until every job passes. Do not push
+commits to see if the remote turns green. Each CI job is one simple command: read
+`.github/workflows/ci.yml` for the current commands, and run them locally.
+
+Push one commit after the commands pass locally.
+
 ## Coding guidelines
 
 - Use descriptive variable names for all code in `src/clair/`
@@ -94,6 +102,11 @@ Do this for every change to:
 
 The example code in `site_docs/docs/` must stay identical to the equivalent code in
 `example_projects/`. If you change one, change the other.
+
+## Documentation: point to the source of truth
+
+When you write documentation, point to the source of truth. Do not copy it. A copy becomes
+wrong when the source changes, and many copies are difficult to maintain.
 
 ## Simplified Technical English
 
