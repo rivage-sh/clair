@@ -22,7 +22,7 @@ class IncrementalMode(StrEnum):
 
 ## `UpsertConfig`
 
-Fine-grained column control for UPSERT MERGE statements.
+Exact control of the columns in an UPSERT MERGE statement.
 
 ```python
 class UpsertConfig(BaseModel):
@@ -32,8 +32,8 @@ class UpsertConfig(BaseModel):
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `update_columns` | `None` (all non-key columns) | Columns to include in `WHEN MATCHED THEN UPDATE SET` |
-| `insert_columns` | `None` (all columns) | Columns to include in `WHEN NOT MATCHED THEN INSERT` |
+| `update_columns` | `None` — all the columns that are not keys | The columns for `WHEN MATCHED THEN UPDATE SET` |
+| `insert_columns` | `None` — all the columns | The columns for `WHEN NOT MATCHED THEN INSERT` |
 
 ## `RunConfig`
 
@@ -50,45 +50,45 @@ class RunConfig(BaseModel):
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `run_mode` | `RunMode` | `FULL_REFRESH` | `FULL_REFRESH` recreates the table; `INCREMENTAL` applies only new data |
-| `incremental_mode` | `IncrementalMode \| None` | `None` | Required when `run_mode=INCREMENTAL`: `APPEND` or `UPSERT` |
-| `primary_key_columns` | `list[str] \| None` | `None` | Column names to match on for UPSERT. Generates `ON target.col = source.col`. |
-| `join_sql` | `str \| None` | `None` | Custom `ON` clause for UPSERT (alternative to `primary_key_columns`). |
-| `upsert_config` | `UpsertConfig \| None` | `None` | Column overrides for UPSERT MERGE statements. |
+| `run_mode` | `RunMode` | `FULL_REFRESH` | `FULL_REFRESH` makes the table again. `INCREMENTAL` applies the new data only. |
+| `incremental_mode` | `IncrementalMode \| None` | `None` | `APPEND` or `UPSERT`. Necessary if `run_mode=INCREMENTAL`. |
+| `primary_key_columns` | `list[str] \| None` | `None` | The columns to match on for UPSERT. clair generates `ON target.col = source.col`. |
+| `join_sql` | `str \| None` | `None` | Your own `ON` clause for UPSERT. Use it in place of `primary_key_columns`. |
+| `upsert_config` | `UpsertConfig \| None` | `None` | Control of the columns in an UPSERT MERGE statement. |
 
 ### Validation matrix
 
 | `run_mode` | `incremental_mode` | `primary_key_columns` / `join_sql` | Valid? |
 |---|---|---|---|
 | `FULL_REFRESH` | `None` | Not set | ✓ |
-| `FULL_REFRESH` | any | any | ✗ (`incremental_mode` only valid with INCREMENTAL) |
-| `INCREMENTAL` | `None` | any | ✗ (`incremental_mode` required) |
+| `FULL_REFRESH` | any | any | ✗ — `incremental_mode` applies to INCREMENTAL only |
+| `INCREMENTAL` | `None` | any | ✗ — `incremental_mode` is necessary |
 | `INCREMENTAL` | `APPEND` | Not set | ✓ |
-| `INCREMENTAL` | `APPEND` | Set | ✗ (`primary_key_columns`/`join_sql` not valid for APPEND) |
-| `INCREMENTAL` | `UPSERT` | Neither set | ✗ (one required) |
-| `INCREMENTAL` | `UPSERT` | Both set | ✗ (specify one, not both) |
+| `INCREMENTAL` | `APPEND` | Set | ✗ — APPEND does not accept `primary_key_columns` or `join_sql` |
+| `INCREMENTAL` | `UPSERT` | Neither set | ✗ — give one of the two |
+| `INCREMENTAL` | `UPSERT` | Both set | ✗ — give one of the two, not both |
 | `INCREMENTAL` | `UPSERT` | Exactly one set | ✓ |
 
 ### Examples
 
 ```python
-# Default — full refresh (explicit)
+# The default — a full refresh, written out
 RunConfig()
 
-# Append-only incremental
+# Incremental, with APPEND
 RunConfig(
     run_mode=RunMode.INCREMENTAL,
     incremental_mode=IncrementalMode.APPEND,
 )
 
-# UPSERT on a single key
+# UPSERT on one key
 RunConfig(
     run_mode=RunMode.INCREMENTAL,
     incremental_mode=IncrementalMode.UPSERT,
     primary_key_columns=["customer_id"],
 )
 
-# UPSERT with custom join condition
+# UPSERT with your own join condition
 RunConfig(
     run_mode=RunMode.INCREMENTAL,
     incremental_mode=IncrementalMode.UPSERT,

@@ -2,7 +2,7 @@
 
 ## Directory → Snowflake name
 
-The directory structure under your project root maps directly to Snowflake fully-qualified names:
+The directory structure below your project root maps directly to fully-qualified Snowflake names:
 
 ```
 <project_root>/
@@ -15,11 +15,11 @@ A file at `my_project/refined/products/catalog.py` becomes `refined.products.cat
 
 ## Typical layout
 
-A production clair project typically has 3–4 layers:
+A clair project in production usually has 3 or 4 layers:
 
 ```
 my_project/
-├── source/                          # Pre-existing tables — TrouveType.SOURCE
+├── source/                          # Tables that already exist — TrouveType.SOURCE
 │   ├── orders/
 │   │   ├── raw.py                   # source.orders.raw
 │   │   └── customers.py             # source.orders.customers
@@ -53,32 +53,32 @@ See [Per-Database & Schema Config](../guides/per-database-schema-config.md) for 
 
 ## Files starting with `_`
 
-Any file or directory whose name starts with `_` is skipped by discovery. Use this for shared utilities or helper modules that shouldn't be Trouves:
+Discovery skips any file or directory with a name that starts with `_`. Use this for shared utilities or helper modules that are not Trouves:
 
 ```
 my_project/
 └── refined/
     └── orders/
-        ├── _utils.py       # ignored by discovery — import freely
-        └── daily.py        # discovered as refined.orders.daily
+        ├── _utils.py       # discovery skips this file — you can import it
+        └── daily.py        # discovery finds this as refined.orders.daily
 ```
 
 ## `_clairtifacts/`
 
-Compiled SQL artifacts are written here. Add it to `.gitignore`:
+clair writes the compiled SQL artifacts here. Add this directory to `.gitignore`:
 
 ```
 # .gitignore
 /_clairtifacts
 ```
 
-## Imports across databases
+## Imports between databases
 
-Python imports work normally. A Trouve in `refined/` can import from `source/`:
+Python imports work in the usual way. A Trouve in `refined/` can import from `source/`:
 
 ```python
 # refined/orders/daily.py
 from source.orders.raw import trouve as raw_orders
 ```
 
-clair resolves `source.orders.raw` to the Snowflake object at `source.orders.raw` (subject to any active [routing policy](../guides/routing.md)).
+clair resolves `source.orders.raw` to the Snowflake object at `source.orders.raw`. An active [routing policy](../guides/routing.md) can change this target.

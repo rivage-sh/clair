@@ -1,8 +1,8 @@
 # Reference
 
-Complete API reference for clair's Python classes.
+The full API reference for the Python classes of clair.
 
-All public types are importable directly from `clair`:
+You import all the public types directly from `clair`:
 
 ```python
 from clair import (

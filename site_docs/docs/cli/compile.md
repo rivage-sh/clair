@@ -1,6 +1,6 @@
 # clair compile
 
-Resolve the DAG and write generated SQL to `_clairtifacts/`. No Snowflake connection is made.
+Resolve the DAG and write the generated SQL to `_clairtifacts/`. The command does not connect to Snowflake.
 
 ```bash
 clair compile [--project PATH] [--env NAME] [--select PATTERN]... [--run-mode MODE]
@@ -12,7 +12,7 @@ clair compile [--project PATH] [--env NAME] [--select PATTERN]... [--run-mode MO
 # Compile the whole project
 clair compile --project .
 
-# Compile with routing applied (requires --env)
+# Compile and apply routing (requires --env)
 clair compile --project . --env prod
 
 # Compile only the orders schema
@@ -23,7 +23,7 @@ clair compile --project . --select='refined.orders.*'
 
 1. Discovers all Trouves in the project
 2. Resolves import references and builds the DAG
-3. Substitutes f-string placeholders with real Snowflake names (applying routing if `--env` is provided)
+3. Replaces the f-string placeholders with real Snowflake names. It applies routing if you give `--env`.
 4. Writes SQL files to `_clairtifacts/<run_id>/`
 
 ## Artifact layout
@@ -41,18 +41,18 @@ _clairtifacts/
 
 ## When to use compile
 
-- **Review SQL before running** — inspect what clair will execute
-- **CI compilation check** — catch import errors and broken references without a Snowflake connection
-- **Audit trail** — commit artifacts for a point-in-time record of generated SQL
+- **Review the SQL before the run** — read what clair will run
+- **CI compilation step** — find import errors and broken references without a Snowflake connection
+- **Audit trail** — commit the artifacts for a point-in-time record of the generated SQL
 
 ## Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
-| `--env` | optional | Environment name. Required if you want routing applied to generated SQL. |
-| `--select` | all | Glob pattern to filter Trouves. Repeat to union patterns. |
-| `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Affects which SQL variant is generated. |
+| `--env` | optional | Environment name. Necessary if clair must apply routing to the generated SQL. |
+| `--select` | all | Glob pattern that filters the Trouves. Repeat the flag to add more patterns. |
+| `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Selects which SQL variant clair generates. |
 
 ## See also
 

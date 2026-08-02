@@ -1,8 +1,8 @@
 # Data Quality Tests
 
-Attach tests to any TABLE or VIEW Trouve. Tests run automatically after each successful node during `clair run`, and can also be run standalone with `clair test`.
+Attach tests to any TABLE or VIEW Trouve. clair runs the tests after each successful node in `clair run`. You can also run them alone with `clair test`.
 
-## Attaching tests
+## Attach tests
 
 ```python
 from clair import (
@@ -26,7 +26,7 @@ trouve = Trouve(
 
 ### `TestUnique`
 
-Assert that a column contains no duplicate values.
+Assert that a column has no duplicate values.
 
 ```python
 TestUnique(column="order_id")
@@ -41,11 +41,11 @@ GROUP BY order_id
 HAVING COUNT(*) > 1
 ```
 
-Zero rows returned = pass.
+Zero rows in the result = pass.
 
 ### `TestNotNull`
 
-Assert that a column contains no NULL values.
+Assert that a column has no NULL values.
 
 ```python
 TestNotNull(column="customer_id")
@@ -61,15 +61,15 @@ WHERE customer_id IS NULL
 
 ### `TestRowCount`
 
-Assert that the table row count falls within bounds. At least one of `min_rows` or `max_rows` must be set.
+Assert that the number of rows is between two limits. You must set `min_rows` or `max_rows`, or both.
 
 ```python
-TestRowCount(min_rows=1)              # at least 1 row
-TestRowCount(max_rows=1_000_000)      # no more than 1M rows
-TestRowCount(min_rows=100, max_rows=10_000)  # within range
+TestRowCount(min_rows=1)              # 1 row minimum
+TestRowCount(max_rows=1_000_000)      # 1M rows maximum
+TestRowCount(min_rows=100, max_rows=10_000)  # between the two limits
 ```
 
-Generated SQL (for `min_rows=100, max_rows=10_000`):
+Generated SQL for `min_rows=100, max_rows=10_000`:
 
 ```sql
 SELECT 1 FROM refined.orders.daily HAVING COUNT(*) < 100
@@ -78,11 +78,11 @@ SELECT 1 FROM refined.orders.daily HAVING COUNT(*) > 10000
 ```
 
 !!! note
-    `TestRowCount` is skipped when running with `--sample`. Row counts are meaningless on sampled data.
+    clair skips `TestRowCount` if you give `--sample`. A row count has no meaning on sampled data.
 
 ### `TestUniqueColumns`
 
-Assert that a combination of columns is unique across all rows. Requires at least 2 columns.
+Assert that a group of columns is unique in all the rows. You must give 2 columns or more.
 
 ```python
 TestUniqueColumns(columns=["customer_id", "created_date"])
@@ -99,31 +99,31 @@ HAVING COUNT(*) > 1
 
 ## Pass/fail semantics
 
-Every test generates a SQL query. **Zero returned rows = pass. Any rows returned = fail.**
+Every test generates a SQL query. **Zero rows in the result = pass. One row or more = fail.**
 
-## Running tests
+## Run the tests
 
 **Automatically after each successful node:**
 
 ```bash
 clair run --project . --env dev
-# tests run after each TABLE/VIEW succeeds
+# the tests run after each successful TABLE or VIEW
 ```
 
-**Skip tests during a run:**
+**Skip the tests in a run:**
 
 ```bash
 clair run --project . --env dev --no-test
 ```
 
-**Standalone test run:**
+**A test run on its own:**
 
 ```bash
 clair test --project . --env dev
 clair test --project . --env dev --select='refined.orders.*'
 ```
 
-**Sampled testing** (most tests run against `SELECT TOP 1000 *`; `TestRowCount` is skipped):
+**Tests on a sample.** Most tests run against `SELECT TOP 1000 *`. clair skips `TestRowCount`:
 
 ```bash
 clair run --project . --env dev --sample
@@ -132,7 +132,7 @@ clair test --project . --env dev --sample
 
 ## Test reference
 
-| Class | Args | Skipped with `--sample`? |
+| Class | Args | Does `--sample` skip it? |
 |-------|------|--------------------------|
 | `TestUnique` | `column: str` | No |
 | `TestNotNull` | `column: str` | No |

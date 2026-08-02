@@ -1,10 +1,10 @@
 # Quickstart
 
-This guide walks you from zero to a running clair project.
+This guide shows you how to build your first clair project and how to run it.
 
 ## 1. Set up an environment
 
-Run `clair init` — it will prompt for your Snowflake connection details and write `~/.clair/environments.yml`:
+Run `clair init`. The command asks for your Snowflake connection details, then writes `~/.clair/environments.yml`:
 
 ```
 $ clair init
@@ -34,7 +34,7 @@ Region (e.g. us-east-1): us-east-1
   hint: select current_account() as account_locator;
 Account locator (e.g. abc12345): abc12345
 
-What is an example Snowflake table that contains source data? (eg source.orders.raw) [source]: source.products.catalog
+Give an example Snowflake table that contains source data (for example source.orders.raw) [source]: source.products.catalog
 
   created  /path/to/my_project/source/products/catalog.py
   created  /path/to/my_project/.gitignore
@@ -68,7 +68,7 @@ my_project/
 
 ## 3. Write your Trouves
 
-**`source/products/catalog.py`** — declares a pre-existing Snowflake table:
+**`source/products/catalog.py`** — declares a Snowflake table that already exists:
 
 ```python
 from clair import Column, ColumnType, Trouve, TrouveType
@@ -151,10 +151,10 @@ trouve = Trouve(
 ## 4. Compile and run
 
 ```bash
-# Inspect the generated SQL without touching Snowflake
+# Read the generated SQL. This does not connect to Snowflake.
 clair compile --project=my_project
 
-# Execute against Snowflake
+# Run against Snowflake
 clair run --project=my_project --env=dev
 ```
 

@@ -7,15 +7,15 @@
 
 ## Install the CLI
 
-Install clair as a global CLI tool using uv:
+Use uv to install clair as a global CLI tool:
 
 ```bash
 uv tool install rivage-clair
 ```
 
-This installs the `clair` command globally. uv isolates the tool's dependencies so they don't interfere with your project's virtualenv.
+This installs the `clair` command globally. uv keeps the dependencies of the tool separate from the virtualenv of your project.
 
-Verify the installation:
+Show the version of the CLI:
 
 ```bash
 clair --version
@@ -24,7 +24,7 @@ clair --version
 
 ## Add clair to your project
 
-Your Trouve files import from `clair` directly (e.g. `from clair import Trouve`). To get IDE autocompletion and type checking, add clair as a dependency in your project:
+Your Trouve files import from `clair` directly (e.g. `from clair import Trouve`). Add clair as a dependency of your project to get IDE autocompletion and type hints:
 
 ```bash
 uv add rivage-clair
@@ -38,7 +38,7 @@ uv tool upgrade rivage-clair
 
 ## Install from source (development)
 
-Clone the repo, then sync dependencies and run via uv:
+Clone the repo. Then use uv to sync the dependencies and to run the CLI:
 
 ```bash
 git clone https://github.com/rivage-sh/clair.git
@@ -47,7 +47,7 @@ uv sync
 uv run clair --version
 ```
 
-If the editable install seems broken:
+If the editable install does not work:
 
 ```bash
 uv pip install --reinstall -e .
