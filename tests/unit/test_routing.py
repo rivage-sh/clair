@@ -35,7 +35,7 @@ class TestTrouveAddress:
     def test_address_is_frozen(self):
         address = TrouveAddress.parse("a.b.c")
         with pytest.raises(ValidationError):
-            address.database_name = "other"
+            setattr(address, "database_name", "other")  # noqa: B010
 
     def test_address_is_hashable(self):
         assert len({TrouveAddress.parse("a.b.c"), TrouveAddress.parse("a.b.c")}) == 1
@@ -84,8 +84,9 @@ class TestRoutingEntry:
         assert entry.database_name == "OMER_DEV"
 
     def test_pydantic_validates_a_subclass_field(self):
+        """An absent database_name is an error, not a silent default."""
         with pytest.raises(ValidationError):
-            DatabaseOverrideRouting(environment_name="dev")
+            DatabaseOverrideRouting.model_validate({"environment_name": "dev"})
 
 
 class TestRoutingTable:

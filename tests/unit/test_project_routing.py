@@ -61,7 +61,8 @@ class TestLoadProjectRouting:
         ''')
         result = load_project_routing(routing_project, "dev")
         assert result.entry is not None
-        assert result.entry.database_name == "OMER_DEV"
+        # The entry is a user subclass, so read its own field through the model.
+        assert result.entry.model_dump()["database_name"] == "OMER_DEV"
         assert route("a.b.c", TrouveType.TABLE, result.entry) == "OMER_DEV.b.c"
 
     def test_an_empty_table_gives_passthrough(self, routing_project: Path):
@@ -177,10 +178,12 @@ class TestRoutingFileCache:
             routing = RoutingTable(entries=[DatabaseOverride(database_name="FIRST")])
         ''')
         first = load_project_routing(routing_project, "dev")
-        assert first.entry.database_name == "FIRST"
+        assert first.entry is not None
+        assert first.entry.model_dump()["database_name"] == "FIRST"
 
         _write_with_prelude(routing_project, '''
             routing = RoutingTable(entries=[DatabaseOverride(database_name="SECOND")])
         ''')
         second = load_project_routing(routing_project, "dev")
-        assert second.entry.database_name == "SECOND"
+        assert second.entry is not None
+        assert second.entry.model_dump()["database_name"] == "SECOND"

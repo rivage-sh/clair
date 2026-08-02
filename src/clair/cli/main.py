@@ -385,9 +385,12 @@ def validate(project: str, env: str | None) -> None:
         sys.exit(1)
 
     routing = project_routing.entry
-    routable = [
-        trouve for trouve in discovered
-        if trouve.compiled and trouve.type != TrouveType.SOURCE
+    # Keep the (logical name, type) pair, not the Trouve. The name is the only
+    # part that the collision report needs, and here it is never None.
+    routable: list[tuple[str, TrouveType]] = [
+        (trouve.compiled.logical_name, trouve.type)
+        for trouve in discovered
+        if trouve.compiled is not None and trouve.type != TrouveType.SOURCE
     ]
 
     click.echo(f"\n  environment: {env_name}")
@@ -403,10 +406,8 @@ def validate(project: str, env: str | None) -> None:
     collisions: list[tuple[str, list[str]]] = []
     if not problems:
         logical_to_routed = {
-            trouve.compiled.logical_name: route(
-                trouve.compiled.logical_name, trouve.type, routing
-            )
-            for trouve in routable
+            logical_name: route(logical_name, trouve_type, routing)
+            for logical_name, trouve_type in routable
         }
         collisions = detect_routing_collisions(logical_to_routed)
         for routed_target, logical_sources in collisions:
