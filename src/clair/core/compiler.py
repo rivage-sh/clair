@@ -15,7 +15,8 @@ from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.core.runner import resolve_effective_mode
 from clair.core.strict import (
     build_clone_statement,
-    build_promote_statements,
+    build_drop_staging_statement,
+    build_promote_statement,
     strict_staging_name,
 )
 from clair.exceptions import CompileError
@@ -101,8 +102,8 @@ def build_statements(
 
     Under strict mode the plan is shown end to end: the optional clone, the build
     into the staging object, and the promotion that follows a passing test run.
-    The runner decides between SWAP and RENAME by checking whether the target
-    exists; compile has no connection, so it shows the SWAP form.
+    The plan shown is the passing path -- a failing test run stops after the build
+    and leaves the staging object in place.
     """
     effective_mode = resolve_effective_mode(trouve, run_mode)
 
@@ -119,15 +120,15 @@ def build_statements(
 
     assert trouve.compiled is not None
     statements.append("-- strict: tests run against the staging object here")
-    statements.extend(
-        build_promote_statements(
+    statements.append(
+        build_promote_statement(
             trouve.type,
             staging_name=staging_name,
             target_name=target_name,
-            target_exists=True,
             resolved_sql=trouve.compiled.resolved_sql,
         )
     )
+    statements.append(build_drop_staging_statement(trouve.type, staging_name))
     return statements
 
 

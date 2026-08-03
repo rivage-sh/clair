@@ -16,9 +16,9 @@ from pydantic import BaseModel, model_validator
 from clair.adapters.base import WarehouseAdapter
 from clair.core.dag import ClairDag, get_executable_nodes
 from clair.core.strict import (
-    build_cleanup_statement,
     build_clone_statement,
-    build_promote_statements,
+    build_drop_staging_statement,
+    build_promote_statement,
     strict_staging_name,
 )
 from clair.exceptions import ClairError, RunError
@@ -288,14 +288,18 @@ def _run_df_fn_trouve(
     )
 
 
-def _promote_or_discard(
+def _promote_or_retain(
     trouve: Trouve,
     adapter: WarehouseAdapter,
     staging_name: str,
     target_name: str,
     tests_passed: bool,
 ) -> tuple[list[str], list[str], str]:
-    """Finish a strict-mode node: swap the staging object in, or drop it.
+    """Finish a strict-mode node: promote the staging object, or leave it for inspection.
+
+    A rejected candidate is never dropped. It is the only copy of what the run
+    produced, and rebuilding it means re-running every upstream Trouve -- so it is
+    left in place and its name reported, ready to be queried directly.
 
     Returns:
         (query_ids, query_urls, error). The error is empty when the staging object
@@ -313,36 +317,40 @@ def _promote_or_discard(
         return "" if query_result.success else (query_result.error or "unknown error")
 
     if not tests_passed:
-        cleanup_error = _execute(build_cleanup_statement(trouve.type, staging_name))
-        error = (
+        return (
+            query_ids,
+            query_urls,
             f"strict mode: tests failed, {target_name} left unchanged "
-            f"(staging object {staging_name} discarded)"
+            f"(rejected candidate retained at {staging_name})",
         )
-        if cleanup_error:
-            error += f"; staging cleanup also failed: {cleanup_error}"
-        return query_ids, query_urls, error
-
-    database_name, schema_name, table_name = target_name.split(".")
-    target_exists = adapter.table_exists(database_name, schema_name, table_name)
 
     assert trouve.compiled is not None
-    for statement in build_promote_statements(
-        trouve.type,
-        staging_name=staging_name,
-        target_name=target_name,
-        target_exists=target_exists,
-        resolved_sql=trouve.compiled.resolved_sql,
-    ):
-        promote_error = _execute(statement)
-        if promote_error:
-            # Leave the staging object in place: it holds tested data and is the
-            # only record of what this run produced.
-            return (
-                query_ids,
-                query_urls,
-                f"strict mode: tests passed but promotion failed: {promote_error} "
-                f"(staging object {staging_name} retained)",
-            )
+    promote_error = _execute(
+        build_promote_statement(
+            trouve.type,
+            staging_name=staging_name,
+            target_name=target_name,
+            resolved_sql=trouve.compiled.resolved_sql,
+        )
+    )
+    if promote_error:
+        return (
+            query_ids,
+            query_urls,
+            f"strict mode: tests passed but promotion failed: {promote_error} "
+            f"(candidate retained at {staging_name})",
+        )
+
+    # The target now holds the tested data, so the staging copy is redundant.
+    # A failure here is untidy, not incorrect -- the node still succeeded.
+    drop_result = adapter.execute(build_drop_staging_statement(trouve.type, staging_name))
+    if not drop_result.success:
+        logger.warning(
+            "run.node.staging_drop_failed",
+            trouve=target_name,
+            staging=staging_name,
+            error=drop_result.error,
+        )
 
     return query_ids, query_urls, ""
 
@@ -500,11 +508,11 @@ def run_project(
 
             error = "" if materialized else ((last_result.error if last_result else "") or "")
 
-        # Strict mode: test the staging object, then swap it in or throw it away.
+        # Strict mode: test the staging object, then promote it or leave it be.
         if staging_name is not None and materialized:
             assert after_node_success is not None
             tests_passed = after_node_success(name, staging_name)
-            promote_ids, promote_urls, strict_error = _promote_or_discard(
+            promote_ids, promote_urls, strict_error = _promote_or_retain(
                 trouve, adapter, staging_name, routed_name, tests_passed
             )
             query_ids.extend(promote_ids)
@@ -513,7 +521,8 @@ def run_project(
                 materialized = False
                 error = strict_error
         elif staging_name is not None and not materialized:
-            adapter.execute(build_cleanup_statement(trouve.type, staging_name))
+            # Whatever the build managed to produce is worth keeping around.
+            error = f"{error} (strict staging object left at {staging_name} if it was created)"
 
         if materialized:
             logger.info("run.node.success", trouve=name, duration_seconds=round(duration, 3), query_ids=query_ids)

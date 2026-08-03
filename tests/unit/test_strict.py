@@ -1,4 +1,4 @@
-"""Tests for strict mode -- build into staging, test, then swap."""
+"""Tests for strict mode -- build into staging, test, then promote."""
 
 from __future__ import annotations
 
@@ -16,9 +16,9 @@ from clair.core.strict import (
     MAX_IDENTIFIER_LENGTH,
     STRICT_SUFFIX,
     StrictNamingError,
-    build_cleanup_statement,
     build_clone_statement,
-    build_promote_statements,
+    build_drop_staging_statement,
+    build_promote_statement,
     strict_staging_name,
 )
 from clair.exceptions import RunError
@@ -82,7 +82,7 @@ class TestStrictStagingName:
         assert staging == f"db.schema.orders{STRICT_SUFFIX}{RUN_ID}"
 
     def test_staging_shares_database_and_schema_with_target(self):
-        """SWAP WITH requires both objects to live in the same schema."""
+        """A rejected candidate should sit next to the table it was meant to become."""
         staging = strict_staging_name("analytics.revenue.daily", RUN_ID)
         assert staging.split(".")[:2] == ["analytics", "revenue"]
 
@@ -107,43 +107,40 @@ class TestStrictStagingName:
 
 
 class TestPromoteStatements:
-    def test_existing_table_is_swapped_then_old_copy_dropped(self):
-        statements = build_promote_statements(
+    def test_table_is_cloned_into_place_carrying_grants(self):
+        statement = build_promote_statement(
             TrouveType.TABLE,
             staging_name="db.s.t__staging",
             target_name="db.s.t",
-            target_exists=True,
         )
-        assert "ALTER TABLE db.s.t__staging SWAP WITH db.s.t" in statements[0]
-        assert "DROP TABLE IF EXISTS db.s.t__staging" in statements[1]
+        assert "CREATE OR REPLACE TABLE db.s.t CLONE db.s.t__staging COPY GRANTS" in statement
 
-    def test_missing_table_is_renamed_into_place(self):
-        statements = build_promote_statements(
+    def test_table_promotion_does_not_depend_on_the_target_existing(self):
+        """COPY GRANTS copies from the replaced table, or the clone source if there is none."""
+        statement = build_promote_statement(
             TrouveType.TABLE,
             staging_name="db.s.t__staging",
             target_name="db.s.t",
-            target_exists=False,
         )
-        assert len(statements) == 1
-        assert "ALTER TABLE db.s.t__staging RENAME TO db.s.t" in statements[0]
+        assert "IF NOT EXISTS" not in statement
+        assert "SWAP WITH" not in statement
+        assert "RENAME TO" not in statement
 
-    def test_view_is_recreated_and_staging_dropped(self):
-        statements = build_promote_statements(
+    def test_view_is_recreated_carrying_grants(self):
+        statement = build_promote_statement(
             TrouveType.VIEW,
             staging_name="db.s.v__staging",
             target_name="db.s.v",
-            target_exists=True,
             resolved_sql="SELECT 1 AS id",
         )
-        assert "CREATE OR REPLACE VIEW db.s.v" in statements[0]
-        assert "SELECT 1 AS id" in statements[0]
-        assert "DROP VIEW IF EXISTS db.s.v__staging" in statements[1]
+        assert "CREATE OR REPLACE VIEW db.s.v COPY GRANTS AS" in statement
+        assert "SELECT 1 AS id" in statement
 
-    def test_cleanup_uses_matching_object_type(self):
-        assert "DROP TABLE IF EXISTS db.s.t" in build_cleanup_statement(
+    def test_drop_staging_uses_matching_object_type(self):
+        assert "DROP TABLE IF EXISTS db.s.t" in build_drop_staging_statement(
             TrouveType.TABLE, "db.s.t"
         )
-        assert "DROP VIEW IF EXISTS db.s.v" in build_cleanup_statement(
+        assert "DROP VIEW IF EXISTS db.s.v" in build_drop_staging_statement(
             TrouveType.VIEW, "db.s.v"
         )
 
@@ -235,7 +232,10 @@ class TestStrictRunner:
         # Tests ran against the staging object, not the target.
         assert tested == [staging]
         assert any(f"CREATE OR REPLACE TABLE {staging}" in sql for sql in executed)
-        assert any(f"ALTER TABLE {staging} SWAP WITH db.s.orders" in sql for sql in executed)
+        assert any(
+            f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging} COPY GRANTS" in sql
+            for sql in executed
+        )
 
     def test_target_is_never_written_before_tests_pass(self):
         dag, selected = _single_table_dag()
@@ -255,7 +255,7 @@ class TestStrictRunner:
             "CREATE OR REPLACE TABLE db.s.orders AS" in sql for sql in sql_at_test_time[0]
         )
 
-    def test_failing_tests_drop_staging_and_leave_target_untouched(self):
+    def test_failing_tests_retain_the_candidate_and_leave_target_untouched(self):
         dag, selected = _single_table_dag()
         adapter, executed = _make_adapter()
 
@@ -267,10 +267,13 @@ class TestStrictRunner:
         staging = strict_staging_name("db.s.orders", RUN_ID)
         assert results[0].status == RunStatus.FAILURE
         assert "tests failed" in results[0].error
-        assert any(f"DROP TABLE IF EXISTS {staging}" in sql for sql in executed)
-        assert not any("SWAP WITH" in sql for sql in executed)
+        # The rejected candidate is the whole point: keep it, and say where it is.
+        assert staging in results[0].error
+        assert not any("DROP TABLE" in sql for sql in executed)
+        # db.s.orders is a prefix of the staging name, so match the promotion exactly.
+        assert not any("CREATE OR REPLACE TABLE db.s.orders CLONE" in sql for sql in executed)
 
-    def test_missing_target_is_renamed_rather_than_swapped(self):
+    def test_promotion_is_identical_when_the_target_does_not_exist(self):
         dag, selected = _single_table_dag()
         adapter, executed = _make_adapter(target_exists=False)
 
@@ -279,10 +282,13 @@ class TestStrictRunner:
             run_id=RUN_ID, after_node_success=lambda _n, _p: True, strict=True,
         ))
 
-        assert any("RENAME TO db.s.orders" in sql for sql in executed)
-        assert not any("SWAP WITH" in sql for sql in executed)
+        staging = strict_staging_name("db.s.orders", RUN_ID)
+        assert any(
+            f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging} COPY GRANTS" in sql
+            for sql in executed
+        )
 
-    def test_failed_materialization_cleans_up_staging(self):
+    def test_failed_materialization_retains_whatever_was_built(self):
         dag, selected = _single_table_dag()
         adapter, executed = _make_adapter(fail_on="CREATE OR REPLACE TABLE")
 
@@ -293,11 +299,12 @@ class TestStrictRunner:
 
         staging = strict_staging_name("db.s.orders", RUN_ID)
         assert results[0].status == RunStatus.FAILURE
-        assert any(f"DROP TABLE IF EXISTS {staging}" in sql for sql in executed)
+        assert staging in results[0].error
+        assert not any("DROP TABLE" in sql for sql in executed)
 
     def test_failed_promotion_retains_staging_and_reports_failure(self):
         dag, selected = _single_table_dag()
-        adapter, executed = _make_adapter(fail_on="SWAP WITH")
+        adapter, executed = _make_adapter(fail_on="CLONE")
 
         results = list(run_project(
             dag, selected, adapter,
@@ -341,7 +348,10 @@ class TestStrictRunner:
             after_node_success=lambda _n, _p: True, strict=True,
         ))
 
-        assert not any("CLONE" in sql for sql in executed)
+        staging = strict_staging_name("db.s.orders", RUN_ID)
+        # The promotion clone still runs; what must not happen is seeding staging
+        # from a target that does not exist yet.
+        assert not any(f"CREATE OR REPLACE TABLE {staging} CLONE" in sql for sql in executed)
 
     def test_view_is_created_in_staging_then_replaced_at_target(self):
         dag, selected = _single_table_dag(trouve_type=TrouveType.VIEW)
@@ -424,7 +434,7 @@ class TestStrictRunner:
 
 
 class TestStrictRunnerPandas:
-    def test_dataframe_is_written_to_staging_then_swapped(self):
+    def test_dataframe_is_written_to_staging_then_promoted(self):
         def transform() -> pd.DataFrame:
             return pd.DataFrame({"id": [1, 2]})
 
@@ -450,9 +460,12 @@ class TestStrictRunnerPandas:
         assert results[0].full_name == "db.s.orders"
         assert adapter.write_dataframe.call_args.kwargs["full_name"] == staging
         assert adapter.write_dataframe.call_args.kwargs["table_name"] == staging.split(".")[2]
-        assert any(f"ALTER TABLE {staging} SWAP WITH db.s.orders" in sql for sql in executed)
+        assert any(
+            f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging} COPY GRANTS" in sql
+            for sql in executed
+        )
 
-    def test_failing_tests_discard_the_staging_table(self):
+    def test_failing_tests_retain_the_staging_table(self):
         def transform() -> pd.DataFrame:
             return pd.DataFrame({"id": [1, 2]})
 
@@ -474,7 +487,8 @@ class TestStrictRunnerPandas:
 
         staging = strict_staging_name("db.s.orders", RUN_ID)
         assert results[0].status == RunStatus.FAILURE
-        assert any(f"DROP TABLE IF EXISTS {staging}" in sql for sql in executed)
+        assert staging in results[0].error
+        assert not any("DROP TABLE" in sql for sql in executed)
 
 
 class TestNonStrictUnchanged:
@@ -576,14 +590,15 @@ class TestStrictCliGuard:
 
 
 class TestStrictCompilePlan:
-    def test_plan_shows_staging_build_test_checkpoint_and_swap(self):
+    def test_plan_shows_staging_build_test_checkpoint_and_promotion(self):
         trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
         statements = build_statements(trouve, RunMode.FULL_REFRESH, RUN_ID, strict=True)
 
         staging = strict_staging_name("db.s.orders", RUN_ID)
         assert f"CREATE OR REPLACE TABLE {staging}" in statements[0]
         assert "tests run against the staging object" in statements[1]
-        assert f"ALTER TABLE {staging} SWAP WITH db.s.orders" in statements[2]
+        assert f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging} COPY GRANTS" in statements[2]
+        assert f"DROP TABLE IF EXISTS {staging}" in statements[3]
 
     def test_incremental_plan_starts_with_a_clone(self):
         trouve = _compile(

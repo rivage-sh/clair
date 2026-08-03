@@ -441,8 +441,9 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     default=False,
     help=(
         "Build each Trouve into a run-scoped staging object, test it, and only "
-        "promote it into its real name if every test passes. Tables are promoted "
-        "with a constant-time SWAP; a failing Trouve leaves its target untouched."
+        "promote it into its real name if every test passes. Promotion is a "
+        "constant-time clone that carries existing grants. A failing Trouve "
+        "leaves its target untouched and its rejected candidate in place."
     ),
 )
 def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool, strict: bool) -> None:

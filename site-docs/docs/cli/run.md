@@ -35,7 +35,7 @@ SOURCE Trouves pass through (no SQL is executed against them).
 
 After each successful TABLE or VIEW, attached tests run automatically. If any test fails, the run exits with a non-zero status code. Use `--no-test` to skip tests.
 
-By default the target is written before its tests run, so a failing test means bad data is already in production. `--strict` builds each Trouve into a run-scoped staging object, tests it there, and swaps it into the real name only if every test passes — see [Strict Mode](../guides/strict-mode.md). It cannot be combined with `--no-test`.
+By default the target is written before its tests run, so a failing test means bad data is already in production. `--strict` builds each Trouve into a run-scoped staging object, tests it there, and promotes it into the real name only if every test passes — see [Strict Mode](../guides/strict-mode.md). It cannot be combined with `--no-test`.
 
 ## Flags
 
@@ -47,12 +47,12 @@ By default the target is written before its tests run, so a failing test means b
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides each Trouve's `run_config`. |
 | `--no-test` | `false` | Skip data quality tests |
 | `--sample` | `false` | Run tests against `SELECT TOP 1000 *` (skips `TestRowCount`) |
-| `--strict` | `false` | Build into a staging object, test, then swap into place. Incompatible with `--no-test`. |
+| `--strict` | `false` | Build into a staging object, test, then promote into place. Incompatible with `--no-test`. |
 
 ## Exit codes
 
 - `0` — all Trouves succeeded and all tests passed
-- `1` — one or more Trouves failed, or one or more tests failed (under `--strict`, a Trouve whose tests failed is itself reported as failed and its target is left unchanged)
+- `1` — one or more Trouves failed, or one or more tests failed (under `--strict`, a Trouve whose tests failed is itself reported as failed, its target is left unchanged, and the rejected candidate is retained for inspection)
 
 ## See also
 

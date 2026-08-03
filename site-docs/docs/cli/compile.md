@@ -18,7 +18,7 @@ clair compile --project . --env prod
 # Compile only the orders schema
 clair compile --project . --select='refined.orders.*'
 
-# Show the strict-mode plan: staging build, test checkpoint, swap
+# Show the strict-mode plan: staging build, test checkpoint, promotion
 clair compile --project . --strict
 ```
 
