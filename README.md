@@ -476,5 +476,13 @@ Example projects are included under `example_projects/`:
 | `example_1` | A minimal 4-Trouve events pipeline with VARIANT flattening |
 | `example_2` | A 50-Trouve e-commerce warehouse across 4 layers (source → refined → derived → reports) |
 | `example_3` | Incremental APPEND and UPSERT strategies |
+| `example_4` | A `PandasTrouve` that gives a DataFrame instead of SQL |
+| `example_from_init` | The files that `clair init` writes |
 
-Each includes a `setup.sql` to create and seed the source tables and a `verify.sql` to inspect the results.
+Each project holds a `__routing__.py` with a `dev` entry and a `prod` entry. The `dev` entry
+reads `CLAIR_USER`, thus each person writes to a separate database. Run
+`clair validate --project example_projects/example_1` to apply the rules without a Snowflake
+connection.
+
+The README of each project holds the SQL that creates and seeds the source tables, and the SQL
+that inspects the results.

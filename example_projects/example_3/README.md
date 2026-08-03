@@ -21,7 +21,7 @@ source.orders  (SOURCE)
 
 ## Prerequisites
 
-- Snowflake account with a profile at `~/.clair/profiles.yml` (examples below use `local`)
+- Snowflake account with an environment at `~/.clair/environments.yml` (examples below use `dev`)
 - clair installed: from the repo root run `uv sync && source .venv/bin/activate`
 
 ## Setup: create the source table
@@ -44,6 +44,33 @@ from values
 as t(order_id, customer_id, order_status, amount, created_at, updated_at);
 ```
 
+## Routing
+
+`__routing__.py` at the root of this project holds the routing rules. It has two entries:
+
+| Environment | Physical write target |
+|---|---|
+| `dev` | `example_3_database_<CLAIR_USER>` |
+| `prod` | `example_3_database` — the logical names |
+
+The `dev` entry reads the `CLAIR_USER` environment variable, thus each person writes to a
+separate database. Set it before you run the `dev` environment:
+
+```bash
+export CLAIR_USER=alice
+```
+
+`clair validate` applies the rules to every Trouve and needs no Snowflake connection:
+
+```bash
+clair validate --project example_projects/example_3
+clair validate --project example_projects/example_3 --env prod
+```
+
+SOURCE Trouves never route. The `source` schema keeps its logical name in every environment.
+
+See the [routing guide](../../site_docs/docs/guides/routing.md) for the full rules.
+
 ## Running the example
 
 All commands run from the repo root (`clair/`).
@@ -63,7 +90,7 @@ clair compile --project example_projects/example_3 --run-mode incremental
 Creates all tables from scratch. Use this to initialise the derived tables before testing incremental.
 
 ```bash
-clair run --project example_projects/example_3 --profile local
+clair run --project example_projects/example_3 --env dev
 ```
 
 Verify:
@@ -86,7 +113,7 @@ insert into example_3_database.source.orders values
 ### 4. Incremental run
 
 ```bash
-clair run --project example_projects/example_3 --profile local --run-mode incremental
+clair run --project example_projects/example_3 --env dev --run-mode incremental
 ```
 
 Expected behaviour:
