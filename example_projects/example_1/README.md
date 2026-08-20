@@ -61,7 +61,7 @@ as t(event_id, user_id, event_type, occurred_at, properties);
 
 | Environment | Physical write target |
 |---|---|
-| `dev` | `example_1_database_<CLAIR_USER>` |
+| `dev` | `<CLAIR_USER>` — the user name replaces the database |
 | `prod` | `example_1_database` — the logical names |
 
 The `dev` entry reads the `CLAIR_USER` environment variable, thus each person writes to a

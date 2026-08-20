@@ -198,7 +198,7 @@ as t(return_id, order_item_id, user_id, reason, status, created_at, refund_amoun
 
 | Environment | Physical write target |
 |---|---|
-| `dev` | `example_2_database_<CLAIR_USER>` |
+| `dev` | `<CLAIR_USER>` — the user name replaces the database |
 | `prod` | `example_2_database` — the logical names |
 
 The `dev` entry reads the `CLAIR_USER` environment variable, thus each person writes to a

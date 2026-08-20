@@ -17,17 +17,15 @@ class DeveloperRouting(RoutingEntry):
     """Each person writes to a separate database.
 
     With CLAIR_USER=alice, example_4_database.refined.events becomes
-    example_4_database_ALICE.refined.events.
+    alice.refined.events.
     """
 
     environment_name: str = "dev"
     user_variable: str = "CLAIR_USER"
 
     def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
-        user_name = os.environ[self.user_variable].upper()
-        return trouve_address.model_copy(
-            update={"database_name": f"{trouve_address.database_name}_{user_name}"}
-        )
+        user_name = os.environ[self.user_variable]
+        return trouve_address.model_copy(update={"database_name": user_name})
 
 
 class ProductionRouting(RoutingEntry):

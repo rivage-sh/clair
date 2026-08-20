@@ -50,7 +50,7 @@ as t(order_id, customer_id, order_status, amount, created_at, updated_at);
 
 | Environment | Physical write target |
 |---|---|
-| `dev` | `example_3_database_<CLAIR_USER>` |
+| `dev` | `<CLAIR_USER>` — the user name replaces the database |
 | `prod` | `example_3_database` — the logical names |
 
 The `dev` entry reads the `CLAIR_USER` environment variable, thus each person writes to a
