@@ -77,6 +77,25 @@ class InvalidRoutingConfigError(ClairError):
         super().__init__(detail)
 
 
+class MissingRoutingVariableError(InvalidRoutingConfigError):
+    """Clair raises this error when a routing entry reads an absent variable.
+
+    A routing entry usually reads an environment variable, to give each person
+    a separate target. This error tells the user which variable to set.
+    """
+
+    def __init__(self, entry_text: str, logical_name: str, variable_name: str) -> None:
+        self.entry_text = entry_text
+        self.logical_name = logical_name
+        self.variable_name = variable_name
+        super().__init__(
+            f"The environment variable {variable_name} is not set. "
+            f"The routing entry `{entry_text}` reads it, thus Clair cannot find "
+            f"the target of '{logical_name}'.\n"
+            f"  Fix: set the variable, for example `export {variable_name}=alice`."
+        )
+
+
 
 class DiscoveryError(ClairError):
     """Clair raises this error when it cannot load a Trouve file."""
