@@ -71,7 +71,8 @@ separate database. Set it before you run the `dev` environment:
 export CLAIR_USER=alice
 ```
 
-`clair validate` applies the rules to every Trouve and needs no Snowflake connection:
+`clair validate` runs each rule on every Trouve and needs no Snowflake connection. It finds a
+rule that gives an invalid name, and two Trouves that go to one target:
 
 ```bash
 clair validate --project example_projects/example_1

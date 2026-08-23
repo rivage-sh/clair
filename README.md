@@ -481,8 +481,8 @@ Example projects are included under `example_projects/`:
 
 Each project holds a `__routing__.py` with a `dev` entry and a `prod` entry. The `dev` entry
 reads `CLAIR_USER`, thus each person writes to a separate database. Run
-`clair validate --project example_projects/example_1` to apply the rules without a Snowflake
-connection.
+`clair validate --project example_projects/example_1` to find a routing problem without a
+Snowflake connection.
 
 The README of each project holds the SQL that creates and seeds the source tables, and the SQL
 that inspects the results.
