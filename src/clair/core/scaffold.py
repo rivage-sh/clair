@@ -25,13 +25,25 @@ Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
 and gives the physical TrouveAddress. SOURCE Trouves never route.
 
-Commit this file. It holds no credentials.
-Run `clair validate` to apply the entries to every Trouve in the project.
+Run `clair validate` to find a rule that gives an invalid name, and two
+Trouves that go to one target.
 """
 
 import os
+from enum import StrEnum
 
 from clair import RoutingEntry, RoutingTable, TrouveAddress
+
+
+class EnvironmentName(StrEnum):
+    \"\"\"The environments of this project.
+
+    Each member matches a top-level key in ~/.clair/environments.yml, and each
+    one matches the environment_name of an entry below.
+    \"\"\"
+
+    DEV = "dev"
+    PROD = "prod"
 
 
 class DeveloperRouting(RoutingEntry):
@@ -40,7 +52,7 @@ class DeveloperRouting(RoutingEntry):
     Set CLAIR_USER to your name before you run clair.
     """
 
-    environment_name: str = "dev"
+    environment_name: str = EnvironmentName.DEV.value
     user_variable: str = "CLAIR_USER"
 
     def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
@@ -53,7 +65,7 @@ class DeveloperRouting(RoutingEntry):
 class ProductionRouting(RoutingEntry):
     """Production writes to the logical names, so the address stays the same."""
 
-    environment_name: str = "prod"
+    environment_name: str = EnvironmentName.PROD.value
 
     def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
         return trouve_address

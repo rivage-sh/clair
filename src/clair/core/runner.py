@@ -295,9 +295,19 @@ def run_project(
 
     skip_reasons: dict[str, str] = {}
 
+    # Each DAG node has the routed name as its key. The logs show the logical
+    # name, thus the reader sees the name that the file path gives, and also
+    # the physical target that routing chose.
+    routed_to_logical: dict[str, str] = {}
+    for node_name in dag.nodes:
+        node_trouve = dag.get_trouve(node_name)
+        if node_trouve.compiled is not None:
+            routed_to_logical[node_name] = node_trouve.compiled.logical_name
+
     for name in to_run:
+        logical_name = routed_to_logical.get(name, name)
         if name in skip_reasons:
-            logger.info("run.node.skipped", trouve=name, skipped_by=skip_reasons[name])
+            logger.info("run.node.skipped", trouve=logical_name, target=name, skipped_by=skip_reasons[name])
             yield RunResult(
                 full_name=name,
                 status=RunStatus.SKIPPED,
@@ -314,7 +324,7 @@ def run_project(
             try:
                 adapter.set_context(warehouse=context_warehouse, role=context_role)
             except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
-                logger.warning("run.node.context_error", trouve=name, warehouse=context_warehouse, role=context_role, error=str(e))
+                logger.warning("run.node.context_error", trouve=logical_name, target=name, warehouse=context_warehouse, role=context_role, error=str(e))
                 yield RunResult(
                     full_name=name,
                     status=RunStatus.FAILURE,
@@ -335,17 +345,17 @@ def run_project(
         # writes it. Clair does not execute SQL.
         if trouve.execution_type == ExecutionType.PANDAS:
             assert isinstance(trouve, PandasTrouve)
-            logger.info("run.node.start", trouve=name, effective_mode="full_refresh")
+            logger.info("run.node.start", trouve=logical_name, target=name, effective_mode="full_refresh")
             result = _run_pandas_trouve(trouve, adapter)
             yield result
 
             if result.status == RunStatus.SUCCESS:
-                logger.info("run.node.success", trouve=name, duration_seconds=round(result.duration_seconds, 3))
+                logger.info("run.node.success", trouve=logical_name, target=name, duration_seconds=round(result.duration_seconds, 3))
                 if after_node_success is not None and not after_node_success(name):
                     for desc in nx.descendants(dag, name):
                         skip_reasons.setdefault(desc, name)
             else:
-                logger.warning("run.node.failure", trouve=name, duration_seconds=round(result.duration_seconds, 3), error=result.error)
+                logger.warning("run.node.failure", trouve=logical_name, target=name, duration_seconds=round(result.duration_seconds, 3), error=result.error)
                 for desc in nx.descendants(dag, name):
                     skip_reasons.setdefault(desc, name)
             continue
@@ -357,10 +367,10 @@ def run_project(
             assert trouve.compiled is not None
             routed_parts = trouve.compiled.full_name.split(".")
             if len(routed_parts) == 3 and not adapter.table_exists(routed_parts[0], routed_parts[1], routed_parts[2]):
-                logger.info("run.node.incremental_fallback", trouve=name, reason="table_not_found")
+                logger.info("run.node.incremental_fallback", trouve=logical_name, target=name, reason="table_not_found")
                 effective_mode = RunMode.FULL_REFRESH
 
-        logger.info("run.node.start", trouve=name, effective_mode=effective_mode.value)
+        logger.info("run.node.start", trouve=logical_name, target=name, effective_mode=effective_mode.value)
         statements = trouve.build_sql(effective_mode, run_id)
 
         if not statements:
@@ -393,7 +403,7 @@ def run_project(
             adapter.execute(statements[2])
 
         if all_succeeded:
-            logger.info("run.node.success", trouve=name, duration_seconds=round(duration, 3), query_ids=query_ids)
+            logger.info("run.node.success", trouve=logical_name, target=name, duration_seconds=round(duration, 3), query_ids=query_ids)
             yield RunResult(
                 full_name=name,
                 status=RunStatus.SUCCESS,
@@ -406,7 +416,7 @@ def run_project(
                     skip_reasons.setdefault(desc, name)
         else:
             assert last_result is not None
-            logger.warning("run.node.failure", trouve=name, duration_seconds=round(duration, 3), error=last_result.error, query_ids=query_ids)
+            logger.warning("run.node.failure", trouve=logical_name, target=name, duration_seconds=round(duration, 3), error=last_result.error, query_ids=query_ids)
             yield RunResult(
                 full_name=name,
                 status=RunStatus.FAILURE,

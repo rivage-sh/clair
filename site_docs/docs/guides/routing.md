@@ -39,14 +39,22 @@ from clair import RoutingEntry, RoutingTable, TrouveAddress
 """Clair routing -- gives each environment its physical write target."""
 
 import os
+from enum import StrEnum
 
 from clair import RoutingEntry, RoutingTable, TrouveAddress
+
+
+class EnvironmentName(StrEnum):
+    """The environments of this project."""
+
+    DEV = "dev"
+    PROD = "prod"
 
 
 class DeveloperRouting(RoutingEntry):
     """Each person writes to a separate database."""
 
-    environment_name: str = "dev"
+    environment_name: str = EnvironmentName.DEV.value
     user_variable: str = "CLAIR_USER"
 
     def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
@@ -59,7 +67,7 @@ class DeveloperRouting(RoutingEntry):
 class ProductionRouting(RoutingEntry):
     """Production writes to the logical names, so the address stays the same."""
 
-    environment_name: str = "prod"
+    environment_name: str = EnvironmentName.PROD.value
 
     def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
         return trouve_address
@@ -75,6 +83,9 @@ With `CLAIR_USER=alice` and the `dev` environment:
 | `source.orders.raw` | `source.orders.raw` (SOURCE — passthrough) |
 | `refined.orders.daily` | `refined_ALICE.orders.daily` |
 | `derived.orders.summary` | `derived_ALICE.orders.summary` |
+
+An environment name joins `__routing__.py` to `environments.yml`, thus the name is easy to
+misspell. A `StrEnum` gives each name one definition, and your editor completes it.
 
 ## Write a route method
 
@@ -103,6 +114,20 @@ def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
 This second shape puts the projects of many developers in one shared schema. Each developer gets different table names, thus the projects do not collide.
 
 Add a field for each value that the rule needs. Pydantic validates the fields, and the field values show in the CLI messages.
+
+## See the target of a run
+
+`clair run` logs two names for each Trouve. `trouve` is the logical name that the file path
+gives. `target` is the physical destination that your entry chose:
+
+```
+[info    ] run.node.start
+  trouve=analytics.orders.daily
+  target=alice.orders.daily
+  effective_mode=full_refresh
+```
+
+The two names are equal when no entry applies to the environment.
 
 ## SOURCE passthrough
 

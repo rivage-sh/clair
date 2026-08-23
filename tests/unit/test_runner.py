@@ -6,11 +6,14 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+from structlog.testing import capture_logs
+
 from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
 from clair.core.runner import RunResult, RunStatus, format_run_output, run_project
 from clair.trouves.run_config import RunMode
+from tests.helpers import DatabaseOverrideRouting
 
 
 def _make_mock_adapter(fail_on: set[str] | None = None) -> WarehouseAdapter:
@@ -44,6 +47,46 @@ def _make_mock_adapter(fail_on: set[str] | None = None) -> WarehouseAdapter:
     adapter.execute.side_effect = mock_execute
     adapter.table_exists.return_value = True
     return adapter
+
+
+class TestRunLogNames:
+    """The run logs show the logical name and the physical target."""
+
+    def test_log_shows_logical_name_and_routed_target(self, simple_project: Path):
+        routing = DatabaseOverrideRouting(database_name="dev_db")
+        discovered = discover_project(simple_project, routing=routing)
+        dag = build_dag(discovered)
+        selected = get_executable_nodes(dag)
+
+        adapter = _make_mock_adapter()
+        with capture_logs() as log_entries:
+            list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
+
+        start_events = [e for e in log_entries if e["event"] == "run.node.start"]
+        assert len(start_events) == 1
+        # trouve is the name that the file path gives. target is the write
+        # destination that the routing entry chose.
+        assert start_events[0]["trouve"] == "analytics.revenue.daily_orders"
+        assert start_events[0]["target"] == "dev_db.revenue.daily_orders"
+
+        success_events = [e for e in log_entries if e["event"] == "run.node.success"]
+        assert len(success_events) == 1
+        assert success_events[0]["trouve"] == "analytics.revenue.daily_orders"
+        assert success_events[0]["target"] == "dev_db.revenue.daily_orders"
+
+    def test_target_equals_trouve_without_routing(self, simple_project: Path):
+        discovered = discover_project(simple_project)
+        dag = build_dag(discovered)
+        selected = get_executable_nodes(dag)
+
+        adapter = _make_mock_adapter()
+        with capture_logs() as log_entries:
+            list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
+
+        start_events = [e for e in log_entries if e["event"] == "run.node.start"]
+        assert len(start_events) == 1
+        assert start_events[0]["trouve"] == "analytics.revenue.daily_orders"
+        assert start_events[0]["target"] == "analytics.revenue.daily_orders"
 
 
 class TestRunner:

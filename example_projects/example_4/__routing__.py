@@ -9,8 +9,20 @@ gives an invalid name, and two Trouves that go to one target.
 """
 
 import os
+from enum import StrEnum
 
 from clair import RoutingEntry, RoutingTable, TrouveAddress
+
+
+class EnvironmentName(StrEnum):
+    """The environments of this project.
+
+    Each member matches a top-level key in ~/.clair/environments.yml, and each
+    one matches the environment_name of an entry below.
+    """
+
+    DEV = "dev"
+    PROD = "prod"
 
 
 class DeveloperRouting(RoutingEntry):
@@ -20,7 +32,7 @@ class DeveloperRouting(RoutingEntry):
     alice.refined.events.
     """
 
-    environment_name: str = "dev"
+    environment_name: str = EnvironmentName.DEV.value
     user_variable: str = "CLAIR_USER"
 
     def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
@@ -31,7 +43,7 @@ class DeveloperRouting(RoutingEntry):
 class ProductionRouting(RoutingEntry):
     """Production writes to the logical names, so the address stays the same."""
 
-    environment_name: str = "prod"
+    environment_name: str = EnvironmentName.PROD.value
 
     def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
         return trouve_address
