@@ -10,6 +10,43 @@ The `clair run`, `clair compile`, `clair test`, and `clair dag` commands accept 
 clair run --project=. --env=dev --select='refined.orders.*'
 ```
 
+## Graph operators
+
+A pattern can also carry the `+` graph operator. The operator tells clair to add the
+neighbours of each matched Trouve from the DAG.
+
+| Pattern | clair selects |
+|---------|---------------|
+| `pattern` | only the Trouves that match the glob |
+| `+pattern` | the matches, and each parent upstream, at any distance |
+| `pattern+` | the matches, and each child downstream, at any distance |
+| `+pattern+` | the matches, and each parent and child, at any distance |
+| `N+pattern` | the matches, and the parents to a distance of N levels |
+| `pattern+N` | the matches, and the children to a distance of N levels |
+| `N+pattern+M` | N levels upstream, and M levels downstream |
+
+**Build a Trouve and all that it depends on:**
+
+```bash
+clair run --project=. --env=dev --select='+derived.products.top_reviewed'
+```
+
+**Build a Trouve and all that depends on it:**
+
+```bash
+clair run --project=. --env=dev --select='refined.orders.clean_orders+'
+```
+
+**Build the direct parents only:**
+
+```bash
+clair run --project=. --env=dev --select='1+derived.products.top_reviewed'
+```
+
+The glob rules of the previous section apply to the part of the pattern between the
+operators. So `+refined.orders.*+` selects each Trouve in `refined.orders`, plus every
+ancestor and every descendant of those Trouves.
+
 ## Examples
 
 **A full schema:**

@@ -38,7 +38,7 @@ clair runs the attached tests after each successful TABLE or VIEW. If a test fai
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
 | `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
-| `--select` | all | Glob pattern that filters the Trouves. Repeat the flag to add more patterns. |
+| `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../guides/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides the `run_config` of each Trouve. |
 | `--no-test` | `false` | Skip the data quality tests |
 | `--sample` | `false` | Run the tests against `SELECT TOP 1000 *` (skips `TestRowCount`) |
