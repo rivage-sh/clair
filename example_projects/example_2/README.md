@@ -19,7 +19,7 @@ Lineage: `source.*` → `refined.*` → `derived.*` → `reports.*`
 
 You need a Snowflake account with:
 
-- A profile configured at `~/.clair/profiles.yml` (the `local` profile is used below)
+- An environment configured at `~/.clair/environments.yml` (the examples below use `dev`)
 - All ten source tables created and seeded (SQL below)
 
 ### Install clair
@@ -192,6 +192,34 @@ as t(return_id, order_item_id, user_id, reason, status, created_at, refund_amoun
 
 ---
 
+## Routing
+
+`__routing__.py` at the root of this project holds the routing rules. It has two entries:
+
+| Environment | Physical write target |
+|---|---|
+| `dev` | `<CLAIR_USER>` — the user name replaces the database |
+| `prod` | `example_2_database` — the logical names |
+
+The `dev` entry reads the `CLAIR_USER` environment variable, thus each person writes to a
+separate database. Set it before you run the `dev` environment:
+
+```bash
+export CLAIR_USER=alice
+```
+
+`clair validate` runs each rule on every Trouve and needs no Snowflake connection. It finds a
+rule that gives an invalid name, and two Trouves that go to one target:
+
+```bash
+clair validate --project example_projects/example_2
+clair validate --project example_projects/example_2 --env prod
+```
+
+SOURCE Trouves never route. The `source` schema keeps its logical name in every environment.
+
+See the [routing guide](../../site_docs/docs/guides/routing.md) for the full rules.
+
 ## Running the example
 
 From the project root (`clair/`):
@@ -201,7 +229,7 @@ From the project root (`clair/`):
 clair compile --project example_projects/example_2
 
 # Run (executes against Snowflake)
-clair run --project example_projects/example_2 --profile local
+clair run --project example_projects/example_2 --env dev
 ```
 
 After running, 40 new tables will be created across three schemas. A few interesting ones to verify:
