@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode, UpsertConfig
@@ -14,7 +15,7 @@ from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, Trou
 def _make_compiled_trouve(
     type: TrouveType = TrouveType.TABLE,
     sql: str = "SELECT 1 AS id",
-    physical_name: str = "db.schema.my_table",
+    physical_address: str = "db.schema.my_table",
     columns: list[Column] | None = None,
     run_config: RunConfig | None = None,
 ) -> Trouve:
@@ -29,11 +30,11 @@ def _make_compiled_trouve(
 
     t = Trouve(**kwargs)
     t.compiled = CompiledAttributes(
-        physical_name=physical_name,
-        logical_name=physical_name,
+        physical_address=TrouveAddress.parse(physical_address),
+        logical_address=TrouveAddress.parse(physical_address),
         resolved_sql=sql if type != TrouveType.SOURCE else "",
-        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
-        module_name=physical_name,
+        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
+        module_name=physical_address,
         imports=[],
         config=ResolvedConfig(),
         execution_type=ExecutionType.SNOWFLAKE,
@@ -107,7 +108,7 @@ class TestBuildSqlUpsert:
     def test_staging_name_contains_run_id(self):
         t = self._upsert_trouve(primary_key_columns=["id"])
         stmts = t.build_sql(RunMode.INCREMENTAL, run_id="abc123")
-        assert "__clair_staging_abc123" in stmts[0]
+        assert "__clair_merge_abc123" in stmts[0]
 
     def test_merge_join_condition_from_primary_key_columns(self):
         t = self._upsert_trouve(primary_key_columns=["id"])
@@ -131,7 +132,7 @@ class TestBuildSqlUpsert:
         t = self._upsert_trouve(primary_key_columns=["id"])
         stmts = t.build_sql(RunMode.INCREMENTAL, run_id="abc123")
         assert "DROP TABLE IF EXISTS" in stmts[2]
-        assert "__clair_staging_abc123" in stmts[2]
+        assert "__clair_merge_abc123" in stmts[2]
 
     def test_join_sql_uses_custom_condition(self):
         t = self._upsert_trouve(join_sql="target.id = source.id AND target.region = source.region")

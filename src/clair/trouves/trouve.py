@@ -18,18 +18,15 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from clair.trouves._refs import register
+from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column
 from clair.trouves.run_config import SOURCE, TARGET, IncrementalMode, RunConfig, RunMode
 from clair.trouves.test import AnyTest
-
-if TYPE_CHECKING:
-    # routing.py imports this module, so the import stays behind TYPE_CHECKING.
-    from clair.environments.routing import TrouveAddress
 
 
 class TrouveType(StrEnum):
@@ -49,8 +46,10 @@ class CompiledAttributes(BaseModel):
     These attributes exist only when ``TrouveAbc.is_compiled`` is True.
     """
 
-    physical_name: str       # The routed name. Clair puts it in the SQL and the DDL.
-    logical_name: str    # The name from the file path. DAG edges and selectors use it.
+    # The address that clair writes to. Clair puts it in the SQL and the DDL.
+    physical_address: TrouveAddress
+    # The address that the file path gives. DAG edges and selectors use it.
+    logical_address: TrouveAddress
     resolved_sql: str
     resolved_transform: str = ""
     file_path: Path
@@ -106,7 +105,7 @@ class TrouveAbc(BaseModel, ABC):
         {other_trouve}"``. The method adds the Trouve to the global refs
         registry. Then it gives a token, for example
         ``__CLAIR_TROUVE_140234567890__``. Discovery replaces the token with the
-        true physical_name.
+        true physical_address.
         """
         return register(self)
 
@@ -116,30 +115,30 @@ class TrouveAbc(BaseModel, ABC):
         return self.compiled is not None
 
     @property
-    def physical_name(self) -> str:
-        """The full Snowflake object name: database.schema.table.
+    def physical_address(self) -> TrouveAddress:
+        """The address of this Trouve in the warehouse: database.schema.table.
 
         This property raises a RuntimeError if you read it before discovery runs.
         """
         if self.compiled is None:
             raise RuntimeError(
-                "Trouve.physical_name is not set. "
+                "Trouve.physical_address is not set. "
                 "The discovery layer of clair did not load this Trouve."
             )
-        return self.compiled.physical_name
+        return self.compiled.physical_address
 
     def sample(self) -> str:
         """Give a subquery that reads a sample of this Trouve, for test SQL.
 
-        The default result is ``(SELECT TOP 1000 * FROM {physical_name})``. To change
+        The default result is ``(SELECT TOP 1000 * FROM {physical_address})``. To change
         how clair takes the sample, override this method in a subclass.
         """
         assert self.compiled is not None, "sample() needs a compiled Trouve"
-        return f"(SELECT TOP 1000 * FROM {self.compiled.physical_name})"
+        return f"(SELECT TOP 1000 * FROM {self.compiled.physical_address})"
 
     def get_full_table_name(self) -> str:
-        """An alias for .physical_name. Use it in f-string SQL."""
-        return self.physical_name
+        """The physical address as a string. Use it in f-string SQL."""
+        return str(self.physical_address)
 
 
 class Trouve(TrouveAbc):
@@ -149,7 +148,7 @@ class Trouve(TrouveAbc):
         sql: The SQL query. A TABLE or a VIEW needs it. A SOURCE must leave it
              empty. To point to a different Trouve, write
              ``f"SELECT * FROM {other_trouve}"``. Discovery replaces the
-             f-string placeholder with the true physical_name.
+             f-string placeholder with the true physical_address.
 
     ``TrouveAbc`` holds the attributes that every backend shares.
     """
@@ -207,7 +206,7 @@ class Trouve(TrouveAbc):
             return []
 
         resolved_sql = self.compiled.resolved_sql.strip()
-        address = str(staging_address) if staging_address else self.physical_name
+        address = str(staging_address) if staging_address else self.physical_address
 
         if effective_mode == RunMode.FULL_REFRESH:
             object_type = "TABLE" if self.type == TrouveType.TABLE else "VIEW"
@@ -226,9 +225,10 @@ class Trouve(TrouveAbc):
                 "the upsert mode needs columns on the Trouve"
             )
 
-        # The name comes from the physical address, and not from the staging
-        # address. Thus the merge suffix does not go on top of the staging suffix.
-        staging_name = f"{self.physical_name}__clair_staging_{run_id}"
+        # The MERGE needs a source table. It is not the staging address: it holds
+        # the new rows only, and the MERGE reads it. The name comes from the
+        # physical address, thus the two suffixes do not go on top of each other.
+        merge_source = f"{self.physical_address}__clair_merge_{run_id}"
         all_col_names = [c.name for c in self.columns]
         unique_keys = set(self.run_config.primary_key_columns or [])
 
@@ -250,20 +250,20 @@ class Trouve(TrouveAbc):
         all_source_columns = ", ".join(f"{SOURCE}.{c}" for c in insert_col_names)
 
         stmt_1 = (
-            f"-- [1/3] create the staging table\n"
-            f"CREATE OR REPLACE TABLE {staging_name} AS (\n{resolved_sql}\n)"
+            f"-- [1/3] create the merge source table\n"
+            f"CREATE OR REPLACE TABLE {merge_source} AS (\n{resolved_sql}\n)"
         )
         stmt_2 = (
-            f"-- [2/3] merge the staging table into the target table\n"
+            f"-- [2/3] merge the source table into the target table\n"
             f"MERGE INTO {address} AS {TARGET}\n"
-            f"USING {staging_name} AS {SOURCE}\n"
+            f"USING {merge_source} AS {SOURCE}\n"
             f"ON {join_condition}\n"
             f"WHEN MATCHED THEN UPDATE SET {update_clause}\n"
             f"WHEN NOT MATCHED THEN INSERT ({all_columns}) VALUES ({all_source_columns})"
         )
         stmt_3 = (
-            f"-- [3/3] drop the staging table\n"
-            f"DROP TABLE IF EXISTS {staging_name}"
+            f"-- [3/3] drop the merge source table\n"
+            f"DROP TABLE IF EXISTS {merge_source}"
         )
 
         return [stmt_1, stmt_2, stmt_3]

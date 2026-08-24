@@ -40,13 +40,13 @@ RUN_ID = "0195aabbccddeeff0011223344556677"
 MAX_IDENTIFIER_LENGTH = 255
 
 
-def _address(physical_name: str) -> TrouveAddress:
-    return TrouveAddress.parse(physical_name)
+def _address(physical_address: str) -> TrouveAddress:
+    return TrouveAddress.parse(physical_address)
 
 
-def _staging_name(physical_name: str, run_id: str = RUN_ID) -> str:
+def _staging_name(physical_address: str, run_id: str = RUN_ID) -> str:
     """Give the staging address of a dotted name, as a string."""
-    return str(make_staging_address(_address(physical_name), run_id))
+    return str(make_staging_address(_address(physical_address), run_id))
 
 
 AnyTrouve = TypeVar("AnyTrouve", bound=TrouveAbc)
@@ -54,16 +54,16 @@ AnyTrouve = TypeVar("AnyTrouve", bound=TrouveAbc)
 
 def _compile(
     trouve: AnyTrouve,
-    full_name: str,
+    address: str,
     imports: list[str] | None = None,
     execution_type: ExecutionType = ExecutionType.SNOWFLAKE,
 ) -> AnyTrouve:
     trouve.compiled = CompiledAttributes(
-        physical_name=full_name,
-        logical_name=full_name,
+        physical_address=TrouveAddress.parse(address),
+        logical_address=TrouveAddress.parse(address),
         resolved_sql=getattr(trouve, "sql", ""),
-        file_path=Path(f"/fake/{full_name.replace('.', '/')}.py"),
-        module_name=full_name,
+        file_path=Path(f"/fake/{address.replace('.', '/')}.py"),
+        module_name=address,
         imports=imports or [],
         config=ResolvedConfig(),
         execution_type=execution_type,
@@ -207,11 +207,11 @@ class TestBuildSqlStagingAddress:
         )
         statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, staging_address=_address("db.s.candidate"))
         assert "MERGE INTO db.s.candidate" in statements[1]
-        # The merge staging table derives from the real name, not the override,
+        # The merge source table derives from the real name, not the override,
         # so the two suffixes never stack.
-        assert f"db.s.orders__clair_staging_{RUN_ID}" in statements[0]
+        assert f"db.s.orders__clair_merge_{RUN_ID}" in statements[0]
 
-    def test_omitting_the_address_writes_to_the_physical_name(self):
+    def test_omitting_the_address_writes_to_the_physical_address(self):
         trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
         assert trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID) == trouve.build_sql(
             RunMode.FULL_REFRESH, RUN_ID, staging_address=None
@@ -237,8 +237,8 @@ class TestStagingRunner:
         adapter, executed = _make_adapter()
         tested: list[str] = []
 
-        def on_success(node_name: str, physical_name: str) -> bool:
-            tested.append(physical_name)
+        def on_success(node_name: str, physical_address: str) -> bool:
+            tested.append(physical_address)
             return True
 
         results = list(run_project(
@@ -261,7 +261,7 @@ class TestStagingRunner:
         adapter, executed = _make_adapter()
         sql_at_test_time: list[list[str]] = []
 
-        def on_success(node_name: str, physical_name: str) -> bool:
+        def on_success(node_name: str, physical_address: str) -> bool:
             sql_at_test_time.append(list(executed))
             return True
 
@@ -403,7 +403,7 @@ class TestStagingRunner:
             use_staging=True,
         ))
 
-        by_name = {r.physical_name: r for r in results}
+        by_name = {r.physical_address: r for r in results}
         assert by_name["db.s.upstream"].status == RunStatus.FAILURE
         assert by_name["db.s.downstream"].status == RunStatus.SKIPPED
         assert by_name["db.s.downstream"].skipped_by == "db.s.upstream"
@@ -476,9 +476,10 @@ class TestStagingRunnerPandas:
         staging = _staging_name("db.s.orders", RUN_ID)
         assert results[0].status == RunStatus.SUCCESS
         # Reported under the real name even though the write went to staging.
-        assert results[0].physical_name == "db.s.orders"
-        assert adapter.write_dataframe.call_args.kwargs["physical_name"] == staging
-        assert adapter.write_dataframe.call_args.kwargs["table_name"] == staging.split(".")[2]
+        assert results[0].physical_address == "db.s.orders"
+        written_address = adapter.write_dataframe.call_args.kwargs["address"]
+        assert str(written_address) == staging
+        assert written_address.table_name == TrouveAddress.parse(staging).table_name
         assert any(
             f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging} COPY GRANTS" in sql
             for sql in executed
@@ -563,7 +564,7 @@ class TestPhysicalNameOverride:
         assert any("db.s.staging" in sql for sql in executed)
         assert not any("FROM db.s.orders" in sql for sql in executed)
 
-    def test_results_still_report_the_routed_name(self):
+    def test_results_still_report_the_physical_address(self):
         from clair.core.test_runner import run_tests
 
         dag = self._dag_with_test()
@@ -573,7 +574,7 @@ class TestPhysicalNameOverride:
             dag, ["db.s.orders"], adapter, query_addresses={"db.s.orders": "db.s.staging"}
         )
 
-        assert [r.physical_name for r in results] == ["db.s.orders"]
+        assert [r.physical_address for r in results] == ["db.s.orders"]
 
     def test_sampling_applies_to_the_override(self):
         from clair.core.test_runner import run_tests

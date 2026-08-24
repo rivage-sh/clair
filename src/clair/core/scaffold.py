@@ -26,7 +26,7 @@ Each entry names one environment. The name matches a top-level key in
 and gives the physical TrouveAddress. SOURCE Trouves never route.
 
 This file starts with one entry, and that entry changes nothing: the physical
-name stays equal to the logical name. Change the route method when you want a
+address stays equal to the logical address. Change the route method for a
 separate target for an environment, for example one database for each person.
 See https://clair.rivage.sh/guides/routing/
 """
@@ -46,7 +46,7 @@ class EnvironmentName(StrEnum):
 
 
 class DevelopmentRouting(RoutingEntry):
-    """Write to the logical names, thus the address stays the same."""
+    """Write to the logical address, thus the address stays the same."""
 
     environment_name: str = EnvironmentName.DEV.value
 

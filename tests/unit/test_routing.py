@@ -142,33 +142,32 @@ def _schema_isolation(database_name: str, schema_name: str) -> SchemaIsolationRo
 
 class TestRoute:
     def test_passthrough_when_no_routing(self):
-        assert route("analytics.finance.revenue", TrouveType.TABLE, None) == (
-            "analytics.finance.revenue"
-        )
+        result = route("analytics.finance.revenue", TrouveType.TABLE, None)
+        assert str(result) == "analytics.finance.revenue"
 
     def test_source_passthrough_with_routing(self):
         result = route(
             "analytics.finance.revenue", TrouveType.SOURCE, _db_override("OMER_DEV")
         )
-        assert result == "analytics.finance.revenue"
+        assert str(result) == "analytics.finance.revenue"
 
     def test_database_override_table(self):
         result = route(
             "analytics.finance.revenue", TrouveType.TABLE, _db_override("OMER_DEV")
         )
-        assert result == "OMER_DEV.finance.revenue"
+        assert str(result) == "OMER_DEV.finance.revenue"
 
     def test_database_override_view(self):
         result = route(
             "analytics.finance.revenue", TrouveType.VIEW, _db_override("OMER_DEV")
         )
-        assert result == "OMER_DEV.finance.revenue"
+        assert str(result) == "OMER_DEV.finance.revenue"
 
     def test_database_override_keeps_the_schema_and_the_table(self):
         result = route(
             "warehouse.orders.daily", TrouveType.TABLE, _db_override("MY_DEV_DB")
         )
-        assert result == "MY_DEV_DB.orders.daily"
+        assert str(result) == "MY_DEV_DB.orders.daily"
 
     def test_schema_isolation_table(self):
         result = route(
@@ -176,14 +175,14 @@ class TestRoute:
             TrouveType.TABLE,
             _schema_isolation("DEV", "obaddour"),
         )
-        assert result == "DEV.obaddour.REFINED_PRODUCTS_CATALOG"
+        assert str(result) == "DEV.obaddour.REFINED_PRODUCTS_CATALOG"
 
-    def test_route_validates_the_logical_name(self):
+    def test_route_validates_the_logical_address(self):
         """A file system name that Snowflake cannot use is an error, with no entry."""
         with pytest.raises(InvalidTrouveAddressError, match="not a valid identifier"):
             route("my-db.finance.revenue", TrouveType.TABLE, None)
 
-    def test_route_validates_the_logical_name_of_a_source(self):
+    def test_route_validates_the_logical_address_of_a_source(self):
         with pytest.raises(InvalidTrouveAddressError):
             route("my-db.finance.revenue", TrouveType.SOURCE, None)
 
@@ -266,7 +265,7 @@ class TestRouteRejectsABadEntry:
                 )
 
         result = route("analytics.finance.revenue", TrouveType.TABLE, UserRouting())
-        assert result == "analytics_OBADDOUR.finance.revenue"
+        assert str(result) == "analytics_OBADDOUR.finance.revenue"
 
 
 class TestDescribeRouting:

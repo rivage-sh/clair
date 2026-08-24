@@ -50,6 +50,7 @@ from clair.exceptions import (
     InvalidRoutingConfigError,
     InvalidTrouveAddressError,
 )
+from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, TrouveType
 
@@ -177,8 +178,8 @@ def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> 
 
     click.echo(click.style(f"\nWarning: Clair found {header}", fg="yellow", bold=True))
 
-    for routed_target, logical_sources in collisions:
-        click.echo(f"\n  {routed_target}")
+    for physical_address, logical_sources in collisions:
+        click.echo(f"\n  {physical_address}")
         for source in logical_sources:
             click.echo(f"    ↳ {source}")
 
@@ -385,10 +386,10 @@ def validate(project: str, env: str | None) -> None:
         sys.exit(1)
 
     routing = project_routing.entry
-    # Keep the (logical name, type) pair, not the Trouve. The name is the only
-    # part that the collision report needs, and here it is never None.
-    routable: list[tuple[str, TrouveType]] = [
-        (trouve.compiled.logical_name, trouve.type)
+    # Keep the (logical address, type) pair, and not the Trouve. The address is
+    # the only part that the collision report needs, and here it is never None.
+    routable: list[tuple[TrouveAddress, TrouveType]] = [
+        (trouve.compiled.logical_address, trouve.type)
         for trouve in discovered
         if trouve.compiled is not None and trouve.type != TrouveType.SOURCE
     ]
@@ -399,19 +400,19 @@ def validate(project: str, env: str | None) -> None:
     click.echo(f"  Trouves to route: {len(routable)}\n")
 
     problems = collect_routing_problems(discovered, routing)
-    for logical_name, problem in problems:
-        click.echo(click.style(f"  ✗ {logical_name}", fg="red", bold=True))
+    for logical_address, problem in problems:
+        click.echo(click.style(f"  ✗ {logical_address}", fg="red", bold=True))
         click.echo(f"    {problem}\n")
 
     collisions: list[tuple[str, list[str]]] = []
     if not problems:
-        logical_to_routed = {
-            logical_name: route(logical_name, trouve_type, routing)
-            for logical_name, trouve_type in routable
+        logical_to_physical = {
+            str(logical_address): str(route(logical_address, trouve_type, routing))
+            for logical_address, trouve_type in routable
         }
-        collisions = detect_routing_collisions(logical_to_routed)
-        for routed_target, logical_sources in collisions:
-            click.echo(click.style(f"  ✗ {routed_target}", fg="red", bold=True))
+        collisions = detect_routing_collisions(logical_to_physical)
+        for physical_address, logical_sources in collisions:
+            click.echo(click.style(f"  ✗ {physical_address}", fg="red", bold=True))
             click.echo("    Two or more Trouves route to this one target:")
             for source in logical_sources:
                 click.echo(f"      ↳ {source}")
@@ -423,7 +424,7 @@ def validate(project: str, env: str | None) -> None:
         click.echo(click.style(f"  {problem_count} {label} found.\n", fg="red", bold=True))
         sys.exit(1)
 
-    click.echo(click.style("  ✓ Every routed name is valid. No collisions.\n", fg="green"))
+    click.echo(click.style("  ✓ Every physical address is valid. No collisions.\n", fg="green"))
 
 
 @cli.command()

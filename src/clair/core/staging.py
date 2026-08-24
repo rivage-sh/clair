@@ -101,7 +101,7 @@ def build_promote_statement(
     Without it clair removes each privilege that an administrator granted on the
     target, because Snowflake attaches a privilege to the object and not to the
     name. An ``ALTER TABLE ... SWAP WITH`` moves the grants to the staging name
-    and leaves the physical name bare. With ``COPY GRANTS`` Snowflake copies each
+    and leaves the physical address bare. With ``COPY GRANTS`` Snowflake copies each
     privilege except OWNERSHIP from the object that it replaces. If the physical
     object does not exist, Snowflake copies from the clone source. One statement
     thus covers the two conditions.

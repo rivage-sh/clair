@@ -50,7 +50,7 @@ class ProjectRouting(NamedTuple):
         """Tell the caller if the table omits this environment.
 
         An absent entry is almost always a typo. Clair then writes to the
-        logical names, which are the production names.
+        logical addresses, which are the production addresses.
         """
         return self.file_exists and not self.has_entry
 

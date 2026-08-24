@@ -18,7 +18,12 @@ import clair as _clair_pkg
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
 
-from clair.environments.routing import RoutingEntry, detect_routing_collisions, route
+from clair.environments.routing import (
+    RoutingEntry,
+    TrouveAddress,
+    detect_routing_collisions,
+    route,
+)
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
@@ -34,13 +39,13 @@ _CONFIG_FILES = {"__database_config__.py", "__schema_config__.py"}
 logger = structlog.get_logger()
 
 
-def compute_full_name(file_path: Path) -> str:
-    """Make the full Snowflake name from the last three parts of the path.
+def compute_logical_address(file_path: Path) -> TrouveAddress:
+    """Make the logical address from the last three parts of the path.
 
     Example: .../database_name/schema_name/table_name.py becomes
     database_name.schema_name.table_name
     """
-    return ".".join(file_path.with_suffix("").parts[-3:])
+    return TrouveAddress.parse(".".join(file_path.with_suffix("").parts[-3:]))
 
 
 def _is_trouve_candidate(file_path: Path) -> bool:
@@ -120,30 +125,39 @@ def _resolve_config(
 _PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 
 
-def _resolve_sql(sql: str, id_to_full_name: dict[int, str], this_name: str) -> str:
-    """Replace each placeholder token with the true physical_name.
+def _resolve_sql(
+    sql: str,
+    id_to_logical_address: dict[int, TrouveAddress],
+    this_address: TrouveAddress,
+) -> str:
+    """Replace each placeholder token with the true logical address.
 
     The function replaces a token that points to a different Trouve
     (``__CLAIR_TROUVE_<id>__``). It also replaces the THIS marker
-    (``__CLAIR_THIS__``) with ``this_name``, the logical name of the current
-    Trouve. Later, ``recompile_for_selection`` changes a logical name to a
-    routed name for each selected upstream Trouve.
+    (``__CLAIR_THIS__``) with ``this_address``, the logical address of the
+    current Trouve. Later, ``recompile_for_selection`` changes a logical address
+    to a physical address for each selected upstream Trouve.
     """
     def replace(m: re.Match[str]) -> str:
-        return id_to_full_name.get(int(m.group(1)), m.group(0))
+        address = id_to_logical_address.get(int(m.group(1)))
+        return str(address) if address else m.group(0)
     result = _PLACEHOLDER_RE.sub(replace, sql)
-    return result.replace(THIS_PLACEHOLDER, this_name)
+    return result.replace(THIS_PLACEHOLDER, str(this_address))
 
 
 def _detect_imports(
-    sql: str, id_to_full_name: dict[int, str], own_full_name: str
+    sql: str,
+    id_to_logical_address: dict[int, TrouveAddress],
+    own_logical_address: TrouveAddress,
 ) -> list[str]:
-    """Give the physical_name of each other Trouve that the SQL points to with a token."""
-    imports = []
+    """Give the logical address of each Trouve that the SQL points to with a token."""
+    imports: list[str] = []
     for obj_id_str in _PLACEHOLDER_RE.findall(sql):
-        dep_name = id_to_full_name.get(int(obj_id_str))
-        if dep_name and dep_name != own_full_name and dep_name not in imports:
-            imports.append(dep_name)
+        dependency = id_to_logical_address.get(int(obj_id_str))
+        if dependency is None or dependency == own_logical_address:
+            continue
+        if str(dependency) not in imports:
+            imports.append(str(dependency))
     return imports
 
 
@@ -163,7 +177,8 @@ def discover_project(
     Args:
         project_root: The absolute path of the project root directory.
         profile_defaults: The default warehouse and role from the active profile.
-        routing: The routing entry for the physical names, from __routing__.py.
+        routing: The routing entry that makes each physical address. It comes
+            from __routing__.py.
         environment: The active environment. Clair puts it in ``clair.env``.
             Thus a Trouve module can read it at load time, for a feature flag.
         run_mode: The run mode that the user asks for: FULL_REFRESH or
@@ -211,11 +226,11 @@ def discover_project(
 
     # Load each candidate. A file can be in sys.modules already, because an
     # earlier candidate imported it as a dependency.
-    collected: list[tuple[TrouveAbc, str, Path, str]] = []
+    collected: list[tuple[TrouveAbc, TrouveAddress, Path, str]] = []
     errors: list[str] = []
 
     for file_path in candidates:
-        physical_name = compute_full_name(file_path)
+        logical_address = compute_logical_address(file_path)
         module_name = str(
             file_path.relative_to(project_root).with_suffix("")
         ).replace(os.sep, ".")
@@ -239,47 +254,49 @@ def discover_project(
         if not isinstance(trouve_obj, TrouveAbc):
             continue
 
-        collected.append((trouve_obj, physical_name, file_path, module_name))
+        collected.append((trouve_obj, logical_address, file_path, module_name))
 
-    # Phase A: make the logical name and the routed name of each Trouve.
-    # logical_name = the name from the file path. DAG edges and selectors use it.
-    # routed_name  = the physical target name. The SQL and the DDL use it.
-    # A SOURCE Trouve always keeps its name, whatever the routing policy is.
-    logical_names: dict[int, str] = {}
-    routed_names: dict[int, str] = {}
-    collision_check: dict[str, str] = {}
+    # Phase A: make the logical address and the physical address of each Trouve.
+    # The logical address comes from the file path. DAG edges and selectors use it.
+    # The physical address is the target. The SQL and the DDL use it.
+    # A SOURCE Trouve always keeps its address, whatever the routing policy is.
+    logical_addresses: dict[int, TrouveAddress] = {}
+    physical_addresses: dict[int, TrouveAddress] = {}
+    collision_check: dict[str, TrouveAddress] = {}
 
-    for trouve_obj, physical_name, _, _ in collected:
-        logical_names[id(trouve_obj)] = physical_name
-        routed = route(physical_name, trouve_obj.type, routing)
-        routed_names[id(trouve_obj)] = routed
+    for trouve_obj, logical_address, _, _ in collected:
+        logical_addresses[id(trouve_obj)] = logical_address
+        physical_address = route(logical_address, trouve_obj.type, routing)
+        physical_addresses[id(trouve_obj)] = physical_address
         if trouve_obj.type != TrouveType.SOURCE:
-            collision_check[physical_name.upper()] = routed
+            collision_check[str(logical_address).upper()] = physical_address
 
-    # Make a map from an id to a logical name, for the pandas dependencies. With
-    # this map, clair finds the logical name of each Trouve that a PandasTrouve
+    # Make a map from an id to a logical address, for the pandas dependencies.
+    # With this map, clair finds the logical address of each Trouve that a PandasTrouve
     # names in its inputs.
-    id_to_logical_name: dict[int, str] = {
-        id(trouve_obj): logical_names[id(trouve_obj)]
+    id_to_logical_address: dict[int, TrouveAddress] = {
+        id(trouve_obj): logical_addresses[id(trouve_obj)]
         for trouve_obj, _, _, _ in collected
     }
 
     # Phase B: compile each Trouve.
-    # Clair puts the logical names in the SQL. Thus, by default, the SQL reads
-    # the production upstream tables. After the selection, call
-    # recompile_for_selection() to change each selected upstream name to its
-    # routed name.
-    for trouve_obj, physical_name, file_path, module_name in collected:
-        logical = logical_names[id(trouve_obj)]
-        routed = routed_names[id(trouve_obj)]
+    # Clair puts the logical addresses in the SQL. Thus, by default, the SQL
+    # reads the production upstream tables. After the selection, call
+    # recompile_for_selection() to change each selected upstream address to its
+    # physical address.
+    for trouve_obj, _, file_path, module_name in collected:
+        logical = logical_addresses[id(trouve_obj)]
+        physical = physical_addresses[id(trouve_obj)]
 
         if trouve_obj.execution_type == ExecutionType.PANDAS:
             assert isinstance(trouve_obj, PandasTrouve)
-            transform_imports = []
+            transform_imports: list[str] = []
             for upstream in trouve_obj.upstream_trouves():
-                dep_logical = id_to_logical_name.get(id(upstream))
-                if dep_logical and dep_logical != logical and dep_logical not in transform_imports:
-                    transform_imports.append(dep_logical)
+                dependency = id_to_logical_address.get(id(upstream))
+                if dependency is None or dependency == logical:
+                    continue
+                if str(dependency) not in transform_imports:
+                    transform_imports.append(str(dependency))
 
             try:
                 resolved_transform = inspect.getsource(trouve_obj.transform)
@@ -287,8 +304,8 @@ def discover_project(
                 resolved_transform = repr(trouve_obj.transform)
 
             trouve_obj.compiled = CompiledAttributes(
-                physical_name=routed,
-                logical_name=logical,
+                physical_address=physical,
+                logical_address=logical,
                 resolved_sql="",
                 resolved_transform=resolved_transform,
                 file_path=file_path.relative_to(project_root),
@@ -299,22 +316,22 @@ def discover_project(
             )
             for test in trouve_obj.tests:
                 if isinstance(test, TestSql):
-                    test.sql = _resolve_sql(test.sql, logical_names, this_name=logical)
+                    test.sql = _resolve_sql(test.sql, logical_addresses, this_address=logical)
         else:
             assert isinstance(trouve_obj, Trouve)
             trouve_obj.compiled = CompiledAttributes(
-                physical_name=routed,
-                logical_name=logical,
-                resolved_sql=_resolve_sql(trouve_obj.sql, logical_names, this_name=logical),
+                physical_address=physical,
+                logical_address=logical,
+                resolved_sql=_resolve_sql(trouve_obj.sql, logical_addresses, this_address=logical),
                 file_path=file_path.relative_to(project_root),
                 module_name=module_name,
-                imports=_detect_imports(trouve_obj.sql, logical_names, logical),
+                imports=_detect_imports(trouve_obj.sql, logical_addresses, logical),
                 config=_resolve_config(file_path, project_root, profile_defaults),
                 execution_type=ExecutionType.SNOWFLAKE,
             )
             for test in trouve_obj.tests:
                 if isinstance(test, TestSql):
-                    test.sql = _resolve_sql(test.sql, logical_names, this_name=logical)
+                    test.sql = _resolve_sql(test.sql, logical_addresses, this_address=logical)
 
     trouve_count = len(collected)
     logger.info("discovery.complete", project_root=str(project_root), trouves=trouve_count, errors=len(errors))
@@ -323,77 +340,81 @@ def discover_project(
 
 
 def find_routing_collisions(trouves: Sequence[TrouveAbc]) -> list[tuple[str, list[str]]]:
-    """Give a (routed_target, [logical_sources]) pair for each routing collision.
+    """Give a (physical_target, [logical_sources]) pair for each routing collision.
 
     A collision occurs when two Trouves that are not SOURCE Trouves route to one
-    physical target. Call this function after discover_project(), to show each
+    physical address. Call this function after discover_project(), to show each
     collision to the user.
 
     The result is an empty list when no routing policy is active. Then the
-    logical name and the routed name are equal for each Trouve.
+    logical address and the physical address are equal for each Trouve.
     """
-    logical_to_routed = {
-        trouve.compiled.logical_name: trouve.compiled.physical_name
+    logical_to_physical = {
+        str(trouve.compiled.logical_address): str(trouve.compiled.physical_address)
         for trouve in trouves
         if trouve.compiled and trouve.type != TrouveType.SOURCE
     }
-    return detect_routing_collisions(logical_to_routed)
+    return detect_routing_collisions(logical_to_physical)
 
 
-def recompile_for_selection(trouves: Sequence[TrouveAbc], selected_names: set[str]) -> None:
-    """Change each selected upstream name in the SQL from logical to routed.
+def recompile_for_selection(
+    trouves: Sequence[TrouveAbc], selected_addresses: set[str]
+) -> None:
+    """Change each selected upstream address in the SQL from logical to physical.
 
     After discover_project(), the resolved_sql of each Trouve holds the logical
-    production name of each upstream Trouve. This function changes the name of
-    each selected TABLE or VIEW upstream Trouve to its routed name, because
-    clair materializes that Trouve at the routed location in this run.
+    production address of each upstream Trouve. This function changes the
+    address of each selected TABLE or VIEW upstream Trouve to its physical
+    address, because clair materializes that Trouve there in this run.
 
-    A SOURCE upstream Trouve keeps its logical name. A TABLE or VIEW upstream
-    Trouve that the user did not select also keeps its logical name. Thus a
+    A SOURCE upstream Trouve keeps its logical address. A TABLE or VIEW upstream
+    Trouve that the user did not select also keeps its logical address. Thus a
     partial run reads the correct production tables.
 
     This function changes each Trouve in place. It does nothing when no routing
-    policy is active, because the logical name and the routed name are equal.
+    policy is active, because the two addresses are then equal.
 
     Args:
         trouves: Each Trouve from discover_project().
-        selected_names: The routed full_names of the Trouves for this run. The
-            DAG selector gives them. Each name is a physical write target.
+        selected_addresses: The physical addresses of the Trouves for this run.
+            The DAG selector gives them.
     """
-    # Map the logical name to the routed name for each selected Trouve that is
-    # not a SOURCE and that has a different routed name.
-    logical_to_routed: dict[str, str] = {}
+    # Map the logical address to the physical address for each selected Trouve
+    # that is not a SOURCE and that has a different physical address.
+    logical_to_physical: dict[str, str] = {}
     for t in trouves:
         if (
             t.compiled
-            and t.compiled.physical_name in selected_names
+            and str(t.compiled.physical_address) in selected_addresses
             and t.type != TrouveType.SOURCE
-            and t.compiled.physical_name != t.compiled.logical_name
+            and t.compiled.physical_address != t.compiled.logical_address
         ):
-            logical_to_routed[t.compiled.logical_name] = t.compiled.physical_name
+            logical_to_physical[str(t.compiled.logical_address)] = str(
+                t.compiled.physical_address
+            )
 
-    if not logical_to_routed:
+    if not logical_to_physical:
         return
 
-    # In the SQL of each selected Trouve, replace the logical upstream name with
-    # the routed name. The pattern has a negative lookaround. Thus a longer
+    # In the SQL of each selected Trouve, replace the logical upstream address
+    # with the physical address. The pattern has a negative lookaround. A longer
     # identifier with the same prefix stays as it is. For example, the pattern
     # "db.s.foo" does not match the text "db.s.foobar".
     for t in trouves:
-        if not t.compiled or t.compiled.physical_name not in selected_names:
+        if not t.compiled or str(t.compiled.physical_address) not in selected_addresses:
             continue
 
         sql = t.compiled.resolved_sql
-        for logical, routed in logical_to_routed.items():
+        for logical, physical in logical_to_physical.items():
             pattern = r"(?<![A-Za-z0-9_.\\])" + re.escape(logical) + r"(?![A-Za-z0-9_.])"
-            sql = re.sub(pattern, routed, sql, flags=re.IGNORECASE)
+            sql = re.sub(pattern, physical, sql, flags=re.IGNORECASE)
 
         t.compiled = t.compiled.model_copy(update={"resolved_sql": sql})
 
         for test in t.tests:
             if isinstance(test, TestSql):
                 test_sql = test.sql
-                for logical, routed in logical_to_routed.items():
+                for logical, physical in logical_to_physical.items():
                     pattern = r"(?<![A-Za-z0-9_.\\])" + re.escape(logical) + r"(?![A-Za-z0-9_.])"
-                    test_sql = re.sub(pattern, routed, test_sql, flags=re.IGNORECASE)
+                    test_sql = re.sub(pattern, physical, test_sql, flags=re.IGNORECASE)
                 test.sql = test_sql

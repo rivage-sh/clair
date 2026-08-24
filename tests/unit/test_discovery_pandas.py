@@ -129,20 +129,20 @@ class TestPandasTrouveDetection:
     def test_pandas_trouve_is_discovered(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
-        names = {t.physical_name for t in trouves}
+        names = {str(t.physical_address) for t in trouves}
         assert "mydb.derived.summary" in names
 
     def test_pandas_trouve_is_a_pandas_trouve_instance(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
-        summary = next(t for t in trouves if t.physical_name == "mydb.derived.summary")
+        summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert isinstance(summary, PandasTrouve)
         assert summary.transform is not None
 
     def test_pandas_trouve_is_compiled(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
-        summary = next(t for t in trouves if t.physical_name == "mydb.derived.summary")
+        summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert summary.is_compiled
 
 
@@ -150,44 +150,44 @@ class TestPandasTrouveDependencyExtraction:
     def test_imports_contain_upstream(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
-        summary = next(t for t in trouves if t.physical_name == "mydb.derived.summary")
+        summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert summary.compiled is not None
         assert "mydb.source.events" in summary.compiled.imports
 
     def test_chained_pandas_trouve_has_correct_imports(self, tmp_path: Path):
         project = _make_chained_pandas_project(tmp_path)
         trouves = discover_project(project)
-        step_two = next(t for t in trouves if t.physical_name == "mydb.derived.step_two")
+        step_two = next(t for t in trouves if str(t.physical_address) == "mydb.derived.step_two")
         assert step_two.compiled is not None
         assert "mydb.derived.step_one" in step_two.compiled.imports
 
 
 class TestPandasTrouveCompiledAttributes:
-    def test_logical_name_set_correctly(self, tmp_path: Path):
+    def test_logical_address_set_correctly(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
-        summary = next(t for t in trouves if t.physical_name == "mydb.derived.summary")
+        summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert summary.compiled is not None
-        assert summary.compiled.logical_name == "mydb.derived.summary"
+        assert str(summary.compiled.logical_address) == "mydb.derived.summary"
 
-    def test_full_name_set_correctly(self, tmp_path: Path):
+    def test_address_set_correctly(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
-        summary = next(t for t in trouves if t.physical_name == "mydb.derived.summary")
+        summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert summary.compiled is not None
-        assert summary.compiled.physical_name == "mydb.derived.summary"
+        assert str(summary.compiled.physical_address) == "mydb.derived.summary"
 
     def test_file_path_set_correctly(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
-        summary = next(t for t in trouves if t.physical_name == "mydb.derived.summary")
+        summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert summary.compiled is not None
         assert summary.compiled.file_path == Path("mydb/derived/summary.py")
 
     def test_resolved_sql_is_empty_for_pandas_trouve(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
-        summary = next(t for t in trouves if t.physical_name == "mydb.derived.summary")
+        summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert summary.compiled is not None
         assert summary.compiled.resolved_sql == ""
 
@@ -196,7 +196,7 @@ class TestMixedDag:
     def test_all_nodes_discovered(self, tmp_path: Path):
         project = _make_mixed_project(tmp_path)
         trouves = discover_project(project)
-        names = {t.physical_name for t in trouves}
+        names = {str(t.physical_address) for t in trouves}
         assert "mydb.source.events" in names
         assert "mydb.refined.events" in names
         assert "mydb.derived.summary" in names
@@ -205,27 +205,27 @@ class TestMixedDag:
     def test_sql_trouve_is_trouve_instance(self, tmp_path: Path):
         project = _make_mixed_project(tmp_path)
         trouves = discover_project(project)
-        refined = next(t for t in trouves if t.physical_name == "mydb.refined.events")
+        refined = next(t for t in trouves if str(t.physical_address) == "mydb.refined.events")
         assert isinstance(refined, Trouve)
         assert not isinstance(refined, PandasTrouve)
 
     def test_pandas_trouve_has_a_transform(self, tmp_path: Path):
         project = _make_mixed_project(tmp_path)
         trouves = discover_project(project)
-        summary = next(t for t in trouves if t.physical_name == "mydb.derived.summary")
+        summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert isinstance(summary, PandasTrouve)
         assert summary.transform is not None
 
     def test_pandas_trouve_depends_on_sql_trouve(self, tmp_path: Path):
         project = _make_mixed_project(tmp_path)
         trouves = discover_project(project)
-        summary = next(t for t in trouves if t.physical_name == "mydb.derived.summary")
+        summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert summary.compiled is not None
         assert "mydb.refined.events" in summary.compiled.imports
 
     def test_sql_trouve_depends_on_source(self, tmp_path: Path):
         project = _make_mixed_project(tmp_path)
         trouves = discover_project(project)
-        refined = next(t for t in trouves if t.physical_name == "mydb.refined.events")
+        refined = next(t for t in trouves if str(t.physical_address) == "mydb.refined.events")
         assert refined.compiled is not None
         assert "mydb.source.events" in refined.compiled.imports

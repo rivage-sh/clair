@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives import serialization
 from snowflake.connector.pandas_tools import write_pandas
 
 from clair.adapters.base import QueryResult, WarehouseAdapter
+from clair.trouves.address import TrouveAddress
 
 
 class SnowflakeAdapter(WarehouseAdapter):
@@ -134,14 +135,14 @@ class SnowflakeAdapter(WarehouseAdapter):
         finally:
             cursor.close()
 
-    def fetch_dataframe(self, physical_name: str) -> pd.DataFrame:
+    def fetch_dataframe(self, address: TrouveAddress) -> pd.DataFrame:
         """Read a complete Snowflake table into a pandas DataFrame."""
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
         cursor = self._conn.cursor()
         try:
-            cursor.execute(f"SELECT * FROM {physical_name}")
+            cursor.execute(f"SELECT * FROM {address}")
             dataframe = cursor.fetch_pandas_all()
             dataframe.columns = dataframe.columns.str.lower()
             return dataframe
@@ -149,12 +150,7 @@ class SnowflakeAdapter(WarehouseAdapter):
             cursor.close()
 
     def write_dataframe(
-        self,
-        dataframe: pd.DataFrame,
-        physical_name: str,
-        database_name: str,
-        schema_name: str,
-        table_name: str,
+        self, dataframe: pd.DataFrame, address: TrouveAddress
     ) -> QueryResult:
         """Write a DataFrame to Snowflake. This makes or replaces the table."""
         if self._conn is None:
@@ -163,9 +159,9 @@ class SnowflakeAdapter(WarehouseAdapter):
         success, _num_chunks, num_rows, _output = write_pandas(
             conn=self._conn,
             df=dataframe,
-            table_name=table_name.upper(),
-            database=database_name.upper(),
-            schema=schema_name.upper(),
+            table_name=address.table_name.upper(),
+            database=address.database_name.upper(),
+            schema=address.schema_name.upper(),
             auto_create_table=True,
             overwrite=True,
             quote_identifiers=False,

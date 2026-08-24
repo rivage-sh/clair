@@ -68,13 +68,13 @@ class TestValidateSucceeds:
     def test_no_routing_file_passes(self, project_with_trouves: Path):
         result = _run_validate(project_with_trouves)
         assert result.exit_code == 0
-        assert "Every routed name is valid" in result.output
+        assert "Every physical address is valid" in result.output
 
     def test_a_valid_entry_passes(self, project_with_trouves: Path):
         _write_routing(project_with_trouves, _DEV_SUFFIX_ENTRY)
         result = _run_validate(project_with_trouves)
         assert result.exit_code == 0
-        assert "Every routed name is valid" in result.output
+        assert "Every physical address is valid" in result.output
 
     def test_output_names_the_environment_and_the_entry(
         self, project_with_trouves: Path

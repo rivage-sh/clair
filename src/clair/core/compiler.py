@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import inspect
-import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -19,7 +18,6 @@ from clair.core.staging import (
     build_promote_statement,
     make_staging_address,
 )
-from clair.environments.routing import TrouveAddress
 from clair.exceptions import CompileError
 from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import RunMode
@@ -115,7 +113,7 @@ def build_statements(
         return trouve.build_sql(effective_mode, run_id=run_id)
 
     assert trouve.compiled is not None
-    physical_address = TrouveAddress.parse(trouve.compiled.physical_name)
+    physical_address = trouve.compiled.physical_address
     staging_address = make_staging_address(physical_address, run_id)
 
     statements: list[str] = []
@@ -182,6 +180,14 @@ def write_compile_output(
         deps = list(dag.predecessors(name))
 
         assert trouve.compiled is not None, f"Clair did not compile {name}"
+        # The artifact path follows the physical address: one directory for the
+        # database name, one for the schema name, and the table name as the file.
+        physical_address = trouve.compiled.physical_address
+        artifact_directory = (
+            artifacts_dir
+            / physical_address.database_name
+            / physical_address.schema_name
+        )
         node_info = None
         if trouve.compiled.execution_type == ExecutionType.PANDAS:
             assert isinstance(trouve, PandasTrouve)
@@ -208,13 +214,13 @@ def write_compile_output(
                 pass
 
             input_lines = [
-                f"#   {parameter_name}  ->  {upstream.physical_name}"
+                f"#   {parameter_name}  ->  {upstream.physical_address}"
                 for parameter_name, upstream in zip(
                     trouve.parameter_names(), trouve.upstream_trouves()
                 )
             ]
 
-            header = f"# clair compiled: {trouve.physical_name}\n# execution_type: pandas\n"
+            header = f"# clair compiled: {trouve.physical_address}\n# execution_type: pandas\n"
             if input_lines:
                 header += "# inputs:\n" + "\n".join(input_lines) + "\n"
             header += "\n"
@@ -229,8 +235,7 @@ def write_compile_output(
             )
             compiled_nodes.append(node_info)
 
-            parts = name.split(".")
-            artifact_path = artifacts_dir / os.sep.join(parts[:-1]) / f"{parts[-1]}.py"
+            artifact_path = artifact_directory / f"{physical_address.table_name}.py"
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text(artifact_content)
         elif trouve.compiled.execution_type == ExecutionType.SNOWFLAKE:
@@ -248,8 +253,7 @@ def write_compile_output(
             )
             compiled_nodes.append(node_info)
 
-            parts = name.split(".")
-            sql_file = artifacts_dir / os.sep.join(parts[:-1]) / f"{parts[-1]}.sql"
+            sql_file = artifact_directory / f"{physical_address.table_name}.sql"
             sql_file.parent.mkdir(parents=True, exist_ok=True)
             sql_content = "\n\n---\n\n".join(s.strip() for s in statements)
             sql_file.write_text(sql_content + "\n")

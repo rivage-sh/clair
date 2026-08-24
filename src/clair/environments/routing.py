@@ -1,132 +1,34 @@
 """Routing -- remaps the logical address of a Trouve to a physical address.
 
-Three types make up the routing system:
+Two types make up the routing system:
 
-* ``TrouveAddress`` holds a database name, a schema name, and a table name. It
-  validates each name when you make it. An address that exists is a valid one.
 * ``RoutingEntry`` is the base class for one environment's rule. A user writes a
   subclass and gives it a ``route`` method.
 * ``RoutingTable`` holds the entries. The project ``__routing__.py`` makes one.
 
-The validation happens in ``TrouveAddress``, not after a rule runs. A rule that
-gives an address gives a correct address, or it raises an error.
-
-At this time ``TrouveAddress`` applies the Snowflake identifier rules.
+A rule takes a ``TrouveAddress`` and gives a ``TrouveAddress``. See
+``clair.trouves.address``. The validation happens in the address, and not after
+a rule runs. A rule that gives an address gives a correct address, or it raises
+an error.
 """
 
 from __future__ import annotations
 
-import re
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    ValidationError,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ValidationError, model_validator
 
 from clair.exceptions import InvalidRoutingConfigError, InvalidTrouveAddressError
+from clair.trouves.address import TrouveAddress, first_error_message
 from clair.trouves.trouve import TrouveType
 
 if TYPE_CHECKING:
     from clair.trouves.trouve import TrouveAbc
 
 
-# Snowflake accepts these characters in an unquoted identifier.
-_VALID_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
-
-# The maximum identifier length of Snowflake.
-#
-# A test against a live account showed that the limit applies to each name, and
-# not to the full database.schema.table path. Snowflake accepts a table name of
-# 255 characters. It rejects 256 characters with the message "Object name '...'
-# exceeds maximum length limit of 255 characters". It also accepts a path of 767
-# characters, which is 255 characters for each of the three names. Therefore this
-# validator applies the limit to each name on its own.
-_MAX_IDENTIFIER_LENGTH = 255
-
 # Maximum width of an entry description in a CLI message.
 _MAX_DESCRIPTION_LENGTH = 200
-
-
-def _first_error_message(exc: ValidationError) -> str:
-    """Take the first message out of a Pydantic error.
-
-    Pydantic prints a report of many lines. A CLI message needs one sentence.
-    """
-    errors = exc.errors()
-    if not errors:
-        return str(exc)
-    first = errors[0]
-    message = str(first.get("msg", "")).removeprefix("Value error, ")
-    location = ".".join(str(part) for part in first.get("loc", ()))
-    return f"{location}: {message}" if location else message
-
-
-class TrouveAddress(BaseModel):
-    """The full address of one Trouve in the warehouse.
-
-    The model is frozen, so an address is hashable and safe to share. To make a
-    changed copy, call ``model_copy(update={...})``.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    database_name: str
-    schema_name: str
-    table_name: str
-
-    @field_validator("database_name", "schema_name", "table_name")
-    @classmethod
-    def _validate_identifier(cls, value: str) -> str:
-        """Reject a name that Snowflake cannot use as an unquoted identifier."""
-        if len(value) > _MAX_IDENTIFIER_LENGTH:
-            raise ValueError(
-                f"'{value}' has {len(value)} characters. "
-                f"The maximum is {_MAX_IDENTIFIER_LENGTH}."
-            )
-        if not _VALID_IDENTIFIER.match(value):
-            raise ValueError(
-                f"'{value}' is not a valid identifier. An identifier starts with a "
-                "letter or an underscore. The other characters are letters, digits, "
-                "underscores or dollar signs."
-            )
-        return value
-
-    @classmethod
-    def parse(cls, physical_name: str) -> TrouveAddress:
-        """Make an address from a "database_name.schema_name.table_name" string.
-
-        Args:
-            physical_name: The dotted name.
-
-        Returns:
-            The validated address.
-
-        Raises:
-            InvalidTrouveAddressError: If the string is not a valid address.
-        """
-        parts = physical_name.split(".")
-        if len(parts) != 3:
-            raise InvalidTrouveAddressError(
-                physical_name,
-                f"an address needs 3 dot-separated parts, but this name has "
-                f"{len(parts)}",
-            )
-        try:
-            return cls(
-                database_name=parts[0], schema_name=parts[1], table_name=parts[2]
-            )
-        except ValidationError as exc:
-            raise InvalidTrouveAddressError(
-                physical_name, _first_error_message(exc)
-            ) from exc
-
-    def __str__(self) -> str:
-        return f"{self.database_name}.{self.schema_name}.{self.table_name}"
 
 
 class RoutingEntry(BaseModel, ABC):
@@ -239,7 +141,7 @@ def _apply_routing(
     except ValidationError as exc:
         raise InvalidRoutingConfigError(
             f"{entry_text} built a bad address for '{logical_address}': "
-            f"{_first_error_message(exc)}"
+            f"{first_error_message(exc)}"
         ) from exc
     except (InvalidRoutingConfigError, InvalidTrouveAddressError):
         raise
@@ -257,33 +159,35 @@ def _apply_routing(
 
 
 def route(
-    logical_name: str,
+    logical_address: TrouveAddress | str,
     trouve_type: TrouveType,
     routing: RoutingEntry | None,
-) -> str:
-    """Apply a routing entry to a logical physical_name.
+) -> TrouveAddress:
+    """Apply a routing entry to a logical address.
 
-    The function validates the logical name first, then applies the entry. A
-    SOURCE Trouve keeps its logical name, whatever the entry is.
+    The function validates the logical address first, then applies the entry. A
+    SOURCE Trouve keeps its logical address, whatever the entry is.
 
     Args:
-        logical_name: The file system name "database_name.schema_name.table_name".
+        logical_address: The address that the file system gives. A string
+            "database_name.schema_name.table_name" is permitted.
         trouve_type: SOURCE, TABLE, or VIEW.
         routing: The active routing entry, or None for passthrough.
 
     Returns:
-        The physical physical_name string.
+        The physical address.
 
     Raises:
-        InvalidTrouveAddressError: If the logical name is not a valid address.
+        InvalidTrouveAddressError: If the logical address is not valid.
         InvalidRoutingConfigError: If the entry fails, or gives a bad address.
     """
-    logical_address = TrouveAddress.parse(logical_name)
+    if isinstance(logical_address, str):
+        logical_address = TrouveAddress.parse(logical_address)
 
     if routing is None or trouve_type == TrouveType.SOURCE:
-        return str(logical_address)
+        return logical_address
 
-    return str(_apply_routing(logical_address, routing))
+    return _apply_routing(logical_address, routing)
 
 
 def collect_routing_problems(
@@ -301,22 +205,22 @@ def collect_routing_problems(
         routing: The routing entry to test.
 
     Returns:
-        A list of (logical_name, problem_text) pairs, in discovery order.
+        A list of (logical_address, problem_text) pairs, in discovery order.
     """
     problems: list[tuple[str, str]] = []
     for trouve in trouves:
         if not trouve.compiled:
             continue
-        logical_name = trouve.compiled.logical_name
+        logical_address = trouve.compiled.logical_address
         try:
-            route(logical_name, trouve.type, routing)
+            route(logical_address, trouve.type, routing)
         except (InvalidRoutingConfigError, InvalidTrouveAddressError) as exc:
-            problems.append((logical_name, str(exc)))
+            problems.append((str(logical_address), str(exc)))
     return problems
 
 
 def detect_routing_collisions(
-    logical_to_routed: dict[str, str],
+    logical_to_physical: dict[str, str],
 ) -> list[tuple[str, list[str]]]:
     """Give the (target, sources) pairs for the routing collisions.
 
@@ -324,15 +228,15 @@ def detect_routing_collisions(
     The last write in execution order sets the final state of that target.
 
     Args:
-        logical_to_routed: A map of logical_name to routed_name for the Trouves
-            that are not SOURCE Trouves.
+        logical_to_physical: A map of a logical address to a physical address.
+            It holds each Trouve that is not a SOURCE.
 
     Returns:
-        A list of (routed_target, [logical_source, ...]) for each collision.
+        A list of (physical_address, [logical_address, ...]) for each collision.
     """
     target_to_sources: dict[str, list[str]] = {}
-    for logical, routed in logical_to_routed.items():
-        target_to_sources.setdefault(routed, []).append(logical)
+    for logical, physical in logical_to_physical.items():
+        target_to_sources.setdefault(physical, []).append(logical)
 
     return [
         (target, sorted(sources))

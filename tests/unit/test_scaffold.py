@@ -94,9 +94,10 @@ class TestFileContents:
         project_routing = load_project_routing(project_dir, "dev")
 
         assert project_routing.entry is not None
-        assert route("analytics.orders.daily", TrouveType.TABLE, project_routing.entry) == (
-            "analytics.orders.daily"
+        physical_address = route(
+            "analytics.orders.daily", TrouveType.TABLE, project_routing.entry
         )
+        assert str(physical_address) == "analytics.orders.daily"
 
 
 class TestDoesNotOverwriteExistingFiles:

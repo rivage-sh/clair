@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX, _registry, clear
+from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
 from clair.trouves.pandas_trouve import PandasTrouve
@@ -31,13 +32,13 @@ SAMPLE_SQL = "SELECT id, name FROM raw.users"
 
 
 def _compiled_attrs(
-    physical_name: str = "db.schema.my_table",
+    physical_address: str = "db.schema.my_table",
     resolved_sql: str = SAMPLE_SQL,
 ) -> CompiledAttributes:
     """Make a CompiledAttributes with good default values."""
     return CompiledAttributes(
-        physical_name=physical_name,
-        logical_name=physical_name,
+        physical_address=TrouveAddress.parse(physical_address),
+        logical_address=TrouveAddress.parse(physical_address),
         resolved_sql=resolved_sql,
         file_path=Path("/fake/db/schema/my_table.py"),
         module_name="db.schema.my_table",
@@ -50,7 +51,7 @@ def _compiled_attrs(
 def _compiled_trouve(
     trouve_type: TrouveType = TrouveType.TABLE,
     sql: str = SAMPLE_SQL,
-    physical_name: str = "db.schema.my_table",
+    physical_address: str = "db.schema.my_table",
     resolved_sql: str = SAMPLE_SQL,
     columns: list[Column] | None = None,
     run_config: RunConfig | None = None,
@@ -63,7 +64,7 @@ def _compiled_trouve(
         run_config=run_config or RunConfig(),
     )
     trouve.compiled = _compiled_attrs(
-        physical_name=physical_name,
+        physical_address=physical_address,
         resolved_sql=resolved_sql,
     )
     return trouve
@@ -137,8 +138,8 @@ class TestTrouveConstruction:
 
         t = Trouve(type=TrouveType.TABLE, sql="select 1")
         t.compiled = CompiledAttributes(
-            physical_name="db.s.orders",
-            logical_name="db.s.orders",
+            physical_address=TrouveAddress.parse("db.s.orders"),
+            logical_address=TrouveAddress.parse("db.s.orders"),
             resolved_sql="select 1",
             file_path=Path("/fake/db/s/orders.py"),
             module_name="db.s.orders",
@@ -148,8 +149,8 @@ class TestTrouveConstruction:
         )
         assert t.sample() == "(SELECT TOP 1000 * FROM db.s.orders)"
 
-    def test_sample_uses_routed_name_not_logical_name(self):
-        """sample() uses compiled.physical_name, the routed name, not logical_name."""
+    def test_sample_uses_the_physical_address(self):
+        """sample() uses compiled.physical_address, the physical address, not logical_address."""
         from pathlib import Path
 
         from clair.trouves.config import ResolvedConfig
@@ -157,8 +158,10 @@ class TestTrouveConstruction:
 
         t = Trouve(type=TrouveType.TABLE, sql="select 1")
         t.compiled = CompiledAttributes(
-            physical_name="dev_omer.s.orders",   # The routed name, for example from the schema isolation policy.
-            logical_name="db.s.orders",       # The initial name from the file path.
+            # The physical address, for example from a schema isolation policy.
+            physical_address=TrouveAddress.parse("dev_omer.s.orders"),
+            # The logical address, which the file path gives.
+            logical_address=TrouveAddress.parse("db.s.orders"),
             resolved_sql="select 1",
             file_path=Path("/fake/db/s/orders.py"),
             module_name="db.s.orders",
@@ -194,15 +197,15 @@ class TestTrouveConstruction:
         trouve.compiled = _compiled_attrs(resolved_sql="")
         assert trouve.is_compiled is True
 
-    def test_full_name_raises_when_not_compiled(self):
+    def test_address_raises_when_not_compiled(self):
         trouve = Trouve(type=TrouveType.SOURCE)
-        with pytest.raises(RuntimeError, match="physical_name is not set"):
-            _ = trouve.physical_name
+        with pytest.raises(RuntimeError, match="physical_address is not set"):
+            _ = trouve.physical_address
 
-    def test_full_name_returns_compiled_value(self):
+    def test_address_returns_compiled_value(self):
         trouve = Trouve(type=TrouveType.SOURCE)
-        trouve.compiled = _compiled_attrs(physical_name="prod.analytics.orders")
-        assert trouve.physical_name == "prod.analytics.orders"
+        trouve.compiled = _compiled_attrs(physical_address="prod.analytics.orders")
+        assert str(trouve.physical_address) == "prod.analytics.orders"
 
 
 class TestTrouveIncrementalValidation:
@@ -443,7 +446,7 @@ class TestBuildSqlSource:
 class TestBuildSqlFullRefresh:
     def test_table_creates_table(self):
         trouve = _compiled_trouve(
-            physical_name="prod.analytics.orders",
+            physical_address="prod.analytics.orders",
             resolved_sql="SELECT * FROM raw.orders",
         )
         statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
@@ -457,7 +460,7 @@ class TestBuildSqlFullRefresh:
     def test_view_creates_view(self):
         trouve = _compiled_trouve(
             trouve_type=TrouveType.VIEW,
-            physical_name="prod.analytics.orders_view",
+            physical_address="prod.analytics.orders_view",
             resolved_sql="SELECT * FROM raw.orders",
         )
         statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
@@ -479,7 +482,7 @@ class TestBuildSqlFullRefresh:
 class TestBuildSqlAppend:
     def test_append_produces_insert_into(self):
         trouve = _compiled_trouve(
-            physical_name="prod.analytics.events",
+            physical_address="prod.analytics.events",
             resolved_sql="SELECT * FROM staging.events WHERE ts > '2024-01-01'",
             run_config=RunConfig(
                 run_mode=RunMode.INCREMENTAL,
@@ -509,7 +512,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
             primary_key_columns=["id"],
         )
         self.trouve = _compiled_trouve(
-            physical_name="db.schema.orders",
+            physical_address="db.schema.orders",
             resolved_sql="SELECT id, name, amount FROM staging.orders",
             columns=self.columns,
             run_config=self.run_config,
@@ -521,14 +524,14 @@ class TestBuildSqlUpsertWithPrimaryKey:
 
     def test_stmt1_creates_staging_table_with_run_id(self):
         staging_stmt = self.statements[0]
-        assert "CREATE OR REPLACE TABLE db.schema.orders__clair_staging_abc123" in staging_stmt
+        assert "CREATE OR REPLACE TABLE db.schema.orders__clair_merge_abc123" in staging_stmt
         assert "SELECT id, name, amount FROM staging.orders" in staging_stmt
         assert "-- [1/3]" in staging_stmt
 
     def test_stmt2_merge_uses_primary_key_in_on_clause(self):
         merge_stmt = self.statements[1]
         assert "MERGE INTO db.schema.orders AS target" in merge_stmt
-        assert "USING db.schema.orders__clair_staging_abc123 AS source" in merge_stmt
+        assert "USING db.schema.orders__clair_merge_abc123 AS source" in merge_stmt
         assert "ON target.id = source.id" in merge_stmt
 
     def test_stmt2_update_set_excludes_primary_key(self):
@@ -544,7 +547,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
 
     def test_stmt3_drops_staging_table(self):
         drop_stmt = self.statements[2]
-        assert "DROP TABLE IF EXISTS db.schema.orders__clair_staging_abc123" in drop_stmt
+        assert "DROP TABLE IF EXISTS db.schema.orders__clair_merge_abc123" in drop_stmt
         assert "-- [3/3]" in drop_stmt
 
 
@@ -563,7 +566,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             primary_key_columns=["region", "product_id"],
         )
         trouve = _compiled_trouve(
-            physical_name="db.schema.inventory",
+            physical_address="db.schema.inventory",
             resolved_sql="SELECT region, product_id, quantity FROM raw.inv",
             columns=columns,
             run_config=run_config,
@@ -585,7 +588,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             primary_key_columns=["region", "product_id"],
         )
         trouve = _compiled_trouve(
-            physical_name="db.schema.inventory",
+            physical_address="db.schema.inventory",
             resolved_sql="SELECT region, product_id, quantity FROM raw.inv",
             columns=columns,
             run_config=run_config,
@@ -613,7 +616,7 @@ class TestBuildSqlUpsertWithJoinSql:
             join_sql="target.id = source.id AND target.name IS NOT NULL",
         )
         trouve = _compiled_trouve(
-            physical_name="db.schema.users",
+            physical_address="db.schema.users",
             resolved_sql="SELECT id, name FROM raw.users",
             columns=columns,
             run_config=run_config,
@@ -636,7 +639,7 @@ class TestBuildSqlUpsertWithJoinSql:
             join_sql="target.id = source.id",
         )
         trouve = _compiled_trouve(
-            physical_name="db.schema.scores",
+            physical_address="db.schema.scores",
             resolved_sql="SELECT id, name, score FROM raw.scores",
             columns=columns,
             run_config=run_config,
@@ -666,7 +669,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             upsert_config=UpsertConfig(update_columns=["email"]),
         )
         trouve = _compiled_trouve(
-            physical_name="db.schema.users",
+            physical_address="db.schema.users",
             resolved_sql="SELECT id, name, email FROM raw.users",
             columns=columns,
             run_config=run_config,
@@ -692,7 +695,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             upsert_config=UpsertConfig(insert_columns=["id", "name"]),
         )
         trouve = _compiled_trouve(
-            physical_name="db.schema.users",
+            physical_address="db.schema.users",
             resolved_sql="SELECT id, name, email FROM raw.users",
             columns=columns,
             run_config=run_config,
@@ -719,7 +722,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             upsert_config=UpsertConfig(update_columns=["score"]),
         )
         trouve = _compiled_trouve(
-            physical_name="db.schema.scores",
+            physical_address="db.schema.scores",
             resolved_sql="SELECT id, name, score FROM raw.scores",
             columns=columns,
             run_config=run_config,
@@ -757,14 +760,14 @@ class TestBuildSqlStagingTableName:
             primary_key_columns=["id"],
         )
         trouve = _compiled_trouve(
-            physical_name="db.schema.target_table",
+            physical_address="db.schema.target_table",
             resolved_sql="SELECT id, val FROM raw.data",
             columns=columns,
             run_config=run_config,
         )
         statements = trouve.build_sql(RunMode.INCREMENTAL, "unique_run_42")
 
-        staging_name = "db.schema.target_table__clair_staging_unique_run_42"
+        staging_name = "db.schema.target_table__clair_merge_unique_run_42"
         assert staging_name in statements[0]
         assert staging_name in statements[1]
         assert staging_name in statements[2]
@@ -1031,7 +1034,7 @@ class TestPandasTrouve:
     def _make_upstream(self) -> Trouve:
         """Make a compiled SOURCE Trouve. A different Trouve can depend on it."""
         source = Trouve(type=TrouveType.SOURCE)
-        source.compiled = _compiled_attrs(physical_name="db.schema.upstream", resolved_sql="")
+        source.compiled = _compiled_attrs(physical_address="db.schema.upstream", resolved_sql="")
         return source
 
     def test_valid_construction(self):

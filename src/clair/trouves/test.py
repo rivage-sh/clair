@@ -20,8 +20,8 @@ class _ThisSentinel:
     """A marker for the table name of the parent Trouve in a TestSql string.
 
     In an f-string, this class gives the ``THIS_PLACEHOLDER`` token. Discovery
-    replaces the token with the full name of the parent Trouve. It uses
-    ``_resolve_sql(sql, id_to_full_name, this_name=logical_name)``.
+    replaces the token with the address of the parent Trouve. It uses
+    ``_resolve_sql(sql, id_to_logical_address, this_name=logical_address)``.
     """
 
     def __format__(self, format_spec: str) -> str:
@@ -42,7 +42,7 @@ class Test(BaseModel, ABC):
     """The abstract parent of all the data quality tests.
 
     Each subclass must set ``type`` to a Literal string, which is the tag of the
-    union. Each subclass must also supply a ``to_sql(physical_name)`` method.
+    union. Each subclass must also supply a ``to_sql(physical_address)`` method.
 
     The ``label`` property comes from the class name. Clair removes the ``Test``
     prefix and makes the remainder snake_case.
@@ -51,7 +51,7 @@ class Test(BaseModel, ABC):
     type: str
 
     @abstractmethod
-    def to_sql(self, physical_name: str) -> str:
+    def to_sql(self, physical_address: str) -> str:
         """Make the SQL for this test. Zero rows in the result means a pass."""
         ...
 
@@ -79,10 +79,10 @@ class TestUnique(Test):
     type: Literal["unique"] = "unique"
     column: str
 
-    def to_sql(self, physical_name: str) -> str:
+    def to_sql(self, physical_address: str) -> str:
         return (
             f"SELECT {self.column}, COUNT(*) "
-            f"FROM {physical_name} "
+            f"FROM {physical_address} "
             f"GROUP BY {self.column} "
             f"HAVING COUNT(*) > 1"
         )
@@ -94,10 +94,10 @@ class TestNotNull(Test):
     type: Literal["not_null"] = "not_null"
     column: str
 
-    def to_sql(self, physical_name: str) -> str:
+    def to_sql(self, physical_address: str) -> str:
         return (
             f"SELECT {self.column} "
-            f"FROM {physical_name} "
+            f"FROM {physical_address} "
             f"WHERE {self.column} IS NULL"
         )
 
@@ -128,12 +128,12 @@ class TestRowCount(Test):
         """A row count test needs the complete table, not a sample."""
         return False
 
-    def to_sql(self, physical_name: str) -> str:
+    def to_sql(self, physical_address: str) -> str:
         parts = []
         if self.min_rows is not None:
-            parts.append(f"SELECT 1 FROM {physical_name} HAVING COUNT(*) < {self.min_rows}")
+            parts.append(f"SELECT 1 FROM {physical_address} HAVING COUNT(*) < {self.min_rows}")
         if self.max_rows is not None:
-            parts.append(f"SELECT 1 FROM {physical_name} HAVING COUNT(*) > {self.max_rows}")
+            parts.append(f"SELECT 1 FROM {physical_address} HAVING COUNT(*) > {self.max_rows}")
         return " UNION ALL ".join(parts)
 
 
@@ -151,11 +151,11 @@ class TestUniqueColumns(Test):
             )
         return self
 
-    def to_sql(self, physical_name: str) -> str:
+    def to_sql(self, physical_address: str) -> str:
         cols = ", ".join(self.columns)
         return (
             f"SELECT {cols}, COUNT(*) "
-            f"FROM {physical_name} "
+            f"FROM {physical_address} "
             f"GROUP BY {cols} "
             f"HAVING COUNT(*) > 1"
         )
@@ -167,7 +167,7 @@ class TestSql(Test):
     Put ``{THIS}`` in an f-string to point to the table name of the parent
     Trouve. Put ``{other_trouve}`` to point to a different Trouve, as in
     ``Trouve.sql``. Discovery replaces each token that points to a different
-    Trouve. ``to_sql(physical_name)`` replaces ``{THIS}`` when the test runs::
+    Trouve. ``to_sql(physical_address)`` replaces ``{THIS}`` when the test runs::
 
         from clair import THIS
         from db.schema.customers import trouve as customers
@@ -183,7 +183,7 @@ class TestSql(Test):
         """Your own SQL can group rows or read many tables, so a sample is not safe."""
         return False
 
-    def to_sql(self, physical_name: str) -> str:
+    def to_sql(self, physical_address: str) -> str:
         return self.sql
 
 

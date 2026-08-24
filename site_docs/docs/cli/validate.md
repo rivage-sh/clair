@@ -36,7 +36,7 @@ A project with no problems:
   entry: DeveloperRouting(environment_name='dev', user_variable='CLAIR_USER')
   Trouves to route: 12
 
-  ✓ Every routed name is valid. No collisions.
+  ✓ Every physical address is valid. No collisions.
 ```
 
 A project with a problem gives exit code 1:
@@ -59,7 +59,7 @@ A project with a problem gives exit code 1:
 
 | Code | Meaning |
 |------|---------|
-| 0 | Every routed name is valid, and no two Trouves collide. |
+| 0 | Every physical address is valid, and no two Trouves collide. |
 | 1 | clair found one problem or more. |
 
 ## In CI

@@ -63,7 +63,7 @@ class TestLoadProjectRouting:
         assert result.entry is not None
         # The entry is a user subclass, so read its own field through the model.
         assert result.entry.model_dump()["database_name"] == "OMER_DEV"
-        assert route("a.b.c", TrouveType.TABLE, result.entry) == "OMER_DEV.b.c"
+        assert str(route("a.b.c", TrouveType.TABLE, result.entry)) == "OMER_DEV.b.c"
 
     def test_an_empty_table_gives_passthrough(self, routing_project: Path):
         _write_with_prelude(routing_project, '''
@@ -110,9 +110,10 @@ class TestLoadProjectRouting:
             routing = RoutingTable(entries=[DeveloperRouting()])
         ''')
         result = load_project_routing(routing_project, "dev")
-        assert route("analytics.finance.revenue", TrouveType.TABLE, result.entry) == (
-            "analytics_OBADDOUR.finance.revenue"
+        physical_address = route(
+            "analytics.finance.revenue", TrouveType.TABLE, result.entry
         )
+        assert str(physical_address) == "analytics_OBADDOUR.finance.revenue"
 
 
 class TestRoutingFileValidation:

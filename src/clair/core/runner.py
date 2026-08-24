@@ -36,22 +36,22 @@ class RunResult(BaseModel):
     """The result after clair materializes one Trouve in the warehouse.
 
     Attributes:
-        logical_name: The name that the file path gives. The DAG edges, the
+        logical_address: The name that the file path gives. The DAG edges, the
             selectors and the Trouve files use it.
-        physical_name: The name that clair writes to. A routing entry makes it
-            from the logical name. The two are equal without an entry.
+        physical_address: The name that clair writes to. A routing entry makes it
+            from the logical address. The two are equal without an entry.
         status: The result of the attempt.
         query_ids: The warehouse query ID of each statement.
         query_urls: The URL of each statement in the Snowflake console.
         error: The error message if the query failed.
         sql: The complete DDL. Clair sets it only for a FAILURE.
         duration_seconds: The clock time of the query.
-        skipped_by: The physical_name of the upstream Trouve that caused the skip.
+        skipped_by: The physical_address of the upstream Trouve that caused the skip.
             Clair sets it only for a SKIPPED result.
     """
 
-    logical_name: str = ""
-    physical_name: str
+    logical_address: str = ""
+    physical_address: str
     status: RunStatus
     query_ids: list[str] = []
     query_urls: list[str] = []
@@ -121,16 +121,16 @@ class RunSummary(BaseModel):
         lines: list[str] = []
 
         if result.status == RunStatus.SKIPPED:
-            lines.append(f"[{index}/{total}] {result.physical_name} ... SKIPPED")
+            lines.append(f"[{index}/{total}] {result.physical_address} ... SKIPPED")
             lines.append(f"      Reason: the upstream dependency {result.skipped_by} failed")
         elif result.status == RunStatus.SUCCESS:
             lines.append(
-                f"[{index}/{total}] {result.physical_name} ... OK ({result.duration_seconds:.1f}s)"
+                f"[{index}/{total}] {result.physical_address} ... OK ({result.duration_seconds:.1f}s)"
             )
             _append_query_urls(lines, result.query_ids, result.query_urls)
         elif result.status == RunStatus.FAILURE:
             lines.append(
-                f"[{index}/{total}] {result.physical_name} ... FAILED ({result.duration_seconds:.1f}s)"
+                f"[{index}/{total}] {result.physical_address} ... FAILED ({result.duration_seconds:.1f}s)"
             )
             _append_query_urls(lines, result.query_ids, result.query_urls)
             lines.append(f"      Error: {result.error}")
@@ -208,13 +208,13 @@ def _run_pandas_trouve(
     input_dataframes: list[pd.DataFrame] = []
     for parameter_name, upstream in zip(trouve.parameter_names(), trouve.upstream_trouves()):
         try:
-            input_dataframes.append(adapter.fetch_dataframe(upstream.physical_name))
+            input_dataframes.append(adapter.fetch_dataframe(upstream.physical_address))
         except Exception as fetch_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
             duration = time.monotonic() - start
             return RunResult(
-                physical_name=trouve.physical_name,
+                physical_address=str(trouve.physical_address),
                 status=RunStatus.FAILURE,
-                error=f"Clair cannot read the input '{parameter_name}' ({upstream.physical_name}): {fetch_error}",
+                error=f"Clair cannot read the input '{parameter_name}' ({upstream.physical_address}): {fetch_error}",
                 duration_seconds=duration,
             )
 
@@ -224,7 +224,7 @@ def _run_pandas_trouve(
     except Exception as transform_error:  # noqa: BLE001 — the user transform code is unknown
         duration = time.monotonic() - start
         return RunResult(
-            physical_name=trouve.physical_name,
+            physical_address=str(trouve.physical_address),
             status=RunStatus.FAILURE,
             error=f"The transform function failed: {transform_error}",
             duration_seconds=duration,
@@ -234,7 +234,7 @@ def _run_pandas_trouve(
     if not isinstance(result_dataframe, pd.DataFrame):
         duration = time.monotonic() - start
         return RunResult(
-            physical_name=trouve.physical_name,
+            physical_address=str(trouve.physical_address),
             status=RunStatus.FAILURE,
             error=(
                 f"The transform function must return a pandas DataFrame, "
@@ -245,21 +245,14 @@ def _run_pandas_trouve(
 
     # 4. Write the result to Snowflake. A TrouveAddress is valid when it exists,
     # so the three names need no test here.
-    physical_name = trouve.physical_name
     address = staging_address or physical_address
 
     try:
-        query_result = adapter.write_dataframe(
-            dataframe=result_dataframe,
-            physical_name=str(address),
-            database_name=address.database_name,
-            schema_name=address.schema_name,
-            table_name=address.table_name,
-        )
+        query_result = adapter.write_dataframe(dataframe=result_dataframe, address=address)
     except Exception as write_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
         duration = time.monotonic() - start
         return RunResult(
-            physical_name=physical_name,
+            physical_address=str(physical_address),
             status=RunStatus.FAILURE,
             error=f"Clair cannot write the DataFrame to {address}: {write_error}",
             duration_seconds=duration,
@@ -269,14 +262,14 @@ def _run_pandas_trouve(
 
     if not query_result.success:
         return RunResult(
-            physical_name=physical_name,
+            physical_address=str(physical_address),
             status=RunStatus.FAILURE,
             error=query_result.error or "write_dataframe returned success=False",
             duration_seconds=duration,
         )
 
     return RunResult(
-        physical_name=physical_name,
+        physical_address=str(physical_address),
         status=RunStatus.SUCCESS,
         query_ids=[query_result.query_id] if query_result.query_id else [],
         query_urls=[query_result.query_url] if query_result.query_url else [],
@@ -360,15 +353,15 @@ def _promote_or_keep(
     return query_ids, query_urls, ""
 
 
-def _logical_name_of(dag: ClairDag, physical_name: str) -> str:
-    """Give the logical name of the DAG node that *physical_name* keys.
+def _logical_address_of(dag: ClairDag, physical_address: str) -> str:
+    """Give the logical address of the DAG node that *physical_address* keys.
 
-    Give the physical name back if the node holds no compiled attributes.
+    Give the physical address back if the node holds no compiled attributes.
     """
-    trouve = dag.get_trouve(physical_name)
+    trouve = dag.get_trouve(physical_address)
     if trouve.compiled is None:
-        return physical_name
-    return trouve.compiled.logical_name
+        return physical_address
+    return str(trouve.compiled.logical_address)
 
 
 def run_project(
@@ -405,15 +398,15 @@ def run_project(
     skip_reasons: dict[str, str] = {}
 
     for name in to_run:
-        # Each DAG node has the physical name as its key. The logs and the
+        # Each DAG node has the physical address as its key. The logs and the
         # results show both names, thus the reader sees the file that made the
         # Trouve, and the object that clair writes.
-        logical_name = _logical_name_of(dag, name)
+        logical_address = _logical_address_of(dag, name)
         if name in skip_reasons:
-            logger.info("run.node.skipped", logical=logical_name, physical=name, skipped_by=skip_reasons[name])
+            logger.info("run.node.skipped", logical=logical_address, physical=name, skipped_by=skip_reasons[name])
             yield RunResult(
-                logical_name=logical_name,
-                physical_name=name,
+                logical_address=logical_address,
+                physical_address=name,
                 status=RunStatus.SKIPPED,
                 skipped_by=skip_reasons[name],
             )
@@ -428,10 +421,10 @@ def run_project(
             try:
                 adapter.set_context(warehouse=context_warehouse, role=context_role)
             except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
-                logger.warning("run.node.context_error", logical=logical_name, physical=name, warehouse=context_warehouse, role=context_role, error=str(e))
+                logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=context_warehouse, role=context_role, error=str(e))
                 yield RunResult(
-                    logical_name=logical_name,
-                    physical_name=name,
+                    logical_address=logical_address,
+                    physical_address=name,
                     status=RunStatus.FAILURE,
                     error=f"Clair cannot set the session context: {e}",
                 )
@@ -440,7 +433,7 @@ def run_project(
                 continue
 
         assert trouve.compiled is not None
-        physical_address = TrouveAddress.parse(trouve.compiled.physical_name)
+        physical_address = trouve.compiled.physical_address
 
         if trouve.type != TrouveType.SOURCE:
             adapter.execute(
@@ -459,10 +452,10 @@ def run_project(
             try:
                 staging_address = make_staging_address(physical_address, run_id)
             except ClairError as naming_error:
-                logger.warning("run.node.failure", logical=logical_name, physical=name, error=str(naming_error))
+                logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(naming_error))
                 yield RunResult(
-                    logical_name=logical_name,
-                    physical_name=name,
+                    logical_address=logical_address,
+                    physical_address=name,
                     status=RunStatus.FAILURE,
                     error=str(naming_error),
                 )
@@ -474,7 +467,7 @@ def run_project(
         # writes it. Clair does not execute SQL.
         if trouve.execution_type == ExecutionType.PANDAS:
             assert isinstance(trouve, PandasTrouve)
-            logger.info("run.node.start", logical=logical_name, physical=name, effective_mode="full_refresh")
+            logger.info("run.node.start", logical=logical_address, physical=name, effective_mode="full_refresh")
             result = _run_pandas_trouve(trouve, adapter, physical_address, staging_address)
 
             if result.status == RunStatus.SUCCESS and staging_address is not None:
@@ -504,12 +497,12 @@ def run_project(
             yield result
 
             if result.status == RunStatus.SUCCESS:
-                logger.info("run.node.success", logical=logical_name, physical=name, duration_seconds=round(result.duration_seconds, 3))
+                logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3))
                 if staging_address is None and after_node_success is not None and not after_node_success(name, str(physical_address)):
                     for desc in nx.descendants(dag, name):
                         skip_reasons.setdefault(desc, name)
             else:
-                logger.warning("run.node.failure", logical=logical_name, physical=name, duration_seconds=round(result.duration_seconds, 3), error=result.error)
+                logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3), error=result.error)
                 for desc in nx.descendants(dag, name):
                     skip_reasons.setdefault(desc, name)
             continue
@@ -524,10 +517,10 @@ def run_project(
                 physical_address.table_name,
             )
             if not table_exists:
-                logger.info("run.node.incremental_fallback", logical=logical_name, physical=name, reason="table_not_found")
+                logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="table_not_found")
                 effective_mode = RunMode.FULL_REFRESH
 
-        logger.info("run.node.start", logical=logical_name, physical=name, effective_mode=effective_mode.value)
+        logger.info("run.node.start", logical=logical_address, physical=name, effective_mode=effective_mode.value)
         statements = trouve.build_sql(effective_mode, run_id, staging_address=staging_address)
 
         # An incremental run changes data that already exists, so the staging
@@ -582,10 +575,10 @@ def run_project(
             all_succeeded = not staging_error
 
         if all_succeeded:
-            logger.info("run.node.success", logical=logical_name, physical=name, duration_seconds=round(duration, 3), query_ids=query_ids)
+            logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(duration, 3), query_ids=query_ids)
             yield RunResult(
-                logical_name=logical_name,
-                physical_name=name,
+                logical_address=logical_address,
+                physical_address=name,
                 status=RunStatus.SUCCESS,
                 query_ids=query_ids,
                 query_urls=query_urls,
@@ -606,10 +599,10 @@ def run_project(
                         f"{error_message}. Clair keeps the staging object at "
                         f"{staging_address}, if the build made one"
                     )
-            logger.warning("run.node.failure", logical=logical_name, physical=name, duration_seconds=round(duration, 3), error=error_message, query_ids=query_ids)
+            logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(duration, 3), error=error_message, query_ids=query_ids)
             yield RunResult(
-                logical_name=logical_name,
-                physical_name=name,
+                logical_address=logical_address,
+                physical_address=name,
                 status=RunStatus.FAILURE,
                 query_ids=query_ids,
                 query_urls=query_urls,
