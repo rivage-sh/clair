@@ -1,12 +1,14 @@
 # Strict Mode
 
-A table can only be tested once it has been materialized. In a normal run that means bad data lands in production first and the tests tell you about it afterwards — the table is already wrong, and anything reading it has already read the wrong numbers.
+A table can only be tested once it has been materialized. Written naively that means bad data lands in production first and the tests tell you about it afterwards — the table is already wrong, and anything reading it has already read the wrong numbers.
 
-Strict mode closes that window. Every Trouve is built into a run-scoped staging object, tested there, and only promoted into its real name once every test passes.
+Strict mode closes that window, and it is **how clair writes**. There is no flag: every Trouve is built into a run-scoped staging object, tested there, and only promoted into its real name once every test passes.
 
 ```bash
-clair run --project . --env prod --strict
+clair run --project . --env prod
 ```
+
+The one way to turn it off is `--no-test`, which removes the tests that gate promotion and so leaves nothing for staging to protect. That run writes directly to its targets and says so.
 
 ## What happens per Trouve
 
@@ -46,11 +48,11 @@ Snowflake clones are metadata-only, so seeding the staging table is constant-tim
 
 ## Seeing the plan
 
-`clair compile --strict` writes the full plan to `_clairtifacts/`, including the clone, the staging build, a comment marking where tests run, and the promotion:
+`clair compile` writes the full plan to `_clairtifacts/`, including the clone, the staging build, a comment marking where tests run, and the promotion:
 
 ```bash
-clair compile --project . --strict
-clair compile --project . --strict --run-mode incremental
+clair compile --project .
+clair compile --project . --run-mode incremental
 ```
 
 ## When something fails
@@ -82,9 +84,9 @@ SHOW TABLES LIKE '%__clair_%' IN SCHEMA db.schema;
 ## Costs and caveats
 
 - **Storage.** Each Trouve briefly holds two copies. For a full refresh that is a real second copy for the duration of the node; for an incremental build the clone shares micro-partitions with the target and only diverges as rows change. Objects left behind by failures persist until you drop them.
-- **Tests are required.** `--strict` cannot be combined with `--no-test` — the whole point is to gate promotion on tests. A Trouve with no tests attached still goes through staging and is promoted; strict mode does not manufacture coverage you have not written.
+- **Tests are what make it work.** `--no-test` turns strict mode off, because gating a promotion on tests that never run is not a guarantee. A Trouve with no tests attached still goes through staging and is promoted; strict mode does not manufacture coverage you have not written.
 - **Name length.** The suffix adds 40 characters to the table component. Snowflake caps each identifier at 255 — the limit is per object name, not per fully-qualified path — so a Trouve whose table name is within 40 characters of the cap fails at the naming step with a clear error rather than mid-run.
-- **`--sample`.** Sampling applies to the staging object, so `--strict --sample` gates promotion on a `TOP 1000` check rather than the full table.
+- **`--sample`.** Sampling applies to the staging object, so `--sample` gates promotion on a `TOP 1000` check rather than the full table.
 
 ## See also
 

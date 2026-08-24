@@ -572,21 +572,24 @@ class TestPhysicalNameOverride:
         assert not any("db.s.orders" in sql for sql in executed)
 
 
-class TestStrictCliGuard:
-    def test_strict_with_no_test_is_rejected(self):
+class TestStrictIsAlwaysOn:
+    def test_strict_is_no_longer_an_option(self):
+        """Strict mode is unconditional, so there is nothing left to opt into."""
         import structlog
         from click.testing import CliRunner
 
         from clair.cli.main import cli
 
         try:
-            result = CliRunner().invoke(cli, ["run", "--strict", "--no-test"])
+            for command in ("run", "compile"):
+                result = CliRunner().invoke(cli, [command, "--strict"])
+                # Click exits 2 on an unrecognized option.
+                assert result.exit_code == 2, command
+                assert "--strict" in result.output
         finally:
             # The CLI binds structlog to the runner's stdout/stderr, which are
             # closed on exit; reset so later tests log to real streams.
             structlog.reset_defaults()
-
-        assert result.exit_code == 1
 
 
 class TestStrictCompilePlan:

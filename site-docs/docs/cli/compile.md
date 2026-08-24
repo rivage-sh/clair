@@ -3,7 +3,7 @@
 Resolve the DAG and write generated SQL to `_clairtifacts/`. No Snowflake connection is made.
 
 ```bash
-clair compile [--project PATH] [--env NAME] [--select PATTERN]... [--run-mode MODE] [--strict]
+clair compile [--project PATH] [--env NAME] [--select PATTERN]... [--run-mode MODE]
 ```
 
 ## Example
@@ -17,10 +17,9 @@ clair compile --project . --env prod
 
 # Compile only the orders schema
 clair compile --project . --select='refined.orders.*'
-
-# Show the strict-mode plan: staging build, test checkpoint, promotion
-clair compile --project . --strict
 ```
+
+Every plan is a [strict-mode](../guides/strict-mode.md) plan: the staging build, a comment marking the test checkpoint, and the promotion.
 
 ## What it does
 
@@ -56,7 +55,6 @@ _clairtifacts/
 | `--env` | optional | Environment name. Required if you want routing applied to generated SQL. |
 | `--select` | all | Glob pattern to filter Trouves. Repeat to union patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Affects which SQL variant is generated. |
-| `--strict` | `false` | Emit the [strict-mode](../guides/strict-mode.md) plan instead of a direct write to the target. |
 
 ## See also
 

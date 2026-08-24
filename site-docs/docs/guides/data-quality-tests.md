@@ -143,8 +143,8 @@ See also: [Tests API reference](../reference/tests-api.md).
 
 ## Testing before publishing
 
-Tests run after a Trouve has been materialized — that is the only point at which there is a table to query. By default that means a failing test tells you production is already wrong. [Strict Mode](strict-mode.md) inverts this: each Trouve is built into a staging object, tested there, and promoted into its real name only if every test passes.
+Tests run after a Trouve has been materialized — that is the only point at which there is a table to query. Taken naively that would mean a failing test tells you production is already wrong. [Strict Mode](strict-mode.md) inverts it, and it is how every run works: each Trouve is built into a staging object, tested there, and promoted into its real name only if every test passes.
 
 ```bash
-clair run --project . --env prod --strict
+clair run --project . --env prod
 ```
