@@ -10,7 +10,8 @@ runs the DAG in topological order. No Jinja, no YAML configuration.
 
 1. `grep` `site_docs/docs/` for the behaviour. It is the source of truth, it is Markdown,
    and it is small. Do not read `src/` to learn what a feature does.
-2. Read `.claude/MEMORY.md` for the design rules.
+2. Read `.claude/MEMORY.md`. It indexes `.claude/memory/`, which holds the design rules
+   and the code conventions.
 3. Open only the two or three source files that the map below names.
 
 ## Layout

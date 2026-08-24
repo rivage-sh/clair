@@ -1,14 +1,16 @@
 # clair — memory index
 
-Behaviour lives in `site_docs/docs/`, not here. Add a note only for a design rule or a
-user correction. See [Docs are the source of truth](memory/project_docs_are_the_source_of_truth.md).
+`.claude/memory/` holds the design rules and the code conventions for clair. This file is
+the index to that directory.
 
-## Project
+| File | Holds |
+|------|-------|
+| [`memory/conventions.md`](memory/conventions.md) | The seven design invariants; docs give orientation and code gives truth; enum branch style; tests assert on object fields, not on strings. |
 
-- [Design invariants](memory/project_design_invariants.md) — seven rules clair never breaks: no Jinja, no config YAML, path is the table name, compile stays offline, eager validation, plain Python for shared SQL, adapter behind an ABC.
-- [Docs are the source of truth](memory/project_docs_are_the_source_of_truth.md) — grep `site_docs/docs/` for orientation, then confirm the API against `src/`; the code wins when they disagree.
+## What belongs in `.claude/memory/`
 
-## Feedback
+Only a design rule, or a correction that the user gave. Behaviour lives in
+`site_docs/docs/`, and `src/` is the final authority when the two disagree.
 
-- [No string output tests](memory/feedback_no_string_output_tests.md) — functions return Pydantic objects; tests assert on fields, never on formatted output.
-- [Defensive enum branching](memory/feedback_defensive_enum_branching.md) — branch on enums with if/elif/else and raise a `ClairError` subclass in the `else`.
+Do not copy a documentation page into memory. A copy becomes wrong when the source
+changes.
