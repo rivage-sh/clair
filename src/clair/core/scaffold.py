@@ -25,41 +25,36 @@ Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
 and gives the physical TrouveAddress. SOURCE Trouves never route.
 
-Commit this file. It holds no credentials.
-Run `clair validate` to apply the entries to every Trouve in the project.
+This file starts with one entry, and that entry changes nothing: the physical
+name stays equal to the logical name. Change the route method when you want a
+separate target for an environment, for example one database for each person.
+See https://clair.rivage.sh/guides/routing/
 """
 
-import os
+from enum import StrEnum
 
 from clair import RoutingEntry, RoutingTable, TrouveAddress
 
 
-class DeveloperRouting(RoutingEntry):
-    """Each person writes to a separate database.
+class EnvironmentName(StrEnum):
+    """The environments of this project.
 
-    Set CLAIR_USER to your name before you run clair.
+    Each member matches a top-level key in ~/.clair/environments.yml.
     """
 
-    environment_name: str = "dev"
-    user_variable: str = "CLAIR_USER"
-
-    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
-        user_name = os.environ[self.user_variable].upper()
-        return trouve_address.model_copy(
-            update={"database_name": f"{trouve_address.database_name}_{user_name}"}
-        )
+    DEV = "dev"
 
 
-class ProductionRouting(RoutingEntry):
-    """Production writes to the logical names, so the address stays the same."""
+class DevelopmentRouting(RoutingEntry):
+    """Write to the logical names, thus the address stays the same."""
 
-    environment_name: str = "prod"
+    environment_name: str = EnvironmentName.DEV.value
 
     def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
         return trouve_address
 
 
-routing = RoutingTable(entries=[DeveloperRouting(), ProductionRouting()])
+routing = RoutingTable(entries=[DevelopmentRouting()])
 '''
 
 _ENVIRONMENTS_TEMPLATE = '''\

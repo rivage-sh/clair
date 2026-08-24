@@ -89,8 +89,11 @@ class TestFileContents:
 
         content = (project_dir / "__routing__.py").read_text()
         assert "RoutingTable(" in content
-        assert "CLAIR_USER" in content
         assert "TrouveAddress" in content
+        # The template starts with one passthrough entry, for the environment
+        # that the environments.yml template holds.
+        assert 'environment_name: str = EnvironmentName.DEV.value' in content
+        assert "return trouve_address" in content
 
 
 class TestDoesNotOverwriteExistingFiles:
