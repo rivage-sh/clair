@@ -59,7 +59,6 @@ jobs:
       CLAIR_CI_SNOWFLAKE_USER: ${{ secrets.CLAIR_CI_SNOWFLAKE_USER }}
       CLAIR_CI_SNOWFLAKE_ROLE: ${{ secrets.CLAIR_CI_SNOWFLAKE_ROLE }}
       CLAIR_CI_SNOWFLAKE_WAREHOUSE: ${{ secrets.CLAIR_CI_SNOWFLAKE_WAREHOUSE }}
-      CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH: ${{ runner.temp }}/clair_ci_key.p8
       CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
 
     steps:
@@ -74,6 +73,11 @@ jobs:
 
       - name: Install deps
         run: uv sync
+
+      - name: Choose the path of the private key
+        # The `runner` context does not exist in a job level `env:` block. This
+        # step therefore puts the path in the environment of the later steps.
+        run: echo "CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/clair_ci_key.p8" >> "$GITHUB_ENV"
 
       - name: Write the private key
         env:
