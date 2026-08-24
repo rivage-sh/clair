@@ -45,7 +45,7 @@ class CompiledAttributes(BaseModel):
     These attributes exist only when ``TrouveAbc.is_compiled`` is True.
     """
 
-    full_name: str       # The routed name. Clair puts it in the SQL and the DDL.
+    physical_name: str       # The routed name. Clair puts it in the SQL and the DDL.
     logical_name: str    # The name from the file path. DAG edges and selectors use it.
     resolved_sql: str
     resolved_transform: str = ""
@@ -102,7 +102,7 @@ class TrouveAbc(BaseModel, ABC):
         {other_trouve}"``. The method adds the Trouve to the global refs
         registry. Then it gives a token, for example
         ``__CLAIR_TROUVE_140234567890__``. Discovery replaces the token with the
-        true full_name.
+        true physical_name.
         """
         return register(self)
 
@@ -112,30 +112,30 @@ class TrouveAbc(BaseModel, ABC):
         return self.compiled is not None
 
     @property
-    def full_name(self) -> str:
+    def physical_name(self) -> str:
         """The full Snowflake object name: database.schema.table.
 
         This property raises a RuntimeError if you read it before discovery runs.
         """
         if self.compiled is None:
             raise RuntimeError(
-                "Trouve.full_name is not set. "
+                "Trouve.physical_name is not set. "
                 "The discovery layer of clair did not load this Trouve."
             )
-        return self.compiled.full_name
+        return self.compiled.physical_name
 
     def sample(self) -> str:
         """Give a subquery that reads a sample of this Trouve, for test SQL.
 
-        The default result is ``(SELECT TOP 1000 * FROM {full_name})``. To change
+        The default result is ``(SELECT TOP 1000 * FROM {physical_name})``. To change
         how clair takes the sample, override this method in a subclass.
         """
         assert self.compiled is not None, "sample() needs a compiled Trouve"
-        return f"(SELECT TOP 1000 * FROM {self.compiled.full_name})"
+        return f"(SELECT TOP 1000 * FROM {self.compiled.physical_name})"
 
     def get_full_table_name(self) -> str:
-        """An alias for .full_name. Use it in f-string SQL."""
-        return self.full_name
+        """An alias for .physical_name. Use it in f-string SQL."""
+        return self.physical_name
 
 
 class Trouve(TrouveAbc):
@@ -145,7 +145,7 @@ class Trouve(TrouveAbc):
         sql: The SQL query. A TABLE or a VIEW needs it. A SOURCE must leave it
              empty. To point to a different Trouve, write
              ``f"SELECT * FROM {other_trouve}"``. Discovery replaces the
-             f-string placeholder with the true full_name.
+             f-string placeholder with the true physical_name.
 
     ``TrouveAbc`` holds the attributes that every backend shares.
     """
@@ -199,12 +199,12 @@ class Trouve(TrouveAbc):
         if effective_mode == RunMode.FULL_REFRESH:
             object_type = "TABLE" if self.type == TrouveType.TABLE else "VIEW"
             return [
-                f"CREATE OR REPLACE {object_type} {self.full_name} AS (\n{resolved_sql}\n)"
+                f"CREATE OR REPLACE {object_type} {self.physical_name} AS (\n{resolved_sql}\n)"
             ]
 
         if self.run_config.incremental_mode == IncrementalMode.APPEND:
             return [
-                f"INSERT INTO {self.full_name}\nSELECT * FROM (\n{resolved_sql}\n)"
+                f"INSERT INTO {self.physical_name}\nSELECT * FROM (\n{resolved_sql}\n)"
             ]
 
         # The UPSERT mode.
@@ -213,7 +213,7 @@ class Trouve(TrouveAbc):
                 "the upsert mode needs columns on the Trouve"
             )
 
-        staging_name = f"{self.full_name}__clair_staging_{run_id}"
+        staging_name = f"{self.physical_name}__clair_staging_{run_id}"
         all_col_names = [c.name for c in self.columns]
         unique_keys = set(self.run_config.primary_key_columns or [])
 
@@ -240,7 +240,7 @@ class Trouve(TrouveAbc):
         )
         stmt_2 = (
             f"-- [2/3] merge the staging table into the target table\n"
-            f"MERGE INTO {self.full_name} AS {TARGET}\n"
+            f"MERGE INTO {self.physical_name} AS {TARGET}\n"
             f"USING {staging_name} AS {SOURCE}\n"
             f"ON {join_condition}\n"
             f"WHEN MATCHED THEN UPDATE SET {update_clause}\n"

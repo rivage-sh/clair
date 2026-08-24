@@ -65,7 +65,7 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
-    def fetch_dataframe(self, full_name: str) -> pd.DataFrame:
+    def fetch_dataframe(self, physical_name: str) -> pd.DataFrame:
         """Read a table into a pandas DataFrame."""
         ...
 
@@ -73,7 +73,7 @@ class WarehouseAdapter(ABC):
     def write_dataframe(
         self,
         dataframe: pd.DataFrame,
-        full_name: str,
+        physical_name: str,
         database_name: str,
         schema_name: str,
         table_name: str,

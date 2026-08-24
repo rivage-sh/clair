@@ -19,7 +19,7 @@ from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, Trou
 
 
 def _make_trouve(
-    full_name: str,
+    physical_name: str,
     trouve_type: TrouveType = TrouveType.TABLE,
     imports: list[str] | None = None,
 ) -> Trouve:
@@ -27,11 +27,11 @@ def _make_trouve(
     sql = "select 1" if trouve_type != TrouveType.SOURCE else ""
     t = Trouve(type=trouve_type, sql=sql)
     t.compiled = CompiledAttributes(
-        full_name=full_name,
-        logical_name=full_name,
+        physical_name=physical_name,
+        logical_name=physical_name,
         resolved_sql=sql,
-        file_path=Path(f"/fake/{full_name.replace('.', '/')}.py"),
-        module_name=full_name,
+        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
+        module_name=physical_name,
         imports=imports or [],
         config=ResolvedConfig(),
         execution_type=ExecutionType.SNOWFLAKE,

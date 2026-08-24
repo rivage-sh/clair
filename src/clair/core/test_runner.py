@@ -19,7 +19,7 @@ class TestResult(BaseModel):
     """The result of one data quality test.
 
     Attributes:
-        full_name: The full Snowflake object name of the Trouve.
+        physical_name: The full Snowflake object name of the Trouve.
         test_index: The index of this test in the test list of the Trouve. The
             first index is 0.
         test_type: A label for a person to read, such as "unique", "not_null",
@@ -33,7 +33,7 @@ class TestResult(BaseModel):
         error: The error message if the query itself did not execute.
     """
 
-    full_name: str
+    physical_name: str
     test_index: int
     test_type: str
     column_name: str | None
@@ -88,7 +88,7 @@ class TestSummary(BaseModel):
         error_count = 0
 
         for i, r in enumerate(self.results, 1):
-            label = f"{r.full_name} :: {r.test_type}"
+            label = f"{r.physical_name} :: {r.test_type}"
             if r.column_name:
                 label += f" ({r.column_name})"
 
@@ -157,7 +157,7 @@ def run_tests(
             column_name = getattr(test, "column", None)
 
             assert trouve.compiled is not None
-            routed_name = trouve.compiled.full_name
+            routed_name = trouve.compiled.physical_name
 
             # Skip each test that needs the complete table.
             if use_sample and not test.is_run_with_sample:
@@ -183,7 +183,7 @@ def run_tests(
                     logger.warning("test.query_error", trouve=name, test_type=test.label, column=column_name, error=query_result.error, query_id=query_result.query_id)
                     results.append(
                         TestResult(
-                            full_name=routed_name,
+                            physical_name=routed_name,
                             test_index=test_index,
                             test_type=test.label,
                             column_name=column_name,
@@ -199,7 +199,7 @@ def run_tests(
                     logger.info("test.result", trouve=routed_name, test_type=test.label, column=column_name, passed=passed, failing_rows=query_result.row_count, query_id=query_result.query_id)
                     results.append(
                         TestResult(
-                            full_name=routed_name,
+                            physical_name=routed_name,
                             test_index=test_index,
                             test_type=test.label,
                             column_name=column_name,
@@ -213,7 +213,7 @@ def run_tests(
                 logger.warning("test.exception", trouve=routed_name, test_type=test.label, column=column_name, error=str(e))
                 results.append(
                     TestResult(
-                        full_name=routed_name,
+                        physical_name=routed_name,
                         test_index=test_index,
                         test_type=test.label,
                         column_name=column_name,

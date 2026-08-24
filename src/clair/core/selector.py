@@ -41,10 +41,10 @@ class ParsedSelector:
     downstream_depth: int | None
 
 
-def match_selector(full_name: str, pattern: str) -> bool:
-    """Compare the full_name of a Trouve with a glob selector pattern.
+def match_selector(physical_name: str, pattern: str) -> bool:
+    """Compare the physical_name of a Trouve with a glob selector pattern.
 
-    The function applies the fnmatch rules to the dotted full_name.
+    The function applies the fnmatch rules to the dotted physical_name.
 
     Examples:
         match_selector("mydb.analytics.orders", "mydb.*.orders") -> True
@@ -52,11 +52,11 @@ def match_selector(full_name: str, pattern: str) -> bool:
         match_selector("mydb.analytics.orders", "mydb.analytics.orders") -> True
         match_selector("mydb.staging.users", "mydb.analytics.*") -> False
     """
-    return fnmatch(full_name, pattern)
+    return fnmatch(physical_name, pattern)
 
 
 def filter_by_selector(full_names: list[str], pattern: str | None) -> list[str]:
-    """Keep each full_name that agrees with the glob pattern.
+    """Keep each physical_name that agrees with the glob pattern.
 
     If the pattern is None, the function gives each name, with no change.
     """
@@ -66,7 +66,7 @@ def filter_by_selector(full_names: list[str], pattern: str | None) -> list[str]:
 
 
 def filter_by_selectors(full_names: list[str], patterns: tuple[str, ...] | None) -> list[str]:
-    """Keep each full_name that agrees with one or more glob patterns.
+    """Keep each physical_name that agrees with one or more glob patterns.
 
     If the patterns argument is None or an empty tuple, the function gives each
     name, with no change. A name that agrees with one pattern is sufficient. The

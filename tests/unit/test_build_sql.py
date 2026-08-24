@@ -14,7 +14,7 @@ from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, Trou
 def _make_compiled_trouve(
     type: TrouveType = TrouveType.TABLE,
     sql: str = "SELECT 1 AS id",
-    full_name: str = "db.schema.my_table",
+    physical_name: str = "db.schema.my_table",
     columns: list[Column] | None = None,
     run_config: RunConfig | None = None,
 ) -> Trouve:
@@ -29,11 +29,11 @@ def _make_compiled_trouve(
 
     t = Trouve(**kwargs)
     t.compiled = CompiledAttributes(
-        full_name=full_name,
-        logical_name=full_name,
+        physical_name=physical_name,
+        logical_name=physical_name,
         resolved_sql=sql if type != TrouveType.SOURCE else "",
-        file_path=Path(f"/fake/{full_name.replace('.', '/')}.py"),
-        module_name=full_name,
+        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
+        module_name=physical_name,
         imports=[],
         config=ResolvedConfig(),
         execution_type=ExecutionType.SNOWFLAKE,

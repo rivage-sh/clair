@@ -88,11 +88,11 @@ class TrouveAddress(BaseModel):
         return value
 
     @classmethod
-    def parse(cls, full_name: str) -> TrouveAddress:
+    def parse(cls, physical_name: str) -> TrouveAddress:
         """Make an address from a "database_name.schema_name.table_name" string.
 
         Args:
-            full_name: The dotted name.
+            physical_name: The dotted name.
 
         Returns:
             The validated address.
@@ -100,10 +100,10 @@ class TrouveAddress(BaseModel):
         Raises:
             InvalidTrouveAddressError: If the string is not a valid address.
         """
-        parts = full_name.split(".")
+        parts = physical_name.split(".")
         if len(parts) != 3:
             raise InvalidTrouveAddressError(
-                full_name,
+                physical_name,
                 f"an address needs 3 dot-separated parts, but this name has "
                 f"{len(parts)}",
             )
@@ -113,7 +113,7 @@ class TrouveAddress(BaseModel):
             )
         except ValidationError as exc:
             raise InvalidTrouveAddressError(
-                full_name, _first_error_message(exc)
+                physical_name, _first_error_message(exc)
             ) from exc
 
     def __str__(self) -> str:
@@ -252,7 +252,7 @@ def route(
     trouve_type: TrouveType,
     routing: RoutingEntry | None,
 ) -> str:
-    """Apply a routing entry to a logical full_name.
+    """Apply a routing entry to a logical physical_name.
 
     The function validates the logical name first, then applies the entry. A
     SOURCE Trouve keeps its logical name, whatever the entry is.
@@ -263,7 +263,7 @@ def route(
         routing: The active routing entry, or None for passthrough.
 
     Returns:
-        The physical full_name string.
+        The physical physical_name string.
 
     Raises:
         InvalidTrouveAddressError: If the logical name is not a valid address.

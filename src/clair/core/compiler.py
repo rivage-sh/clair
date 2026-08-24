@@ -155,13 +155,13 @@ def write_compile_output(
                 pass
 
             input_lines = [
-                f"#   {parameter_name}  ->  {upstream.full_name}"
+                f"#   {parameter_name}  ->  {upstream.physical_name}"
                 for parameter_name, upstream in zip(
                     trouve.parameter_names(), trouve.upstream_trouves()
                 )
             ]
 
-            header = f"# clair compiled: {trouve.full_name}\n# execution_type: pandas\n"
+            header = f"# clair compiled: {trouve.physical_name}\n# execution_type: pandas\n"
             if input_lines:
                 header += "# inputs:\n" + "\n".join(input_lines) + "\n"
             header += "\n"

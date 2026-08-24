@@ -32,7 +32,7 @@ class TestComputeFullName:
 class TestDiscovery:
     def test_discovers_simple_project(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        names = {t.full_name for t in trouves}
+        names = {t.physical_name for t in trouves}
 
         assert "source.raw.orders" in names
         assert "analytics.revenue.daily_orders" in names
@@ -40,46 +40,46 @@ class TestDiscovery:
 
     def test_source_trouve_has_correct_type(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        source = next(t for t in trouves if t.full_name == "source.raw.orders")
+        source = next(t for t in trouves if t.physical_name == "source.raw.orders")
         assert source.type == TrouveType.SOURCE
 
     def test_table_trouve_has_correct_type(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if t.full_name == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if t.physical_name == "analytics.revenue.daily_orders")
         assert table.type == TrouveType.TABLE
 
     def test_full_name_set_on_compiled(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        source = next(t for t in trouves if t.full_name == "source.raw.orders")
-        assert source.full_name == "source.raw.orders"
+        source = next(t for t in trouves if t.physical_name == "source.raw.orders")
+        assert source.physical_name == "source.raw.orders"
 
     def test_import_detection(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if t.full_name == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if t.physical_name == "analytics.revenue.daily_orders")
         assert table.compiled is not None
         assert "source.raw.orders" in table.compiled.imports
 
     def test_resolved_sql_contains_full_name(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if t.full_name == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if t.physical_name == "analytics.revenue.daily_orders")
         assert table.compiled is not None
         assert "source.raw.orders" in table.compiled.resolved_sql
 
     def test_raw_sql_contains_placeholder(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if t.full_name == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if t.physical_name == "analytics.revenue.daily_orders")
         assert isinstance(table, Trouve)
         assert TROUVE_PLACEHOLDER_PREFIX in table.sql
 
     def test_config_resolution(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if t.full_name == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if t.physical_name == "analytics.revenue.daily_orders")
         assert table.compiled is not None
         assert table.compiled.config.warehouse == "reporting_wh"
 
     def test_skips_underscore_files(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        names = {t.full_name for t in trouves}
+        names = {t.physical_name for t in trouves}
         assert not any("schema_config" in name for name in names)
         assert not any("database_config" in name for name in names)
 
@@ -134,14 +134,14 @@ class TestDiscoveryWithRouting:
         trouves = discover_project(simple_project, routing=routing)
         table = next(t for t in trouves if t.type == TrouveType.TABLE)
 
-        assert table.full_name == "MYDEV.revenue.daily_orders"
+        assert table.physical_name == "MYDEV.revenue.daily_orders"
 
     def test_database_override_source_not_rerouted(self, simple_project: Path):
         routing = DatabaseOverrideRouting(database_name="MYDEV")
         trouves = discover_project(simple_project, routing=routing)
         source = next(t for t in trouves if t.type == TrouveType.SOURCE)
 
-        assert source.full_name == "source.raw.orders"
+        assert source.physical_name == "source.raw.orders"
 
     def test_database_override_logical_name_preserved(self, simple_project: Path):
         routing = DatabaseOverrideRouting(database_name="MYDEV")
@@ -172,14 +172,14 @@ class TestDiscoveryWithRouting:
         trouves = discover_project(simple_project, routing=routing)
         table = next(t for t in trouves if t.type == TrouveType.TABLE)
 
-        assert table.full_name == "DEV.myschema.ANALYTICS_REVENUE_DAILY_ORDERS"
+        assert table.physical_name == "DEV.myschema.ANALYTICS_REVENUE_DAILY_ORDERS"
 
     def test_no_routing_logical_and_full_name_equal(self, simple_project: Path):
         trouves = discover_project(simple_project, routing=None)
 
         for t in trouves:
             assert t.compiled is not None
-            assert t.full_name == t.compiled.logical_name
+            assert t.physical_name == t.compiled.logical_name
 
     def test_routing_collision_continues_and_is_detectable(self, tmp_path: Path):
         source_dir = tmp_path / "shared" / "raw"
@@ -316,7 +316,7 @@ class TestRecompileForSelection:
 
         # Select each Trouve that is not a SOURCE, with the routed names.
         selected = {
-            t.compiled.full_name
+            t.compiled.physical_name
             for t in trouves
             if t.compiled and t.type != TrouveType.SOURCE
         }
@@ -335,7 +335,7 @@ class TestRecompileForSelection:
 
         # Select each Trouve, and refined.events too, with the routed names.
         selected = {
-            t.compiled.full_name
+            t.compiled.physical_name
             for t in trouves
             if t.compiled and t.type != TrouveType.SOURCE
         }
@@ -356,7 +356,7 @@ class TestRecompileForSelection:
             t.compiled.logical_name: t.compiled.resolved_sql
             for t in trouves if t.compiled
         }
-        selected = {t.compiled.full_name for t in trouves if t.compiled}
+        selected = {t.compiled.physical_name for t in trouves if t.compiled}
         recompile_for_selection(trouves, selected)
 
         for t in trouves:
@@ -364,17 +364,17 @@ class TestRecompileForSelection:
                 assert t.compiled.resolved_sql == sql_before[t.compiled.logical_name]
 
     def test_write_target_is_always_routed(self, tmp_path: Path):
-        """The write target, full_name, is always routed, whatever the selection is."""
+        """The write target, physical_name, is always routed, whatever the selection is."""
         project = _make_chained_project(tmp_path)
         routing = DatabaseOverrideRouting(database_name="omer")
         trouves = discover_project(project, routing=routing)
 
-        # With an empty selection, full_name stays routed.
+        # With an empty selection, physical_name stays routed.
         recompile_for_selection(trouves, set())
 
         for t in trouves:
             if t.compiled and t.type != TrouveType.SOURCE:
-                assert t.compiled.full_name.startswith("omer.")
+                assert t.compiled.physical_name.startswith("omer.")
 
 
 class TestRecompileForSelectionTestSql:
@@ -431,7 +431,7 @@ class TestRecompileForSelectionTestSql:
         assert orders.compiled is not None
 
         # The selection never holds a SOURCE. It holds orders only.
-        selected = {orders.compiled.full_name}
+        selected = {orders.compiled.physical_name}
         recompile_for_selection(trouves, selected)
 
         test = orders.tests[0]
@@ -471,7 +471,7 @@ class TestRecompileForSelectionTestSql:
 
         # Select the two TABLE Trouves.
         selected = {
-            t.compiled.full_name
+            t.compiled.physical_name
             for t in trouves
             if t.compiled and t.type != TrouveType.SOURCE
         }

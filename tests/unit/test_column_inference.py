@@ -203,9 +203,9 @@ class TestBuildCatalogColumnInference:
         dag = build_dag(discovered)
         catalog = build_catalog(dag, simple_project)
 
-        for full_name, trouve_data in catalog["trouves"].items():
+        for physical_name, trouve_data in catalog["trouves"].items():
             assert "column_inference" in trouve_data, (
-                f"Trouve {full_name} missing column_inference"
+                f"Trouve {physical_name} missing column_inference"
             )
             inference = trouve_data["column_inference"]
             assert "status" in inference
