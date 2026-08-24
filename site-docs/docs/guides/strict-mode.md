@@ -2,7 +2,7 @@
 
 A table can only be tested once it has been materialized. In a normal run that means bad data lands in production first and the tests tell you about it afterwards — the table is already wrong, and anything reading it has already read the wrong numbers.
 
-Strict mode closes that window. Every Trouve is built into a run-scoped staging object, tested there, and only swapped into its real name once every test passes.
+Strict mode closes that window. Every Trouve is built into a run-scoped staging object, tested there, and only promoted into its real name once every test passes.
 
 ```bash
 clair run --project . --env prod --strict

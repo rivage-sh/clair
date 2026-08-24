@@ -256,7 +256,7 @@ def _prompt_and_write_environment() -> None:
     "--strict",
     is_flag=True,
     default=False,
-    help="Show the strict-mode plan: build into a run-scoped staging object, test, then swap.",
+    help="Show the strict-mode plan: build into a run-scoped staging object, test, then promote.",
 )
 def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, strict: bool) -> None:
     """Compile the project and show generated SQL (no Snowflake connection)."""
