@@ -35,7 +35,7 @@ class StagingAddressError(ClairError):
     """Clair cannot make a staging address for a Trouve."""
 
 
-def staging_address(physical_address: TrouveAddress, run_id: str) -> TrouveAddress:
+def make_staging_address(physical_address: TrouveAddress, run_id: str) -> TrouveAddress:
     """Give the run-scoped staging address for a physical address.
 
     The suffix goes on the table name only, so the staging object stays in the

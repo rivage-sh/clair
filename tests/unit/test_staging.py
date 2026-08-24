@@ -19,7 +19,7 @@ from clair.core.staging import (
     build_clone_statement,
     build_drop_staging_statement,
     build_promote_statement,
-    staging_address,
+    make_staging_address,
 )
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import RunError
@@ -46,7 +46,7 @@ def _address(physical_name: str) -> TrouveAddress:
 
 def _staging_name(physical_name: str, run_id: str = RUN_ID) -> str:
     """Give the staging address of a dotted name, as a string."""
-    return str(staging_address(_address(physical_name), run_id))
+    return str(make_staging_address(_address(physical_name), run_id))
 
 
 AnyTrouve = TypeVar("AnyTrouve", bound=TrouveAbc)
@@ -167,10 +167,10 @@ class TestPromoteStatements:
         assert "CREATE OR REPLACE TABLE db.s.t__staging CLONE db.s.t" in statement
 
 
-class TestBuildSqlWriteAddress:
+class TestBuildSqlStagingAddress:
     def test_full_refresh_writes_into_override(self):
         trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID, write_address=_address("db.s.staging"))
+        statements = trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID, staging_address=_address("db.s.staging"))
         assert "CREATE OR REPLACE TABLE db.s.staging" in statements[0]
         assert "db.s.orders" not in statements[0]
 
@@ -184,7 +184,7 @@ class TestBuildSqlWriteAddress:
             ),
             "db.s.orders",
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, write_address=_address("db.s.staging"))
+        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, staging_address=_address("db.s.staging"))
         assert statements[0].startswith("INSERT INTO db.s.staging")
 
     def test_upsert_merges_into_override_without_stacking_staging_suffixes(self):
@@ -205,7 +205,7 @@ class TestBuildSqlWriteAddress:
             ),
             "db.s.orders",
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, write_address=_address("db.s.candidate"))
+        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, staging_address=_address("db.s.candidate"))
         assert "MERGE INTO db.s.candidate" in statements[1]
         # The merge staging table derives from the real name, not the override,
         # so the two suffixes never stack.
@@ -214,7 +214,7 @@ class TestBuildSqlWriteAddress:
     def test_omitting_the_address_writes_to_the_physical_name(self):
         trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
         assert trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID) == trouve.build_sql(
-            RunMode.FULL_REFRESH, RUN_ID, write_address=None
+            RunMode.FULL_REFRESH, RUN_ID, staging_address=None
         )
 
 

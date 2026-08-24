@@ -32,7 +32,7 @@ SOURCE Trouves pass through. clair does not run SQL against them.
 
 clair runs the attached tests after each successful TABLE or VIEW. If a test fails, the run stops with a non-zero status code. Use `--no-test` to skip the tests.
 
-The tests decide the publication. They do not report a fault after it reaches production: clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the object its physical name only after each test passes. See [Staging](../guides/staging.md).
+The tests decide the publication. They do not report a fault after it reaches production: clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes. See [Staging](../guides/staging.md).
 
 ## Flags
 

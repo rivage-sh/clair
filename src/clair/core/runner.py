@@ -17,7 +17,7 @@ from clair.core.staging import (
     build_clone_statement,
     build_drop_staging_statement,
     build_promote_statement,
-    staging_address,
+    make_staging_address,
 )
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError, RunError
@@ -188,15 +188,17 @@ def resolve_effective_mode(trouve: Trouve, cli_run_mode: RunMode) -> RunMode:
 def _run_pandas_trouve(
     trouve: PandasTrouve,
     adapter: WarehouseAdapter,
-    write_address: TrouveAddress,
+    physical_address: TrouveAddress,
+    staging_address: TrouveAddress | None = None,
 ) -> RunResult:
     """Execute a PandasTrouve. Read the inputs, transform them, write the output.
 
     Args:
         trouve: The Trouve to execute.
         adapter: A warehouse adapter with an open connection.
-        write_address: The address that receives the DataFrame. The runner gives
-            the staging address here.
+        physical_address: The address of the Trouve in the warehouse.
+        staging_address: The staging address, if the run has a staging step.
+            The DataFrame goes there, and not to the physical address.
 
     Returns a RunResult with the SUCCESS status or the FAILURE status.
     """
@@ -244,21 +246,22 @@ def _run_pandas_trouve(
     # 4. Write the result to Snowflake. A TrouveAddress is valid when it exists,
     # so the three names need no test here.
     physical_name = trouve.physical_name
+    address = staging_address or physical_address
 
     try:
         query_result = adapter.write_dataframe(
             dataframe=result_dataframe,
-            physical_name=str(write_address),
-            database_name=write_address.database_name,
-            schema_name=write_address.schema_name,
-            table_name=write_address.table_name,
+            physical_name=str(address),
+            database_name=address.database_name,
+            schema_name=address.schema_name,
+            table_name=address.table_name,
         )
     except Exception as write_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
         duration = time.monotonic() - start
         return RunResult(
             physical_name=physical_name,
             status=RunStatus.FAILURE,
-            error=f"Clair cannot write the DataFrame to {write_address}: {write_error}",
+            error=f"Clair cannot write the DataFrame to {address}: {write_error}",
             duration_seconds=duration,
         )
 
@@ -284,8 +287,8 @@ def _run_pandas_trouve(
 def _promote_or_keep(
     trouve: Trouve | PandasTrouve,
     adapter: WarehouseAdapter,
-    staging: TrouveAddress,
-    physical: TrouveAddress,
+    staging_address: TrouveAddress,
+    physical_address: TrouveAddress,
     tests_passed: bool,
 ) -> tuple[list[str], list[str], str]:
     """Complete a node: promote the staging object, or keep it for an examination.
@@ -293,8 +296,8 @@ def _promote_or_keep(
     Args:
         trouve: The Trouve that clair materialized at the staging address.
         adapter: A warehouse adapter with an open connection.
-        staging: The address that holds the candidate data.
-        physical: The address that the data must reach.
+        staging_address: The address that holds the candidate data.
+        physical_address: The address that the data must reach.
         tests_passed: The result of the data quality tests on the staging object.
 
     Returns:
@@ -318,8 +321,8 @@ def _promote_or_keep(
             query_ids,
             query_urls,
             (
-                f"the tests failed. {physical} keeps its data. "
-                f"The rejected candidate stays at {staging}"
+                f"the tests failed. {physical_address} keeps its data. "
+                f"The rejected candidate stays at {staging_address}"
             ),
         )
 
@@ -327,8 +330,8 @@ def _promote_or_keep(
     promote_error = execute(
         build_promote_statement(
             trouve.type,
-            staging_address=staging,
-            physical_address=physical,
+            staging_address=staging_address,
+            physical_address=physical_address,
             resolved_sql=trouve.compiled.resolved_sql,
         )
     )
@@ -338,19 +341,19 @@ def _promote_or_keep(
             query_urls,
             (
                 f"the tests passed, but the promotion failed: {promote_error}. "
-                f"The candidate stays at {staging}"
+                f"The candidate stays at {staging_address}"
             ),
         )
 
     # The physical address now holds the tested data, so the staging copy has no
     # more use. A fault here makes clutter, not a wrong table, thus the node
     # keeps the SUCCESS status.
-    drop_result = adapter.execute(build_drop_staging_statement(trouve.type, staging))
+    drop_result = adapter.execute(build_drop_staging_statement(trouve.type, staging_address))
     if not drop_result.success:
         logger.warning(
             "run.node.staging_drop_failed",
-            trouve=str(physical),
-            staging=str(staging),
+            trouve=str(physical_address),
+            staging=str(staging_address),
             error=drop_result.error,
         )
 
@@ -451,10 +454,10 @@ def run_project(
         # A staged run materializes the Trouve at a run-scoped address beside the
         # physical one. Clair writes the physical address only after the tests on
         # that object pass.
-        staging = None
+        staging_address = None
         if use_staging:
             try:
-                staging = staging_address(physical_address, run_id)
+                staging_address = make_staging_address(physical_address, run_id)
             except ClairError as naming_error:
                 logger.warning("run.node.failure", logical=logical_name, physical=name, error=str(naming_error))
                 yield RunResult(
@@ -467,20 +470,18 @@ def run_project(
                     skip_reasons.setdefault(desc, name)
                 continue
 
-        write_address = staging or physical_address
-
         # A PandasTrouve is different. Clair reads the data, transforms it and
         # writes it. Clair does not execute SQL.
         if trouve.execution_type == ExecutionType.PANDAS:
             assert isinstance(trouve, PandasTrouve)
             logger.info("run.node.start", logical=logical_name, physical=name, effective_mode="full_refresh")
-            result = _run_pandas_trouve(trouve, adapter, write_address)
+            result = _run_pandas_trouve(trouve, adapter, physical_address, staging_address)
 
-            if result.status == RunStatus.SUCCESS and staging is not None:
+            if result.status == RunStatus.SUCCESS and staging_address is not None:
                 assert after_node_success is not None
-                tests_passed = after_node_success(name, str(staging))
+                tests_passed = after_node_success(name, str(staging_address))
                 promote_ids, promote_urls, staging_error = _promote_or_keep(
-                    trouve, adapter, staging, physical_address, tests_passed
+                    trouve, adapter, staging_address, physical_address, tests_passed
                 )
                 result = result.model_copy(
                     update={
@@ -490,12 +491,12 @@ def run_project(
                         "error": staging_error or result.error,
                     }
                 )
-            elif result.status == RunStatus.FAILURE and staging is not None:
+            elif result.status == RunStatus.FAILURE and staging_address is not None:
                 result = result.model_copy(
                     update={
                         "error": (
                             f"{result.error}. Clair keeps the staging object at "
-                            f"{staging}, if the write made one"
+                            f"{staging_address}, if the write made one"
                         )
                     }
                 )
@@ -504,7 +505,7 @@ def run_project(
 
             if result.status == RunStatus.SUCCESS:
                 logger.info("run.node.success", logical=logical_name, physical=name, duration_seconds=round(result.duration_seconds, 3))
-                if staging is None and after_node_success is not None and not after_node_success(name, str(physical_address)):
+                if staging_address is None and after_node_success is not None and not after_node_success(name, str(physical_address)):
                     for desc in nx.descendants(dag, name):
                         skip_reasons.setdefault(desc, name)
             else:
@@ -527,12 +528,12 @@ def run_project(
                 effective_mode = RunMode.FULL_REFRESH
 
         logger.info("run.node.start", logical=logical_name, physical=name, effective_mode=effective_mode.value)
-        statements = trouve.build_sql(effective_mode, run_id, write_address=staging)
+        statements = trouve.build_sql(effective_mode, run_id, staging_address=staging_address)
 
         # An incremental run changes data that already exists, so the staging
         # table needs that data first. A zero-copy clone gives it in constant time.
-        if staging is not None and effective_mode == RunMode.INCREMENTAL:
-            statements = [build_clone_statement(physical_address, staging)] + statements
+        if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
+            statements = [build_clone_statement(physical_address, staging_address)] + statements
 
         if not statements:
             continue
@@ -570,11 +571,11 @@ def run_project(
 
         # A staged run tests the staging object, then promotes it or keeps it.
         staging_error = ""
-        if all_succeeded and staging is not None:
+        if all_succeeded and staging_address is not None:
             assert after_node_success is not None
-            tests_passed = after_node_success(name, str(staging))
+            tests_passed = after_node_success(name, str(staging_address))
             promote_ids, promote_urls, staging_error = _promote_or_keep(
-                trouve, adapter, staging, physical_address, tests_passed
+                trouve, adapter, staging_address, physical_address, tests_passed
             )
             query_ids.extend(promote_ids)
             query_urls.extend(promote_urls)
@@ -591,7 +592,7 @@ def run_project(
                 duration_seconds=duration,
             )
             # Without staging the tests run after clair wrote the physical object.
-            if staging is None and after_node_success is not None and not after_node_success(name, str(physical_address)):
+            if staging_address is None and after_node_success is not None and not after_node_success(name, str(physical_address)):
                 for desc in nx.descendants(dag, name):
                     skip_reasons.setdefault(desc, name)
         else:
@@ -600,10 +601,10 @@ def run_project(
             else:
                 assert last_result is not None
                 error_message = last_result.error or ""
-                if staging is not None:
+                if staging_address is not None:
                     error_message = (
                         f"{error_message}. Clair keeps the staging object at "
-                        f"{staging}, if the build made one"
+                        f"{staging_address}, if the build made one"
                     )
             logger.warning("run.node.failure", logical=logical_name, physical=name, duration_seconds=round(duration, 3), error=error_message, query_ids=query_ids)
             yield RunResult(

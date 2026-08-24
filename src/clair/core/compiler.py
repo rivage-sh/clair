@@ -17,7 +17,7 @@ from clair.core.staging import (
     build_clone_statement,
     build_drop_staging_statement,
     build_promote_statement,
-    staging_address,
+    make_staging_address,
 )
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import CompileError
@@ -116,25 +116,25 @@ def build_statements(
 
     assert trouve.compiled is not None
     physical_address = TrouveAddress.parse(trouve.compiled.physical_name)
-    staging = staging_address(physical_address, run_id)
+    staging_address = make_staging_address(physical_address, run_id)
 
     statements: list[str] = []
     if effective_mode == RunMode.INCREMENTAL:
-        statements.append(build_clone_statement(physical_address, staging))
+        statements.append(build_clone_statement(physical_address, staging_address))
     statements.extend(
-        trouve.build_sql(effective_mode, run_id=run_id, write_address=staging)
+        trouve.build_sql(effective_mode, run_id=run_id, staging_address=staging_address)
     )
 
     statements.append("-- staging: the data quality tests run here")
     statements.append(
         build_promote_statement(
             trouve.type,
-            staging_address=staging,
+            staging_address=staging_address,
             physical_address=physical_address,
             resolved_sql=trouve.compiled.resolved_sql,
         )
     )
-    statements.append(build_drop_staging_statement(trouve.type, staging))
+    statements.append(build_drop_staging_statement(trouve.type, staging_address))
     return statements
 
 

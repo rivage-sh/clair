@@ -180,16 +180,16 @@ class Trouve(TrouveAbc):
         self,
         effective_mode: RunMode,
         run_id: str,
-        write_address: TrouveAddress | None = None,
+        staging_address: TrouveAddress | None = None,
     ) -> list[str]:
         """Make the SQL statements that materialize this Trouve.
 
         Args:
             effective_mode: The final run mode. The caller selects it.
             run_id: The unique identifier of this clair run.
-            write_address: The address to write into. It replaces the physical
-                address. The runner gives the staging address here. A reference
-                to an upstream Trouve in the SQL keeps its physical address.
+            staging_address: The staging address, if the run has a staging step.
+                The statements write there, and not to the physical address. A
+                reference to an upstream Trouve keeps its physical address.
 
         Returns:
             The SQL statements to execute, in order. The list is empty for a
@@ -207,17 +207,17 @@ class Trouve(TrouveAbc):
             return []
 
         resolved_sql = self.compiled.resolved_sql.strip()
-        write_target = str(write_address) if write_address else self.physical_name
+        address = str(staging_address) if staging_address else self.physical_name
 
         if effective_mode == RunMode.FULL_REFRESH:
             object_type = "TABLE" if self.type == TrouveType.TABLE else "VIEW"
             return [
-                f"CREATE OR REPLACE {object_type} {write_target} AS (\n{resolved_sql}\n)"
+                f"CREATE OR REPLACE {object_type} {address} AS (\n{resolved_sql}\n)"
             ]
 
         if self.run_config.incremental_mode == IncrementalMode.APPEND:
             return [
-                f"INSERT INTO {write_target}\nSELECT * FROM (\n{resolved_sql}\n)"
+                f"INSERT INTO {address}\nSELECT * FROM (\n{resolved_sql}\n)"
             ]
 
         # The UPSERT mode.
@@ -226,8 +226,8 @@ class Trouve(TrouveAbc):
                 "the upsert mode needs columns on the Trouve"
             )
 
-        # The name comes from the physical address, not from write_target. This
-        # keeps the merge suffix off the top of the staging suffix.
+        # The name comes from the physical address, and not from the staging
+        # address. Thus the merge suffix does not go on top of the staging suffix.
         staging_name = f"{self.physical_name}__clair_staging_{run_id}"
         all_col_names = [c.name for c in self.columns]
         unique_keys = set(self.run_config.primary_key_columns or [])
@@ -255,7 +255,7 @@ class Trouve(TrouveAbc):
         )
         stmt_2 = (
             f"-- [2/3] merge the staging table into the target table\n"
-            f"MERGE INTO {write_target} AS {TARGET}\n"
+            f"MERGE INTO {address} AS {TARGET}\n"
             f"USING {staging_name} AS {SOURCE}\n"
             f"ON {join_condition}\n"
             f"WHEN MATCHED THEN UPDATE SET {update_clause}\n"

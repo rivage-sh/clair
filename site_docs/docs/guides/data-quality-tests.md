@@ -143,7 +143,7 @@ See also: [Tests API reference](../reference/tests-api.md).
 
 ## Testing before publishing
 
-A test runs after clair materializes a Trouve, because only then does a table exist to query. A direct write would thus tell you that production is already wrong. [Staging](staging.md) changes the order, and each run works this way: clair writes each Trouve to a staging address, runs the tests there, and gives the object its physical name only after each test passes.
+A test runs after clair materializes a Trouve, because only then does a table exist to query. A direct write would thus tell you that production is already wrong. [Staging](staging.md) changes the order, and each run works this way: clair writes each Trouve to a staging address, runs the tests there, and gives the data its physical address only after each test passes.
 
 ```bash
 clair run --project . --env prod

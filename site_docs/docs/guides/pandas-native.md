@@ -80,7 +80,7 @@ trouve = PandasTrouve(
 
 `clair run` gives a `PandasTrouve` these four steps:
 
-1. **Read** — for each Trouve in `inputs`, run `SELECT * FROM <full_name>` and load the result into a DataFrame. Column names become lowercase.
+1. **Read** — for each Trouve in `inputs`, run `SELECT * FROM <physical_name>` and load the result into a DataFrame. Column names become lowercase.
 2. **Transform** — call your function locally on the clair machine, with one DataFrame for each parameter, in the order of `inputs`.
 3. **Write** — write the DataFrame from your function to Snowflake. clair creates or replaces the table.
 4. **Test** — run the attached tests against the output table in Snowflake.

@@ -2,13 +2,23 @@
 
 Snowflake can test a table only after the table exists. A direct write therefore puts untested data into production first, and the tests report the fault after a reader saw the wrong numbers.
 
-Staging closes that window, and it is **how clair writes**. There is no flag. Clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the object its physical name only after each test passes.
+Staging closes that window, and it is **how clair writes**. There is no flag. Clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes.
 
 ```bash
 clair run --project . --env prod
 ```
 
 `--no-test` is the one flag that stops this. It removes the tests that decide the promotion, so a staging address protects nothing. That run writes to each physical address directly.
+
+## The three addresses
+
+clair gives each Trouve three addresses, and uses these three names everywhere:
+
+| The address | What it is |
+|-------------|-----------|
+| logical address | The name that the file path gives. The DAG edges and the selectors use it. |
+| physical address | The name that clair writes to. [Routing](routing.md) makes it from the logical address. |
+| staging address | The physical address plus the run-scoped suffix `__clair_<run_id>`. The data goes there first. |
 
 ## The steps for one Trouve
 
