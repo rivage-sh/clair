@@ -18,7 +18,7 @@ runs the DAG in topological order. No Jinja, no YAML configuration.
 |------|-------|
 | `src/clair/` | The package. Tests are in `tests/`. |
 | `site_docs/docs/` | User documentation, published by CI. Source of truth for behaviour. |
-| `example_projects/`, `example_notebooks/` | Runnable examples. |
+| `examples/projects/`, `examples/notebooks/` | Runnable examples. |
 
 Packages inside `src/clair/`:
 
@@ -79,7 +79,7 @@ changes.
 `site_docs/docs/` is the source of truth for behaviour, so update it in the same PR that
 changes the CLI (`cli/`), the public API in `src/clair/__init__.py` (`reference/`), or a
 behaviour that a guide or a concept page describes. The example code in `site_docs/docs/`
-must stay identical to the equivalent code in `example_projects/`. Change one, change the
+must stay identical to the equivalent code in `examples/projects/`. Change one, change the
 other.
 
 ## Simplified Technical English

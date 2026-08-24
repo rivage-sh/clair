@@ -4,7 +4,7 @@ Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
 and gives the physical TrouveAddress. SOURCE Trouves never route.
 
-Run `clair validate --project example_projects/example_3` to find a rule that
+Run `clair validate --project examples/projects/example_1` to find a rule that
 gives an invalid name, and two Trouves that go to one target.
 """
 
@@ -28,8 +28,8 @@ class EnvironmentName(StrEnum):
 class DeveloperRouting(RoutingEntry):
     """Each person writes to a separate database.
 
-    With CLAIR_USER=alice, example_3_database.refined.orders becomes
-    alice.refined.orders.
+    With CLAIR_USER=alice, example_1_database.refined.events becomes
+    alice.refined.events.
     """
 
     environment_name: str = EnvironmentName.DEV.value

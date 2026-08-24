@@ -25,7 +25,7 @@ jobs:
         run: uv sync
 
       - name: Run ty
-        run: uvx ty check --exclude example_notebooks
+        run: uvx ty check --exclude examples/notebooks
 
   test:
     runs-on: ubuntu-latest
