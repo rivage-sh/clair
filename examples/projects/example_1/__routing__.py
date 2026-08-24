@@ -2,7 +2,8 @@
 
 Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
-and gives the physical TrouveAddress. SOURCE Trouves never route.
+and gives the physical TrouveAddress. The entry sees every Trouve, and
+a SOURCE Trouve is not an exception.
 
 Run `clair validate --project examples/projects/example_1` to find a rule that
 gives an invalid name, and two Trouves that go to one target.
@@ -11,7 +12,7 @@ gives an invalid name, and two Trouves that go to one target.
 import os
 from enum import StrEnum
 
-from clair import RoutingEntry, RoutingTable, TrouveAddress
+from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
 
 
 class EnvironmentName(StrEnum):
@@ -35,7 +36,13 @@ class DeveloperRouting(RoutingEntry):
     environment_name: str = EnvironmentName.DEV.value
     user_variable: str = "CLAIR_USER"
 
-    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+    def route(
+        self, trouve_address: TrouveAddress, trouve_type: TrouveType
+    ) -> TrouveAddress:
+        # A SOURCE reads a table that another system writes. It stays where it
+        # is, thus each person reads the same upstream data.
+        if trouve_type == TrouveType.SOURCE:
+            return trouve_address
         user_name = os.environ[self.user_variable]
         return trouve_address.model_copy(update={"database_name": user_name})
 
@@ -45,7 +52,9 @@ class ProductionRouting(RoutingEntry):
 
     environment_name: str = EnvironmentName.PROD.value
 
-    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+    def route(
+        self, trouve_address: TrouveAddress, trouve_type: TrouveType
+    ) -> TrouveAddress:
         return trouve_address
 
 

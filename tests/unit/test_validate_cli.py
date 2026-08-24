@@ -54,7 +54,9 @@ _DEV_SUFFIX_ENTRY = '''
     class DevRouting(RoutingEntry):
         environment_name: str = "dev"
 
-        def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+        def route(
+            self, trouve_address: TrouveAddress, trouve_type: TrouveType
+        ) -> TrouveAddress:
             return trouve_address.model_copy(update={
                 "database_name": f"{trouve_address.database_name}_dev"
             })
@@ -85,10 +87,10 @@ class TestValidateSucceeds:
         # The description names the class, not the base class.
         assert "DevRouting" in result.output
 
-    def test_counts_only_the_routable_trouves(self, project_with_trouves: Path):
-        # 2 TABLE Trouves route. The SOURCE Trouve never routes.
+    def test_counts_every_trouve(self, project_with_trouves: Path):
+        # Every Trouve routes: 2 TABLE Trouves and 1 SOURCE Trouve.
         result = _run_validate(project_with_trouves)
-        assert "Trouves to route: 2" in result.output
+        assert "Trouves to route: 3" in result.output
 
 
 class TestValidateFails:
@@ -97,7 +99,9 @@ class TestValidateFails:
             class DashRouting(RoutingEntry):
                 environment_name: str = "dev"
 
-                def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+                def route(
+                    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+                ) -> TrouveAddress:
                     return TrouveAddress(
                         database_name=f"{trouve_address.database_name}-dev",
                         schema_name=trouve_address.schema_name,
@@ -118,7 +122,9 @@ class TestValidateFails:
             class DashRouting(RoutingEntry):
                 environment_name: str = "dev"
 
-                def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+                def route(
+                    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+                ) -> TrouveAddress:
                     return TrouveAddress(
                         database_name=f"{trouve_address.database_name}-dev",
                         schema_name=trouve_address.schema_name,
@@ -131,14 +137,18 @@ class TestValidateFails:
         result = _run_validate(project_with_trouves)
         assert "analytics.finance.revenue" in result.output
         assert "analytics.reports.revenue" in result.output
-        assert "2 problems found" in result.output
+        # The SOURCE Trouve routes too, thus the bad rule fails on it as well.
+        assert "source.raw.orders" in result.output
+        assert "3 problems found" in result.output
 
     def test_a_collision_fails(self, project_with_trouves: Path):
         _write_routing(project_with_trouves, '''
             class SharedRouting(RoutingEntry):
                 environment_name: str = "dev"
 
-                def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+                def route(
+                    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+                ) -> TrouveAddress:
                     return trouve_address.model_copy(update={
                         "database_name": "DEV", "schema_name": "shared"
                     })
@@ -158,7 +168,9 @@ class TestValidateFails:
             class UserRouting(RoutingEntry):
                 environment_name: str = "dev"
 
-                def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+                def route(
+                    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+                ) -> TrouveAddress:
                     user_name = os.environ["CLAIR_USER"]
                     return trouve_address.model_copy(update={
                         "database_name": f"{trouve_address.database_name}_{user_name}"
@@ -181,7 +193,9 @@ class TestValidateFails:
             class DevRouting(RoutingEntry):
                 environment_name: str = "dev"
 
-                def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+                def route(
+                    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+                ) -> TrouveAddress:
                     return trouve_address
 
 
@@ -214,7 +228,9 @@ class TestUnnamedEnvironmentWarning:
             class ProdRouting(RoutingEntry):
                 environment_name: str = "prod"
 
-                def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+                def route(
+                    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+                ) -> TrouveAddress:
                     return trouve_address
 
 
@@ -232,7 +248,9 @@ class TestUnnamedEnvironmentWarning:
             class StagingRouting(RoutingEntry):
                 environment_name: str = "staging"
 
-                def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+                def route(
+                    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+                ) -> TrouveAddress:
                     return trouve_address
 
 

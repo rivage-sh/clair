@@ -390,7 +390,7 @@ def validate(project: str, env: str | None) -> None:
     routable: list[tuple[str, TrouveType]] = [
         (trouve.compiled.logical_name, trouve.type)
         for trouve in discovered
-        if trouve.compiled is not None and trouve.type != TrouveType.SOURCE
+        if trouve.compiled is not None
     ]
 
     click.echo(f"\n  environment: {env_name}")

@@ -23,7 +23,7 @@ The routing file holds no credentials, so you commit it and your team reviews it
 ## The three types
 
 ```python
-from clair import RoutingEntry, RoutingTable, TrouveAddress
+from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
 ```
 
 `TrouveAddress` holds a `database_name`, a `schema_name`, and a `table_name`. It validates each name when you make it, so an address that exists is a valid Snowflake identifier.
@@ -57,7 +57,12 @@ class DeveloperRouting(RoutingEntry):
     environment_name: str = EnvironmentName.DEV.value
     user_variable: str = "CLAIR_USER"
 
-    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+    def route(
+        self, trouve_address: TrouveAddress, trouve_type: TrouveType
+    ) -> TrouveAddress:
+        # Another system writes the source table, thus it does not move.
+        if trouve_type == TrouveType.SOURCE:
+            return trouve_address
         user_name = os.environ[self.user_variable].upper()
         return trouve_address.model_copy(
             update={"database_name": f"{trouve_address.database_name}_{user_name}"}
@@ -69,7 +74,9 @@ class ProductionRouting(RoutingEntry):
 
     environment_name: str = EnvironmentName.PROD.value
 
-    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+    def route(
+        self, trouve_address: TrouveAddress, trouve_type: TrouveType
+    ) -> TrouveAddress:
         return trouve_address
 
 
@@ -80,7 +87,7 @@ With `CLAIR_USER=alice` and the `dev` environment:
 
 | Logical name | Physical target |
 |---|---|
-| `source.orders.raw` | `source.orders.raw` (SOURCE — passthrough) |
+| `source.orders.raw` | `source.orders.raw` (the entry gives a SOURCE back) |
 | `refined.orders.daily` | `refined_ALICE.orders.daily` |
 | `derived.orders.summary` | `derived_ALICE.orders.summary` |
 
@@ -89,17 +96,22 @@ misspell. A `StrEnum` gives each name one definition, and your editor completes 
 
 ## Write a route method
 
-`route` accepts one `TrouveAddress` and gives one `TrouveAddress`. To change one part, call `model_copy`:
+`route` accepts one `TrouveAddress` and one `TrouveType`, and gives one `TrouveAddress`. To
+change one part, call `model_copy`:
 
 ```python
-def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+def route(
+    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+) -> TrouveAddress:
     return trouve_address.model_copy(update={"database_name": "DEV"})
 ```
 
 To build a new address, name all three parts:
 
 ```python
-def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+def route(
+    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+) -> TrouveAddress:
     collapsed_table_name = (
         f"{trouve_address.database_name}_{trouve_address.schema_name}_"
         f"{trouve_address.table_name}"
@@ -132,9 +144,31 @@ writes:
   effective_mode=full_refresh
 ```
 
-## SOURCE passthrough
+## The Trouve type
 
-SOURCE Trouves always use their logical name. clair never calls `route` for a SOURCE Trouve. Routing applies to TABLE and VIEW Trouves only.
+clair calls `route` for every Trouve, and a SOURCE Trouve is not an exception. The second
+parameter gives the type, thus one entry can hold a different rule for each type.
+
+Most projects keep a SOURCE at its logical address: another system writes that table, thus
+the table does not move with your environment. Examine the type and give the address back:
+
+```python
+from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
+
+
+class DeveloperRouting(RoutingEntry):
+    environment_name: str = "dev"
+
+    def route(
+        self, trouve_address: TrouveAddress, trouve_type: TrouveType
+    ) -> TrouveAddress:
+        if trouve_type == TrouveType.SOURCE:
+            return trouve_address
+        return trouve_address.model_copy(update={"database_name": "ALICE"})
+```
+
+A test environment does the opposite: it routes the SOURCE too, thus the whole pipeline
+reads and writes one throwaway database.
 
 ## No entry for an environment
 

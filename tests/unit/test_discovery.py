@@ -16,7 +16,11 @@ from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
 from clair.trouves.trouve import Trouve, TrouveType
-from tests.helpers import DatabaseOverrideRouting, SchemaIsolationRouting
+from tests.helpers import (
+    DatabaseOverrideRouting,
+    SchemaIsolationRouting,
+    SourceAwareRouting,
+)
 
 
 class TestComputeFullName:
@@ -136,12 +140,23 @@ class TestDiscoveryWithRouting:
 
         assert table.physical_name == "MYDEV.revenue.daily_orders"
 
-    def test_database_override_source_not_rerouted(self, simple_project: Path):
+    def test_database_override_reroutes_a_source_too(self, simple_project: Path):
+        """The entry sees every Trouve, thus this entry moves the SOURCE too."""
         routing = DatabaseOverrideRouting(database_name="MYDEV")
         trouves = discover_project(simple_project, routing=routing)
         source = next(t for t in trouves if t.type == TrouveType.SOURCE)
 
+        assert source.physical_name == "MYDEV.raw.orders"
+
+    def test_a_source_aware_entry_keeps_the_source(self, simple_project: Path):
+        """An entry that examines the type keeps the SOURCE where it is."""
+        routing = SourceAwareRouting(database_name="MYDEV")
+        trouves = discover_project(simple_project, routing=routing)
+        source = next(t for t in trouves if t.type == TrouveType.SOURCE)
+        table = next(t for t in trouves if t.type == TrouveType.TABLE)
+
         assert source.physical_name == "source.raw.orders"
+        assert table.physical_name == "MYDEV.revenue.daily_orders"
 
     def test_database_override_logical_name_preserved(self, simple_project: Path):
         routing = DatabaseOverrideRouting(database_name="MYDEV")

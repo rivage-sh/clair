@@ -216,7 +216,9 @@ clair validate --project examples/projects/example_2
 clair validate --project examples/projects/example_2 --env prod
 ```
 
-SOURCE Trouves never route. The `source` schema keeps its logical name in every environment.
+The routing entry sees every Trouve. This entry examines the Trouve type and gives a
+SOURCE back unchanged, thus the `source` schema keeps its logical name in every
+environment.
 
 See the [routing guide](../../site_docs/docs/guides/routing.md) for the full rules.
 
