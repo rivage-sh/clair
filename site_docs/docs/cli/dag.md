@@ -34,7 +34,7 @@ clair dag --project . --select='refined.*.*'
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
-| `--select` | all | Glob pattern that filters the Trouves. Repeat the flag to add more patterns. |
+| `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../guides/selectors.md). Repeat the flag to add more patterns. |
 
 ## See also
 

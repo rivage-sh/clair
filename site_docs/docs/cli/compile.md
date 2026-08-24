@@ -51,7 +51,7 @@ _clairtifacts/
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
 | `--env` | optional | Environment name. It selects the entry in `__routing__.py` that clair applies to the generated SQL. |
-| `--select` | all | Glob pattern that filters the Trouves. Repeat the flag to add more patterns. |
+| `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../guides/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Selects which SQL variant clair generates. |
 
 ## See also
