@@ -342,13 +342,17 @@ class TestRecompileForSelection:
         # The selection contains refined.events, and thus daily reads omer.refined.events.
         assert "omer.refined.events" in daily.compiled.resolved_sql
 
-    def test_source_references_never_routed(self, tmp_path: Path):
-        """An upstream SOURCE always keeps its logical address, whatever the selection is."""
+    def test_a_source_reaches_the_sql_with_its_physical_address(self, tmp_path: Path):
+        """A SOURCE that goes somewhere else reaches the SQL with that address.
+
+        Clair never builds a SOURCE, thus the physical address is the only place
+        that holds it. A SOURCE is never in the selection, and the substitution
+        must happen anyway.
+        """
         project = _make_chained_project(tmp_path)
         routing = DatabaseOverrideRouting(database_name="omer")
         trouves = discover_project(project, routing=routing)
 
-        # Select each Trouve, and refined.events too, with the physical addresss.
         selected = {
             str(t.compiled.physical_address)
             for t in trouves
@@ -358,7 +362,24 @@ class TestRecompileForSelection:
 
         refined = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.refined.events")
         assert refined.compiled is not None
-        # source.events is a SOURCE, and thus its name is always logical.
+        assert "omer.source.events" in refined.compiled.resolved_sql
+        assert "mydb.source.events" not in refined.compiled.resolved_sql
+
+    def test_a_source_that_stays_keeps_its_logical_address(self, tmp_path: Path):
+        """An entry that gives a SOURCE back leaves the address in the SQL."""
+        project = _make_chained_project(tmp_path)
+        routing = SourceAwareRouting(database_name="omer")
+        trouves = discover_project(project, routing=routing)
+
+        selected = {
+            str(t.compiled.physical_address)
+            for t in trouves
+            if t.compiled and t.type != TrouveType.SOURCE
+        }
+        recompile_for_selection(trouves, selected)
+
+        refined = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.refined.events")
+        assert refined.compiled is not None
         assert "mydb.source.events" in refined.compiled.resolved_sql
         assert "omer.source.events" not in refined.compiled.resolved_sql
 
@@ -445,15 +466,15 @@ class TestRecompileForSelectionTestSql:
         orders = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.refined.orders")
         assert orders.compiled is not None
 
-        # The selection never holds a SOURCE. It holds orders only.
+        # The selection holds orders only. A SOURCE is never in a selection.
         selected = {str(orders.compiled.physical_address)}
         recompile_for_selection(trouves, selected)
 
         test = orders.tests[0]
         assert isinstance(test, TestSql)
-        # customers is a SOURCE. Clair never routes it, and thus it keeps its
-        # logical address.
-        assert "mydb.source.customers" in test.sql
+        # customers is a SOURCE, and this entry gives it a new address. The
+        # test SQL therefore reads that address.
+        assert "dev.source.customers" in test.sql
 
     def test_recompile_upgrades_table_refs_in_test_sql(self, tmp_path: Path):
         """A TestSql name that points to a selected upstream TABLE becomes a physical address."""

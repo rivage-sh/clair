@@ -367,9 +367,10 @@ def recompile_for_selection(
     address of each selected TABLE or VIEW upstream Trouve to its physical
     address, because clair materializes that Trouve there in this run.
 
-    A SOURCE upstream Trouve keeps its logical address. A TABLE or VIEW upstream
-    Trouve that the user did not select also keeps its logical address. Thus a
-    partial run reads the correct production tables.
+    A routed SOURCE upstream Trouve always takes its physical address: clair
+    never builds a SOURCE, thus the physical address is the only place that holds
+    it. A TABLE or VIEW upstream Trouve that the user did not select keeps its
+    logical address. Thus a partial run reads the correct production tables.
 
     This function changes each Trouve in place. It does nothing when no routing
     policy is active, because the two addresses are then equal.
@@ -379,15 +380,16 @@ def recompile_for_selection(
         selected_addresses: The physical addresses of the Trouves for this run.
             The DAG selector gives them.
     """
-    # Map the logical address to the physical address for each selected Trouve
-    # that is not a SOURCE and that has a different physical address.
+    # Map the logical address to the physical address of each Trouve that goes
+    # somewhere else. A SOURCE is never in selected_addresses, because clair does
+    # not build it, and the physical address is the only place that holds it.
     logical_to_physical: dict[str, str] = {}
     for t in trouves:
+        if not t.compiled or t.compiled.physical_address == t.compiled.logical_address:
+            continue
         if (
-            t.compiled
-            and str(t.compiled.physical_address) in selected_addresses
-            and t.type != TrouveType.SOURCE
-            and t.compiled.physical_address != t.compiled.logical_address
+            t.type == TrouveType.SOURCE
+            or str(t.compiled.physical_address) in selected_addresses
         ):
             logical_to_physical[str(t.compiled.logical_address)] = str(
                 t.compiled.physical_address
