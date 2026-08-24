@@ -23,7 +23,7 @@ _ROUTING_TEMPLATE = '''\
 
 Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
-and gives the physical TrouveAddress. SOURCE Trouves never route.
+and gives the physical TrouveAddress.
 
 This file starts with one entry, and that entry changes nothing: the physical
 name stays equal to the logical name. Change the route method when you want a
@@ -33,7 +33,7 @@ See https://clair.rivage.sh/guides/routing/
 
 from enum import StrEnum
 
-from clair import RoutingEntry, RoutingTable, TrouveAddress
+from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
 
 
 class EnvironmentName(StrEnum):
@@ -50,7 +50,9 @@ class DevelopmentRouting(RoutingEntry):
 
     environment_name: str = EnvironmentName.DEV.value
 
-    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+    def route(
+        self, trouve_address: TrouveAddress, trouve_type: TrouveType
+    ) -> TrouveAddress:
         return trouve_address
 
 

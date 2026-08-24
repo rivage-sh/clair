@@ -244,7 +244,7 @@ def discover_project(
     # Phase A: make the logical name and the routed name of each Trouve.
     # logical_name = the name from the file path. DAG edges and selectors use it.
     # routed_name  = the physical target name. The SQL and the DDL use it.
-    # A SOURCE Trouve always keeps its name, whatever the routing policy is.
+    # The routing entry sees every Trouve, a SOURCE too.
     logical_names: dict[int, str] = {}
     routed_names: dict[int, str] = {}
     collision_check: dict[str, str] = {}
@@ -253,8 +253,8 @@ def discover_project(
         logical_names[id(trouve_obj)] = physical_name
         routed = route(physical_name, trouve_obj.type, routing)
         routed_names[id(trouve_obj)] = routed
-        if trouve_obj.type != TrouveType.SOURCE:
-            collision_check[physical_name.upper()] = routed
+        # A TABLE that routes onto a SOURCE replaces the data it reads.
+        collision_check[physical_name.upper()] = routed
 
     # Make a map from an id to a logical name, for the pandas dependencies. With
     # this map, clair finds the logical name of each Trouve that a PandasTrouve

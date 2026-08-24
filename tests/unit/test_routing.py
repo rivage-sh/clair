@@ -18,7 +18,11 @@ from clair.environments.routing import (
 )
 from clair.exceptions import InvalidRoutingConfigError, InvalidTrouveAddressError
 from clair.trouves.trouve import TrouveType
-from tests.helpers import DatabaseOverrideRouting, SchemaIsolationRouting
+from tests.helpers import (
+    DatabaseOverrideRouting,
+    SchemaIsolationRouting,
+    SourceAwareRouting,
+)
 
 
 class TestTrouveAddress:
@@ -146,11 +150,22 @@ class TestRoute:
             "analytics.finance.revenue"
         )
 
-    def test_source_passthrough_with_routing(self):
+    def test_an_entry_routes_a_source_too(self):
+        """The entry sees every Trouve. A SOURCE is not an exception."""
         result = route(
             "analytics.finance.revenue", TrouveType.SOURCE, _db_override("OMER_DEV")
         )
-        assert result == "analytics.finance.revenue"
+        assert result == "OMER_DEV.finance.revenue"
+
+    def test_an_entry_can_keep_a_source_at_its_logical_address(self):
+        """An entry examines the Trouve type to give a SOURCE back unchanged."""
+        entry = SourceAwareRouting(database_name="OMER_DEV")
+        assert route("analytics.finance.revenue", TrouveType.SOURCE, entry) == (
+            "analytics.finance.revenue"
+        )
+        assert route("analytics.finance.revenue", TrouveType.TABLE, entry) == (
+            "OMER_DEV.finance.revenue"
+        )
 
     def test_database_override_table(self):
         result = route(
@@ -206,7 +221,7 @@ class TestRouteRejectsABadEntry:
         class StringRouting(RoutingEntry):
             environment_name: str = "dev"
 
-            def route(self, trouve_address):
+            def route(self, trouve_address, trouve_type):
                 return "a.b.c"
 
         with pytest.raises(
@@ -218,7 +233,7 @@ class TestRouteRejectsABadEntry:
         class NoneRouting(RoutingEntry):
             environment_name: str = "dev"
 
-            def route(self, trouve_address):
+            def route(self, trouve_address, trouve_type):
                 return None
 
         with pytest.raises(InvalidRoutingConfigError, match="NoneType"):
@@ -230,7 +245,7 @@ class TestRouteRejectsABadEntry:
         class UserRouting(RoutingEntry):
             environment_name: str = "dev"
 
-            def route(self, trouve_address):
+            def route(self, trouve_address, trouve_type):
                 user = os.environ["CLAIR_USER"]
                 return trouve_address.model_copy(
                     update={"database_name": f"{trouve_address.database_name}_{user}"}
@@ -243,7 +258,7 @@ class TestRouteRejectsABadEntry:
         class DashRouting(RoutingEntry):
             environment_name: str = "dev"
 
-            def route(self, trouve_address):
+            def route(self, trouve_address, trouve_type):
                 return TrouveAddress(
                     database_name="my-db",
                     schema_name=trouve_address.schema_name,
@@ -259,7 +274,7 @@ class TestRouteRejectsABadEntry:
         class UserRouting(RoutingEntry):
             environment_name: str = "dev"
 
-            def route(self, trouve_address):
+            def route(self, trouve_address, trouve_type):
                 user = os.environ["CLAIR_USER"].upper()
                 return trouve_address.model_copy(
                     update={"database_name": f"{trouve_address.database_name}_{user}"}
