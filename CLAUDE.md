@@ -54,8 +54,6 @@ index belong to one worktree. Therefore:
 - Never pass `-B`, and never name the branch `main`. `git checkout -B main origin/main`
   moves the shared ref, and the main checkout keeps its old files under a new HEAD. Its
   `git status` then shows a complete reverse diff, which reads like data loss.
-- To repair a checkout in that state, run `git reset --hard HEAD` in it. Ignored and
-  untracked files stay.
 
 ## Code
 
