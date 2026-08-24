@@ -98,15 +98,32 @@ environment**, not on the repository:
 | `CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_BASE64` | `base64 -i clair_ci_key.p8 \| tr -d '\n'` |
 | `CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` | Only for an encrypted key. |
 
-Then, on the same environment page, add **Required reviewers** and add yourself.
-GitHub then asks for your approval before a job reaches the credentials.
+### Required reviewers: when to turn them on
+
+While one account only has write access, leave **Required reviewers** off. An
+approval that you give to your own pull request adds work and no protection.
+
+Turn **Required reviewers** on (the same environment page) on the day that you
+give write access to a second person. GitHub then stops the job before it
+starts, and it asks for an approval.
+
+Read the diff before you approve. You do not approve a test run: you approve the
+execution of that code with the Snowflake key.
+
+To see each account with write access:
+
+```bash
+scratchpad/security/repo_write_access.sh
+```
+
+That script is not in the repository, because `scratchpad/` is in `.gitignore`.
 
 ## Why this is safe in a public repository
 
 | Risk | The control |
 |---|---|
 | A pull request from a fork reads the secrets. | The trigger is `pull_request`, and GitHub gives no secret to a fork run. The `if:` condition also stops the job. **Never** change the trigger to `pull_request_target`. |
-| A new collaborator starts a job that steals the credentials. | The `snowflake-integration` environment holds the secrets, and required reviewers gate it. |
+| A person with write access starts a job that steals the credentials. | Write access to the repository **is** access to the credentials: the job runs the code of the branch, thus a new test can print a secret. The `snowflake-integration` environment holds the secrets, and required reviewers gate it when more than one person has write access. |
 | A test drops the wrong schema. | `ci_snowflake.py` reads the schema names from `INFORMATION_SCHEMA` first, and it compares them in Python. It refuses `SEED`, `PUBLIC` and `INFORMATION_SCHEMA`, and it refuses a prefix with an unusual character. |
 | The credentials reach another database. | `CLAIR_CI_ROLE` has a grant on the `CLAIR_CI` database only. |
 | A workflow uses too many credits. | The `CLAIR_CI_MONITOR` resource monitor suspends the warehouse at 5 credits each month. |

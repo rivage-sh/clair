@@ -10,9 +10,13 @@ name: Integration
 #   maintainer read.
 # * The `if:` condition below stops the job for a pull request from a fork. The
 #   job then reports "skipped", and the pull request stays green.
-# * The job needs the `snowflake-integration` environment. Put the required
-#   reviewers on that environment, thus a new collaborator cannot reach the
-#   credentials without an approval.
+# * A pull request from a BRANCH OF THIS REPOSITORY does get the secrets, and
+#   the job runs the code of that branch. Write access to the repository is
+#   therefore access to the credentials. No restriction on a subdirectory stops
+#   this, because `uv sync` and `pytest` run the code of the whole repository.
+# * The job needs the `snowflake-integration` environment. Put required
+#   reviewers on that environment when a second person gets write access. See
+#   tests/integration/README.md.
 # * The job reads the repository only. It writes no comment and no commit.
 #
 # Do not make this job a required status check. A pull request from a fork
