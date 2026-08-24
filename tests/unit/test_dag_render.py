@@ -1,4 +1,4 @@
-"""Tests for DAG rendering -- tree visualization of a ClairDag."""
+"""The tests of the DAG render code, which draws a ClairDag as a tree."""
 
 from __future__ import annotations
 
@@ -17,26 +17,25 @@ from clair.core.dag_render import (
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
-
 # ---------------------------------------------------------------------------
-# Helper
+# The helper functions.
 # ---------------------------------------------------------------------------
 
 
 def _make_trouve(
-    full_name: str,
+    physical_name: str,
     trouve_type: TrouveType = TrouveType.TABLE,
     imports: list[str] | None = None,
 ) -> Trouve:
-    """Create a minimal compiled Trouve for rendering tests."""
+    """Make a small compiled Trouve for a render test."""
     sql = "select 1" if trouve_type != TrouveType.SOURCE else ""
     t = Trouve(type=trouve_type, sql=sql)
     t.compiled = CompiledAttributes(
-        full_name=full_name,
-        logical_name=full_name,
+        physical_name=physical_name,
+        logical_name=physical_name,
         resolved_sql=sql,
-        file_path=Path(f"/fake/{full_name.replace('.', '/')}.py"),
-        module_name=full_name,
+        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
+        module_name=physical_name,
         imports=imports or [],
         config=ResolvedConfig(),
         execution_type=ExecutionType.SNOWFLAKE,
@@ -48,20 +47,20 @@ def _build_dag(
     nodes: list[tuple[str, TrouveType]],
     edges: list[tuple[str, str]] | None = None,
 ) -> ClairDag:
-    """Build a ClairDag from (full_name, type) pairs and (src, dst) edges."""
+    """Make a ClairDag from the (physical_name, type) pairs and the (src, dst) edges."""
     dag = ClairDag()
-    for full_name, ttype in nodes:
-        dag.add_trouve(_make_trouve(full_name, ttype))
+    for physical_name, ttype in nodes:
+        dag.add_trouve(_make_trouve(physical_name, ttype))
     for src, dst in edges or []:
         dag.add_dependency(src, dst)
     return dag
 
 
 def _node_name(line: str) -> str:
-    """Extract the node full_name from a rendered output line.
+    """Read the node physical_name from one line of the output.
 
-    Strips tree-drawing characters and other
-    prefixes, returning the bare fully-qualified name.
+    The function removes each tree character and each other prefix. It gives the
+    full name alone.
     """
     for i, ch in enumerate(line):
         if ch.isalpha():
@@ -70,7 +69,7 @@ def _node_name(line: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Basic rendering
+# The basic output
 # ---------------------------------------------------------------------------
 
 
@@ -157,16 +156,16 @@ class TestLinearChain:
         output = render_dag(linear_dag)
         rendered = output.render()
         lines = [ln for ln in rendered.split("\n") if ln.strip() and "===" not in ln]
-        # depth 0: root, no connector
+        # Depth 0: the root, with no connector.
         assert lines[0].startswith("source.raw.orders")
-        # depth 1: direct child connector
+        # Depth 1: a child, with a connector.
         assert lines[1].startswith("└── ") or lines[1].startswith("├── ")
-        # depth 2: child with 4-char indent prefix + connector
+        # Depth 2: a child, with an indent of 4 characters and a connector.
         assert lines[2].startswith("    └── ") or lines[2].startswith("    ├── ")
 
 
 # ---------------------------------------------------------------------------
-# Depth and indentation
+# The depth and the indent
 # ---------------------------------------------------------------------------
 
 
@@ -202,7 +201,7 @@ class TestDepthAndIndentation:
         assert lines[2].startswith("    └── db.s.c") or lines[2].startswith("    ├── db.s.c")
 
     def test_diamond_node_appears_at_longest_path_depth(self):
-        """In a diamond A->B->D, A->C->D, D should be a grandchild (depth 2)."""
+        """In a diamond A->B->D and A->C->D, node D is at depth 2."""
         dag = _build_dag(
             [
                 ("db.s.a", TrouveType.SOURCE),
@@ -221,8 +220,8 @@ class TestDepthAndIndentation:
         rendered = output.render()
         for line in rendered.split("\n"):
             if "db.s.d" in line and "(^)" not in line:
-                assert line.startswith("│   └── db.s.d") or line.startswith(
-                    "    └── db.s.d"
+                assert line.startswith(
+                    ("│   └── db.s.d", "    └── db.s.d")
                 ), f"db.s.d should be at depth 2, got: {line!r}"
                 break
         else:
@@ -230,13 +229,13 @@ class TestDepthAndIndentation:
 
 
 # ---------------------------------------------------------------------------
-# Diamond / fan-in
+# A diamond, where two parents give one child
 # ---------------------------------------------------------------------------
 
 
 class TestDiamondFanIn:
     def test_node_with_two_parents_real_entry_appears_once(self):
-        """Fan-in: merged appears once as a full entry, once as a back-ref (^)."""
+        """The node merged occurs one time as a complete entry and one time as a (^) reference."""
         dag = _build_dag(
             [
                 ("db.s.src1", TrouveType.SOURCE),
@@ -260,7 +259,7 @@ class TestDiamondFanIn:
         assert back_ref_count == 1
 
     def test_fan_in_direct_child_of_source(self):
-        """Merged is a direct child (depth 1) of its source parents."""
+        """The node merged is at depth 1, below its two source parents."""
         dag = _build_dag(
             [
                 ("db.s.src1", TrouveType.SOURCE),
@@ -276,16 +275,14 @@ class TestDiamondFanIn:
         rendered = output.render()
         for line in rendered.split("\n"):
             if "db.s.merged" in line and "(^)" not in line:
-                assert line.startswith("└── db.s.merged") or line.startswith(
-                    "├── db.s.merged"
-                )
+                assert line.startswith(("└── db.s.merged", "├── db.s.merged"))
                 break
         else:
             pytest.fail("db.s.merged not found in output")
 
 
 # ---------------------------------------------------------------------------
-# Multiple roots
+# More than one root
 # ---------------------------------------------------------------------------
 
 
@@ -317,20 +314,20 @@ class TestMultipleRoots:
             if ln.strip() and "===" not in ln and "db.s." in ln
         ]
         assert len(root_indices) == 2
-        # There should be a blank line between the two root nodes
+        # An empty line separates the two root nodes.
         assert root_indices[1] - root_indices[0] == 2
         assert lines[root_indices[0] + 1].strip() == ""
 
 
 # ---------------------------------------------------------------------------
-# Selected filtering
+# The selection filter
 # ---------------------------------------------------------------------------
 
 
 class TestSelectedFiltering:
     @pytest.fixture
     def chain_dag(self) -> ClairDag:
-        """SOURCE -> staging -> daily_orders"""
+        """A chain: SOURCE -> staging -> daily_orders."""
         return _build_dag(
             [
                 ("source.raw.orders", TrouveType.SOURCE),
@@ -345,7 +342,7 @@ class TestSelectedFiltering:
 
     @pytest.fixture
     def chain_with_unrelated(self) -> ClairDag:
-        """Chain plus an unrelated branch."""
+        """The chain, and one more branch that is separate."""
         return _build_dag(
             [
                 ("source.raw.orders", TrouveType.SOURCE),
@@ -399,7 +396,7 @@ class TestSelectedFiltering:
         assert "analytics.events.counts" not in output.visible_nodes
 
     def test_selected_empty_list_renders_all(self, chain_dag: ClairDag):
-        """Empty selected=[] is treated as no selection and renders all nodes."""
+        """An empty selected=[] means no selection. The tree shows each node."""
         output = render_dag(chain_dag, selected=[])
         assert len(output.visible_nodes) > 0
 
@@ -424,7 +421,7 @@ class TestSelectedFiltering:
 
 
 # ---------------------------------------------------------------------------
-# Node metadata / type tags
+# The node data and the type tags
 # ---------------------------------------------------------------------------
 
 
@@ -456,7 +453,7 @@ class TestNodeMetadata:
             ],
         )
         output = render_dag(dag)
-        assert output.model_count == 2  # TABLE + VIEW
+        assert output.model_count == 2  # One TABLE and one VIEW.
         assert output.source_count == 1
 
     def test_all_three_types_visible(self):
@@ -474,7 +471,7 @@ class TestNodeMetadata:
 
 
 # ---------------------------------------------------------------------------
-# Output format
+# The output format
 # ---------------------------------------------------------------------------
 
 
@@ -514,7 +511,7 @@ class TestOutputFormat:
             ],
         )
         output = render_dag(dag)
-        # 3 models (2 TABLE + 1 VIEW), 2 sources
+        # 3 models: 2 TABLE and 1 VIEW. Also 2 sources.
         assert output.model_count == 3
         assert output.source_count == 2
 
@@ -531,7 +528,7 @@ class TestOutputFormat:
         assert output.source_count == 1
 
     def test_alphabetical_ordering_within_depth(self):
-        """Siblings at the same depth are sorted alphabetically."""
+        """The nodes at one depth are in alphabetic order."""
         dag = _build_dag(
             [
                 ("db.s.root", TrouveType.SOURCE),
@@ -556,7 +553,7 @@ class TestOutputFormat:
 
 
 # ---------------------------------------------------------------------------
-# Header helper (unit tests for coverage)
+# The header function
 # ---------------------------------------------------------------------------
 
 
@@ -580,7 +577,7 @@ class TestFormatHeader:
 
 
 # ---------------------------------------------------------------------------
-# _compute_depths (unit tests for coverage)
+# The _compute_depths function
 # ---------------------------------------------------------------------------
 
 
@@ -660,34 +657,34 @@ class TestComputeVisibleNodes:
             ],
             [("db.s.a", "db.s.b")],
         )
-        visible, matched = _compute_visible_nodes(dag, ["db.s.b"])
+        visible, _matched = _compute_visible_nodes(dag, ["db.s.b"])
         assert "db.s.unrelated" not in visible
 
 
 # ---------------------------------------------------------------------------
-# Edge case: selected=[] triggers IndexError (bug documentation)
+# A limit case: selected=[] caused an IndexError. These tests record the fix.
 # ---------------------------------------------------------------------------
 
 
 class TestSelectedEmptyList:
     def test_empty_selected_list_renders_all(self):
-        """Empty selected=[] is treated as no selection and renders all nodes."""
+        """An empty selected=[] means no selection. The tree shows each node."""
         dag = _build_dag([("db.s.a", TrouveType.SOURCE)])
         output = render_dag(dag, selected=[])
         assert "db.s.a" in output.visible_nodes
 
 
 # ---------------------------------------------------------------------------
-# Sentinel refactor: exhaustive edge-case and adversarial tests
+# The marker refactor: the complete limit cases and the hostile inputs
 # ---------------------------------------------------------------------------
 
 
 class TestSentinelRefactor:
-    """Verify the None -> [] normalization and all boundary conditions."""
+    """These tests show the change from None to [], and each limit condition."""
 
     @pytest.fixture
     def three_node_chain(self) -> ClairDag:
-        """SOURCE(src) -> TABLE(mid) -> TABLE(leaf)"""
+        """A chain: SOURCE(src) -> TABLE(mid) -> TABLE(leaf)."""
         return _build_dag(
             [
                 ("db.s.src", TrouveType.SOURCE),
@@ -716,7 +713,7 @@ class TestSentinelRefactor:
             ],
         )
 
-    # --- 1. selected=None renders all nodes (baseline) ---
+    # --- 1. selected=None shows each node. This is the reference case. ---
 
     def test_selected_none_renders_all_nodes(self, three_node_chain: ClairDag):
         output = render_dag(three_node_chain, selected=None)
@@ -732,7 +729,7 @@ class TestSentinelRefactor:
         output = render_dag(three_node_chain, selected=None)
         assert output.matched_nodes == []
 
-    # --- 2. selected=[] must render all nodes (same as None) ---
+    # --- 2. selected=[] must show each node, as None does. ---
 
     def test_selected_empty_list_renders_all_nodes(self, three_node_chain: ClairDag):
         output = render_dag(three_node_chain, selected=[])
@@ -755,7 +752,7 @@ class TestSentinelRefactor:
         output_empty = render_dag(three_node_chain, selected=[])
         assert output_none.render() == output_empty.render()
 
-    # --- 3. selected=["*.*.*"] matches everything ---
+    # --- 3. selected=["*.*.*"] agrees with each node. ---
 
     def test_star_star_star_matches_all_dotted_names(self, three_node_chain: ClairDag):
         output = render_dag(three_node_chain, selected=["*.*.*"])
@@ -771,7 +768,7 @@ class TestSentinelRefactor:
         output = render_dag(three_node_chain, selected=["*.*.*"])
         assert output.selector == "*.*.*"
 
-    # --- 4. selected=["nonexistent.*"] no-match message ---
+    # --- 4. selected=["nonexistent.*"] gives the no-match message. ---
 
     def test_nonexistent_pattern_returns_no_match(
         self, three_node_chain: ClairDag
@@ -787,7 +784,7 @@ class TestSentinelRefactor:
         output = render_dag(three_node_chain, selected=["nonexistent.*"])
         assert output.selector == "nonexistent.*"
 
-    # --- 5. Multi-pattern: union of matches ---
+    # --- 5. Many patterns: clair joins the results. ---
 
     def test_multi_pattern_union_shows_both_branches(self, two_branch_dag: ClairDag):
         output = render_dag(two_branch_dag, selected=["a.s.*", "b.s.*"])
@@ -800,7 +797,7 @@ class TestSentinelRefactor:
         output = render_dag(two_branch_dag, selected=["a.s.y", "b.s.q"])
         assert "a.s.y" in output.matched_nodes
         assert "b.s.q" in output.matched_nodes
-        # Ancestors should not be matched
+        # A parent node is not a match.
         assert "a.s.x" not in output.matched_nodes
         assert "b.s.p" not in output.matched_nodes
 
@@ -811,16 +808,16 @@ class TestSentinelRefactor:
         assert output.selector == "a.s.*"
 
     def test_multi_pattern_one_matching_one_not(self, three_node_chain: ClairDag):
-        """First pattern matches nothing, second matches a leaf."""
+        """The first pattern agrees with no node. The second pattern agrees with a leaf."""
         output = render_dag(three_node_chain, selected=["nope.*", "db.s.leaf"])
         assert "db.s.leaf" in output.visible_nodes
-        assert "db.s.mid" in output.visible_nodes  # ancestor
-        assert "db.s.src" in output.visible_nodes  # ancestor
+        assert "db.s.mid" in output.visible_nodes  # A parent node.
+        assert "db.s.src" in output.visible_nodes  # A parent node.
 
-    # --- 6. selected=[""] empty string pattern ---
+    # --- 6. selected=[""], an empty pattern. ---
 
     def test_empty_string_pattern_matches_nothing(self, three_node_chain: ClairDag):
-        """fnmatch(name, '') is False for all non-empty names."""
+        """fnmatch(name, '') is False for each name that is not empty."""
         output = render_dag(three_node_chain, selected=[""])
         assert output.no_match is True
 
@@ -830,10 +827,10 @@ class TestSentinelRefactor:
         output = render_dag(three_node_chain, selected=[""])
         assert output.selector == ""
 
-    # --- 7. selected=["*"] single wildcard ---
+    # --- 7. selected=["*"], one wildcard. ---
 
     def test_single_star_matches_dotted_names(self, three_node_chain: ClairDag):
-        """fnmatch treats '.' as a regular char, so '*' matches 'db.s.leaf'."""
+        """For fnmatch, '.' is a usual character. Thus '*' agrees with 'db.s.leaf'."""
         output = render_dag(three_node_chain, selected=["*"])
         assert "db.s.src" in output.visible_nodes
         assert "db.s.mid" in output.visible_nodes
@@ -843,7 +840,7 @@ class TestSentinelRefactor:
         output = render_dag(three_node_chain, selected=["*"])
         assert set(output.matched_nodes) == {"db.s.src", "db.s.mid", "db.s.leaf"}
 
-    # --- 8. _compute_visible_nodes directly ---
+    # --- 8. A direct call to _compute_visible_nodes. ---
 
     def test_compute_visible_nodes_empty_list_returns_all(
         self, three_node_chain: ClairDag
@@ -867,7 +864,7 @@ class TestSentinelRefactor:
         assert vis_none == vis_empty
         assert mat_none == mat_empty
 
-    # --- 9. Ancestor inclusion correctness ---
+    # --- 9. The tree holds the correct parent nodes. ---
 
     def test_leaf_selected_ancestors_visible_but_unmarked(
         self, three_node_chain: ClairDag
@@ -887,7 +884,7 @@ class TestSentinelRefactor:
     def test_mid_node_selected_includes_ancestor_excludes_descendant(
         self, three_node_chain: ClairDag
     ):
-        """Selecting middle node shows src (ancestor) but NOT leaf (descendant)."""
+        """A selection of the middle node shows src, the parent, but not leaf, the child."""
         visible, matched = _compute_visible_nodes(
             three_node_chain, ["db.s.mid"]
         )
@@ -896,7 +893,7 @@ class TestSentinelRefactor:
         assert "db.s.leaf" not in visible
         assert matched == {"db.s.mid"}
 
-    # --- 10. Pattern matching only a SOURCE ---
+    # --- 10. A pattern that agrees with a SOURCE only. ---
 
     def test_selected_source_only_shows_source(self):
         dag = _build_dag(
@@ -929,7 +926,7 @@ class TestSentinelRefactor:
 
 
 class TestSentinelAdversarial:
-    """Adversarial and pen-tester inputs for the sentinel path."""
+    """Hostile inputs for the marker path."""
 
     @pytest.fixture
     def simple_dag(self) -> ClairDag:
@@ -942,7 +939,7 @@ class TestSentinelAdversarial:
         )
 
     def test_whitespace_only_pattern_matches_nothing(self, simple_dag: ClairDag):
-        """fnmatch('db.s.t', ' ') is False."""
+        """fnmatch('db.s.t', ' ') gives False."""
         output = render_dag(simple_dag, selected=[" "])
         assert output.no_match is True
 
@@ -951,28 +948,28 @@ class TestSentinelAdversarial:
         assert output.no_match is True
 
     def test_special_glob_chars_in_pattern(self, simple_dag: ClairDag):
-        """Brackets and question marks are valid fnmatch syntax."""
+        """A bracket and a question mark are correct fnmatch syntax."""
         output = render_dag(simple_dag, selected=["[d]b.s.t"])
         assert "db.s.t" in output.matched_nodes
 
     def test_question_mark_pattern(self, simple_dag: ClairDag):
-        """? matches exactly one character, so 'db.s.?' matches 'db.s.t'."""
+        """A question mark agrees with one character. Thus 'db.s.?' agrees with 'db.s.t'."""
         output = render_dag(simple_dag, selected=["db.s.?"])
         assert "db.s.t" in output.matched_nodes
         assert "db.s.m" in output.matched_nodes
 
     def test_multiple_empty_strings_in_selected(self, simple_dag: ClairDag):
-        """All patterns are empty strings -- none match."""
+        """Each pattern is an empty string. Thus no node is a match."""
         output = render_dag(simple_dag, selected=["", ""])
         assert output.no_match is True
 
     def test_pattern_with_trailing_spaces(self, simple_dag: ClairDag):
-        """Trailing space means pattern won't match (fnmatch is literal)."""
+        """A space at the end stops the match, because fnmatch compares the exact text."""
         output = render_dag(simple_dag, selected=["db.s.t "])
         assert output.no_match is True
 
     def test_sql_injection_in_pattern_is_harmless(self, simple_dag: ClairDag):
-        """Pattern is only used in fnmatch, not in SQL. Should just not match."""
+        """Clair gives the pattern to fnmatch only, not to the SQL. Thus no node is a match."""
         output = render_dag(simple_dag, selected=["'; DROP TABLE --"])
         assert output.no_match is True
 
@@ -991,10 +988,10 @@ class TestSentinelAdversarial:
 
 
 class TestCLISentinelFlow:
-    """Verify the CLI dag command's selected flow: select -> [select] if select else None."""
+    """These tests show the selection logic of the CLI dag command."""
 
     def test_cli_none_select_produces_none(self):
-        """When click passes select=None, the dag command passes selected=None."""
+        """When click gives select=None, the dag command gives selected=None."""
         select = None
         selected = [select] if select else None
         assert selected is None
@@ -1005,13 +1002,13 @@ class TestCLISentinelFlow:
         assert selected == ["analytics.*"]
 
     def test_cli_empty_string_select_produces_none(self):
-        """An empty string from click is falsy, so it becomes None."""
+        """An empty string from click is false, and thus it becomes None."""
         select = ""
         selected = [select] if select else None
         assert selected is None
 
     def test_none_through_render_dag_normalizes_to_full_render(self):
-        """None -> render_dag -> `selected or []` -> [] -> full render."""
+        """None goes to render_dag. There `selected or []` gives [], and the tree shows each node."""
         dag = _build_dag(
             [("db.s.a", TrouveType.SOURCE), ("db.s.b", TrouveType.TABLE)],
             [("db.s.a", "db.s.b")],

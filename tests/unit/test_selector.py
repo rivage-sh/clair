@@ -1,4 +1,4 @@
-"""Tests for the selector/glob matching and graph traversal operators."""
+"""The tests of the selector, the glob match, and the graph operators."""
 
 import networkx as nx
 import pytest
@@ -119,11 +119,11 @@ class TestParseSelector:
         assert parse_selector("mydb.analytics.*+") == ParsedSelector(glob="mydb.analytics.*", upstream_depth=None, downstream_depth=0)
 
     def test_upstream_zero_is_explicit_unlimited(self):
-        # 0+ means explicit zero (same as +, unlimited)
+        # The text 0+ gives a zero, and thus it is equal to + and has no limit.
         assert parse_selector("0+mydb.analytics.orders") == ParsedSelector(glob="mydb.analytics.orders", upstream_depth=0, downstream_depth=None)
 
 
-# Graph fixture shared by operator tests:
+# The graph that the operator tests use:
 #
 #   db.raw.source_a ──┬──► db.analytics.orders ──► db.analytics.revenue
 #   db.raw.source_b ──┘
@@ -175,7 +175,7 @@ class TestExpandSelector:
         assert result == {"db.raw.source_a", "db.raw.source_b", "db.analytics.orders"}
 
     def test_upstream_depth_1_on_revenue_stops_at_orders(self, dag):
-        # revenue's parent is orders; depth=1 should NOT include source_a/source_b
+        # The parent of revenue is orders. A depth of 1 omits source_a and source_b.
         result = expand_selector(dag, "1+db.analytics.revenue")
         assert result == {"db.analytics.orders", "db.analytics.revenue"}
 
@@ -212,7 +212,7 @@ class TestExpandSelector:
 class TestExpandSelectors:
     def test_none_returns_all_in_topo_order(self, dag):
         result = expand_selectors(dag, None)
-        # All four nodes, sources before dependents
+        # The four nodes. Each source comes before the node that reads it.
         assert set(result) == {
             "db.raw.source_a",
             "db.raw.source_b",
@@ -245,7 +245,7 @@ class TestExpandSelectors:
         assert result.index("db.raw.source_a") < result.index("db.analytics.orders")
 
     def test_union_deduplicates(self, dag):
-        # Two patterns that overlap; orders should appear once
+        # The two patterns overlap. The result holds orders one time only.
         result = expand_selectors(dag, ("db.analytics.*", "db.analytics.orders+"))
         assert result.count("db.analytics.orders") == 1
         assert result.count("db.analytics.revenue") == 1

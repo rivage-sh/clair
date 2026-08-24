@@ -1,9 +1,10 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.refined.orders import trouve as example_2_database_refined_orders
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Per-user lifetime order statistics.",
+    docs="Order statistics for each user, for the full life of the account.",
     sql=f"""
         select
             user_id,

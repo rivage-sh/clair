@@ -1,8 +1,14 @@
-# Clair Project Memory
+# clair — memory index
 
-## Specs
-- [specs/environments.md](../specs/environments.md) — Environments feature: routing policies (database_override, schema_isolation), environments.yml, --env flag, no backwards compat with profiles.yml.
+`.claude/memory/` holds the design position and the quality bar for clair. This file is
+the index to that directory.
 
-## Feedback
-- [memory/feedback_no_string_output_tests.md](memory/feedback_no_string_output_tests.md) — Functions must return Pydantic objects; tests assert on fields, not formatted output strings
-- [memory/feedback_defensive_enum_branching.md](memory/feedback_defensive_enum_branching.md) — Use if/elif/else with explicit raise (ClairError subclass) when branching on enums, not ternaries
+| File | Holds |
+|------|-------|
+| [`memory/conventions.md`](memory/conventions.md) | The seven design invariants; docs give orientation and code gives truth; the quality bar for code; how to write a test; why the existing code is not the standard. |
+
+## What belongs here
+
+Only the design position, the quality bar, or a correction that the user gave. Behaviour
+lives in `site_docs/docs/`, and `src/` is the final authority when the two disagree. Do
+not copy a documentation page into memory — a copy becomes wrong when the source changes.

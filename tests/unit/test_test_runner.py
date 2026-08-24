@@ -1,4 +1,4 @@
-"""Tests for the test runner (data quality tests)."""
+"""The tests of the test runner, which executes the data quality tests."""
 
 from __future__ import annotations
 
@@ -15,35 +15,35 @@ from clair.core.test_runner import (
     format_test_output,
     run_tests,
 )
-from clair.trouves.config import ResolvedConfig
 from clair.trouves._refs import THIS_PLACEHOLDER
+from clair.trouves.config import ResolvedConfig
 from clair.trouves.test import (
+    THIS,
     TestNotNull,
     TestRowCount,
     TestSql,
     TestUnique,
     TestUniqueColumns,
-    THIS,
 )
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
 
 def _make_trouve_with_tests(
-    full_name: str,
+    physical_name: str,
     trouve_type: TrouveType,
     tests: list,
     imports: list[str] | None = None,
     sql: str = "SELECT 1",
 ) -> Trouve:
-    """Helper to build a compiled Trouve with tests attached."""
+    """Make a compiled Trouve that holds some tests."""
     raw_sql = "" if trouve_type == TrouveType.SOURCE else sql
     t = Trouve(type=trouve_type, sql=raw_sql, tests=tests)
     t.compiled = CompiledAttributes(
-        full_name=full_name,
-        logical_name=full_name,
+        physical_name=physical_name,
+        logical_name=physical_name,
         resolved_sql=raw_sql,
-        file_path=Path(f"/fake/{full_name.replace('.', '/')}.py"),
-        module_name=full_name,
+        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
+        module_name=physical_name,
         imports=imports or [],
         config=ResolvedConfig(),
         execution_type=ExecutionType.SNOWFLAKE,
@@ -52,7 +52,7 @@ def _make_trouve_with_tests(
 
 
 def _make_mock_adapter(row_count: int = 0, success: bool = True) -> WarehouseAdapter:
-    """Create a mock adapter that returns a fixed row_count."""
+    """Make a false adapter that always gives the same row_count."""
     adapter = MagicMock(spec=WarehouseAdapter)
     call_counter = 0
 
@@ -75,7 +75,7 @@ def _make_mock_adapter(row_count: int = 0, success: bool = True) -> WarehouseAda
 
 class TestRunTests:
     def test_passing_test_row_count_zero(self):
-        """A test passes when the query returns zero rows."""
+        """A test passes when the query gives zero rows."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -92,7 +92,7 @@ class TestRunTests:
         assert results[0].query_id is not None
 
     def test_failing_test_row_count_positive(self):
-        """A test fails when the query returns one or more rows."""
+        """A test fails when the query gives one row or more."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -108,7 +108,7 @@ class TestRunTests:
         assert results[0].failing_row_count == 3
 
     def test_source_trouves_are_skipped(self):
-        """SOURCE Trouves should be skipped even if they have tests declared."""
+        """Clair skips each SOURCE Trouve, and a test on it too."""
         dt = _make_trouve_with_tests(
             "db.s.raw_orders",
             TrouveType.SOURCE,
@@ -123,7 +123,7 @@ class TestRunTests:
         cast(Any, adapter.execute).assert_not_called()
 
     def test_multiple_tests_on_one_trouve(self):
-        """Multiple tests on the same Trouve should all be executed."""
+        """Clair executes each test on one Trouve."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -145,7 +145,7 @@ class TestRunTests:
         assert results[2].test_index == 2
 
     def test_adapter_query_failure_produces_error_result(self):
-        """When the adapter returns success=False, the test result records the error."""
+        """When the adapter gives success=False, the test result holds the error."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -165,7 +165,7 @@ class TestFormatTestOutput:
     def test_format_includes_structured_counts(self):
         results = [
             TestResult(
-                full_name="db.s.t",
+                physical_name="db.s.t",
                 test_index=0,
                 test_type="unique",
                 column_name="id",
@@ -175,7 +175,7 @@ class TestFormatTestOutput:
                 query_url="https://sf/#/qid-1",
             ),
             TestResult(
-                full_name="db.s.t",
+                physical_name="db.s.t",
                 test_index=1,
                 test_type="not_null",
                 column_name="email",
@@ -203,12 +203,12 @@ class TestFormatTestOutput:
     def test_format_all_passed(self):
         results = [
             TestResult(
-                full_name="db.s.t", test_index=0, test_type="unique",
+                physical_name="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=True, failing_row_count=0,
                 query_id="qid-1", query_url="https://sf/#/qid-1",
             ),
             TestResult(
-                full_name="db.s.t", test_index=1, test_type="not_null",
+                physical_name="db.s.t", test_index=1, test_type="not_null",
                 column_name="email", passed=True, failing_row_count=0,
                 query_id="qid-2", query_url="https://sf/#/qid-2",
             ),
@@ -221,7 +221,7 @@ class TestFormatTestOutput:
     def test_format_all_failed(self):
         results = [
             TestResult(
-                full_name="db.s.t", test_index=0, test_type="unique",
+                physical_name="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=False, failing_row_count=5,
                 query_id="qid-1", query_url="https://sf/#/qid-1",
             ),
@@ -234,7 +234,7 @@ class TestFormatTestOutput:
     def test_format_with_errors(self):
         results = [
             TestResult(
-                full_name="db.s.t", test_index=0, test_type="unique",
+                physical_name="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=False, failing_row_count=0,
                 error="Query execution failed",
             ),
@@ -247,17 +247,17 @@ class TestFormatTestOutput:
     def test_format_mixed_pass_fail_error(self):
         results = [
             TestResult(
-                full_name="db.s.t", test_index=0, test_type="unique",
+                physical_name="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=True, failing_row_count=0,
                 query_id="qid-1", query_url="https://sf/#/qid-1",
             ),
             TestResult(
-                full_name="db.s.t", test_index=1, test_type="not_null",
+                physical_name="db.s.t", test_index=1, test_type="not_null",
                 column_name="email", passed=False, failing_row_count=3,
                 query_id="qid-2", query_url="https://sf/#/qid-2",
             ),
             TestResult(
-                full_name="db.s.t", test_index=2, test_type="sql",
+                physical_name="db.s.t", test_index=2, test_type="sql",
                 column_name=None, passed=False, failing_row_count=0,
                 error="Syntax error",
             ),
@@ -270,17 +270,17 @@ class TestFormatTestOutput:
     def test_format_list_properties(self):
         results = [
             TestResult(
-                full_name="db.s.t", test_index=0, test_type="unique",
+                physical_name="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=True, failing_row_count=0,
                 query_id="qid-1", query_url="https://sf/#/qid-1",
             ),
             TestResult(
-                full_name="db.s.t", test_index=1, test_type="not_null",
+                physical_name="db.s.t", test_index=1, test_type="not_null",
                 column_name="email", passed=False, failing_row_count=3,
                 query_id="qid-2", query_url="https://sf/#/qid-2",
             ),
             TestResult(
-                full_name="db.s.t", test_index=2, test_type="sql",
+                physical_name="db.s.t", test_index=2, test_type="sql",
                 column_name=None, passed=False, failing_row_count=0,
                 error="Syntax error",
             ),
@@ -319,7 +319,7 @@ class TestRunTestsEdgeCases:
         dag = build_dag([dt])
         adapter = _make_mock_adapter(row_count=0)
 
-        with pytest.raises(Exception):
+        with pytest.raises(KeyError):
             run_tests(dag, ["db.s.nonexistent"], adapter)
 
     def test_test_result_fields_populated(self):
@@ -333,7 +333,7 @@ class TestRunTestsEdgeCases:
         results = run_tests(dag, ["db.s.orders"], adapter)
 
         r = results[0]
-        assert r.full_name == "db.s.orders"
+        assert r.physical_name == "db.s.orders"
         assert r.test_index == 0
         assert r.test_type == "unique"
         assert r.column_name == "id"
@@ -416,7 +416,7 @@ class TestRunTestsUniqueColumns:
 
 class TestUseSample:
     def test_row_count_skipped_when_use_sample(self):
-        """TestRowCount is skipped when use_sample=True."""
+        """Clair skips a TestRowCount when use_sample is True."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -431,7 +431,7 @@ class TestUseSample:
         cast(Any, adapter.execute).assert_not_called()
 
     def test_non_row_count_tests_run_with_use_sample(self):
-        """Non-row-count tests run when use_sample=True."""
+        """A test that is not a row count test runs when use_sample is True."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -446,7 +446,7 @@ class TestUseSample:
         assert results[0].passed is True
 
     def test_use_sample_applies_top_1000(self):
-        """When use_sample=True, trouve.sample() wraps the table with TOP 1000."""
+        """With use_sample=True, trouve.sample() puts TOP 1000 around the table."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -461,7 +461,7 @@ class TestUseSample:
         assert "SELECT TOP 1000" in executed_sql
 
     def test_mixed_tests_use_sample_skips_row_count(self):
-        """With use_sample=True and mixed tests, row_count is skipped but others run."""
+        """With use_sample=True, clair skips the row count test but runs the other tests."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -476,12 +476,12 @@ class TestUseSample:
 
         results = run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
 
-        # Only 2 results (unique + not_null), row_count skipped
+        # There are 2 results, unique and not_null. Clair skipped row_count.
         assert len(results) == 2
         assert all(r.test_type != "row_count" for r in results)
 
     def test_use_sample_false_runs_all(self):
-        """With use_sample=False, all tests run without sampling."""
+        """With use_sample=False, each test runs on the complete table."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -499,7 +499,7 @@ class TestUseSample:
 
 class TestTestSql:
     def test_to_sql_is_passthrough(self):
-        """to_sql returns self.sql unchanged — discovery is responsible for all token resolution."""
+        """to_sql gives self.sql with no change. Discovery replaces each token."""
         pre_resolved = "SELECT * FROM db.schema.orders WHERE amount < 0"
         test = TestSql(sql=pre_resolved)
         assert test.to_sql("db.schema.orders") == pre_resolved
@@ -516,7 +516,7 @@ class TestTestSql:
         assert f"{THIS}" == THIS_PLACEHOLDER
 
     def test_passes_when_zero_rows(self):
-        # SQL is pre-resolved as it would be after discovery
+        # The SQL holds the true names already, as after discovery.
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -548,7 +548,7 @@ class TestTestSql:
         assert results[0].failing_row_count == 4
 
     def test_sql_sent_to_adapter_verbatim(self):
-        """The SQL executed on the adapter is exactly test.sql — no runtime substitution."""
+        """The adapter executes test.sql exactly. Clair changes nothing at run time."""
         pre_resolved = "SELECT * FROM db.s.orders WHERE amount < 0"
         dt = _make_trouve_with_tests(
             "db.s.orders",
@@ -578,7 +578,7 @@ class TestTestSql:
         cast(Any, adapter.execute).assert_not_called()
 
     def test_skipped_when_use_sample(self):
-        """TestSql is skipped when use_sample=True (is_run_with_sample=False)."""
+        """Clair skips a TestSql when use_sample is True, because is_run_with_sample is False."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,

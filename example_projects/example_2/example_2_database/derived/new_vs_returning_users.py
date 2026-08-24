@@ -1,10 +1,11 @@
-from clair import Column, ColumnType, Trouve, TrouveType
-from example_2_database.refined.orders import trouve as example_2_database_refined_orders
 from example_2_database.derived.user_order_stats import trouve as example_2_database_derived_user_order_stats
+from example_2_database.refined.orders import trouve as example_2_database_refined_orders
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Daily breakdown of new versus returning buyers.",
+    docs="Daily count of the new buyers and the buyers who come back.",
     sql=f"""
         select
             o.order_date,

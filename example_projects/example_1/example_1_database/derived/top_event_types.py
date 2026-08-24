@@ -1,9 +1,10 @@
-from clair import Column, ColumnType, TestUnique, Trouve, TrouveType
 from example_1_database.derived.daily_event_counts import trouve as example_1_database_derived_daily_event_counts
+
+from clair import Column, ColumnType, TestUnique, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Top 10 event types ranked by total count across all days.",
+    docs="The 10 event types with the highest total count for all days.",
     sql=f"""
         select
             event_type,

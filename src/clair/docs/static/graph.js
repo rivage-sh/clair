@@ -1,4 +1,4 @@
-// graph.js -- Cytoscape.js graph rendering for clair docs
+// graph.js -- Cytoscape.js draws the graph of clair docs
 
 var ClairdocsGraph = (function () {
     "use strict";
@@ -6,9 +6,9 @@ var ClairdocsGraph = (function () {
     var cy = null;
     var onSelectCallback = null;
 
-    // ─── Cytoscape Stylesheet ─────────────────────────────────────────
+    // ─── The Cytoscape stylesheet ─────────────────────────────────────────
     var STYLE = [
-        // Default node
+        // The default node.
         {
             selector: "node",
             style: {
@@ -26,7 +26,7 @@ var ClairdocsGraph = (function () {
                 "text-wrap": "none",
             },
         },
-        // SOURCE nodes: rounded rectangle, gray
+        // A SOURCE node: a gray rectangle with round corners.
         {
             selector: "node[type='source']",
             style: {
@@ -34,7 +34,7 @@ var ClairdocsGraph = (function () {
                 "shape": "roundrectangle",
             },
         },
-        // TABLE nodes: rounded rectangle, blue
+        // A TABLE node: a blue rectangle with round corners.
         {
             selector: "node[type='table']",
             style: {
@@ -42,7 +42,7 @@ var ClairdocsGraph = (function () {
                 "shape": "roundrectangle",
             },
         },
-        // VIEW nodes: dashed border, lighter fill
+        // A VIEW node: a dashed border and a paler color.
         {
             selector: "node[type='view']",
             style: {
@@ -53,7 +53,7 @@ var ClairdocsGraph = (function () {
                 "border-color": "#4a90d9",
             },
         },
-        // Nodes with tests: green border
+        // A node that has tests: a green border.
         {
             selector: "node[testCount > 0]",
             style: {
@@ -61,7 +61,7 @@ var ClairdocsGraph = (function () {
                 "border-color": "#22c55e",
             },
         },
-        // Default edge
+        // The default edge.
         {
             selector: "edge",
             style: {
@@ -73,7 +73,7 @@ var ClairdocsGraph = (function () {
                 "arrow-scale": 0.8,
             },
         },
-        // Highlighted (lineage) nodes
+        // A node in the lineage, with a highlight.
         {
             selector: "node.highlighted",
             style: {
@@ -82,7 +82,7 @@ var ClairdocsGraph = (function () {
                 "background-opacity": 1,
             },
         },
-        // Selected node
+        // The node that the user selected.
         {
             selector: "node.selected-node",
             style: {
@@ -90,7 +90,7 @@ var ClairdocsGraph = (function () {
                 "border-color": "#ef4444",
             },
         },
-        // Highlighted edges
+        // An edge with a highlight.
         {
             selector: "edge.highlighted",
             style: {
@@ -99,7 +99,7 @@ var ClairdocsGraph = (function () {
                 "width": 2.5,
             },
         },
-        // Dimmed (non-lineage) elements
+        // An element that is not in the lineage, with a pale color.
         {
             selector: "node.dimmed",
             style: {
@@ -114,7 +114,7 @@ var ClairdocsGraph = (function () {
         },
     ];
 
-    // ─── Layout Configuration ─────────────────────────────────────────
+    // ─── The layout configuration ─────────────────────────────────────────
     var LAYOUT = {
         name: "dagre",
         rankDir: "LR",
@@ -126,7 +126,7 @@ var ClairdocsGraph = (function () {
         fit: true,
     };
 
-    // ─── Build Cytoscape Elements from Catalog ────────────────────────
+    // ─── Make the Cytoscape elements from the catalog ────────────────────────
     function buildElements(catalog) {
         var nodes = [];
         var trouves = catalog.trouves;
@@ -135,7 +135,7 @@ var ClairdocsGraph = (function () {
         for (var i = 0; i < fullNames.length; i++) {
             var fn = fullNames[i];
             var t = trouves[fn];
-            // full_name is inside compiled; the key in the dict is the full_name
+            // The compiled object holds physical_name. The key in the dict is the physical_name too.
             var parts = fn.split(".");
             var label = fn;
             var databaseName = parts.length >= 1 ? parts[0] : "";
@@ -173,11 +173,11 @@ var ClairdocsGraph = (function () {
         return nodes.concat(edges);
     }
 
-    // ─── Initialization ───────────────────────────────────────────────
+    // ─── The start of the graph ───────────────────────────────────────────────
     function init(containerId, catalog, onSelect) {
         onSelectCallback = onSelect;
 
-        // Register the dagre layout
+        // Add the dagre layout.
         if (typeof cytoscapeDagre !== "undefined") {
             cytoscape.use(cytoscapeDagre);
         }
@@ -194,7 +194,7 @@ var ClairdocsGraph = (function () {
             wheelSensitivity: 0.3,
         });
 
-        // Wire events
+        // Connect the events.
         cy.on("tap", "node", function (e) {
             selectNode(e.target.id());
         });
@@ -206,7 +206,7 @@ var ClairdocsGraph = (function () {
         });
     }
 
-    // ─── Selection & Lineage Highlighting ─────────────────────────────
+    // ─── The selection and the lineage highlight ─────────────────────────────
     function selectNode(nodeId) {
         clearClasses();
 
@@ -215,7 +215,7 @@ var ClairdocsGraph = (function () {
 
         node.addClass("selected-node");
 
-        // Compute full lineage via BFS
+        // Find the complete lineage with a breadth-first search.
         var upstream = {};
         var downstream = {};
         walkPredecessors(node, upstream);
@@ -235,7 +235,7 @@ var ClairdocsGraph = (function () {
                     ele.addClass("dimmed");
                 }
             } else {
-                // Edge: highlight if both endpoints are in lineage
+                // An edge gets a highlight if the lineage holds its two nodes.
                 var sourceIn = !!lineageNodes[ele.source().id()];
                 var targetIn = !!lineageNodes[ele.target().id()];
                 if (sourceIn && targetIn) {
@@ -322,7 +322,7 @@ var ClairdocsGraph = (function () {
         return result;
     }
 
-    // ─── Public API ───────────────────────────────────────────────────
+    // ─── The public API ───────────────────────────────────────────────────
     return {
         init: init,
         selectNode: selectNode,

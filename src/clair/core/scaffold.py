@@ -1,11 +1,13 @@
-"""Scaffold -- create a new Clair project with example Trouves and config."""
+"""The scaffold. It makes a new Clair project with an example Trouve and a config."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from clair.environments.project_routing import ROUTING_FILE_NAME
+
 # ---------------------------------------------------------------------------
-# File templates
+# The file templates.
 # ---------------------------------------------------------------------------
 
 _SOURCE_TROUVE_TEMPLATE = '''\
@@ -16,24 +18,64 @@ trouve = Trouve(
 )
 '''
 
+_ROUTING_TEMPLATE = '''\
+"""Clair routing -- gives each environment its physical write target.
+
+Each entry names one environment. The name matches a top-level key in
+~/.clair/environments.yml. The route method accepts the logical TrouveAddress
+and gives the physical TrouveAddress. SOURCE Trouves never route.
+
+This file starts with one entry, and that entry changes nothing: the physical
+name stays equal to the logical name. Change the route method when you want a
+separate target for an environment, for example one database for each person.
+See https://clair.rivage.sh/guides/routing/
+"""
+
+from enum import StrEnum
+
+from clair import RoutingEntry, RoutingTable, TrouveAddress
+
+
+class EnvironmentName(StrEnum):
+    """The environments of this project.
+
+    Each member matches a top-level key in ~/.clair/environments.yml.
+    """
+
+    DEV = "dev"
+
+
+class DevelopmentRouting(RoutingEntry):
+    """Write to the logical names, thus the address stays the same."""
+
+    environment_name: str = EnvironmentName.DEV.value
+
+    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+        return trouve_address
+
+
+routing = RoutingTable(entries=[DevelopmentRouting()])
+'''
+
 _ENVIRONMENTS_TEMPLATE = '''\
-# Clair environments — connection settings per environment.
-# Reference: https://github.com/your-org/clair
+# The Clair environments. Each environment has its own connection settings.
+# Routing is not here. It lives in the project __routing__.py file.
+# Reference: https://github.com/rivage-sh/clair
 
 dev:
-  account: your-org-your-account   # e.g. myorg-myaccount
+  account: your-org-your-account   # for example, myorg-myaccount
   user: your@email.com
-  authenticator: externalbrowser   # SSO login via browser
+  authenticator: externalbrowser   # SSO authentication in a browser
   warehouse: your_warehouse
-  # region: us-east-1              # required for query URLs
-  # account_locator: abc12345      # required for query URLs
+  # region: us-east-1              # necessary for the query URLs
+  # account_locator: abc12345      # necessary for the query URLs
 
-# Production environment (key-pair auth):
+# A production environment with key pair authentication:
 # prod:
 #   account: your-org-your-account
 #   user: ci_service_user
 #   private_key_path: ~/.clair/snowflake_key.p8
-#   # private_key_passphrase: your-passphrase   # only if key is encrypted
+#   # private_key_passphrase: your-passphrase   # only if the key is encrypted
 #   warehouse: your_warehouse
 #   region: us-east-1
 #   account_locator: abc12345
@@ -41,9 +83,10 @@ dev:
 
 
 def _write_if_missing(path: Path, content: str) -> bool:
-    """Write *content* to *path*, creating parent dirs as needed.
+    """Write *content* to *path*. Make each parent directory that is absent.
 
-    Returns True if the file was created, False if it already existed.
+    Returns True if the function made the file. Returns False if the file
+    already exists.
     """
     if path.exists():
         return False
@@ -59,27 +102,29 @@ def scaffold_project(
     source_table_name: str,
     home_dir: Path | None = None,
 ) -> list[tuple[str, str]]:
-    """Create a new Clair project at *project_dir*.
+    """Make a new Clair project in *project_dir*.
 
-    Generates an example source Trouve file and a global
-    ``~/.clair/environments.yml`` (if it does not already exist).
+    The function writes an example source Trouve file and a project
+    ``__routing__.py`` file. It also writes the global
+    ``~/.clair/environments.yml`` file, if that file does not exist.
 
     Args:
-        project_dir: Root directory for the new project.
-        source_database_name: Name for the source database directory.
-        source_schema_name: Name for the source schema directory.
-        source_table_name: Name for the source table file.
-        home_dir: Override for ``Path.home()`` (used in tests).
+        project_dir: The root directory of the new project.
+        source_database_name: The name of the source database directory.
+        source_schema_name: The name of the source schema directory.
+        source_table_name: The name of the source table file.
+        home_dir: A replacement for ``Path.home()``. The tests use it.
 
     Returns:
-        List of ``(status, path)`` tuples where status is ``"created"`` or
-        ``"skipped"``.  Each path is a string.
+        A list of ``(status, path)`` tuples. The status is ``"created"`` or
+        ``"skipped"``. Each path is a string.
     """
     project_dir = project_dir.resolve()
 
-    # All project files: (relative_path, template_content)
+    # Each project file, as a (relative_path, template_content) pair.
     project_files: list[tuple[str, str]] = [
         (f"{source_database_name}/{source_schema_name}/{source_table_name}.py", _SOURCE_TROUVE_TEMPLATE),
+        (ROUTING_FILE_NAME, _ROUTING_TEMPLATE),
     ]
 
     results: list[tuple[str, str]] = []
@@ -90,7 +135,7 @@ def scaffold_project(
         status = "created" if created else "skipped"
         results.append((status, str(full_path)))
 
-    # Global environments.yml in ~/.clair/
+    # The global environments.yml file in ~/.clair/
     effective_home = home_dir if home_dir is not None else Path.home()
     environments_path = effective_home / ".clair" / "environments.yml"
     created = _write_if_missing(environments_path, _ENVIRONMENTS_TEMPLATE)
@@ -106,21 +151,22 @@ def write_environments_yml(
     *,
     home_dir: Path | None = None,
 ) -> Path:
-    """Write an environments.yml file from interactively collected data.
+    """Write an environments.yml file from the data that the user gave.
 
     Args:
-        env_data: Key-value pairs for the environment (account, user, etc.).
-        env_name: Name of the environment section.
-        home_dir: Override for ``Path.home()`` (used in tests).
+        env_data: The key and value pairs of the environment, such as the
+            account and the user.
+        env_name: The name of the environment section.
+        home_dir: A replacement for ``Path.home()``. The tests use it.
 
     Returns:
-        The path to the written environments.yml file.
+        The path of the new environments.yml file.
     """
     effective_home = home_dir if home_dir is not None else Path.home()
     environments_path = effective_home / ".clair" / "environments.yml"
 
     lines = [
-        "# Clair environments -- connection settings per environment.",
+        "# The Clair environments. Each environment has its own connection settings.",
         "",
         f"{env_name}:",
     ]

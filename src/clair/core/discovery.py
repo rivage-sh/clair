@@ -1,4 +1,4 @@
-"""Project discovery -- walk the project root, find and load Trouve files."""
+"""Project discovery. Clair reads the project root and loads each Trouve file."""
 
 from __future__ import annotations
 
@@ -7,23 +7,25 @@ import inspect
 import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import clair as _clair_pkg
 import structlog
+
+import clair as _clair_pkg
 
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
 
-from clair.environments.routing import RoutingConfig, detect_routing_collisions, route
+from clair.environments.routing import RoutingEntry, detect_routing_collisions, route
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
-from clair.trouves.run_config import RunMode
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
+from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
-
+from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveAbc, TrouveType
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
 _SKIP_DIRS = {"clair", "tests", ARTIFACTS_DIR_NAME, "__pycache__", ".git", ".venv", "node_modules"}
@@ -33,9 +35,10 @@ logger = structlog.get_logger()
 
 
 def compute_full_name(file_path: Path) -> str:
-    """Derive the fully-qualified Snowflake name from the last three path components.
+    """Make the full Snowflake name from the last three parts of the path.
 
-    Example: .../database_name/schema_name/table_name.py -> database_name.schema_name.table_name
+    Example: .../database_name/schema_name/table_name.py becomes
+    database_name.schema_name.table_name
     """
     return ".".join(file_path.with_suffix("").parts[-3:])
 
@@ -63,8 +66,8 @@ def _load_config_file(
         defaults = getattr(module, "defaults", None)
         if isinstance(defaults, (DatabaseDefaults, SchemaDefaults)):
             return defaults
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001 — the user config code is unknown, but it is never fatal
+        logger.debug("discovery.config_load_error", file=str(file_path), error=str(e))
     return None
 
 
@@ -73,10 +76,11 @@ def _resolve_config(
     project_root: Path,
     profile_defaults: dict[str, str | None] | None = None,
 ) -> ResolvedConfig:
-    """Build merged config for a Trouve by walking up its directory tree.
+    """Make the merged config of a Trouve. The function moves up the directory tree.
 
-    Resolution order (later overrides earlier):
-    1. Profile defaults
+    The function reads these sources in order. Each source replaces the values
+    of the source before it:
+    1. The profile defaults
     2. __database_config__.py
     3. __schema_config__.py
     """
@@ -117,12 +121,13 @@ _PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 
 
 def _resolve_sql(sql: str, id_to_full_name: dict[int, str], this_name: str) -> str:
-    """Replace placeholder tokens with real full_names.
+    """Replace each placeholder token with the true physical_name.
 
-    Resolves both cross-Trouve placeholders (``__CLAIR_TROUVE_<id>__``) and the
-    THIS sentinel (``__CLAIR_THIS__``) to ``this_name``, which is the logical name
-    of the Trouve being compiled. ``recompile_for_selection`` later upgrades any
-    logical names to routed names for selected upstreams.
+    The function replaces a token that points to a different Trouve
+    (``__CLAIR_TROUVE_<id>__``). It also replaces the THIS marker
+    (``__CLAIR_THIS__``) with ``this_name``, the logical name of the current
+    Trouve. Later, ``recompile_for_selection`` changes a logical name to a
+    routed name for each selected upstream Trouve.
     """
     def replace(m: re.Match[str]) -> str:
         return id_to_full_name.get(int(m.group(1)), m.group(0))
@@ -133,7 +138,7 @@ def _resolve_sql(sql: str, id_to_full_name: dict[int, str], this_name: str) -> s
 def _detect_imports(
     sql: str, id_to_full_name: dict[int, str], own_full_name: str
 ) -> list[str]:
-    """Extract full_names of other Trouves referenced as placeholders in the SQL."""
+    """Give the physical_name of each other Trouve that the SQL points to with a token."""
     imports = []
     for obj_id_str in _PLACEHOLDER_RE.findall(sql):
         dep_name = id_to_full_name.get(int(obj_id_str))
@@ -145,37 +150,40 @@ def _detect_imports(
 def discover_project(
     project_root: Path,
     profile_defaults: dict[str, str | None] | None = None,
-    routing: RoutingConfig | None = None,
-    environment: "Environment | None" = None,
+    routing: RoutingEntry | None = None,
+    environment: Environment | None = None,
     run_mode: RunMode | None = None,
-) -> list[Trouve]:
-    """Discover all Trouves in a project.
+) -> list[TrouveAbc]:
+    """Find each Trouve in a project.
 
-    Walks the project root, loads all Trouve files, resolves SQL placeholders,
-    detects import relationships, and returns compiled Trouve objects.
+    The function reads the project root and loads each Trouve file. It replaces
+    the SQL placeholders, finds the import relations, and gives the compiled
+    Trouve objects.
 
     Args:
-        project_root: Absolute path to the project root directory.
-        profile_defaults: Default warehouse/role from the active profile.
-        routing: Routing configuration for physical name overrides.
-        environment: Active environment. Exposed as ``clair.env`` so Trouve
-            modules can read it during loading (e.g. for feature flags).
-        run_mode: Requested run mode (FULL_REFRESH or INCREMENTAL). Exposed as
-            ``clair.run_mode`` so Trouve modules can read it during loading
-            (e.g. to make WHERE clauses conditional on run mode).
+        project_root: The absolute path of the project root directory.
+        profile_defaults: The default warehouse and role from the active profile.
+        routing: The routing entry for the physical names, from __routing__.py.
+        environment: The active environment. Clair puts it in ``clair.env``.
+            Thus a Trouve module can read it at load time, for a feature flag.
+        run_mode: The run mode that the user asks for: FULL_REFRESH or
+            INCREMENTAL. Clair puts it in ``clair.run_mode``. Thus a Trouve
+            module can read it at load time and change its WHERE clause.
 
     Returns:
-        List of Trouve objects, each with .compiled set.
+        A list of Trouve objects. Each object has a value in .compiled.
     """
     project_root = project_root.resolve()
 
-    # Expose the active environment and run mode on the clair package so Trouve
-    # modules can read them during loading (e.g. ``import clair; clair.env.role``).
+    # Put the active environment and the run mode on the clair package. Thus a
+    # Trouve module can read them at load time, for example with
+    # ``import clair; clair.env.role``.
     _clair_pkg.env = environment
     _clair_pkg.run_mode = run_mode
 
-    # Clear refs registry and purge previously loaded project modules so each
-    # discovery run starts from a clean slate (important for tests and repeated calls).
+    # Empty the refs registry and remove each project module from a previous
+    # run. Thus each discovery run starts from a clean state. This is important
+    # for the tests and for more than one call in one process.
     clear_refs()
     for mod_name in list(sys.modules.keys()):
         mod_file = getattr(sys.modules[mod_name], "__file__", None)
@@ -186,12 +194,12 @@ def discover_project(
             except ValueError:
                 pass
 
-    # Add project root to sys.path so cross-Trouve imports resolve normally.
+    # Put the project root in sys.path. Thus an import of a different Trouve works.
     project_root_str = str(project_root)
     if project_root_str not in sys.path:
         sys.path.insert(0, project_root_str)
 
-    # Collect candidate files.
+    # Collect the candidate files.
     candidates: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith("_")]
@@ -201,13 +209,13 @@ def discover_project(
                 candidates.append(file_path)
     candidates.sort()
 
-    # Load each candidate. A file may already be in sys.modules if it was
-    # imported as a dependency of an earlier candidate.
-    collected: list[tuple[Trouve, str, Path, str]] = []
+    # Load each candidate. A file can be in sys.modules already, because an
+    # earlier candidate imported it as a dependency.
+    collected: list[tuple[TrouveAbc, str, Path, str]] = []
     errors: list[str] = []
 
     for file_path in candidates:
-        full_name = compute_full_name(file_path)
+        physical_name = compute_full_name(file_path)
         module_name = str(
             file_path.relative_to(project_root).with_suffix("")
         ).replace(os.sep, ".")
@@ -222,68 +230,70 @@ def discover_project(
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = module
                 spec.loader.exec_module(module)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — the user module code is unknown; clair reports the fault as an error
                 logger.warning("discovery.load_error", file=str(file_path), error=str(e))
                 errors.append(f"{file_path}: {e}")
                 continue
 
         trouve_obj = getattr(module, "trouve", None)
-        if not isinstance(trouve_obj, Trouve):
+        if not isinstance(trouve_obj, TrouveAbc):
             continue
 
-        collected.append((trouve_obj, full_name, file_path, module_name))
+        collected.append((trouve_obj, physical_name, file_path, module_name))
 
-    # Phase A: compute logical names and routed names for all Trouves.
-    # logical_name = filesystem-derived name (used for DAG edges, selectors)
-    # routed_name  = physical target name (used in SQL and DDL)
-    # SOURCE Trouves always pass through routing unchanged.
+    # Phase A: make the logical name and the routed name of each Trouve.
+    # logical_name = the name from the file path. DAG edges and selectors use it.
+    # routed_name  = the physical target name. The SQL and the DDL use it.
+    # A SOURCE Trouve always keeps its name, whatever the routing policy is.
     logical_names: dict[int, str] = {}
     routed_names: dict[int, str] = {}
     collision_check: dict[str, str] = {}
 
-    for trouve_obj, full_name, _, _ in collected:
-        logical_names[id(trouve_obj)] = full_name
-        routed = route(full_name, trouve_obj.type, routing)
+    for trouve_obj, physical_name, _, _ in collected:
+        logical_names[id(trouve_obj)] = physical_name
+        routed = route(physical_name, trouve_obj.type, routing)
         routed_names[id(trouve_obj)] = routed
         if trouve_obj.type != TrouveType.SOURCE:
-            collision_check[full_name.upper()] = routed
+            collision_check[physical_name.upper()] = routed
 
-    # Build an id-to-logical-name map for df_fn dependency resolution.
-    # This lets us look up logical names for Trouve objects referenced as df_fn parameter defaults.
+    # Make a map from an id to a logical name, for the pandas dependencies. With
+    # this map, clair finds the logical name of each Trouve that a PandasTrouve
+    # names in its inputs.
     id_to_logical_name: dict[int, str] = {
         id(trouve_obj): logical_names[id(trouve_obj)]
         for trouve_obj, _, _, _ in collected
     }
 
     # Phase B: compile each Trouve.
-    # SQL is resolved with logical names so it reads from production upstreams by default.
-    # Call recompile_for_selection() after filtering to upgrade references for selected
-    # upstreams to their routed names.
-    for trouve_obj, full_name, file_path, module_name in collected:
+    # Clair puts the logical names in the SQL. Thus, by default, the SQL reads
+    # the production upstream tables. After the selection, call
+    # recompile_for_selection() to change each selected upstream name to its
+    # routed name.
+    for trouve_obj, physical_name, file_path, module_name in collected:
         logical = logical_names[id(trouve_obj)]
         routed = routed_names[id(trouve_obj)]
 
-        if trouve_obj.df_fn is not None:
-            df_imports = []
-            for param in inspect.signature(trouve_obj.df_fn).parameters.values():
-                if isinstance(param.default, Trouve):
-                    dep_logical = id_to_logical_name.get(id(param.default))
-                    if dep_logical and dep_logical != logical and dep_logical not in df_imports:
-                        df_imports.append(dep_logical)
+        if trouve_obj.execution_type == ExecutionType.PANDAS:
+            assert isinstance(trouve_obj, PandasTrouve)
+            transform_imports = []
+            for upstream in trouve_obj.upstream_trouves():
+                dep_logical = id_to_logical_name.get(id(upstream))
+                if dep_logical and dep_logical != logical and dep_logical not in transform_imports:
+                    transform_imports.append(dep_logical)
 
             try:
-                resolved_df_fn = inspect.getsource(trouve_obj.df_fn)
+                resolved_transform = inspect.getsource(trouve_obj.transform)
             except OSError:
-                resolved_df_fn = repr(trouve_obj.df_fn)
+                resolved_transform = repr(trouve_obj.transform)
 
             trouve_obj.compiled = CompiledAttributes(
-                full_name=routed,
+                physical_name=routed,
                 logical_name=logical,
                 resolved_sql="",
-                resolved_df_fn=resolved_df_fn,
+                resolved_transform=resolved_transform,
                 file_path=file_path.relative_to(project_root),
                 module_name=module_name,
-                imports=df_imports,
+                imports=transform_imports,
                 config=_resolve_config(file_path, project_root, profile_defaults),
                 execution_type=ExecutionType.PANDAS,
             )
@@ -291,8 +301,9 @@ def discover_project(
                 if isinstance(test, TestSql):
                     test.sql = _resolve_sql(test.sql, logical_names, this_name=logical)
         else:
+            assert isinstance(trouve_obj, Trouve)
             trouve_obj.compiled = CompiledAttributes(
-                full_name=routed,
+                physical_name=routed,
                 logical_name=logical,
                 resolved_sql=_resolve_sql(trouve_obj.sql, logical_names, this_name=logical),
                 file_path=file_path.relative_to(project_root),
@@ -311,59 +322,65 @@ def discover_project(
     return [trouve for trouve, _, _, _ in collected]
 
 
-def find_routing_collisions(trouves: list[Trouve]) -> list[tuple[str, list[str]]]:
-    """Return (routed_target, [logical_sources]) for any routing collisions.
+def find_routing_collisions(trouves: Sequence[TrouveAbc]) -> list[tuple[str, list[str]]]:
+    """Give a (routed_target, [logical_sources]) pair for each routing collision.
 
-    A collision occurs when two non-SOURCE Trouves are routed to the same physical target.
-    Call this after discover_project() to surface collisions for display.
+    A collision occurs when two Trouves that are not SOURCE Trouves route to one
+    physical target. Call this function after discover_project(), to show each
+    collision to the user.
 
-    Returns an empty list when no routing is active (logical == routed for all Trouves).
+    The result is an empty list when no routing policy is active. Then the
+    logical name and the routed name are equal for each Trouve.
     """
     logical_to_routed = {
-        trouve.compiled.logical_name: trouve.compiled.full_name
+        trouve.compiled.logical_name: trouve.compiled.physical_name
         for trouve in trouves
         if trouve.compiled and trouve.type != TrouveType.SOURCE
     }
     return detect_routing_collisions(logical_to_routed)
 
 
-def recompile_for_selection(trouves: list[Trouve], selected_names: set[str]) -> None:
-    """Upgrade SQL references for selected upstreams from logical to routed names.
+def recompile_for_selection(trouves: Sequence[TrouveAbc], selected_names: set[str]) -> None:
+    """Change each selected upstream name in the SQL from logical to routed.
 
-    After discover_project(), each Trouve's resolved_sql uses logical (production) names
-    for all upstream references. This function upgrades references to TABLE/VIEW upstreams
-    that are in the selected set to their routed names, because those Trouves will be
-    materialized at the routed location during this run.
+    After discover_project(), the resolved_sql of each Trouve holds the logical
+    production name of each upstream Trouve. This function changes the name of
+    each selected TABLE or VIEW upstream Trouve to its routed name, because
+    clair materializes that Trouve at the routed location in this run.
 
-    SOURCE upstreams and non-selected TABLE/VIEW upstreams keep their logical names,
-    so partial runs still read from the correct production tables.
+    A SOURCE upstream Trouve keeps its logical name. A TABLE or VIEW upstream
+    Trouve that the user did not select also keeps its logical name. Thus a
+    partial run reads the correct production tables.
 
-    Mutates Trouves in-place. No-op when no routing is active (logical == routed).
+    This function changes each Trouve in place. It does nothing when no routing
+    policy is active, because the logical name and the routed name are equal.
 
     Args:
-        trouves: All Trouves returned by discover_project().
-        selected_names: Routed full_names of Trouves selected for this run
-            (as returned by the DAG selector — these are the physical write targets).
+        trouves: Each Trouve from discover_project().
+        selected_names: The routed full_names of the Trouves for this run. The
+            DAG selector gives them. Each name is a physical write target.
     """
-    # Build a mapping of logical → routed for selected non-SOURCE Trouves that are actually rerouted.
+    # Map the logical name to the routed name for each selected Trouve that is
+    # not a SOURCE and that has a different routed name.
     logical_to_routed: dict[str, str] = {}
     for t in trouves:
         if (
             t.compiled
-            and t.compiled.full_name in selected_names
+            and t.compiled.physical_name in selected_names
             and t.type != TrouveType.SOURCE
-            and t.compiled.full_name != t.compiled.logical_name
+            and t.compiled.physical_name != t.compiled.logical_name
         ):
-            logical_to_routed[t.compiled.logical_name] = t.compiled.full_name
+            logical_to_routed[t.compiled.logical_name] = t.compiled.physical_name
 
     if not logical_to_routed:
         return
 
-    # For each selected Trouve, replace logical upstream names with routed names in the SQL.
-    # Use negative lookaround so we don't accidentally match a longer identifier that starts
-    # with the same prefix (e.g. "db.s.foo" inside "db.s.foobar" would not match).
+    # In the SQL of each selected Trouve, replace the logical upstream name with
+    # the routed name. The pattern has a negative lookaround. Thus a longer
+    # identifier with the same prefix stays as it is. For example, the pattern
+    # "db.s.foo" does not match the text "db.s.foobar".
     for t in trouves:
-        if not t.compiled or t.compiled.full_name not in selected_names:
+        if not t.compiled or t.compiled.physical_name not in selected_names:
             continue
 
         sql = t.compiled.resolved_sql

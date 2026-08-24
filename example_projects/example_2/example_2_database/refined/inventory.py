@@ -1,9 +1,10 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.source.inventory import trouve as example_2_database_source_inventory
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined inventory with stock status classification.",
+    docs="Refined inventory. Each row has a class for the stock status.",
     sql=f"""
         select
             inventory_id,

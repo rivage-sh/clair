@@ -632,7 +632,7 @@
         </aside>
         <div class="resize-handle" id="sidebar-resize-handle"></div>
         <main class="graph-panel" id="graph-container">
-            <!-- Cytoscape.js renders here -->
+            <!-- Cytoscape.js draws the graph here. -->
         </main>
         <aside class="detail-panel" id="detail-panel">
             <div class="detail-resize-handle" id="detail-resize-handle"></div>
@@ -640,11 +640,11 @@
         </aside>
     </div>
 
-    <!-- JS dependencies: pinned CDN versions (requires internet) -->
+    <!-- The JS dependencies. Each CDN version is fixed. The page needs the internet. -->
     <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
-    <!-- Application JS -->
+    <!-- The application JS. -->
     <script src="graph.js"></script>
     <script src="app.js"></script>
 </body>

@@ -2,7 +2,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.SOURCE,
-    docs="Raw products catalog table.",
+    docs="Raw catalog of the products.",
     columns=[
         Column(name="product_id", type=ColumnType.STRING),
         Column(name="seller_id", type=ColumnType.STRING),

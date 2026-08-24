@@ -1,19 +1,20 @@
-"""Selector matching for --select / --exclude glob patterns.
+"""Clair matches the glob patterns of --select and --exclude.
 
-Supports plain glob patterns as well as dbt-style graph traversal operators:
+A pattern can be a plain glob. A pattern can also contain a graph operator, as
+in dbt:
 
-    +pattern          all upstream ancestors (unlimited depth)
-    pattern+          all downstream descendants (unlimited depth)
+    +pattern          each upstream parent, at any distance
+    pattern+          each downstream child, at any distance
     +pattern+         both directions
-    N+pattern         upstream ancestors up to N levels
-    pattern+N         downstream descendants up to N levels
-    N+pattern+M       N levels upstream, M levels downstream
+    N+pattern         each upstream parent, to a distance of N levels
+    pattern+N         each downstream child, to a distance of N levels
+    N+pattern+M       N levels upstream and M levels downstream
 
 Examples:
-    mydb.analytics.*        glob only — no traversal
-    +mydb.analytics.orders  orders + all its upstream dependencies
-    mydb.analytics.orders+  orders + everything downstream of it
-    2+mydb.analytics.orders orders + up to 2 levels of upstream parents
+    mydb.analytics.*        only a glob, with no movement in the graph
+    +mydb.analytics.orders  orders and each of its upstream dependencies
+    mydb.analytics.orders+  orders and each node downstream of it
+    2+mydb.analytics.orders orders and its parents, to a distance of 2 levels
 """
 
 from __future__ import annotations
@@ -27,11 +28,11 @@ import networkx as nx
 
 @dataclass(frozen=True)
 class ParsedSelector:
-    """The result of parsing a selector pattern.
+    """The result after clair reads a selector pattern.
 
-    upstream_depth / downstream_depth:
-        None  — no traversal in that direction
-        0     — unlimited depth
+    The upstream_depth field and the downstream_depth field have these values:
+        None  — clair does not move in that direction
+        0     — no limit on the distance
         n > 0 — exactly n levels
     """
 
@@ -40,10 +41,10 @@ class ParsedSelector:
     downstream_depth: int | None
 
 
-def match_selector(full_name: str, pattern: str) -> bool:
-    """Match a Trouve full_name against a glob-style selector pattern.
+def match_selector(physical_name: str, pattern: str) -> bool:
+    """Compare the physical_name of a Trouve with a glob selector pattern.
 
-    Uses fnmatch semantics on the dotted full_name.
+    The function applies the fnmatch rules to the dotted physical_name.
 
     Examples:
         match_selector("mydb.analytics.orders", "mydb.*.orders") -> True
@@ -51,13 +52,13 @@ def match_selector(full_name: str, pattern: str) -> bool:
         match_selector("mydb.analytics.orders", "mydb.analytics.orders") -> True
         match_selector("mydb.staging.users", "mydb.analytics.*") -> False
     """
-    return fnmatch(full_name, pattern)
+    return fnmatch(physical_name, pattern)
 
 
 def filter_by_selector(full_names: list[str], pattern: str | None) -> list[str]:
-    """Filter a list of full_names by glob pattern.
+    """Keep each physical_name that agrees with the glob pattern.
 
-    If pattern is None, returns all names unchanged.
+    If the pattern is None, the function gives each name, with no change.
     """
     if pattern is None:
         return full_names
@@ -65,10 +66,11 @@ def filter_by_selector(full_names: list[str], pattern: str | None) -> list[str]:
 
 
 def filter_by_selectors(full_names: list[str], patterns: tuple[str, ...] | None) -> list[str]:
-    """Filter a list of full_names by multiple glob patterns (union).
+    """Keep each physical_name that agrees with one or more glob patterns.
 
-    If patterns is None or an empty tuple, returns all names unchanged.
-    Names that match ANY pattern are included; original order is preserved.
+    If the patterns argument is None or an empty tuple, the function gives each
+    name, with no change. A name that agrees with one pattern is sufficient. The
+    function keeps the initial order of the names.
     """
     if not patterns:
         return full_names
@@ -76,7 +78,7 @@ def filter_by_selectors(full_names: list[str], patterns: tuple[str, ...] | None)
 
 
 def parse_selector(pattern: str) -> ParsedSelector:
-    """Parse a selector pattern into a ParsedSelector.
+    """Read a selector pattern and make a ParsedSelector.
 
     Examples:
         "mydb.analytics.*"      -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=None, downstream_depth=None)
@@ -87,7 +89,7 @@ def parse_selector(pattern: str) -> ParsedSelector:
         "mydb.analytics.*+3"    -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=None, downstream_depth=3)
         "2+mydb.analytics.*+3"  -> ParsedSelector(glob="mydb.analytics.*", upstream_depth=2,    downstream_depth=3)
     """
-    # Both sides: [N+]glob[+M]
+    # Operators on both sides: [N+]glob[+M]
     match = re.match(r'^(\d*)\+(.+)\+(\d*)$', pattern)
     if match:
         left, glob, right = match.groups()
@@ -97,13 +99,13 @@ def parse_selector(pattern: str) -> ParsedSelector:
             downstream_depth=int(right) if right else 0,
         )
 
-    # Left only: [N+]glob
+    # An operator on the left side only: [N+]glob
     match = re.match(r'^(\d*)\+(.+)$', pattern)
     if match:
         left, glob = match.groups()
         return ParsedSelector(glob=glob, upstream_depth=int(left) if left else 0, downstream_depth=None)
 
-    # Right only: glob[+N]
+    # An operator on the right side only: glob[+N]
     match = re.match(r'^(.+)\+(\d*)$', pattern)
     if match:
         glob, right = match.groups()
@@ -113,9 +115,10 @@ def parse_selector(pattern: str) -> ParsedSelector:
 
 
 def _traverse_upstream(dag: nx.DiGraph, start_nodes: set[str], depth: int) -> set[str]:
-    """Return ancestors of start_nodes up to `depth` levels (0 = unlimited).
+    """Give the parents of start_nodes, to a distance of `depth` levels.
 
-    Does not include start_nodes themselves in the result.
+    A `depth` of 0 puts no limit on the distance. The result does not contain
+    the start_nodes.
     """
     if depth == 0:
         ancestors: set[str] = set()
@@ -139,9 +142,10 @@ def _traverse_upstream(dag: nx.DiGraph, start_nodes: set[str], depth: int) -> se
 
 
 def _traverse_downstream(dag: nx.DiGraph, start_nodes: set[str], depth: int) -> set[str]:
-    """Return descendants of start_nodes up to `depth` levels (0 = unlimited).
+    """Give the children of start_nodes, to a distance of `depth` levels.
 
-    Does not include start_nodes themselves in the result.
+    A `depth` of 0 puts no limit on the distance. The result does not contain
+    the start_nodes.
     """
     if depth == 0:
         descendants: set[str] = set()
@@ -165,9 +169,9 @@ def _traverse_downstream(dag: nx.DiGraph, start_nodes: set[str], depth: int) -> 
 
 
 def expand_selector(dag: nx.DiGraph, pattern: str) -> set[str]:
-    """Expand a single selector pattern (may include + operators) against the DAG.
+    """Apply one selector pattern to the DAG. The pattern can contain a + operator.
 
-    Returns the set of matching node full_names.
+    Returns the set of full_names that agree with the pattern.
     """
     parsed = parse_selector(pattern)
 
@@ -183,12 +187,12 @@ def expand_selector(dag: nx.DiGraph, pattern: str) -> set[str]:
 
 
 def expand_selectors(dag: nx.DiGraph, patterns: tuple[str, ...] | None) -> list[str]:
-    """Expand multiple selector patterns against the DAG (union semantics).
+    """Apply many selector patterns to the DAG and join the results.
 
-    Supports plain globs and + operators. If patterns is None or empty, returns
-    all nodes in topological order.
+    A pattern can be a plain glob or contain a + operator. If the patterns
+    argument is None or empty, the function gives each node.
 
-    Returns nodes in topological order (dependencies before dependents).
+    Returns the nodes in topological order. Each dependency comes first.
     """
     if not patterns:
         return list(nx.topological_sort(dag))

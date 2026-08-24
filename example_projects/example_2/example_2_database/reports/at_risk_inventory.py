@@ -1,11 +1,12 @@
-from clair import Column, ColumnType, Trouve, TrouveType
+from example_2_database.derived.product_sales_summary import trouve as example_2_database_derived_product_sales_summary
 from example_2_database.refined.inventory import trouve as example_2_database_refined_inventory
 from example_2_database.refined.products import trouve as example_2_database_refined_products
-from example_2_database.derived.product_sales_summary import trouve as example_2_database_derived_product_sales_summary
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Products with fewer than 30 days of stock remaining.",
+    docs="The products with less than 30 days of stock.",
     sql=f"""
         with daily_sales_rate as (
             select

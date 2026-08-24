@@ -1,10 +1,11 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.refined.orders import trouve as example_2_database_refined_orders
 from example_2_database.refined.promotions import trouve as example_2_database_refined_promotions
 
+from clair import Column, ColumnType, Trouve, TrouveType
+
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Promotion usage statistics from orders with applied promos.",
+    docs="Statistics for the use of the promotions. This Trouve reads the orders that have a promotion.",
     sql=f"""
         select
             p.promotion_id,

@@ -1,9 +1,10 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.refined.events import trouve as example_2_database_refined_events
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Daily event counts by type with unique user counts.",
+    docs="Daily count of the events for each type, with the count of the unique users.",
     sql=f"""
         select
             event_date,

@@ -1,10 +1,11 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.refined.inventory import trouve as example_2_database_refined_inventory
 from example_2_database.refined.products import trouve as example_2_database_refined_products
 
+from clair import Column, ColumnType, Trouve, TrouveType
+
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Products with low or out-of-stock inventory levels.",
+    docs="The products with a low inventory level or no inventory.",
     sql=f"""
         select
             i.product_id,

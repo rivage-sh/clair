@@ -2,7 +2,7 @@ from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.SOURCE,
-    docs="Raw orders table. Each row is one order. updated_at changes when an order status changes.",
+    docs="Raw orders table. Each row is one order. The updated_at column changes when the status of an order changes.",
     columns=[
         Column(name="order_id", type=ColumnType.STRING),
         Column(name="customer_id", type=ColumnType.STRING),

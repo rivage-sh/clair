@@ -6,9 +6,9 @@ Public API exports. Users import from here in their Trouve files:
 
 Runtime context
 ---------------
-``clair.env`` is set to the active :class:`~clair.environments.environments.Environment`
-before Trouve modules are loaded during discovery. Import it to implement
-feature flags based on the active environment::
+Discovery sets ``clair.env`` to the active
+:class:`~clair.environments.environments.Environment` before it loads the Trouve
+modules. Import it to make feature flags that obey the active environment::
 
     import clair
 
@@ -16,9 +16,9 @@ feature flags based on the active environment::
         sql=f"SELECT * FROM {upstream} {'WHERE is_beta = 1' if clair.env.role == 'DEV' else ''}"
     )
 
-``clair.run_mode`` is set to the active :class:`~clair.trouves.run_config.RunMode`
-before Trouve modules are loaded during discovery. Use it to make SQL conditional
-on run mode (analogous to dbt's ``is_incremental()``)::
+Discovery also sets ``clair.run_mode`` to the active
+:class:`~clair.trouves.run_config.RunMode` before it loads the Trouve modules. Use
+it to make the SQL obey the run mode (the equivalent of dbt's ``is_incremental()``)::
 
     import clair
     from clair import RunMode
@@ -30,9 +30,10 @@ on run mode (analogous to dbt's ``is_incremental()``)::
         \"\"\"
     )
 
-When ``clair.run_mode`` is ``None`` (e.g. during ``clair dag`` or ``clair docs``),
-the expression ``clair.run_mode == RunMode.INCREMENTAL`` evaluates to ``False``,
-so no WHERE clause is applied — the safe default for non-run commands.
+When ``clair.run_mode`` is ``None`` (for example, in ``clair dag`` or ``clair
+docs``), the expression ``clair.run_mode == RunMode.INCREMENTAL`` gives ``False``.
+Thus clair adds no WHERE clause — the safe default for commands that do not run
+the project.
 """
 
 from __future__ import annotations
@@ -42,17 +43,20 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
 
+from clair.environments.routing import RoutingEntry, RoutingTable, TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
+from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import (
-    IncrementalMode,
-    UpsertConfig,
-    RunConfig,
-    RunMode,
     SOURCE,
     TARGET,
+    IncrementalMode,
+    RunConfig,
+    RunMode,
+    UpsertConfig,
 )
 from clair.trouves.test import (
+    THIS,
     AnyTest,
     Test,
     TestNotNull,
@@ -60,39 +64,43 @@ from clair.trouves.test import (
     TestSql,
     TestUnique,
     TestUniqueColumns,
-    THIS,
 )
-from clair.trouves.trouve import Trouve, TrouveType
+from clair.trouves.trouve import Trouve, TrouveAbc, TrouveType
 
 __version__ = "0.1.0"
 
-# Set by discover_project() before Trouve modules are loaded.
-# None when running outside of a clair discovery run.
+# discover_project() sets this before it loads the Trouve modules.
+# It stays None outside of a clair discovery run.
 env: Environment | None = None
 
-# Set by discover_project() before Trouve modules are loaded.
-# None when running outside of a clair discovery run.
+# discover_project() sets this before it loads the Trouve modules.
+# It stays None outside of a clair discovery run.
 run_mode: RunMode | None = None
 
 __all__ = [
+    "SOURCE",
+    "TARGET",
+    "THIS",
     "AnyTest",
     "Column",
     "ColumnType",
     "DatabaseDefaults",
     "IncrementalMode",
-    "UpsertConfig",
+    "PandasTrouve",
+    "RoutingEntry",
+    "RoutingTable",
     "RunConfig",
     "RunMode",
-    "SOURCE",
     "SchemaDefaults",
-    "TARGET",
     "Test",
     "TestNotNull",
     "TestRowCount",
     "TestSql",
     "TestUnique",
     "TestUniqueColumns",
-    "THIS",
     "Trouve",
+    "TrouveAbc",
+    "TrouveAddress",
     "TrouveType",
+    "UpsertConfig",
 ]

@@ -1,4 +1,4 @@
-"""Tests for clair.docs.columns -- column inference from SQL."""
+"""The tests of clair.docs.columns. That module reads the columns from the SQL."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from clair.trouves.column import Column, ColumnType
 
 
 class TestInferColumnsWithDeclaredColumns:
-    """When the user explicitly declares columns, inference should use them as-is."""
+    """When the user declares the columns, clair keeps them with no change."""
 
     def test_declared_columns_returned_verbatim(self):
         declared = [
@@ -23,7 +23,7 @@ class TestInferColumnsWithDeclaredColumns:
         assert result.message == ""
 
     def test_declared_columns_take_priority_over_sql(self):
-        """Even if SQL has explicit columns, user-declared columns win."""
+        """The columns of the user win, and the columns in the SQL do not."""
         declared = [Column(name="custom_col", type=ColumnType.STRING)]
         result = infer_columns(
             declared_columns=declared,
@@ -35,7 +35,7 @@ class TestInferColumnsWithDeclaredColumns:
 
 
 class TestInferColumnsNoSql:
-    """SOURCE trouves have no SQL -- should return NO_SQL status."""
+    """A SOURCE Trouve has no SQL. Clair gives the NO_SQL status."""
 
     def test_none_sql(self):
         result = infer_columns(declared_columns=[], resolved_sql=None)
@@ -53,7 +53,7 @@ class TestInferColumnsNoSql:
 
 
 class TestInferColumnsSelectStar:
-    """SELECT * queries should be detected and return SELECT_STAR status."""
+    """Clair finds a SELECT * query and gives the SELECT_STAR status."""
 
     def test_bare_select_star(self):
         result = infer_columns(
@@ -89,7 +89,7 @@ class TestInferColumnsSelectStar:
         assert result.status == ColumnStatus.SELECT_STAR
 
     def test_count_star_is_not_select_star(self):
-        """count(*) is a function call, not a star projection."""
+        """count(*) is a function call, not a star in the projection."""
         result = infer_columns(
             declared_columns=[],
             resolved_sql="SELECT count(*) as total_rows FROM orders",
@@ -105,7 +105,7 @@ class TestInferColumnsSelectStar:
 
 
 class TestInferColumnsFromSql:
-    """When SQL has explicit columns, they should be inferred."""
+    """When the SQL names each column, clair reads the names."""
 
     def test_simple_column_list(self):
         result = infer_columns(
@@ -164,20 +164,21 @@ class TestInferColumnsFromSql:
         assert [c.name for c in result.columns] == ["fallback_value", "id"]
 
     def test_expression_without_alias_skipped(self):
-        """Complex expressions without AS aliases can't be named."""
+        """A long expression with no AS alias has no name."""
         sql = "SELECT id, 1 + 2 FROM users"
         result = infer_columns(declared_columns=[], resolved_sql=sql)
         assert result.status == ColumnStatus.INFERRED
-        # Only 'id' can be extracted; '1 + 2' has no alias
+        # Clair reads only 'id'. The expression '1 + 2' has no alias.
         assert [c.name for c in result.columns] == ["id"]
 
 
 class TestInferColumnsParseFailed:
-    """SQL that can't be parsed at all should return PARSE_FAILED."""
+    """Clair gives the PARSE_FAILED status for SQL that it cannot read."""
 
     def test_no_select_keyword(self):
-        # INSERT INTO target SELECT * FROM source -- the first match finds SELECT * FROM source
-        # This actually will match SELECT *, so let's use a truly unparseable statement
+        # In "INSERT INTO target SELECT * FROM source", the first match is
+        # "SELECT * FROM source". Thus that statement gives SELECT *. A test
+        # needs a statement that clair truly cannot read.
         pass
 
     def test_unparseable_sql(self):
@@ -191,7 +192,7 @@ class TestInferColumnsParseFailed:
 
 
 class TestBuildCatalogColumnInference:
-    """Integration: verify that build_catalog attaches column_inference to each trouve."""
+    """An integration test: build_catalog puts column_inference on each trouve."""
 
     def test_catalog_includes_column_inference(self, simple_project):
         from clair.core.dag import build_dag
@@ -202,9 +203,9 @@ class TestBuildCatalogColumnInference:
         dag = build_dag(discovered)
         catalog = build_catalog(dag, simple_project)
 
-        for full_name, trouve_data in catalog["trouves"].items():
+        for physical_name, trouve_data in catalog["trouves"].items():
             assert "column_inference" in trouve_data, (
-                f"Trouve {full_name} missing column_inference"
+                f"Trouve {physical_name} missing column_inference"
             )
             inference = trouve_data["column_inference"]
             assert "status" in inference
@@ -212,7 +213,7 @@ class TestBuildCatalogColumnInference:
             assert "message" in inference
 
     def test_declared_columns_get_declared_status(self, simple_project):
-        """Both the source and the table in simple_project have declared columns."""
+        """The source and the table in simple_project both have declared columns."""
         from clair.core.dag import build_dag
         from clair.core.discovery import discover_project
         from clair.docs.catalog import build_catalog
@@ -221,6 +222,6 @@ class TestBuildCatalogColumnInference:
         dag = build_dag(discovered)
         catalog = build_catalog(dag, simple_project)
 
-        for full_name, trouve_data in catalog["trouves"].items():
+        for trouve_data in catalog["trouves"].values():
             inference = trouve_data["column_inference"]
             assert inference["status"] == ColumnStatus.DECLARED

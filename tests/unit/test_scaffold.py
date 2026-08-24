@@ -1,37 +1,38 @@
-"""Tests for clair.core.scaffold -- project initialisation."""
+"""The tests of clair.core.scaffold. That module starts a new project."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-
 from clair.core.scaffold import scaffold_project, write_environments_yml
-
+from clair.environments.project_routing import load_project_routing
+from clair.environments.routing import route
+from clair.trouves.trouve import TrouveType
 
 # ---------------------------------------------------------------------------
-# Helpers
+# The helper functions.
 # ---------------------------------------------------------------------------
 
 EXPECTED_PROJECT_FILES = [
     "source/raw/orders.py",
 ]
 
-DEFAULT_SOURCE_ARGS = dict(
-    source_database_name="source",
-    source_schema_name="raw",
-    source_table_name="orders",
-)
+DEFAULT_SOURCE_ARGS = {
+    "source_database_name": "source",
+    "source_schema_name": "raw",
+    "source_table_name": "orders",
+}
 
 
 def _run_scaffold(tmp_path: Path) -> list[tuple[str, str]]:
-    """Run scaffold_project with a fake home dir so we never touch the real one."""
+    """Run scaffold_project with a false home directory. The real one stays as it is."""
     project_dir = tmp_path / "my_project"
     fake_home = tmp_path / "fake_home"
     return scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# The tests.
 # ---------------------------------------------------------------------------
 
 
@@ -52,11 +53,17 @@ class TestScaffoldCreatesAllExpectedFiles:
         environments_path = fake_home / ".clair" / "environments.yml"
         assert environments_path.exists()
 
+    def test_creates_routing_file(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "my_project"
+        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
+
+        assert (project_dir / "__routing__.py").exists()
+
     def test_returns_all_paths_as_created(self, tmp_path: Path) -> None:
         results = _run_scaffold(tmp_path)
 
-        # 1 project file + 1 environments.yml
-        assert len(results) == 2
+        # 1 source Trouve, 1 __routing__.py, and 1 environments.yml file.
+        assert len(results) == 3
         assert all(status == "created" for status, _ in results)
 
 
@@ -76,7 +83,20 @@ class TestFileContents:
         assert "dev:" in content
         assert "account:" in content
         assert "externalbrowser" in content
-        assert "  routing:" not in content  # routing omitted by default; shown as comment only
+        # Routing lives in the project __routing__.py, never in environments.yml.
+        assert "  routing:" not in content
+
+    def test_routing_file_gives_a_passthrough_entry_for_dev(self, tmp_path: Path) -> None:
+        """The file that clair init writes loads, and it changes no address."""
+        project_dir = tmp_path / "proj"
+        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
+
+        project_routing = load_project_routing(project_dir, "dev")
+
+        assert project_routing.entry is not None
+        assert route("analytics.orders.daily", TrouveType.TABLE, project_routing.entry) == (
+            "analytics.orders.daily"
+        )
 
 
 class TestDoesNotOverwriteExistingFiles:

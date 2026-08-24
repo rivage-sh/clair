@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/clair_logo.png" alt="clair logo" width="200" />
+  <img src="https://raw.githubusercontent.com/rivage-sh/clair/main/site_docs/docs/assets/clair_logo.png" alt="clair logo" width="200" />
 </p>
 
 # clair
@@ -39,18 +39,18 @@ Or skip SQL entirely and write pandas:
 
 ```python
 import pandas as pd
+from refined.products.catalog import trouve as catalog_trouve
+from refined.products.reviews import trouve as reviews_trouve
+
 from clair import PandasTrouve
-from refined.products.catalog import trouve as catalog
-from refined.products.reviews import trouve as reviews
 
-def summarize(inputs):
-    df = inputs["catalog"].merge(inputs["reviews"], on="product_id")
-    return df.groupby("name")["rating"].mean().reset_index()
 
-trouve = PandasTrouve(
-    inputs={"catalog": catalog, "reviews": reviews},
-    transform=summarize,
-)
+def summarize(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
+    merged = catalog.merge(reviews, on="product_id")
+    return merged.groupby("name", as_index=False).agg(rating=("rating", "mean"))
+
+
+trouve = PandasTrouve(transform=summarize, inputs=[catalog_trouve, reviews_trouve])
 ```
 
 clair fetches the upstream tables from Snowflake, runs your function locally, then writes the result back. The DAG, lineage, `--select` filters, and data quality tests all work unchanged.
@@ -70,10 +70,10 @@ my_project/
         └── reviews.py   →   source.products.reviews
 ```
 
-There are two kinds of Trouve:
+Clair has one Trouve class for each backend. Both derive from `TrouveAbc`:
 
-- **`Trouve`** — SQL-based. Compiles to a Snowflake `TABLE` or `VIEW`. Runs inside Snowflake.
-- **`PandasTrouve`** — pandas-based. Runs a Python function on the machine executing clair, then writes the result back to Snowflake.
+- **`Trouve`** — compiles `sql` to a Snowflake `TABLE` or `VIEW`. Runs inside Snowflake.
+- **`PandasTrouve`** — runs a Python function on the machine executing clair, then writes the result back to Snowflake.
 
 `Trouve` has three types:
 
@@ -135,7 +135,10 @@ uv add rivage-clair
 
 ### 1. Set up an environment
 
-Run `clair init` — it will prompt for your Snowflake connection details and write `~/.clair/environments.yml`.
+Run `clair init`. It asks for your Snowflake connection details and writes two files:
+
+- `~/.clair/environments.yml` — your connection settings. Do not commit this file.
+- `<project>/__routing__.py` — the [routing](https://clair.rivage.sh/guides/routing/) entry of each environment. Commit this file.
 
 ### 2. Create a project
 
@@ -382,36 +385,39 @@ Pass `--run-mode full_refresh` on the CLI to force a full rebuild of everything 
 
 ## Pandas-native transformations
 
-When SQL isn't the right tool — complex reshaping, ML feature engineering, multi-step aggregations — use `PandasTrouve`. Your function receives upstream tables as DataFrames, runs locally on the machine executing clair, and the result is written back to Snowflake automatically.
+When SQL isn't the right tool — complex reshaping, ML feature engineering, multi-step aggregations — use a `PandasTrouve` in place of a `Trouve`. Your function receives upstream tables as DataFrames, runs locally on the machine executing clair, and clair writes the result back to Snowflake.
 
 ```python
 import pandas as pd
-from clair import PandasTrouve, Column, ColumnType, TestNotNull
-from refined.products.catalog import trouve as catalog
-from refined.products.reviews import trouve as reviews
+from refined.products.catalog import trouve as catalog_trouve
+from refined.products.reviews import trouve as reviews_trouve
 
-def top_rated(inputs):
-    df = inputs["catalog"].merge(inputs["reviews"], on="product_id")
+from clair import Column, ColumnType, PandasTrouve, TestNotNull
+
+
+def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
+    merged = catalog.merge(reviews, on="product_id")
     return (
-        df.groupby(["product_id", "name"])["rating"]
-        .mean()
-        .reset_index()
-        .rename(columns={"rating": "avg_rating"})
+        merged.groupby(["product_id", "name"], as_index=False)
+        .agg(avg_rating=("rating", "mean"))
         .query("avg_rating >= 4")
     )
 
+
 trouve = PandasTrouve(
-    inputs={"catalog": catalog, "reviews": reviews},
     transform=top_rated,
+    inputs=[catalog_trouve, reviews_trouve],
     columns=[
         Column(name="product_id", type=ColumnType.STRING),
         Column(name="name",       type=ColumnType.STRING),
         Column(name="avg_rating", type=ColumnType.FLOAT),
     ],
     tests=[TestNotNull(column="product_id")],
-    docs="Top-rated products by average review score, computed in pandas.",
+    docs="The products with the highest average review score. This Trouve uses pandas.",
 )
 ```
+
+Clair binds `inputs` to the transform parameters by position. Because the transform takes plain DataFrames, you can call it directly in a unit test or in a notebook.
 
 > **Note:** pandas transformations run on the machine executing clair, not inside Snowflake. Keep this in mind for large tables.
 
@@ -470,5 +476,13 @@ Example projects are included under `example_projects/`:
 | `example_1` | A minimal 4-Trouve events pipeline with VARIANT flattening |
 | `example_2` | A 50-Trouve e-commerce warehouse across 4 layers (source → refined → derived → reports) |
 | `example_3` | Incremental APPEND and UPSERT strategies |
+| `example_4` | A `PandasTrouve` that gives a DataFrame instead of SQL |
+| `example_from_init` | The files that `clair init` writes |
 
-Each includes a `setup.sql` to create and seed the source tables and a `verify.sql` to inspect the results.
+Each numbered project holds a `__routing__.py` with a `dev` entry and a `prod` entry. The
+`dev` entry reads `CLAIR_USER`, thus each person writes to a separate database. Run
+`clair validate --project example_projects/example_1` to find a routing problem without a
+Snowflake connection.
+
+The README of each project holds the SQL that creates and seeds the source tables, and the SQL
+that inspects the results.

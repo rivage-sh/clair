@@ -1,12 +1,12 @@
-"""Database and schema-level configuration defaults."""
+"""The default configuration for a database and for a schema."""
 
 from pydantic import BaseModel
 
 
 class ResolvedConfig(BaseModel):
-    """Merged warehouse/role configuration for a single Trouve.
+    """The final warehouse and role configuration of one Trouve.
 
-    Built by discovery by walking up the directory tree and merging
+    Discovery makes this object. It moves up the directory tree and merges the
     profile defaults with __database_config__.py and __schema_config__.py.
     """
 
@@ -15,9 +15,9 @@ class ResolvedConfig(BaseModel):
 
 
 class DatabaseDefaults(BaseModel):
-    """Defaults for all Trouves within a database directory.
+    """The defaults for each Trouve in a database directory.
 
-    Defined in __database_config__.py at the database directory level.
+    Set these values in __database_config__.py in the database directory.
     """
 
     warehouse: str | None = None
@@ -25,10 +25,10 @@ class DatabaseDefaults(BaseModel):
 
 
 class SchemaDefaults(BaseModel):
-    """Defaults for all Trouves within a schema directory.
+    """The defaults for each Trouve in a schema directory.
 
-    Defined in __schema_config__.py at the schema directory level.
-    Overrides DatabaseDefaults for fields that are set.
+    Set these values in __schema_config__.py in the schema directory. Each value
+    that you set replaces the equivalent value in DatabaseDefaults.
     """
 
     warehouse: str | None = None

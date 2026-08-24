@@ -1,4 +1,4 @@
-"""Tests for compiler output for df_fn Trouve nodes."""
+"""The tests of the compiler output for a PandasTrouve node."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ FAKE_RUN_ID = "0" * 32
 
 
 def _make_pandas_project(tmp_path: Path) -> Path:
-    """Build a project with a SOURCE and a df_fn Trouve with columns."""
+    """Make a project with a SOURCE and a PandasTrouve that has columns."""
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
@@ -25,14 +25,15 @@ def _make_pandas_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import Trouve, Column, ColumnType
+        from clair import PandasTrouve, Column, ColumnType
         from mydb.source.events import trouve as source_events
 
-        def summarize(events: pd.DataFrame = source_events) -> pd.DataFrame:
+        def summarize(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = Trouve(
-            df_fn=summarize,
+        trouve = PandasTrouve(
+            transform=summarize,
+            inputs=[source_events],
             columns=[
                 Column(name="event_type", type=ColumnType.STRING),
                 Column(name="event_count", type=ColumnType.NUMBER),
@@ -44,7 +45,7 @@ def _make_pandas_project(tmp_path: Path) -> Path:
 
 
 def _make_mixed_project(tmp_path: Path) -> Path:
-    """Build a project with both SQL Trouve and df_fn Trouve."""
+    """Make a project with a SQL Trouve and a PandasTrouve."""
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "refined").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
@@ -62,20 +63,20 @@ def _make_mixed_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import Trouve
+        from clair import PandasTrouve
         from mydb.refined.events import trouve as refined_events
 
-        def summarize(events: pd.DataFrame = refined_events) -> pd.DataFrame:
+        def summarize(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = Trouve(df_fn=summarize)
+        trouve = PandasTrouve(transform=summarize, inputs=[refined_events])
     """))
 
     return tmp_path
 
 
 def _make_no_columns_project(tmp_path: Path) -> Path:
-    """Build a project with a df_fn Trouve that has no columns defined."""
+    """Make a project with a PandasTrouve that has no columns."""
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
@@ -86,19 +87,19 @@ def _make_no_columns_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import Trouve
+        from clair import PandasTrouve
         from mydb.source.events import trouve as source_events
 
-        def summarize(events: pd.DataFrame = source_events) -> pd.DataFrame:
+        def summarize(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = Trouve(df_fn=summarize)
+        trouve = PandasTrouve(transform=summarize, inputs=[refined_events])
     """))
 
     return tmp_path
 
 
-class TestDfFnTrouveArtifactFile:
+class TestPandasTrouveArtifactFile:
     def test_artifact_file_ends_in_py(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
@@ -108,7 +109,7 @@ class TestDfFnTrouveArtifactFile:
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         assert py_file.exists()
 
-    def test_no_sql_file_for_df_fn_trouve(self, tmp_path: Path):
+    def test_no_sql_file_for_pandas_trouve(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
@@ -117,7 +118,7 @@ class TestDfFnTrouveArtifactFile:
         sql_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.sql"
         assert not sql_file.exists()
 
-    def test_no_json_file_for_df_fn_trouve(self, tmp_path: Path):
+    def test_no_json_file_for_pandas_trouve(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
@@ -127,7 +128,7 @@ class TestDfFnTrouveArtifactFile:
         assert not json_file.exists()
 
 
-class TestDfFnTrouveArtifactContent:
+class TestPandasTrouveArtifactContent:
     def _get_artifact_content(self, tmp_path: Path) -> str:
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
@@ -155,7 +156,7 @@ class TestDfFnTrouveArtifactContent:
         assert "def summarize" in content
 
 
-class TestDfFnTrouveCompiledNodeInfo:
+class TestPandasTrouveCompiledNodeInfo:
     def test_compiled_node_type_is_pandas(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))

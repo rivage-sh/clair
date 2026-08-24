@@ -1,9 +1,10 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.refined.orders import trouve as example_2_database_refined_orders
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Daily order aggregates including revenue and buyer counts.",
+    docs="Daily totals for the orders. They contain the revenue and the count of the buyers.",
     sql=f"""
         select
             order_date,

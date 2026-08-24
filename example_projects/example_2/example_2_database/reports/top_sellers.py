@@ -1,9 +1,10 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.derived.seller_performance import trouve as example_2_database_derived_seller_performance
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Top sellers by total revenue at or above the 90th percentile.",
+    docs="The sellers with a total revenue in the 90th percentile or higher.",
     sql=f"""
         with p90 as (
             select percentile_cont(0.9) within group (order by total_revenue) as threshold

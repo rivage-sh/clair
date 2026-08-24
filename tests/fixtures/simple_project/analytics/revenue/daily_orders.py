@@ -1,9 +1,10 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from source.raw.orders import trouve as raw_orders
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Daily order totals aggregated from raw orders.",
+    docs="Daily totals for the orders. This Trouve reads the raw orders.",
     sql=f"""
         select
             date_trunc('day', created_at) as order_date,

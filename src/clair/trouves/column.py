@@ -1,4 +1,4 @@
-"""Column and ColumnType definitions."""
+"""The Column and ColumnType definitions."""
 
 from enum import StrEnum
 
@@ -6,12 +6,11 @@ from pydantic import BaseModel
 
 
 class ColumnType(StrEnum):
-    """Common Snowflake data types.
+    """The usual Snowflake data types.
 
-    Because ColumnType is a StrEnum, members compare equal to their string
-    values (e.g. ColumnType.STRING == "STRING"). You can also pass a plain
-    string for parameterised types like "NUMBER(18,2)" that don't have a
-    named constant.
+    ColumnType is a StrEnum. Thus each member is equal to its own string, for
+    example ColumnType.STRING == "STRING". For a type with parameters, such as
+    "NUMBER(18,2)", give a plain string, because this enum has no such member.
     """
 
     STRING = "STRING"
@@ -34,10 +33,10 @@ class Column(BaseModel):
     """A column in a Trouve.
 
     Attributes:
-        name: Column name as it appears in Snowflake.
-        type: Snowflake data type string (e.g., "STRING", "NUMBER(18,2)").
-        docs: Optional documentation for this column.
-        nullable: Whether the column allows NULLs.
+        name: The column name, as Snowflake shows it.
+        type: The Snowflake data type, for example "STRING" or "NUMBER(18,2)".
+        docs: Optional documentation text for this column.
+        nullable: True if the column accepts a NULL value.
     """
 
     name: str

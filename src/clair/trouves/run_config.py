@@ -1,4 +1,4 @@
-"""Run configuration types for incremental materializations."""
+"""The run configuration types for incremental materializations."""
 
 from __future__ import annotations
 
@@ -8,33 +8,34 @@ from pydantic import BaseModel, model_validator
 
 
 class RunMode(StrEnum):
-    """How a Trouve is materialized during `clair run`."""
+    """The method that `clair run` uses to materialize a Trouve."""
     FULL_REFRESH = "full_refresh"
     INCREMENTAL = "incremental"
 
 
 class IncrementalMode(StrEnum):
-    """Strategy for applying incremental data."""
+    """The method that clair uses to apply incremental data."""
     APPEND = "append"
     UPSERT = "upsert"
 
 
-# Importable aliases for MERGE statement table aliases.
+# The aliases of the target table and the source table in a MERGE statement.
 TARGET = "target"
 SOURCE = "source"
 
 
 class UpsertConfig(BaseModel):
-    """Fine-grained column control for UPSERT MERGE statements.
+    """Exact column control for an UPSERT MERGE statement.
 
-    Useful when ``join_sql`` is used and clair cannot infer which columns are
-    join keys, or when only a subset of columns should be updated or inserted.
+    Use this class when you set ``join_sql`` and clair cannot find the join keys.
+    Use it also when clair must update or insert only some of the columns.
 
     Attributes:
-        update_columns: Columns to include in WHEN MATCHED THEN UPDATE SET.
-            Defaults to all non-primary-key columns (or all columns when join_sql is used).
-        insert_columns: Columns to include in WHEN NOT MATCHED THEN INSERT.
-            Defaults to all columns.
+        update_columns: The columns for the WHEN MATCHED THEN UPDATE SET clause.
+            The default is all the columns that are not primary keys. If you set
+            join_sql, the default is all the columns.
+        insert_columns: The columns for the WHEN NOT MATCHED THEN INSERT clause.
+            The default is all the columns.
     """
 
     update_columns: list[str] | None = None
@@ -42,14 +43,17 @@ class UpsertConfig(BaseModel):
 
 
 class RunConfig(BaseModel):
-    """Controls how a Trouve is materialized.
+    """This class controls how clair materializes a Trouve.
 
     Attributes:
-        run_mode: FULL_REFRESH recreates the table; INCREMENTAL applies only new data.
-        incremental_mode: APPEND inserts new rows; UPSERT merges on key.
-        primary_key_columns: Column names to match on for UPSERT (generates ON clause).
-        join_sql: Custom ON clause for UPSERT (alternative to primary_key_columns).
-        upsert_config: Optional column overrides for UPSERT MERGE statements.
+        run_mode: FULL_REFRESH makes the table again. INCREMENTAL applies only
+            the new data.
+        incremental_mode: APPEND inserts new rows. UPSERT merges on a key.
+        primary_key_columns: The column names that UPSERT matches on. Clair makes
+            the ON clause from them.
+        join_sql: Your own ON clause for UPSERT. Use it in place of
+            primary_key_columns.
+        upsert_config: Optional column overrides for the UPSERT MERGE statement.
     """
 
     run_mode: RunMode = RunMode.FULL_REFRESH
@@ -61,19 +65,19 @@ class RunConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_config(self) -> RunConfig:
         if self.run_mode == RunMode.FULL_REFRESH and self.incremental_mode is not None:
-            raise ValueError("incremental_mode is only valid when run_mode is incremental")
+            raise ValueError("you can set incremental_mode only when run_mode is incremental")
         if self.run_mode == RunMode.INCREMENTAL and self.incremental_mode is None:
-            raise ValueError("incremental run_mode requires incremental_mode")
+            raise ValueError("the incremental run_mode needs incremental_mode")
         if self.incremental_mode == IncrementalMode.APPEND:
             if self.primary_key_columns is not None:
-                raise ValueError("primary_key_columns is only valid for upsert mode")
+                raise ValueError("you can set primary_key_columns only for the upsert mode")
             if self.join_sql is not None:
-                raise ValueError("join_sql is only valid for upsert mode")
+                raise ValueError("you can set join_sql only for the upsert mode")
             if self.upsert_config is not None:
-                raise ValueError("upsert_config is only valid for upsert mode")
+                raise ValueError("you can set upsert_config only for the upsert mode")
         if self.incremental_mode == IncrementalMode.UPSERT:
             if self.primary_key_columns is not None and self.join_sql is not None:
-                raise ValueError("specify primary_key_columns or join_sql, not both")
+                raise ValueError("set primary_key_columns or join_sql, but not both")
             if self.primary_key_columns is None and self.join_sql is None:
-                raise ValueError("upsert mode requires primary_key_columns or join_sql")
+                raise ValueError("the upsert mode needs primary_key_columns or join_sql")
         return self

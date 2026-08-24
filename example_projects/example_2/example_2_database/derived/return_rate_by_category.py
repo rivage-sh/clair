@@ -1,10 +1,11 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.derived.return_rate_by_product import trouve as example_2_database_derived_return_rate_by_product
 from example_2_database.refined.products import trouve as example_2_database_refined_products
 
+from clair import Column, ColumnType, Trouve, TrouveType
+
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Per-category return rates aggregated from product-level data.",
+    docs="Return rate for each category. This Trouve reads the data for each product.",
     sql=f"""
         select
             p.category,

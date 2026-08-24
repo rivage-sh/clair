@@ -1,0 +1,11 @@
+# Guides
+
+These guides show you how to do the usual clair tasks.
+
+- **[Pandas-Native Transformations](pandas-native.md)** — write pipeline steps as Python functions with pandas
+- **[Incrementality](incrementality.md)** — APPEND and UPSERT strategies for large tables
+- **[Data Quality Tests](data-quality-tests.md)** — attach tests to Trouves
+- **[Staging](staging.md)** — clair publishes a Trouve only after its tests pass
+- **[Selectors](selectors.md)** — run only a subset of your project
+- **[Routing](routing.md)** — remap the Snowflake target of each environment
+- **[Per-Database & Schema Config](per-database-schema-config.md)** — warehouse and role overrides per directory

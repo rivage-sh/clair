@@ -30,12 +30,12 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Build docs
-        run: uv run --group docs mkdocs build -f site-docs/mkdocs.yml
+        run: uv run --group docs mkdocs build -f site_docs/mkdocs.yml
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site-docs/site
+          path: site_docs/site
 
       - name: Deploy to GitHub Pages
         id: deployment

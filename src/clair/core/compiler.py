@@ -1,4 +1,4 @@
-"""Compiler -- resolve SQL and produce compile output."""
+"""The compiler. It completes the SQL and writes the compile output."""
 
 from __future__ import annotations
 
@@ -13,19 +13,21 @@ from pydantic import BaseModel
 from clair.core.dag import ClairDag
 from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.core.runner import resolve_effective_mode
-from clair.core.strict import (
+from clair.core.staging import (
     build_clone_statement,
     build_drop_staging_statement,
     build_promote_statement,
-    strict_staging_name,
+    staging_address,
 )
+from clair.environments.routing import TrouveAddress
 from clair.exceptions import CompileError
+from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
 
 
 class CompiledNodeInfo(BaseModel):
-    """Structured info about a single compiled node."""
+    """The data of one compiled node."""
 
     name: str
     type: str
@@ -35,7 +37,7 @@ class CompiledNodeInfo(BaseModel):
 
 
 class CompileOutput(BaseModel):
-    """Structured result of a compile operation."""
+    """The result of one compile operation."""
 
     trouve_count: int
     source_count: int
@@ -44,12 +46,14 @@ class CompileOutput(BaseModel):
 
     @staticmethod
     def render_header(trouve_count: int, source_count: int, compiled_nodes: list[CompiledNodeInfo]) -> str:
-        """Render the compile header and execution order."""
+        """Make the text of the compile header and the execution order."""
         lines = [
             "=== Clair Compile ===",
             "",
-            f"DAG: {trouve_count} Trouve{'s' if trouve_count != 1 else ''}, "
-            f"{source_count} source{'s' if source_count != 1 else ''}",
+            (
+                f"DAG: {trouve_count} Trouve{'s' if trouve_count != 1 else ''}, "
+                f"{source_count} source{'s' if source_count != 1 else ''}"
+            ),
             "",
         ]
 
@@ -63,7 +67,7 @@ class CompileOutput(BaseModel):
 
     @staticmethod
     def render_node(node: CompiledNodeInfo) -> str:
-        """Render the output for a single compiled node."""
+        """Make the output text of one compiled node."""
         lines: list[str] = []
         lines.append(f"--- {node.name} ---")
         deps_str = ", ".join(node.dependencies) if node.dependencies else "(none)"
@@ -77,11 +81,11 @@ class CompileOutput(BaseModel):
 
     @staticmethod
     def render_footer(artifacts_dir: Path) -> str:
-        """Render the final compile summary line."""
-        return f"Compiled SQL written to {artifacts_dir}/"
+        """Make the last line of the compile summary."""
+        return f"Clair wrote the compiled SQL to {artifacts_dir}/"
 
     def render(self) -> str:
-        """Produce the formatted summary string for stdout."""
+        """Make the complete summary text for stdout."""
         parts = [self.render_header(self.trouve_count, self.source_count, self.compiled_nodes)]
 
         for node in self.compiled_nodes:
@@ -96,39 +100,41 @@ def build_statements(
     trouve: Trouve,
     run_mode: RunMode,
     run_id: str,
-    strict: bool = False,
+    use_staging: bool = True,
 ) -> list[str]:
-    """Build the SQL statements for one Trouve, as they would be executed.
+    """Make the SQL statements of one Trouve, in the order that clair executes them.
 
-    Under strict mode the plan is shown end to end: the optional clone, the build
-    into the staging object, and the promotion that follows a passing test run.
-    The plan shown is the passing path -- a failing test run stops after the build
-    and leaves the staging object in place.
+    A staged plan shows each step: the clone for an incremental Trouve, the build
+    at the staging address, and the promotion after the tests pass. The plan shows
+    the path of a run that passes. A run that fails a test stops after the build,
+    and the staging object stays.
     """
     effective_mode = resolve_effective_mode(trouve, run_mode)
 
-    if not strict:
+    if not use_staging:
         return trouve.build_sql(effective_mode, run_id=run_id)
 
-    target_name = trouve.full_name
-    staging_name = strict_staging_name(target_name, run_id)
+    assert trouve.compiled is not None
+    physical_address = TrouveAddress.parse(trouve.compiled.physical_name)
+    staging = staging_address(physical_address, run_id)
 
     statements: list[str] = []
     if effective_mode == RunMode.INCREMENTAL:
-        statements.append(build_clone_statement(target_name, staging_name))
-    statements.extend(trouve.build_sql(effective_mode, run_id=run_id, target_name=staging_name))
+        statements.append(build_clone_statement(physical_address, staging))
+    statements.extend(
+        trouve.build_sql(effective_mode, run_id=run_id, write_address=staging)
+    )
 
-    assert trouve.compiled is not None
-    statements.append("-- strict: tests run against the staging object here")
+    statements.append("-- staging: the data quality tests run here")
     statements.append(
         build_promote_statement(
             trouve.type,
-            staging_name=staging_name,
-            target_name=target_name,
+            staging_address=staging,
+            physical_address=physical_address,
             resolved_sql=trouve.compiled.resolved_sql,
         )
     )
-    statements.append(build_drop_staging_statement(trouve.type, staging_name))
+    statements.append(build_drop_staging_statement(trouve.type, staging))
     return statements
 
 
@@ -139,23 +145,26 @@ def write_compile_output(
     on_node_compiled: Callable[[CompiledNodeInfo], None] = lambda _: None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     run_id: str = "",
-    strict: bool = False,
+    use_staging: bool = True,
 ) -> CompileOutput:
-    """Write compiled SQL to _clairtifacts/<run_id>/ and return a structured output.
+    """Write the compiled SQL to _clairtifacts/<run_id>/ and give the output.
 
     Args:
-        dag: The full project DAG.
-        selected: Ordered list of full_names to compile (non-SOURCE, topological order).
-        project_root: The project root directory.
-        on_node_compiled: Callback invoked after each node is compiled and written
-            to disk, allowing callers to stream output.
-        run_mode: The run mode to use when generating SQL statements.
-        run_id: UUIDv7 hex string identifying this compile run.
-        strict: When True, emit the full strict-mode plan (staging build, test
-            checkpoint, promotion) rather than a direct write to the target.
+        dag: The complete project DAG.
+        selected: The names to compile, in topological order. The list holds no
+            SOURCE Trouve.
+        project_root: The root directory of the project.
+        on_node_compiled: A callback. Clair calls it after it compiles a node
+            and writes the node to the disk. Thus the caller can show the
+            output immediately.
+        run_mode: The run mode for the new SQL statements.
+        run_id: The UUIDv7 hex string that identifies this compile run.
+        use_staging: If True, the plan shows the staged path: the build at the
+            staging address, the test step, and the promotion. If False, the plan
+            writes to the physical address directly.
 
     Returns:
-        A CompileOutput with structured data and a .render() method.
+        A CompileOutput. It holds the data and supplies a .render() method.
     """
     artifacts_dir = project_root / ARTIFACTS_DIR_NAME / run_id
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -172,18 +181,19 @@ def write_compile_output(
         trouve = dag.get_trouve(name)
         deps = list(dag.predecessors(name))
 
-        assert trouve.compiled is not None, f"{name} has not been compiled"
+        assert trouve.compiled is not None, f"Clair did not compile {name}"
         node_info = None
         if trouve.compiled.execution_type == ExecutionType.PANDAS:
+            assert isinstance(trouve, PandasTrouve)
             try:
-                fn_source = inspect.getsource(trouve.df_fn)
+                fn_source = inspect.getsource(trouve.transform)
             except (OSError, TypeError):
-                # Source unavailable for lambdas, built-ins, or compiled extensions
-                fn_source = repr(trouve.df_fn)
+                # A lambda, a built-in, or a compiled extension has no source text.
+                fn_source = repr(trouve.transform)
 
             imports_section = ""
             try:
-                source_file = inspect.getfile(trouve.df_fn)
+                source_file = inspect.getfile(trouve.transform)
                 source_text = Path(source_file).read_text()
                 tree = ast.parse(source_text)
                 import_lines = [
@@ -197,12 +207,14 @@ def write_compile_output(
             except (OSError, SyntaxError):
                 pass
 
-            input_lines = []
-            for param in inspect.signature(trouve.df_fn).parameters.values():
-                if isinstance(param.default, Trouve):
-                    input_lines.append(f"#   {param.name}  ->  {param.default.full_name}")
+            input_lines = [
+                f"#   {parameter_name}  ->  {upstream.physical_name}"
+                for parameter_name, upstream in zip(
+                    trouve.parameter_names(), trouve.upstream_trouves()
+                )
+            ]
 
-            header = "# clair compiled: {}\n# execution_type: pandas\n".format(trouve.full_name)
+            header = f"# clair compiled: {trouve.physical_name}\n# execution_type: pandas\n"
             if input_lines:
                 header += "# inputs:\n" + "\n".join(input_lines) + "\n"
             header += "\n"
@@ -222,7 +234,10 @@ def write_compile_output(
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text(artifact_content)
         elif trouve.compiled.execution_type == ExecutionType.SNOWFLAKE:
-            statements = build_statements(trouve, run_mode, run_id, strict=strict)
+            assert isinstance(trouve, Trouve)
+            statements = build_statements(
+                trouve, run_mode, run_id, use_staging=use_staging
+            )
 
             node_info = CompiledNodeInfo(
                 name=name,
@@ -239,7 +254,7 @@ def write_compile_output(
             sql_content = "\n\n---\n\n".join(s.strip() for s in statements)
             sql_file.write_text(sql_content + "\n")
         else:
-            raise CompileError(f"Unknown execution_type '{trouve.compiled.execution_type}' for {name}")
+            raise CompileError(f"Clair does not know the execution_type '{trouve.compiled.execution_type}' for {name}")
 
         on_node_compiled(node_info)
 

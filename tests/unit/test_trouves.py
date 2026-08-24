@@ -1,12 +1,14 @@
-"""Comprehensive tests for Trouve, RunConfig, tests, refs, and build_sql."""
+"""The complete tests of Trouve, RunConfig, the test models, refs, and build_sql."""
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX, _registry, clear
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
+from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import (
     IncrementalMode,
     RunConfig,
@@ -19,24 +21,23 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
-
+from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveAbc, TrouveType
 
 # ---------------------------------------------------------------------------
-# Helpers
+# The helper functions.
 # ---------------------------------------------------------------------------
 
 SAMPLE_SQL = "SELECT id, name FROM raw.users"
 
 
 def _compiled_attrs(
-    full_name: str = "db.schema.my_table",
+    physical_name: str = "db.schema.my_table",
     resolved_sql: str = SAMPLE_SQL,
 ) -> CompiledAttributes:
-    """Build a CompiledAttributes with sensible defaults."""
+    """Make a CompiledAttributes with good default values."""
     return CompiledAttributes(
-        full_name=full_name,
-        logical_name=full_name,
+        physical_name=physical_name,
+        logical_name=physical_name,
         resolved_sql=resolved_sql,
         file_path=Path("/fake/db/schema/my_table.py"),
         module_name="db.schema.my_table",
@@ -49,12 +50,12 @@ def _compiled_attrs(
 def _compiled_trouve(
     trouve_type: TrouveType = TrouveType.TABLE,
     sql: str = SAMPLE_SQL,
-    full_name: str = "db.schema.my_table",
+    physical_name: str = "db.schema.my_table",
     resolved_sql: str = SAMPLE_SQL,
     columns: list[Column] | None = None,
     run_config: RunConfig | None = None,
 ) -> Trouve:
-    """Build a compiled Trouve ready for build_sql()."""
+    """Make a compiled Trouve for build_sql()."""
     trouve = Trouve(
         type=trouve_type,
         sql=sql,
@@ -62,14 +63,14 @@ def _compiled_trouve(
         run_config=run_config or RunConfig(),
     )
     trouve.compiled = _compiled_attrs(
-        full_name=full_name,
+        physical_name=physical_name,
         resolved_sql=resolved_sql,
     )
     return trouve
 
 
 # ---------------------------------------------------------------------------
-# Trouve construction and validation
+# The Trouve build and the Trouve rules
 # ---------------------------------------------------------------------------
 
 
@@ -108,34 +109,35 @@ class TestTrouveConstruction:
         assert trouve.run_config.incremental_mode is None
 
     def test_table_rejects_empty_sql(self):
-        with pytest.raises(ValueError, match="requires non-empty sql"):
+        with pytest.raises(ValueError, match="must have sql"):
             Trouve(type=TrouveType.TABLE, sql="")
 
     def test_table_rejects_whitespace_only_sql(self):
-        with pytest.raises(ValueError, match="requires non-empty sql"):
+        with pytest.raises(ValueError, match="must have sql"):
             Trouve(type=TrouveType.TABLE, sql="   \n\t  ")
 
     def test_view_rejects_empty_sql(self):
-        with pytest.raises(ValueError, match="requires non-empty sql"):
+        with pytest.raises(ValueError, match="must have sql"):
             Trouve(type=TrouveType.VIEW, sql="")
 
     def test_source_rejects_sql(self):
-        with pytest.raises(ValueError, match="SOURCE Trouve must not have sql"):
+        with pytest.raises(ValueError, match="a SOURCE Trouve must not have sql"):
             Trouve(type=TrouveType.SOURCE, sql="SELECT 1")
 
     def test_source_rejects_whitespace_sql(self):
-        """Source sql is checked with .strip(), so whitespace-only is fine."""
+        """The code applies .strip() to the SQL of a source. Thus only spaces are correct."""
         trouve = Trouve(type=TrouveType.SOURCE, sql="   ")
         assert trouve.type == TrouveType.SOURCE
 
     def test_sample_returns_top_subquery(self):
         from pathlib import Path
+
         from clair.trouves.config import ResolvedConfig
         from clair.trouves.trouve import CompiledAttributes, ExecutionType
 
         t = Trouve(type=TrouveType.TABLE, sql="select 1")
         t.compiled = CompiledAttributes(
-            full_name="db.s.orders",
+            physical_name="db.s.orders",
             logical_name="db.s.orders",
             resolved_sql="select 1",
             file_path=Path("/fake/db/s/orders.py"),
@@ -147,15 +149,16 @@ class TestTrouveConstruction:
         assert t.sample() == "(SELECT TOP 1000 * FROM db.s.orders)"
 
     def test_sample_uses_routed_name_not_logical_name(self):
-        """sample() uses compiled.full_name (post-routing), not logical_name."""
+        """sample() uses compiled.physical_name, the routed name, not logical_name."""
         from pathlib import Path
+
         from clair.trouves.config import ResolvedConfig
         from clair.trouves.trouve import CompiledAttributes, ExecutionType
 
         t = Trouve(type=TrouveType.TABLE, sql="select 1")
         t.compiled = CompiledAttributes(
-            full_name="dev_omer.s.orders",   # routed name (e.g. schema isolation)
-            logical_name="db.s.orders",       # original filesystem-derived name
+            physical_name="dev_omer.s.orders",   # The routed name, for example from the schema isolation policy.
+            logical_name="db.s.orders",       # The initial name from the file path.
             resolved_sql="select 1",
             file_path=Path("/fake/db/s/orders.py"),
             module_name="db.s.orders",
@@ -169,7 +172,7 @@ class TestTrouveConstruction:
 
     def test_sample_raises_when_not_compiled(self):
         t = Trouve(type=TrouveType.TABLE, sql="select 1")
-        with pytest.raises(AssertionError, match="requires a compiled Trouve"):
+        with pytest.raises(AssertionError, match="needs a compiled Trouve"):
             t.sample()
 
     def test_trouve_with_tests(self):
@@ -193,20 +196,20 @@ class TestTrouveConstruction:
 
     def test_full_name_raises_when_not_compiled(self):
         trouve = Trouve(type=TrouveType.SOURCE)
-        with pytest.raises(RuntimeError, match="full_name is not set"):
-            _ = trouve.full_name
+        with pytest.raises(RuntimeError, match="physical_name is not set"):
+            _ = trouve.physical_name
 
     def test_full_name_returns_compiled_value(self):
         trouve = Trouve(type=TrouveType.SOURCE)
-        trouve.compiled = _compiled_attrs(full_name="prod.analytics.orders")
-        assert trouve.full_name == "prod.analytics.orders"
+        trouve.compiled = _compiled_attrs(physical_name="prod.analytics.orders")
+        assert trouve.physical_name == "prod.analytics.orders"
 
 
 class TestTrouveIncrementalValidation:
-    """Validate that incremental mode is only allowed on TABLE Trouves."""
+    """These tests show that only a TABLE Trouve accepts the incremental mode."""
 
     def test_view_with_incremental_raises(self):
-        with pytest.raises(ValueError, match="only TABLE Trouves support incremental mode"):
+        with pytest.raises(ValueError, match="only a TABLE Trouve can use the incremental mode"):
             Trouve(
                 type=TrouveType.VIEW,
                 sql="SELECT 1",
@@ -217,10 +220,11 @@ class TestTrouveIncrementalValidation:
             )
 
     def test_source_with_incremental_raises(self):
-        """SOURCE has no sql, but incremental mode validation fires first via RunConfig.
-        Actually SOURCE with incremental will fail because SOURCE requires empty sql,
-        and incremental only applies to TABLE. The validator checks run_mode == INCREMENTAL
-        and type != TABLE."""
+        """A SOURCE with the incremental mode causes an error.
+
+        A SOURCE has no sql. Also, only a TABLE accepts the incremental mode.
+        The validator looks for run_mode == INCREMENTAL and a type that is not
+        TABLE."""
         with pytest.raises(ValueError):
             Trouve(
                 type=TrouveType.SOURCE,
@@ -255,7 +259,7 @@ class TestTrouveIncrementalValidation:
 
 
 # ---------------------------------------------------------------------------
-# RunConfig validation
+# The RunConfig rules
 # ---------------------------------------------------------------------------
 
 
@@ -266,18 +270,18 @@ class TestRunConfigValidation:
         assert config.incremental_mode is None
 
     def test_full_refresh_with_incremental_mode_raises(self):
-        with pytest.raises(ValueError, match="incremental_mode is only valid when run_mode is incremental"):
+        with pytest.raises(ValueError, match="you can set incremental_mode only when run_mode is incremental"):
             RunConfig(
                 run_mode=RunMode.FULL_REFRESH,
                 incremental_mode=IncrementalMode.APPEND,
             )
 
     def test_incremental_without_incremental_mode_raises(self):
-        with pytest.raises(ValueError, match="incremental run_mode requires incremental_mode"):
+        with pytest.raises(ValueError, match="the incremental run_mode needs incremental_mode"):
             RunConfig(run_mode=RunMode.INCREMENTAL)
 
     def test_append_with_primary_key_columns_raises(self):
-        with pytest.raises(ValueError, match="primary_key_columns is only valid for upsert mode"):
+        with pytest.raises(ValueError, match="you can set primary_key_columns only for the upsert mode"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.APPEND,
@@ -285,7 +289,7 @@ class TestRunConfigValidation:
             )
 
     def test_append_with_join_sql_raises(self):
-        with pytest.raises(ValueError, match="join_sql is only valid for upsert mode"):
+        with pytest.raises(ValueError, match="you can set join_sql only for the upsert mode"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.APPEND,
@@ -293,7 +297,7 @@ class TestRunConfigValidation:
             )
 
     def test_append_with_upsert_config_raises(self):
-        with pytest.raises(ValueError, match="upsert_config is only valid for upsert mode"):
+        with pytest.raises(ValueError, match="you can set upsert_config only for the upsert mode"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.APPEND,
@@ -301,7 +305,7 @@ class TestRunConfigValidation:
             )
 
     def test_upsert_with_both_primary_key_and_join_sql_raises(self):
-        with pytest.raises(ValueError, match="specify primary_key_columns or join_sql, not both"):
+        with pytest.raises(ValueError, match="set primary_key_columns or join_sql, but not both"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.UPSERT,
@@ -310,7 +314,7 @@ class TestRunConfigValidation:
             )
 
     def test_upsert_with_neither_primary_key_nor_join_sql_raises(self):
-        with pytest.raises(ValueError, match="upsert mode requires primary_key_columns or join_sql"):
+        with pytest.raises(ValueError, match="the upsert mode needs primary_key_columns or join_sql"):
             RunConfig(
                 run_mode=RunMode.INCREMENTAL,
                 incremental_mode=IncrementalMode.UPSERT,
@@ -349,7 +353,7 @@ class TestRunConfigValidation:
 
 
 # ---------------------------------------------------------------------------
-# Trouve.__format__() and _refs registration
+# Trouve.__format__() and the _refs registry
 # ---------------------------------------------------------------------------
 
 
@@ -386,7 +390,7 @@ class TestRefsRegistration:
         assert token_first == token_second
 
     def test_format_in_fstring_sql(self):
-        """Simulates actual usage: referencing a Trouve in SQL via f-string."""
+        """This is the true use: an f-string in the SQL points to a Trouve."""
         source = Trouve(type=TrouveType.SOURCE)
         sql = f"SELECT * FROM {source}"
         assert sql.startswith("SELECT * FROM " + TROUVE_PLACEHOLDER_PREFIX)
@@ -407,7 +411,7 @@ class TestRefsRegistration:
         assert len(_registry) == 1
 
     def test_format_spec_is_ignored(self):
-        """__format__ receives _spec but ignores it; any spec should still work."""
+        """__format__ gets _spec, but it ignores the value. Each value operates."""
         trouve = Trouve(type=TrouveType.SOURCE)
         token = format(trouve, "some_spec")
         assert token.startswith(TROUVE_PLACEHOLDER_PREFIX)
@@ -421,7 +425,7 @@ class TestRefsRegistration:
 class TestBuildSqlNotCompiled:
     def test_raises_runtime_error_when_not_compiled(self):
         trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1")
-        with pytest.raises(RuntimeError, match="build_sql\\(\\) requires a compiled Trouve"):
+        with pytest.raises(RuntimeError, match="build_sql\\(\\) needs a compiled Trouve"):
             trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
 
 
@@ -439,7 +443,7 @@ class TestBuildSqlSource:
 class TestBuildSqlFullRefresh:
     def test_table_creates_table(self):
         trouve = _compiled_trouve(
-            full_name="prod.analytics.orders",
+            physical_name="prod.analytics.orders",
             resolved_sql="SELECT * FROM raw.orders",
         )
         statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
@@ -453,7 +457,7 @@ class TestBuildSqlFullRefresh:
     def test_view_creates_view(self):
         trouve = _compiled_trouve(
             trouve_type=TrouveType.VIEW,
-            full_name="prod.analytics.orders_view",
+            physical_name="prod.analytics.orders_view",
             resolved_sql="SELECT * FROM raw.orders",
         )
         statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
@@ -465,7 +469,7 @@ class TestBuildSqlFullRefresh:
         )
 
     def test_resolved_sql_is_stripped(self):
-        """Leading/trailing whitespace in resolved_sql should be trimmed."""
+        """The code removes each space at the start and at the end of resolved_sql."""
         trouve = _compiled_trouve(resolved_sql="  \n  SELECT 1  \n  ")
         statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
         assert "SELECT 1" in statements[0]
@@ -475,7 +479,7 @@ class TestBuildSqlFullRefresh:
 class TestBuildSqlAppend:
     def test_append_produces_insert_into(self):
         trouve = _compiled_trouve(
-            full_name="prod.analytics.events",
+            physical_name="prod.analytics.events",
             resolved_sql="SELECT * FROM staging.events WHERE ts > '2024-01-01'",
             run_config=RunConfig(
                 run_mode=RunMode.INCREMENTAL,
@@ -491,7 +495,7 @@ class TestBuildSqlAppend:
 
 
 class TestBuildSqlUpsertWithPrimaryKey:
-    """UPSERT with primary_key_columns: 3 statements, auto-generated join condition."""
+    """An UPSERT with primary_key_columns gives 3 statements and a new join condition."""
 
     def setup_method(self):
         self.columns = [
@@ -505,7 +509,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
             primary_key_columns=["id"],
         )
         self.trouve = _compiled_trouve(
-            full_name="db.schema.orders",
+            physical_name="db.schema.orders",
             resolved_sql="SELECT id, name, amount FROM staging.orders",
             columns=self.columns,
             run_config=self.run_config,
@@ -530,7 +534,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
     def test_stmt2_update_set_excludes_primary_key(self):
         merge_stmt = self.statements[1]
         assert "UPDATE SET name = source.name, amount = source.amount" in merge_stmt
-        # primary key should NOT appear in UPDATE SET
+        # UPDATE SET does not contain the primary key.
         assert "id = source.id" not in merge_stmt.split("UPDATE SET")[1]
 
     def test_stmt2_insert_uses_all_columns(self):
@@ -545,7 +549,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
 
 
 class TestBuildSqlUpsertWithCompositePrimaryKey:
-    """UPSERT with multiple primary_key_columns."""
+    """An UPSERT with more than one column in primary_key_columns."""
 
     def test_composite_key_join_uses_and(self):
         columns = [
@@ -559,7 +563,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             primary_key_columns=["region", "product_id"],
         )
         trouve = _compiled_trouve(
-            full_name="db.schema.inventory",
+            physical_name="db.schema.inventory",
             resolved_sql="SELECT region, product_id, quantity FROM raw.inv",
             columns=columns,
             run_config=run_config,
@@ -581,7 +585,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             primary_key_columns=["region", "product_id"],
         )
         trouve = _compiled_trouve(
-            full_name="db.schema.inventory",
+            physical_name="db.schema.inventory",
             resolved_sql="SELECT region, product_id, quantity FROM raw.inv",
             columns=columns,
             run_config=run_config,
@@ -596,7 +600,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
 
 
 class TestBuildSqlUpsertWithJoinSql:
-    """UPSERT with join_sql: join condition from user, UPDATE includes all columns."""
+    """An UPSERT with join_sql. The user gives the join condition, and UPDATE holds each column."""
 
     def test_join_sql_used_as_on_clause(self):
         columns = [
@@ -609,7 +613,7 @@ class TestBuildSqlUpsertWithJoinSql:
             join_sql="target.id = source.id AND target.name IS NOT NULL",
         )
         trouve = _compiled_trouve(
-            full_name="db.schema.users",
+            physical_name="db.schema.users",
             resolved_sql="SELECT id, name FROM raw.users",
             columns=columns,
             run_config=run_config,
@@ -620,7 +624,7 @@ class TestBuildSqlUpsertWithJoinSql:
         assert "ON target.id = source.id AND target.name IS NOT NULL" in merge_stmt
 
     def test_join_sql_update_includes_all_columns(self):
-        """When join_sql is used (no primary_key_columns), UPDATE SET includes all columns."""
+        """With join_sql and no primary_key_columns, UPDATE SET holds each column."""
         columns = [
             Column(name="id", type="INTEGER"),
             Column(name="name", type="STRING"),
@@ -632,7 +636,7 @@ class TestBuildSqlUpsertWithJoinSql:
             join_sql="target.id = source.id",
         )
         trouve = _compiled_trouve(
-            full_name="db.schema.scores",
+            physical_name="db.schema.scores",
             resolved_sql="SELECT id, name, score FROM raw.scores",
             columns=columns,
             run_config=run_config,
@@ -647,7 +651,7 @@ class TestBuildSqlUpsertWithJoinSql:
 
 
 class TestBuildSqlUpsertWithUpsertConfig:
-    """UPSERT with upsert_config overrides for update_columns and insert_columns."""
+    """An UPSERT where upsert_config replaces update_columns and insert_columns."""
 
     def test_custom_update_columns(self):
         columns = [
@@ -662,7 +666,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             upsert_config=UpsertConfig(update_columns=["email"]),
         )
         trouve = _compiled_trouve(
-            full_name="db.schema.users",
+            physical_name="db.schema.users",
             resolved_sql="SELECT id, name, email FROM raw.users",
             columns=columns,
             run_config=run_config,
@@ -671,7 +675,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
-        # Only email should be in UPDATE SET
+        # UPDATE SET holds email only.
         assert "email = source.email" in update_part
         assert "name = source.name" not in update_part
 
@@ -688,7 +692,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             upsert_config=UpsertConfig(insert_columns=["id", "name"]),
         )
         trouve = _compiled_trouve(
-            full_name="db.schema.users",
+            physical_name="db.schema.users",
             resolved_sql="SELECT id, name, email FROM raw.users",
             columns=columns,
             run_config=run_config,
@@ -698,11 +702,11 @@ class TestBuildSqlUpsertWithUpsertConfig:
 
         assert "INSERT (id, name)" in merge_stmt
         assert "VALUES (source.id, source.name)" in merge_stmt
-        # email should NOT be in INSERT
+        # INSERT does not hold email.
         assert "source.email" not in merge_stmt.split("VALUES")[1]
 
     def test_custom_update_columns_with_join_sql(self):
-        """upsert_config.update_columns takes precedence over join_sql default (all cols)."""
+        """upsert_config.update_columns wins against the join_sql default of all the columns."""
         columns = [
             Column(name="id", type="INTEGER"),
             Column(name="name", type="STRING"),
@@ -715,7 +719,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             upsert_config=UpsertConfig(update_columns=["score"]),
         )
         trouve = _compiled_trouve(
-            full_name="db.schema.scores",
+            physical_name="db.schema.scores",
             resolved_sql="SELECT id, name, score FROM raw.scores",
             columns=columns,
             run_config=run_config,
@@ -740,7 +744,7 @@ class TestBuildSqlUpsertErrors:
             columns=[],
             run_config=run_config,
         )
-        with pytest.raises(ValueError, match="upsert mode requires columns to be defined"):
+        with pytest.raises(ValueError, match="the upsert mode needs columns on the Trouve"):
             trouve.build_sql(RunMode.INCREMENTAL, "run_err")
 
 
@@ -753,7 +757,7 @@ class TestBuildSqlStagingTableName:
             primary_key_columns=["id"],
         )
         trouve = _compiled_trouve(
-            full_name="db.schema.target_table",
+            physical_name="db.schema.target_table",
             resolved_sql="SELECT id, val FROM raw.data",
             columns=columns,
             run_config=run_config,
@@ -767,7 +771,7 @@ class TestBuildSqlStagingTableName:
 
 
 # ---------------------------------------------------------------------------
-# Test models: TestUnique
+# The test model TestUnique
 # ---------------------------------------------------------------------------
 
 
@@ -790,7 +794,7 @@ class TestUniqueValidation:
 
 
 # ---------------------------------------------------------------------------
-# Test models: TestNotNull
+# The test model TestNotNull
 # ---------------------------------------------------------------------------
 
 
@@ -812,7 +816,7 @@ class TestNotNullValidation:
 
 
 # ---------------------------------------------------------------------------
-# Test models: TestRowCount
+# The test model TestRowCount
 # ---------------------------------------------------------------------------
 
 
@@ -847,7 +851,7 @@ class TestRowCountValidation:
         assert test.max_rows == 50
 
     def test_neither_raises(self):
-        with pytest.raises(ValueError, match="at least one of min_rows or max_rows must be set"):
+        with pytest.raises(ValueError, match="you must set min_rows or max_rows, or both"):
             TestRowCount()
 
     def test_max_less_than_min_raises(self):
@@ -859,7 +863,7 @@ class TestRowCountValidation:
             TestRowCount(min_rows=-1)
 
     def test_negative_max_with_no_min_is_allowed(self):
-        """max_rows has no >= 0 validation when min_rows is not set."""
+        """With no min_rows, the code accepts a max_rows below 0."""
         test = TestRowCount(max_rows=-5)
         assert test.max_rows == -5
 
@@ -883,7 +887,7 @@ class TestRowCountSqlGeneration:
         assert "HAVING COUNT(*) > 100" in sql
 
     def test_sql_min_rows_zero(self):
-        """min_rows=0 generates HAVING COUNT(*) < 0 which is always false (good: no failure)."""
+        """min_rows=0 gives HAVING COUNT(*) < 0. That condition is always false, and thus the test passes."""
         test = TestRowCount(min_rows=0)
         sql = test.to_sql("db.s.t")
         assert "HAVING COUNT(*) < 0" in sql
@@ -917,7 +921,7 @@ class TestIsRunWithSample:
 
 
 # ---------------------------------------------------------------------------
-# Test models: TestUniqueColumns
+# The test model TestUniqueColumns
 # ---------------------------------------------------------------------------
 
 
@@ -937,11 +941,11 @@ class TestUniqueColumnsValidation:
         assert len(test.columns) == 5
 
     def test_one_column_raises(self):
-        with pytest.raises(ValueError, match="at least 2"):
+        with pytest.raises(ValueError, match="a minimum of 2 columns"):
             TestUniqueColumns(columns=["a"])
 
     def test_empty_columns_raises(self):
-        with pytest.raises(ValueError, match="at least 2"):
+        with pytest.raises(ValueError, match="a minimum of 2 columns"):
             TestUniqueColumns(columns=[])
 
 
@@ -995,7 +999,7 @@ class TestColumn:
 
 
 # ---------------------------------------------------------------------------
-# Config models
+# The config models
 # ---------------------------------------------------------------------------
 
 
@@ -1017,73 +1021,166 @@ class TestConfig:
 
 
 # ---------------------------------------------------------------------------
-# Trouve with df_fn
+# PandasTrouve and the abstract base
 # ---------------------------------------------------------------------------
 
 
-class TestTrouveWithDfFn:
-    """Tests for the df_fn field on Trouve."""
+class TestPandasTrouve:
+    """The tests of PandasTrouve, the pandas backend."""
 
     def _make_upstream(self) -> Trouve:
-        """Create a compiled SOURCE Trouve for use as an upstream dependency."""
+        """Make a compiled SOURCE Trouve. A different Trouve can depend on it."""
         source = Trouve(type=TrouveType.SOURCE)
-        source.compiled = _compiled_attrs(full_name="db.schema.upstream", resolved_sql="")
+        source.compiled = _compiled_attrs(physical_name="db.schema.upstream", resolved_sql="")
         return source
 
-    def test_valid_construction_with_df_fn(self):
+    def test_valid_construction(self):
         upstream = self._make_upstream()
 
-        def my_fn(events=upstream):
+        def my_fn(events):
             return events
 
-        trouve = Trouve(df_fn=my_fn)
-        assert trouve.df_fn is my_fn
+        trouve = PandasTrouve(transform=my_fn, inputs=[upstream])
+        assert trouve.transform is my_fn
         assert trouve.type == TrouveType.TABLE
-        assert trouve.sql == ""
+        assert trouve.execution_type == ExecutionType.PANDAS
 
-    def test_df_fn_with_sql_raises_value_error(self):
+    def test_inputs_keep_object_identity(self):
+        """Pydantic must not copy an input. Discovery matches each input by id()."""
         upstream = self._make_upstream()
 
-        def my_fn(events=upstream):
+        def my_fn(events):
             return events
 
-        with pytest.raises(ValueError, match="cannot have both sql and df_fn"):
-            Trouve(df_fn=my_fn, sql="SELECT 1")
+        trouve = PandasTrouve(transform=my_fn, inputs=[upstream])
+        assert trouve.inputs[0] is upstream
+        assert trouve.upstream_trouves()[0] is upstream
 
-    def test_df_fn_with_view_type_raises_value_error(self):
+    def test_upstream_trouves_keeps_the_input_order(self):
+        first = self._make_upstream()
+        second = self._make_upstream()
+
+        def my_fn(a, b):
+            return a
+
+        trouve = PandasTrouve(transform=my_fn, inputs=[first, second])
+        assert trouve.upstream_trouves() == [first, second]
+
+    def test_parameter_names_gives_the_signature_order(self):
+        first = self._make_upstream()
+        second = self._make_upstream()
+
+        def my_fn(catalog, reviews):
+            return catalog
+
+        trouve = PandasTrouve(transform=my_fn, inputs=[first, second])
+        assert trouve.parameter_names() == ["catalog", "reviews"]
+
+    def test_transform_stays_directly_callable(self):
+        """A user must be able to call the transform in a test or a notebook."""
         upstream = self._make_upstream()
 
-        def my_fn(events=upstream):
+        def my_fn(events):
             return events
 
-        with pytest.raises(ValueError, match="df_fn Trouves must be TABLE type"):
-            Trouve(df_fn=my_fn, type=TrouveType.VIEW)
+        trouve = PandasTrouve(transform=my_fn, inputs=[upstream])
+        frame = pd.DataFrame({"a": [1, 2]})
+        assert trouve.transform(frame) is frame
 
-    def test_df_fn_with_source_type_raises_value_error(self):
-        upstream = self._make_upstream()
+    def test_no_inputs_and_no_parameters_is_valid(self):
+        def my_fn():
+            return pd.DataFrame()
 
-        def my_fn(events=upstream):
-            return events
+        trouve = PandasTrouve(transform=my_fn)
+        assert trouve.inputs == []
 
-        with pytest.raises(ValueError, match="df_fn Trouves must be TABLE type"):
-            Trouve(df_fn=my_fn, type=TrouveType.SOURCE)
+    def test_too_few_inputs_raises_value_error(self):
+        def my_fn(a, b):
+            return a
 
-    def test_df_fn_not_callable_raises_value_error(self):
-        with pytest.raises(ValueError, match="df_fn must be callable"):
-            Trouve(df_fn="not_a_function")
+        with pytest.raises(ValueError, match="takes 2 parameter\\(s\\) but inputs has 1"):
+            PandasTrouve(transform=my_fn, inputs=[self._make_upstream()])
 
-    def test_df_fn_with_incremental_raises_value_error(self):
-        upstream = self._make_upstream()
+    def test_too_many_inputs_raises_value_error(self):
+        def my_fn(a):
+            return a
 
-        def my_fn(events=upstream):
-            return events
+        with pytest.raises(ValueError, match="takes 1 parameter\\(s\\) but inputs has 2"):
+            PandasTrouve(
+                transform=my_fn,
+                inputs=[self._make_upstream(), self._make_upstream()],
+            )
 
-        with pytest.raises(ValueError, match="df_fn Trouves do not support incremental mode"):
-            Trouve(
-                df_fn=my_fn,
+    def test_arity_error_names_the_parameters(self):
+        def my_fn(catalog, reviews):
+            return catalog
+
+        with pytest.raises(ValueError, match="Parameters: catalog, reviews"):
+            PandasTrouve(transform=my_fn, inputs=[])
+
+    def test_var_positional_raises_value_error(self):
+        def my_fn(*frames):
+            return frames
+
+        with pytest.raises(ValueError, match="must not have \\*args or \\*\\*kwargs"):
+            PandasTrouve(transform=my_fn, inputs=[self._make_upstream()])
+
+    def test_var_keyword_raises_value_error(self):
+        def my_fn(**frames):
+            return frames
+
+        with pytest.raises(ValueError, match="must not have \\*args or \\*\\*kwargs"):
+            PandasTrouve(transform=my_fn, inputs=[])
+
+    def test_view_type_raises_value_error(self):
+        def my_fn():
+            return pd.DataFrame()
+
+        with pytest.raises(ValueError, match="PandasTrouve must be TABLE type"):
+            PandasTrouve(transform=my_fn, type=TrouveType.VIEW)
+
+    def test_source_type_raises_value_error(self):
+        def my_fn():
+            return pd.DataFrame()
+
+        with pytest.raises(ValueError, match="PandasTrouve must be TABLE type"):
+            PandasTrouve(transform=my_fn, type=TrouveType.SOURCE)
+
+    def test_transform_not_callable_raises_value_error(self):
+        with pytest.raises(ValueError, match="transform"):
+            PandasTrouve(transform="not_a_function")
+
+    def test_incremental_raises_value_error(self):
+        def my_fn():
+            return pd.DataFrame()
+
+        with pytest.raises(ValueError, match="PandasTrouve does not support incremental mode"):
+            PandasTrouve(
+                transform=my_fn,
                 run_config=RunConfig(
                     run_mode=RunMode.INCREMENTAL,
                     incremental_mode=IncrementalMode.APPEND,
                 ),
             )
 
+    def test_pandas_trouve_is_a_trouve_abc(self):
+        """Discovery finds a node with isinstance(obj, TrouveAbc)."""
+        def my_fn():
+            return pd.DataFrame()
+
+        assert isinstance(PandasTrouve(transform=my_fn), TrouveAbc)
+
+
+class TestTrouveAbc:
+    """The tests of the abstract base of every backend."""
+
+    def test_trouve_abc_is_not_instantiable(self):
+        with pytest.raises(TypeError, match="abstract"):
+            TrouveAbc()  # type: ignore[abstract]
+
+    def test_sql_trouve_gives_no_upstream_trouves(self):
+        """A SQL Trouve declares its dependencies with placeholder tokens."""
+        assert Trouve(sql="SELECT 1").upstream_trouves() == []
+
+    def test_sql_trouve_execution_type(self):
+        assert Trouve(sql="SELECT 1").execution_type == ExecutionType.SNOWFLAKE

@@ -1,4 +1,4 @@
-"""Public API for programmatic access to the Clair project DAG."""
+"""The public API that gives your code access to the Clair project DAG."""
 
 from __future__ import annotations
 
@@ -9,19 +9,19 @@ from clair.core.discovery import discover_project
 
 
 def get_dag(project_root: str | Path) -> ClairDag:
-    """Load a Clair project and return its dependency graph.
+    """Load a Clair project and give its dependency graph.
 
-    This is the public Python API for Clair's lineage. The returned graph
-    is a ClairDag (a networkx DiGraph subclass) where:
-    - Nodes are full_name strings (e.g., "analytics.revenue.daily_orders")
-    - Edges are (dependency, dependent)
-    - Each node has a "trouve" attribute with the compiled Trouve
+    This function is the public Python API for the Clair lineage. The result is
+    a ClairDag, a subclass of the networkx DiGraph class. In that graph:
+    - Each node is a physical_name, for example "analytics.revenue.daily_orders"
+    - Each edge is a (dependency, dependent) pair
+    - Each node has a "trouve" attribute that holds the compiled Trouve
 
     Args:
-        project_root: Path to the Clair project root directory.
+        project_root: The path of the Clair project root directory.
 
     Returns:
-        A ClairDag representing the project's dependency graph.
+        A ClairDag. It is the dependency graph of the project.
     """
     discovered = discover_project(Path(project_root))
     return build_dag(discovered)

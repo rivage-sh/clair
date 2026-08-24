@@ -1,10 +1,11 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.refined.order_items import trouve as example_2_database_refined_order_items
 from example_2_database.refined.products import trouve as example_2_database_refined_products
 
+from clair import Column, ColumnType, Trouve, TrouveType
+
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Per-product sales aggregates joined with product details.",
+    docs="Sales totals for each product, with the details of the product.",
     sql=f"""
         select
             p.product_id,

@@ -1,9 +1,10 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.source.users import trouve as example_2_database_source_users
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Refined users with flattened address and full name.",
+    docs="Refined users. Each row has the address in separate columns and the full name.",
     sql=f"""
         select
             user_id,

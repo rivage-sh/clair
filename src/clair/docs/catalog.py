@@ -1,8 +1,8 @@
-"""Catalog builder for clair docs."""
+"""The catalog builder of clair docs."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from clair import __version__
@@ -12,24 +12,26 @@ from clair.trouves.trouve import TrouveType
 
 
 def build_catalog(dag: ClairDag, project_root: Path) -> dict:
-    """Build a catalog dict from a compiled DAG.
+    """Make a catalog dict from a compiled DAG.
 
-    Each trouve entry includes a ``column_inference`` object with:
-    - ``status``: how the columns were determined (declared, inferred, select_star, etc.)
-    - ``columns``: the resolved column list (user-declared or best-effort inferred)
-    - ``message``: guidance text for the UI when columns are missing or inferred
+    Each trouve item holds a ``column_inference`` object with these fields:
+    - ``status``: the method that gave the columns, such as declared, inferred,
+      or select_star
+    - ``columns``: the column list. The user declared it, or clair read it from
+      the SQL.
+    - ``message``: advice for the UI when a column is absent
 
     Args:
-        dag: A validated ClairDag (from build_dag).
-        project_root: Absolute path to the project root.
+        dag: A correct ClairDag from build_dag().
+        project_root: The absolute path of the project root.
 
     Returns:
-        A JSON-serializable dict. The server serializes this to bytes.
+        A dict that clair can write as JSON. The server makes the bytes.
     """
     trouves_catalog: dict[str, dict] = {}
 
-    for full_name in dag.nodes:
-        trouve = dag.get_trouve(full_name)
+    for physical_name in dag.nodes:
+        trouve = dag.get_trouve(physical_name)
         trouve_data = trouve.model_dump(mode="json")
 
         resolved_sql = (
@@ -45,11 +47,11 @@ def build_catalog(dag: ClairDag, project_root: Path) -> dict:
 
         trouve_data["column_inference"] = inference.model_dump(mode="json")
 
-        trouves_catalog[full_name] = trouve_data
+        trouves_catalog[physical_name] = trouve_data
 
     return {
         "project_name": project_root.name,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "clair_version": __version__,
         "trouves": trouves_catalog,
         "edges": [{"source": source, "target": target} for source, target in dag.edges],

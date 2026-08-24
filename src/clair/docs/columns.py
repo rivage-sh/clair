@@ -1,10 +1,10 @@
-"""Column inference from SQL for clair docs.
+"""Clair docs finds the columns in the SQL.
 
-Attempts to extract column names from a Trouve's resolved SQL when
-the user hasn't explicitly declared columns. This is a best-effort
-heuristic -- it handles common SELECT patterns but won't cover every
-SQL edge case. When inference fails (e.g., ``SELECT *``), it returns
-a clear reason so the frontend can display helpful guidance.
+The code reads the column names from the resolved SQL of a Trouve when the user
+declared no column. The code applies simple rules. It knows the usual SELECT
+patterns, but it does not know every form of SQL. If the code finds no column,
+for example with ``SELECT *``, it gives a clear reason. Thus the frontend can
+show good advice to the user.
 """
 
 from __future__ import annotations
@@ -18,31 +18,32 @@ from clair.trouves.column import Column
 
 
 class ColumnStatus(StrEnum):
-    """How the column list for a Trouve was determined."""
+    """The method that gave the column list of a Trouve."""
 
     DECLARED = "declared"
-    """User explicitly defined columns on the Trouve."""
+    """The user set the columns on the Trouve."""
 
     INFERRED = "inferred"
-    """Columns were extracted from the SQL by heuristic parsing."""
+    """Clair read the columns from the SQL with its simple rules."""
 
     SELECT_STAR = "select_star"
-    """SQL uses SELECT * -- columns depend on upstream and cannot be inferred offline."""
+    """The SQL contains SELECT *. The columns come from the upstream table."""
 
     NO_SQL = "no_sql"
-    """Trouve has no SQL (e.g., a SOURCE). Columns must be declared."""
+    """The Trouve has no SQL, for example a SOURCE. The user must declare the columns."""
 
     PARSE_FAILED = "parse_failed"
-    """SQL could not be parsed to extract columns."""
+    """Clair could not read the columns from the SQL."""
 
 
 class ColumnInference(BaseModel):
-    """Result of attempting to determine a Trouve's columns.
+    """The result after clair looks for the columns of a Trouve.
 
     Attributes:
-        status: How the columns were determined (or why they couldn't be).
-        columns: The column list -- either user-declared or inferred.
-        message: Human-readable explanation of the status, for display in docs.
+        status: The method that gave the columns, or the reason for a failure.
+        columns: The column list. The user declared it, or clair read it from
+            the SQL.
+        message: Text about the status for a person to read. The docs show it.
     """
 
     status: ColumnStatus
@@ -50,16 +51,16 @@ class ColumnInference(BaseModel):
     message: str
 
 
-# ── Regex patterns ──────────────────────────────────────────────────
+# ── The regular expressions ──────────────────────────────────────────────────
 
-# Matches SELECT ... FROM, handling multiline and common whitespace.
-# Captures the projection list between SELECT and FROM.
+# This pattern matches SELECT ... FROM. It accepts many lines and the usual
+# space characters. It keeps the projection list between SELECT and FROM.
 _SELECT_PROJECTION_PATTERN = re.compile(
     r"\bSELECT\s+(DISTINCT\s+)?(.*?)\s+FROM\b",
     re.IGNORECASE | re.DOTALL,
 )
 
-# Matches a trailing column alias: ... AS alias_name
+# This pattern matches a column alias at the end: ... AS alias_name
 _ALIAS_PATTERN = re.compile(
     r"\bAS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$",
     re.IGNORECASE,
@@ -70,22 +71,23 @@ def infer_columns(
     declared_columns: list[Column],
     resolved_sql: str | None,
 ) -> ColumnInference:
-    """Determine column information for a Trouve.
+    """Find the column data of a Trouve.
 
-    Priority:
-    1. If the user declared columns, use those (status = DECLARED).
-    2. If there's no SQL (SOURCE), return NO_SQL.
-    3. Try to parse columns from the SQL.
-       - If SELECT * is detected, return SELECT_STAR with guidance.
-       - Otherwise, extract aliased/named columns and return INFERRED.
-       - If parsing fails entirely, return PARSE_FAILED.
+    The function obeys this order:
+    1. If the user declared the columns, use them. The status is DECLARED.
+    2. If there is no SQL, as for a SOURCE, give NO_SQL.
+    3. If there is SQL, read the columns from it.
+       - If the SQL contains SELECT *, give SELECT_STAR and some advice.
+       - If not, read each column name or alias and give INFERRED.
+       - If the code finds no column, give PARSE_FAILED.
 
     Args:
-        declared_columns: The columns the user explicitly set on the Trouve.
-        resolved_sql: The SQL after placeholder resolution (None for SOURCEs).
+        declared_columns: The columns that the user set on the Trouve.
+        resolved_sql: The SQL after clair replaced each placeholder. It is None
+            for a SOURCE.
 
     Returns:
-        A ColumnInference with the status, columns, and a display message.
+        A ColumnInference with the status, the columns, and a message.
     """
     if declared_columns:
         return ColumnInference(
@@ -99,8 +101,8 @@ def infer_columns(
             status=ColumnStatus.NO_SQL,
             columns=[],
             message=(
-                "This is a source trouve with no SQL. "
-                "Add columns=[] to document its schema."
+                "This is a source Trouve with no SQL. "
+                "Add columns=[] to the Trouve to show its columns here."
             ),
         )
 
@@ -111,9 +113,9 @@ def infer_columns(
             status=ColumnStatus.SELECT_STAR,
             columns=[],
             message=(
-                "This model uses SELECT * -- columns depend on the upstream "
-                "source and cannot be inferred from SQL alone. Add explicit "
-                "columns=[] to document them."
+                "This model uses SELECT *. The columns come from the upstream "
+                "source, thus Clair cannot find them in the SQL. Add columns=[] "
+                "to the Trouve to show them here."
             ),
         )
 
@@ -127,28 +129,28 @@ def infer_columns(
         return ColumnInference(
             status=ColumnStatus.INFERRED,
             columns=inferred_columns,
-            message="Columns inferred from SQL. Add explicit columns=[] for types and docs.",
+            message="Clair found these columns in the SQL. Add columns=[] to the Trouve to give types and documentation.",
         )
 
     return ColumnInference(
         status=ColumnStatus.PARSE_FAILED,
         columns=[],
         message=(
-            "Could not infer columns from SQL. "
-            "Add explicit columns=[] to document them."
+            "Clair cannot find the columns in the SQL. "
+            "Add columns=[] to the Trouve to show them here."
         ),
     )
 
 
 def _uses_select_star(sql: str) -> bool:
-    """Detect whether a SQL statement uses SELECT * (with or without table prefix).
+    """Tell you if a SQL statement contains SELECT *, with or without a prefix.
 
-    Handles patterns like:
+    The function knows these patterns:
     - SELECT *
     - SELECT DISTINCT *
     - SELECT t.*
     - SELECT alias.*
-    - SELECT *, count(*) (star in projection, not just inside functions)
+    - SELECT *, count(*) — a star in the projection, not only in a function
     """
     match = _SELECT_PROJECTION_PATTERN.search(sql)
     if not match:
@@ -156,15 +158,15 @@ def _uses_select_star(sql: str) -> bool:
 
     projection = match.group(2).strip()
 
-    # Split projection into individual expressions (respecting parentheses)
+    # Cut the projection into separate expressions. Keep each parenthesis pair.
     expressions = _split_projection(projection)
 
     for expression in expressions:
         stripped_expression = expression.strip()
-        # Bare star: *
+        # A star alone: *
         if stripped_expression == "*":
             return True
-        # Qualified star: alias.* or table.*
+        # A star with a prefix: alias.* or table.*
         if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\.\*$", stripped_expression):
             return True
 
@@ -172,15 +174,16 @@ def _uses_select_star(sql: str) -> bool:
 
 
 def _extract_column_names(sql: str) -> list[str]:
-    """Extract column names from a SELECT statement's projection list.
+    """Read the column names from the projection list of a SELECT statement.
 
-    For each expression in the SELECT list:
-    - If it has an AS alias, use the alias.
-    - If it's a bare column reference (word), use that.
-    - If it's a qualified reference (table.column), use the column part.
-    - Otherwise skip it (complex expression without alias).
+    The function examines each expression in the SELECT list:
+    - If the expression has an AS alias, use the alias.
+    - If the expression is one word, use that word.
+    - If the expression is table.column, use the column part.
+    - If not, skip the expression, because it has no alias.
 
-    Returns an ordered list of column names, or empty if parsing fails.
+    Returns the column names in order. The list is empty if the code finds no
+    column.
     """
     match = _SELECT_PROJECTION_PATTERN.search(sql)
     if not match:
@@ -203,20 +206,20 @@ def _extract_column_names(sql: str) -> list[str]:
 
 
 def _column_name_from_expression(expression: str) -> str | None:
-    """Extract a column name from a single SELECT expression.
+    """Read the column name from one SELECT expression.
 
-    Returns the name if determinable, None otherwise.
+    Returns the name, or None if the code cannot find a name.
     """
-    # Check for AS alias first
+    # Look for an AS alias first.
     alias_match = _ALIAS_PATTERN.search(expression)
     if alias_match:
         return alias_match.group(1).lower()
 
-    # Bare column reference: just a name
+    # A column reference alone: only a name.
     if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", expression):
         return expression.lower()
 
-    # Qualified reference: table.column
+    # A column reference with a prefix: table.column
     qualified_match = re.match(
         r"^[a-zA-Z_][a-zA-Z0-9_]*\.([a-zA-Z_][a-zA-Z0-9_]*)$", expression
     )
@@ -227,10 +230,10 @@ def _column_name_from_expression(expression: str) -> str | None:
 
 
 def _split_projection(projection: str) -> list[str]:
-    """Split a SELECT projection into individual expressions.
+    """Cut a SELECT projection into separate expressions.
 
-    Respects parentheses so that ``count(*)`` or ``coalesce(a, b)``
-    are not split on their internal commas.
+    The function keeps each parenthesis pair together. Thus it does not cut
+    ``count(*)`` or ``coalesce(a, b)`` at an internal comma.
     """
     expressions: list[str] = []
     current_expression: list[str] = []
@@ -249,7 +252,7 @@ def _split_projection(projection: str) -> list[str]:
         else:
             current_expression.append(character)
 
-    # Don't forget the last expression
+    # Keep the last expression.
     if current_expression:
         expressions.append("".join(current_expression))
 

@@ -1,7 +1,7 @@
-"""Abstract warehouse adapter interface.
+"""The abstract warehouse adapter interface.
 
-Abstracts the database connection so that future adapters (e.g. BigQuery,
-Databricks) can be added without rewriting the runner.
+This interface hides the database connection. Thus you can add a new adapter,
+for example BigQuery or Databricks, and keep the runner as it is.
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ from pydantic import BaseModel
 
 
 class QueryResult(BaseModel):
-    """Result of executing a single SQL query against the warehouse.
+    """The result of one SQL query against the warehouse.
 
     Attributes:
-        query_id: Warehouse-assigned identifier for the executed query.
-        query_url: URL to the query detail page in the warehouse console.
-        success: Whether the query completed without error.
-        error: Error message if the query failed.
-        row_count: Number of rows returned (or affected) by the query.
+        query_id: The identifier that the warehouse gave to the query.
+        query_url: The URL of the query detail page in the warehouse console.
+        success: True if the query completed with no error.
+        error: The error message if the query failed.
+        row_count: The number of rows that the query returned or changed.
     """
 
     query_id: str
@@ -32,16 +32,16 @@ class QueryResult(BaseModel):
 
 
 class WarehouseAdapter(ABC):
-    """Abstract interface for warehouse connections."""
+    """The abstract interface for a warehouse connection."""
 
     @abstractmethod
     def connect(self, profile: dict[str, Any]) -> None:
-        """Establish a connection using profile credentials."""
+        """Open a connection with the credentials from the profile."""
         ...
 
     @abstractmethod
     def execute(self, sql: str) -> QueryResult:
-        """Execute a SQL statement and return the result."""
+        """Execute one SQL statement and give the result."""
         ...
 
     @abstractmethod
@@ -51,12 +51,12 @@ class WarehouseAdapter(ABC):
         role: str | None = None,
         database_name: str | None = None,
     ) -> None:
-        """Set the session context (warehouse, role, database)."""
+        """Set the session context: the warehouse, the role and the database."""
         ...
 
     @abstractmethod
     def table_exists(self, database_name: str, schema_name: str, table_name: str) -> bool:
-        """Check whether a table exists in the warehouse."""
+        """Tell you if the table exists in the warehouse."""
         ...
 
     @abstractmethod
@@ -65,18 +65,18 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
-    def fetch_dataframe(self, full_name: str) -> pd.DataFrame:
-        """Fetch a table as a pandas DataFrame."""
+    def fetch_dataframe(self, physical_name: str) -> pd.DataFrame:
+        """Read a table into a pandas DataFrame."""
         ...
 
     @abstractmethod
     def write_dataframe(
         self,
         dataframe: pd.DataFrame,
-        full_name: str,
+        physical_name: str,
         database_name: str,
         schema_name: str,
         table_name: str,
     ) -> QueryResult:
-        """Write a DataFrame to the warehouse, creating or replacing the table."""
+        """Write a DataFrame to the warehouse. This makes or replaces the table."""
         ...

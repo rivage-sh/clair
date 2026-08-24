@@ -1,9 +1,10 @@
-from clair import Column, ColumnType, Trouve, TrouveType
 from example_2_database.derived.product_sales_summary import trouve as example_2_database_derived_product_sales_summary
+
+from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
-    docs="Underperforming products by net revenue at or below the 10th percentile.",
+    docs="The products with a net revenue in the 10th percentile or lower.",
     sql=f"""
         with p10 as (
             select percentile_cont(0.1) within group (order by net_revenue) as threshold

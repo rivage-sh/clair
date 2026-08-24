@@ -1,4 +1,4 @@
-"""Shared test fixtures for Clair tests."""
+"""The shared fixtures of the Clair tests."""
 
 from __future__ import annotations
 
@@ -10,21 +10,22 @@ import pytest
 
 @pytest.fixture
 def simple_project() -> Path:
-    """Path to the simple_project test fixture."""
+    """The path of the simple_project test fixture."""
     return Path(__file__).parent / "fixtures" / "simple_project"
 
 
 @pytest.fixture
 def cyclic_project() -> Path:
-    """Path to the cyclic_project test fixture."""
+    """The path of the cyclic_project test fixture."""
     return Path(__file__).parent / "fixtures" / "cyclic_project"
 
 
 @pytest.fixture(autouse=True)
 def clean_sys_modules():
-    """Remove any fixture-loaded modules from sys.modules between tests.
+    """Delete each fixture module from sys.modules after each test.
 
-    Prevents state leakage between tests that load Trouve files.
+    Thus no state moves from one test to the next test. This is important for
+    the tests that load a Trouve file.
     """
     before = set(sys.modules.keys())
     yield
@@ -32,14 +33,14 @@ def clean_sys_modules():
     for mod_name in after - before:
         if any(
             part in mod_name
-            for part in ("source.", "analytics.", "db.", "tmp_project")
+            for part in ("source.", "analytics.", "db.", "tmp_project", "_clair_routing_")
         ):
             del sys.modules[mod_name]
 
 
 @pytest.fixture
 def tmp_environments(tmp_path: Path) -> Path:
-    """Create a temporary environments.yml for testing."""
+    """Make a temporary environments.yml file for a test."""
     environments_content = """
 dev:
   account: test-account
@@ -68,25 +69,22 @@ key_auth_encrypted:
   private_key_passphrase: s3cr3t
   warehouse: key_wh
 
-with_routing:
+unknown_key:
   account: test-account
   user: test-user
   authenticator: externalbrowser
   warehouse: test_wh
   routing:
     policy: database_override
-    database_name: OMER_DEV
-
-with_schema_isolation:
-  account: test-account
-  user: test-user
-  authenticator: externalbrowser
-  warehouse: test_wh
-  routing:
-    policy: schema_isolation
-    database_name: DEV
-    schema_name: obaddour
 """
     environments_file = tmp_path / "environments.yml"
     environments_file.write_text(environments_content)
     return environments_file
+
+
+@pytest.fixture
+def routing_project(tmp_path: Path) -> Path:
+    """Create a project directory that holds a __routing__.py file."""
+    project_dir = tmp_path / "routing_project"
+    project_dir.mkdir()
+    return project_dir

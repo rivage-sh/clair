@@ -1,4 +1,4 @@
-"""Local HTTP server for clair docs."""
+"""The local HTTP server of clair docs."""
 
 from __future__ import annotations
 
@@ -18,20 +18,21 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 class CatalogHandler(SimpleHTTPRequestHandler):
-    """Serves static files from STATIC_DIR and the catalog at /api/catalog.json.
+    """This handler sends the files in STATIC_DIR and the catalog.
 
-    The catalog bytes are attached to the server instance as ``server.catalog_json``
-    (a pre-serialized bytes object) to avoid re-serializing on every request.
+    The catalog is at /api/catalog.json. The server object holds the catalog
+    bytes in ``server.catalog_json``. Clair makes those bytes one time only,
+    and thus each request is fast.
     """
 
-    server: CatalogServer  # this handler is only used with CatalogServer
+    server: CatalogServer  # This handler operates only with a CatalogServer.
 
     def do_GET(self) -> None:
         if self.path == "/api/catalog.json":
             self._serve_catalog()
         elif self.path == "/" or not self._static_file_exists():
-            # SPA fallback: serve index.html for any path that doesn't
-            # match a static file. This supports potential future deep linking.
+            # If the path is not a file in STATIC_DIR, send index.html. Thus a
+            # link to a page in the application can operate in the future.
             self._serve_file("index.html")
         else:
             self._serve_file(self.path.lstrip("/"))
@@ -59,9 +60,9 @@ class CatalogHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _static_file_exists(self) -> bool:
-        """Check if the request path maps to an actual file in STATIC_DIR."""
+        """Tell you if the request path points to a true file in STATIC_DIR."""
         candidate = STATIC_DIR / self.path.lstrip("/")
-        # Prevent directory traversal
+        # Stop a path that goes out of STATIC_DIR.
         try:
             candidate.resolve().relative_to(STATIC_DIR.resolve())
         except ValueError:
@@ -69,12 +70,11 @@ class CatalogHandler(SimpleHTTPRequestHandler):
         return candidate.is_file()
 
     def log_message(self, format: str, *args) -> None:
-        """Suppress default stderr logging -- we use structlog."""
-        pass
+        """Stop the default log output on stderr. Clair uses structlog."""
 
 
 class CatalogServer(HTTPServer):
-    """HTTPServer subclass that carries the pre-serialized catalog."""
+    """An HTTPServer subclass that holds the catalog bytes."""
 
     catalog_json: bytes
 
@@ -86,13 +86,13 @@ def serve(
     port: int = 8741,
     open_browser: bool = True,
 ) -> None:
-    """Start the docs server. Blocks until Ctrl+C.
+    """Start the docs server. The function stops at Ctrl+C.
 
     Args:
         catalog: The catalog dict from build_catalog().
-        host: Bind address.
-        port: Bind port.
-        open_browser: Whether to open the user's default browser.
+        host: The address of the server.
+        port: The port of the server.
+        open_browser: True if clair must open the default browser of the user.
     """
     catalog_bytes = json.dumps(
         catalog, separators=(",", ":")
@@ -105,7 +105,7 @@ def serve(
     logger.info("docs.serving", url=url)
 
     if open_browser:
-        # Open in a thread so it doesn't delay the server start
+        # Use a thread. Thus the browser does not delay the start of the server.
         threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
 
     try:
