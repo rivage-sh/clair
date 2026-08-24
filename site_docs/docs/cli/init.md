@@ -12,7 +12,8 @@ clair init [--project PATH]
 2. If `~/.clair/environments.yml` does not exist, asks for your Snowflake connection details
 3. Prompts for an example source table name in the format `database.schema.table`
 4. Creates a starter project with a SOURCE Trouve for that table
-5. Writes a `.gitignore` file that excludes `_clairtifacts/`
+5. Writes a `__routing__.py` file with one passthrough entry for the `dev` environment
+6. Writes a `.gitignore` file that excludes `_clairtifacts/`
 
 ## Interactive session
 

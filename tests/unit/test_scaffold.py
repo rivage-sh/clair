@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from clair.core.scaffold import scaffold_project, write_environments_yml
+from clair.environments.project_routing import load_project_routing
+from clair.environments.routing import route
+from clair.trouves.trouve import TrouveType
 
 # ---------------------------------------------------------------------------
 # The helper functions.
@@ -83,14 +86,17 @@ class TestFileContents:
         # Routing lives in the project __routing__.py, never in environments.yml.
         assert "  routing:" not in content
 
-    def test_routing_file_defines_a_routing_table(self, tmp_path: Path) -> None:
+    def test_routing_file_gives_a_passthrough_entry_for_dev(self, tmp_path: Path) -> None:
+        """The file that clair init writes loads, and it changes no address."""
         project_dir = tmp_path / "proj"
         scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
 
-        content = (project_dir / "__routing__.py").read_text()
-        assert "RoutingTable(" in content
-        assert "CLAIR_USER" in content
-        assert "TrouveAddress" in content
+        project_routing = load_project_routing(project_dir, "dev")
+
+        assert project_routing.entry is not None
+        assert route("analytics.orders.daily", TrouveType.TABLE, project_routing.entry) == (
+            "analytics.orders.daily"
+        )
 
 
 class TestDoesNotOverwriteExistingFiles:
