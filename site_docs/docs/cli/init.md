@@ -9,7 +9,7 @@ clair init [--project PATH]
 ## What it does
 
 1. Prompts for a project directory (default: current directory)
-2. If `~/.clair/environments.yml` does not exist, asks for your Snowflake connection details
+2. If `~/.clair/environments.yml` does not exist, asks for an environment name and your Snowflake connection details. If the file exists, clair keeps it.
 3. Prompts for an example source table name in the format `database.schema.table`
 4. Creates a starter project with a SOURCE Trouve for that table
 5. Writes a `__routing__.py` file with one passthrough entry for the `dev` environment
@@ -19,6 +19,8 @@ clair init [--project PATH]
 
 ```
 Project directory [.]: ./my_project
+
+Environment name [dev]: dev
 
   hint: select concat(current_organization_name(), '-', current_account_name()) as account;
 Snowflake account (e.g. myorg-myaccount): myorg-myaccount
@@ -35,7 +37,7 @@ Enter choice [1]: 3
   hint: select current_warehouse() as warehouse;
 Warehouse: dev_warehouse
 
-Role (leave blank to use user default): analyst
+Role (leave empty to use the default role of the user): analyst
 
   hint: select current_region() as region;
 Region (e.g. us-east-1): us-east-1
@@ -51,6 +53,11 @@ Next steps:
   1. clair compile --project /path/to/my_project
   2. clair run    --project /path/to/my_project
 ```
+
+!!! note
+    If you select authentication method `1`, clair asks for the private key path.
+    Then it asks if the key is encrypted, and it asks for the passphrase of an
+    encrypted key. Method `2` asks for a password. Method `3` asks for nothing more.
 
 ## Files created
 

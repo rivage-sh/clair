@@ -1,0 +1,67 @@
+name: Integration Janitor
+
+# A cancelled integration job leaves its schemas in the CI database. This job
+# drops each run schema that is older than 48 hours. It never drops the SEED
+# schema, and it never drops PUBLIC.
+#
+# The job holds the same credentials as the integration workflow, thus it uses
+# the same protected environment.
+
+on:
+  schedule:
+    # 04:00 UTC, each day.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-janitor
+  cancel-in-progress: false
+
+jobs:
+  drop-stale-schemas:
+    name: Drop the stale schemas
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: snowflake-integration
+
+    env:
+      # The prefix has no meaning for this command. The configuration loader
+      # asks for one, thus the workflow gives a name that no run uses.
+      CLAIR_CI_SCHEMA_PREFIX: JANITOR
+      CLAIR_CI_SNOWFLAKE_ACCOUNT: ${{ secrets.CLAIR_CI_SNOWFLAKE_ACCOUNT }}
+      CLAIR_CI_SNOWFLAKE_USER: ${{ secrets.CLAIR_CI_SNOWFLAKE_USER }}
+      CLAIR_CI_SNOWFLAKE_ROLE: ${{ secrets.CLAIR_CI_SNOWFLAKE_ROLE }}
+      CLAIR_CI_SNOWFLAKE_WAREHOUSE: ${{ secrets.CLAIR_CI_SNOWFLAKE_WAREHOUSE }}
+      CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH: ${{ runner.temp }}/clair_ci_key.p8
+      CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install deps
+        run: uv sync
+
+      - name: Write the private key
+        env:
+          PRIVATE_KEY_BASE64: ${{ secrets.CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$PRIVATE_KEY_BASE64" | base64 -d > "$CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH"
+          chmod 600 "$CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH"
+          head -n 1 "$CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH" | grep -q 'BEGIN .*PRIVATE KEY'
+
+      - name: Drop the stale schemas
+        run: uv run python -m tests.integration.ci_snowflake drop-stale --max-age-hours 48
+
+      - name: Remove the private key
+        if: always()
+        run: rm -f "$CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH"

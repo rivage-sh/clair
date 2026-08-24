@@ -94,16 +94,43 @@ CLAIR_ENV=prod clair run --project .
 
 ## CI usage
 
-In CI, set `CLAIR_ENV` and use key-pair authentication. This method does not need a browser:
+In CI, set `CLAIR_ENV` and use key-pair authentication. This method does not need a browser.
+
+clair reads the credentials from `environments.yml` only. It reads no credential from an
+environment variable. A CI job therefore writes the key file first, then it writes an
+`environments.yml` that points at that file:
 
 ```yaml
 # GitHub Actions example
+- name: Write the Snowflake credentials
+  env:
+    PRIVATE_KEY_BASE64: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_BASE64 }}
+    ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+    USER: ${{ secrets.SNOWFLAKE_USER }}
+  run: |
+    umask 077
+    mkdir -p ~/.clair
+    printf '%s' "$PRIVATE_KEY_BASE64" | base64 -d > ~/.clair/snowflake_key.p8
+    cat > ~/.clair/environments.yml <<EOF
+    prod:
+      account: $ACCOUNT
+      user: $USER
+      warehouse: prod_warehouse
+      role: transformer
+      private_key_path: $HOME/.clair/snowflake_key.p8
+    EOF
+
 - name: Run clair
   env:
     CLAIR_ENV: prod
-    SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
   run: clair run --project .
 ```
+
+Keep the private key in one secret, in base64. A secret of one line is easier for the CI
+system to hide in the logs than a PEM file of many lines.
+
+The clair repository runs its own integration tests this way. See
+`tests/integration/README.md` in the repository.
 
 ## Routing
 

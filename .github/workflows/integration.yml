@@ -1,0 +1,103 @@
+name: Integration
+
+# SECURITY -- read this before you change the file.
+#
+# This repository is public, and this workflow holds Snowflake credentials.
+#
+# * The trigger is `pull_request`. GitHub gives no secret to a `pull_request`
+#   run that starts from a fork. Do NOT change the trigger to
+#   `pull_request_target`: that trigger gives the secrets to code that no
+#   maintainer read.
+# * The `if:` condition below stops the job for a pull request from a fork. The
+#   job then reports "skipped", and the pull request stays green.
+# * The job needs the `snowflake-integration` environment. Put the required
+#   reviewers on that environment, thus a new collaborator cannot reach the
+#   credentials without an approval.
+# * The job reads the repository only. It writes no comment and no commit.
+#
+# Do not make this job a required status check. A pull request from a fork
+# always skips it, and a required check would block every such pull request.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run for each pull request. Two runs of one pull request write the same
+  # schemas, thus they must not run together.
+  group: integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  snowflake:
+    name: Snowflake
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: snowflake-integration
+
+    env:
+      # Each run writes to schemas that start with this prefix. A pull request
+      # uses its number, thus two pull requests never share a schema.
+      CLAIR_CI_SCHEMA_PREFIX: >-
+        ${{ github.event_name == 'pull_request'
+            && format('PR_{0}', github.event.pull_request.number)
+            || format('CI_{0}', github.run_id) }}
+      CLAIR_CI_SNOWFLAKE_ACCOUNT: ${{ secrets.CLAIR_CI_SNOWFLAKE_ACCOUNT }}
+      CLAIR_CI_SNOWFLAKE_USER: ${{ secrets.CLAIR_CI_SNOWFLAKE_USER }}
+      CLAIR_CI_SNOWFLAKE_ROLE: ${{ secrets.CLAIR_CI_SNOWFLAKE_ROLE }}
+      CLAIR_CI_SNOWFLAKE_WAREHOUSE: ${{ secrets.CLAIR_CI_SNOWFLAKE_WAREHOUSE }}
+      CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH: ${{ runner.temp }}/clair_ci_key.p8
+      CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The job needs no git credentials. It must not keep a token in the
+          # git config of the checkout.
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install deps
+        run: uv sync
+
+      - name: Write the private key
+        env:
+          PRIVATE_KEY_BASE64: ${{ secrets.CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$PRIVATE_KEY_BASE64" | base64 -d > "$CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH"
+          chmod 600 "$CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH"
+          head -n 1 "$CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH" | grep -q 'BEGIN .*PRIVATE KEY'
+
+      # Without this step, an absent secret makes each test skip and the job
+      # stays green. The step stops the job instead, and it prints the schema
+      # prefix only.
+      - name: Read the Snowflake configuration
+        run: |
+          uv run python -c "
+          from tests.integration.ci_snowflake import load_config
+          print('schema prefix:', load_config().schema_prefix)
+          "
+
+      - name: Run the integration tests
+        run: uv run pytest tests/integration -m integration -v
+
+      - name: Drop the schemas of this run
+        if: always()
+        run: uv run python -m tests.integration.ci_snowflake drop-schemas
+
+      - name: Remove the private key
+        if: always()
+        run: rm -f "$CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH"
