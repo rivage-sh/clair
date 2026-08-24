@@ -16,11 +16,7 @@ from clair.environments.routing import (
     detect_routing_collisions,
     route,
 )
-from clair.exceptions import (
-    InvalidRoutingConfigError,
-    InvalidTrouveAddressError,
-    MissingRoutingVariableError,
-)
+from clair.exceptions import InvalidRoutingConfigError, InvalidTrouveAddressError
 from clair.trouves.trouve import TrouveType
 from tests.helpers import DatabaseOverrideRouting, SchemaIsolationRouting
 
@@ -240,9 +236,8 @@ class TestRouteRejectsABadEntry:
                     update={"database_name": f"{trouve_address.database_name}_{user}"}
                 )
 
-        # An absent environment variable names the variable, not the Python
-        # error class. TestAbsentEnvironmentVariable holds the detail.
-        with pytest.raises(MissingRoutingVariableError, match="CLAIR_USER is not set"):
+        # The message names the key, not the Python error class.
+        with pytest.raises(InvalidRoutingConfigError, match="CLAIR_USER"):
             route("analytics.finance.revenue", TrouveType.TABLE, UserRouting())
 
     def test_an_entry_that_builds_a_bad_address_raises(self):
@@ -352,10 +347,10 @@ class TestDetectRoutingCollisions:
             {"analytics.finance.revenue": "OMER_DEV.finance.revenue"}
         ) == []
 
-class TestAbsentEnvironmentVariable:
-    """A routing entry that reads an absent variable names that variable."""
+class TestAbsentKeyMessage:
+    """A routing entry that reads an absent key names that key and the fix."""
 
-    def test_names_the_variable_and_the_fix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_names_the_key_and_the_fix(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CLAIR_USER", raising=False)
 
         class UserRouting(RoutingEntry):
@@ -366,28 +361,11 @@ class TestAbsentEnvironmentVariable:
                     update={"database_name": os.environ["CLAIR_USER"]}
                 )
 
-        with pytest.raises(MissingRoutingVariableError) as error:
+        with pytest.raises(InvalidRoutingConfigError) as error:
             route("analytics.orders.daily", TrouveType.TABLE, UserRouting())
 
         message = str(error.value)
-        assert "CLAIR_USER is not set" in message
+        assert "CLAIR_USER" in message
         assert "export CLAIR_USER=" in message
         # The old message showed the Python error class. It does not any more.
         assert "KeyError" not in message
-
-    def test_another_absent_key_is_not_an_environment_variable(self) -> None:
-        class MappingRouting(RoutingEntry):
-            environment_name: str = "dev"
-
-            def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
-                targets: dict[str, str] = {}
-                return trouve_address.model_copy(
-                    update={"database_name": targets["absent"]}
-                )
-
-        with pytest.raises(InvalidRoutingConfigError) as error:
-            route("analytics.orders.daily", TrouveType.TABLE, MappingRouting())
-
-        message = str(error.value)
-        assert "absent key" in message
-        assert not isinstance(error.value, MissingRoutingVariableError)

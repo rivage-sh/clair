@@ -28,11 +28,7 @@ from pydantic import (
     model_validator,
 )
 
-from clair.exceptions import (
-    InvalidRoutingConfigError,
-    InvalidTrouveAddressError,
-    MissingRoutingVariableError,
-)
+from clair.exceptions import InvalidRoutingConfigError, InvalidTrouveAddressError
 from clair.trouves.trouve import TrouveType
 
 if TYPE_CHECKING:
@@ -219,28 +215,6 @@ def describe_routing(routing: RoutingEntry | None) -> str:
     return description
 
 
-def _absent_environment_variable(exc: KeyError) -> str | None:
-    """Give the name of the environment variable that os.environ did not find.
-
-    A routing entry reads an environment variable with ``os.environ[name]``,
-    and that raises KeyError when the variable is absent. Another mapping
-    raises the same error, thus this function looks at the frame that raised.
-    It gives None when the KeyError came from another mapping.
-    """
-    traceback = exc.__traceback__
-    while traceback is not None and traceback.tb_next is not None:
-        traceback = traceback.tb_next
-    if traceback is None:
-        return None
-    frame_code = traceback.tb_frame.f_code
-    if frame_code.co_name != "__getitem__":
-        return None
-    # CPython freezes the os module, thus the file name is "<frozen os>".
-    if frame_code.co_filename not in ("<frozen os>",) and not frame_code.co_filename.endswith("os.py"):
-        return None
-    return str(exc.args[0]) if exc.args else None
-
-
 def _apply_routing(
     logical_address: TrouveAddress, routing: RoutingEntry
 ) -> TrouveAddress:
@@ -254,14 +228,19 @@ def _apply_routing(
     try:
         physical_address = routing.route(logical_address)
     except KeyError as exc:
-        variable_name = _absent_environment_variable(exc)
-        if variable_name is None:
-            raise InvalidRoutingConfigError(
-                f"{entry_text} failed on '{logical_address}': it read the absent "
-                f"key {exc}."
-            ) from exc
-        raise MissingRoutingVariableError(
-            describe_routing(routing), str(logical_address), variable_name
+        # A routing entry reads an environment variable with os.environ[name],
+        # and that raises KeyError. Clair cannot tell that mapping from another
+        # one, thus the message names the key and the usual cause.
+        key_name = str(exc.args[0]) if exc.args else ""
+        set_hint = (
+            f" If {key_name} is an environment variable, set it, for example "
+            f"`export {key_name}=alice`."
+            if key_name
+            else ""
+        )
+        raise InvalidRoutingConfigError(
+            f"{entry_text} did not find the key '{key_name}' when it routed "
+            f"'{logical_address}'.{set_hint}"
         ) from exc
     except ValidationError as exc:
         raise InvalidRoutingConfigError(
