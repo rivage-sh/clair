@@ -11,16 +11,16 @@ from pathlib import Path
 import pytest
 
 from clair.adapters.snowflake import SnowflakeAdapter
-from tests.integration.config import DATABASE_NAME, IntegrationConfig
+from tests.integration.config import IntegrationConfig
 from tests.integration.conftest import clair_environment, events_named, run_clair
 from tests.integration.projects import (
     copy_with_ci_routing,
     example_project_paths,
     model_logical_names,
-    physical_table_name,
+    physical_address,
     trouves_of,
 )
-from tests.integration.warehouse import row_count, table_names_in_schema
+from tests.integration.warehouse import row_count, table_exists
 
 pytestmark = pytest.mark.integration
 
@@ -52,19 +52,20 @@ def test_a_full_refresh_builds_every_model(
 
     completed = run_clair(["run", "--project", str(copy_path)], environment)
 
-    expected = {
-        physical_table_name(logical_name)
-        for logical_name in model_logical_names(trouves_of(project_path))
-    }
-    assert expected, f"{project_path.name} builds no Trouve"
+    logical_names = model_logical_names(trouves_of(project_path))
+    assert logical_names, f"{project_path.name} builds no Trouve"
 
-    present = table_names_in_schema(
-        adapter, DATABASE_NAME, snowflake_workspace.schema_name
-    )
-    assert expected <= present
+    absent = [
+        logical_name
+        for logical_name in logical_names
+        if not table_exists(
+            adapter, physical_address(logical_name, snowflake_workspace.schema_name)
+        )
+    ]
+    assert absent == []
 
     successes = events_named(completed, "run.node.success")
-    assert len(successes) == len(expected)
+    assert len(successes) == len(logical_names)
 
 
 @pytest.mark.parametrize("project_path", EXAMPLE_PROJECT_PATHS, ids=EXAMPLE_PROJECT_IDS)
@@ -102,9 +103,11 @@ def test_the_incremental_append_adds_the_rows_of_the_window(
     """
     copy_path = project_copies["example_3"]
     environment = clair_environment(snowflake_workspace, clair_home)
-    schema = f"{DATABASE_NAME}.{snowflake_workspace.schema_name}"
-    recent_orders = f"{schema}.{physical_table_name('example_3_database.derived.recent_orders')}"
-    source_orders = f"{schema}.{physical_table_name('example_3_database.source.orders')}"
+    schema_name = snowflake_workspace.schema_name
+    recent_orders = physical_address(
+        "example_3_database.derived.recent_orders", schema_name
+    )
+    source_orders = physical_address("example_3_database.source.orders", schema_name)
 
     run_clair(["run", "--project", str(copy_path), "--run-mode", "full_refresh"], environment)
     assert row_count(adapter, recent_orders) == 6
@@ -135,9 +138,10 @@ def test_select_builds_one_part_of_the_dag(
     """
     copy_path = project_copies["example_1"]
     environment = clair_environment(snowflake_workspace, clair_home)
-    selector = (
-        f"{DATABASE_NAME}.{snowflake_workspace.schema_name}."
-        f"{physical_table_name('example_1_database.refined.events')}"
+    selector = str(
+        physical_address(
+            "example_1_database.refined.events", snowflake_workspace.schema_name
+        )
     )
 
     completed = run_clair(

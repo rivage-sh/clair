@@ -10,8 +10,10 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from clair import TrouveAddress
 from clair.core.discovery import discover_project
 from clair.trouves.trouve import TrouveAbc, TrouveType
+from tests.integration.config import DATABASE_NAME
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE_PROJECTS_DIR = REPOSITORY_ROOT / "examples" / "projects"
@@ -87,6 +89,15 @@ def physical_table_name(logical_name: str) -> str:
     """
     database_name, schema_name, table_name = logical_name.split(".")
     return f"{database_name}__{schema_name}__{table_name}"
+
+
+def physical_address(logical_name: str, schema_name: str) -> TrouveAddress:
+    """Give the address that the CI routing entry makes for one logical name."""
+    return TrouveAddress(
+        database_name=DATABASE_NAME,
+        schema_name=schema_name,
+        table_name=physical_table_name(logical_name),
+    )
 
 
 def golden_table_name(project_path: Path, logical_name: str) -> str:
