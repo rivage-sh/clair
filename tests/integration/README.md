@@ -84,9 +84,10 @@ uv run pytest tests/integration -m integration -v
 The user, the role and the warehouse are names inside the account, and
 `scripts/snowflake_ci_setup.sql` makes them. They are not secrets.
 
-Without the account and the credentials, the tests **skip** on your machine and
-**fail** in GitHub Actions. A CI run with no credentials would otherwise report
-success after it ran nothing.
+Without the account and the credentials, the tests **skip**. The integration
+workflow sets `CLAIR_CI_REQUIRE_SNOWFLAKE=1`, and the tests then **fail**
+instead. A job with no credentials would otherwise report success after it ran
+nothing.
 
 ## The GitHub Actions setup
 

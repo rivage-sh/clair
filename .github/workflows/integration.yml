@@ -31,6 +31,9 @@ jobs:
             && format('pr_{0}', github.event.pull_request.number)
             || format('run_{0}', github.run_id) }}
       CLAIR_CI_SNOWFLAKE_ACCOUNT: ${{ secrets.CLAIR_CI_SNOWFLAKE_ACCOUNT }}
+      # Without this variable an absent secret makes each test skip, and the
+      # job stays green after it ran nothing.
+      CLAIR_CI_REQUIRE_SNOWFLAKE: "1"
 
     steps:
       - uses: actions/checkout@v4

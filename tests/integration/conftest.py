@@ -36,8 +36,10 @@ def integration_config() -> IntegrationConfig:
     try:
         return load_config()
     except IntegrationConfigError as error:
-        if os.environ.get("GITHUB_ACTIONS"):
-            pytest.fail(f"CI needs the Snowflake settings: {error}")
+        # The integration workflow sets this variable. The other CI jobs run the
+        # same files with no credentials, and those must skip, not fail.
+        if os.environ.get("CLAIR_CI_REQUIRE_SNOWFLAKE"):
+            pytest.fail(f"The integration job needs the Snowflake settings: {error}")
         pytest.skip(str(error))
 
 
