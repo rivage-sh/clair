@@ -104,16 +104,12 @@ This second shape puts the projects of many developers in one shared schema. Eac
 
 Add a field for each value that the rule needs. Pydantic validates the fields, and the field values show in the CLI messages.
 
-## The two names
-
-clair gives each Trouve two names, and it uses these two words everywhere:
+## Trouve addresses: logical and physical
 
 | Name | Meaning |
 |---|---|
 | logical | The name that the file path gives. The DAG edges, the `--select` patterns and the Trouve files use it. |
-| physical | The name that clair writes to. Your routing entry makes it from the logical name. |
-
-The two names are equal when no entry applies to the environment.
+| physical | The name that clair writes to. Your routing entry can make it from the logical name. |
 
 `clair run` logs both, thus you see the file that made the Trouve and the object that clair
 writes:
