@@ -15,10 +15,6 @@ clair init [--project PATH]
 5. Writes a `__routing__.py` file with one passthrough entry for the `dev` environment
 6. Writes a `.gitignore` file that excludes `_clairtifacts/`
 
-The routing entry changes nothing: the physical name stays equal to the logical name. Change
-the `route` method when you want a separate target for an environment. See the
-[routing guide](../guides/routing.md).
-
 ## Interactive session
 
 ```
