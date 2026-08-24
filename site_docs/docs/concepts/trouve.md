@@ -155,7 +155,7 @@ See the [Pandas-native guide](../guides/pandas-native.md) for a full example.
 
 After clair discovers a Trouve, it sets the `compiled` attributes. Two properties become available:
 
-- `trouve.full_name` — the fully-qualified Snowflake name, such as `refined.orders.daily`
+- `trouve.physical_address` — the `TrouveAddress` that clair writes to, such as `refined.orders.daily`
 - `trouve.is_compiled` — `True` after clair discovers the project
 
-If you read `full_name` before discovery, clair raises `RuntimeError`.
+If you read `physical_address` before discovery, clair raises `RuntimeError`.

@@ -79,7 +79,7 @@ class Trouve(TrouveAbc):
 | Property | Type | Description |
 |----------|------|-------------|
 | `is_compiled` | `bool` | `True` after clair discovers the project |
-| `full_name` | `str` | Fully-qualified Snowflake name (`database.schema.table`). Raises `RuntimeError` if not compiled. |
+| `physical_address` | `TrouveAddress` | The address that clair writes to. `str()` gives `database.schema.table`. Raises `RuntimeError` if not compiled. |
 
 ### Validation rules
 
@@ -93,12 +93,12 @@ Discovery sets these attributes on `Trouve.compiled`. They are available after `
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `full_name` | `str` | The routed Snowflake name. clair uses it in the SQL and the DDL. |
-| `logical_name` | `str` | The name from the file system. clair uses it for the DAG edges and the selectors. |
-| `resolved_sql` | `str` | The SQL. clair replaced each placeholder token with a real full_name. It is empty for a `PandasTrouve`. |
+| `physical_address` | `TrouveAddress` | The address that routing gives. clair uses it in the SQL and the DDL. |
+| `logical_address` | `TrouveAddress` | The address that the file system gives. clair uses it for the DAG edges and the selectors. |
+| `resolved_sql` | `str` | The SQL. clair replaced each placeholder token with a real logical address. It is empty for a `PandasTrouve`. |
 | `resolved_transform` | `str` | The source text of the transform function. It is empty for a SQL `Trouve`. |
 | `file_path` | `Path` | Absolute path to the Trouve file |
-| `imports` | `list[str]` | The logical names of the upstream Trouves |
+| `imports` | `list[str]` | The logical addresses of the upstream Trouves |
 | `execution_type` | `ExecutionType` | SNOWFLAKE or PANDAS |
 
 ## `PandasTrouve`
@@ -194,4 +194,4 @@ Python calls `Trouve.__format__`, which:
 1. Registers `other_trouve` in a global registry
 2. Returns a placeholder token, such as `__CLAIR_TROUVE_140234567890__`
 
-At discovery, clair replaces every placeholder with the real `full_name` of the Trouve. Thus clair builds the dependency graph and resolves the SQL names.
+At discovery, clair replaces every placeholder with the logical address of the Trouve. Thus clair builds the dependency graph and resolves the SQL names.

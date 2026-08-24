@@ -14,6 +14,7 @@ from clair.core.dag_render import (
     _format_header,
     render_dag,
 )
+from clair.trouves.address import TrouveAddress
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
@@ -23,7 +24,7 @@ from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, Trou
 
 
 def _make_trouve(
-    physical_name: str,
+    physical_address: str,
     trouve_type: TrouveType = TrouveType.TABLE,
     imports: list[str] | None = None,
 ) -> Trouve:
@@ -31,11 +32,11 @@ def _make_trouve(
     sql = "select 1" if trouve_type != TrouveType.SOURCE else ""
     t = Trouve(type=trouve_type, sql=sql)
     t.compiled = CompiledAttributes(
-        physical_name=physical_name,
-        logical_name=physical_name,
+        physical_address=TrouveAddress.parse(physical_address),
+        logical_address=TrouveAddress.parse(physical_address),
         resolved_sql=sql,
-        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
-        module_name=physical_name,
+        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
+        module_name=physical_address,
         imports=imports or [],
         config=ResolvedConfig(),
         execution_type=ExecutionType.SNOWFLAKE,
@@ -47,20 +48,20 @@ def _build_dag(
     nodes: list[tuple[str, TrouveType]],
     edges: list[tuple[str, str]] | None = None,
 ) -> ClairDag:
-    """Make a ClairDag from the (physical_name, type) pairs and the (src, dst) edges."""
+    """Make a ClairDag from the (physical_address, type) pairs and the (src, dst) edges."""
     dag = ClairDag()
-    for physical_name, ttype in nodes:
-        dag.add_trouve(_make_trouve(physical_name, ttype))
+    for physical_address, ttype in nodes:
+        dag.add_trouve(_make_trouve(physical_address, ttype))
     for src, dst in edges or []:
         dag.add_dependency(src, dst)
     return dag
 
 
 def _node_name(line: str) -> str:
-    """Read the node physical_name from one line of the output.
+    """Read the node physical_address from one line of the output.
 
     The function removes each tree character and each other prefix. It gives the
-    full name alone.
+    address alone.
     """
     for i, ch in enumerate(line):
         if ch.isalpha():

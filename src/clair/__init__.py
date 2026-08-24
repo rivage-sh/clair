@@ -43,7 +43,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
 
-from clair.environments.routing import RoutingEntry, RoutingTable, TrouveAddress
+from clair.environments.routing import RoutingEntry, RoutingTable
+from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
 from clair.trouves.pandas_trouve import PandasTrouve

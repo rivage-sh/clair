@@ -3,7 +3,7 @@
 Put a Trouve in an f-string, for example ``f"SELECT * FROM {other_trouve}"``.
 Then its ``__format__`` method adds the Trouve to this registry and gives a
 token, for example ``__CLAIR_TROUVE_140234567890__``. Later, discovery replaces
-each token with the true physical_name.
+each token with the true physical_address.
 """
 
 from __future__ import annotations

@@ -12,6 +12,8 @@ from typing import Any
 import pandas as pd
 from pydantic import BaseModel
 
+from clair.trouves.address import TrouveAddress
+
 
 class QueryResult(BaseModel):
     """The result of one SQL query against the warehouse.
@@ -65,18 +67,13 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
-    def fetch_dataframe(self, physical_name: str) -> pd.DataFrame:
+    def fetch_dataframe(self, address: TrouveAddress) -> pd.DataFrame:
         """Read a table into a pandas DataFrame."""
         ...
 
     @abstractmethod
     def write_dataframe(
-        self,
-        dataframe: pd.DataFrame,
-        physical_name: str,
-        database_name: str,
-        schema_name: str,
-        table_name: str,
+        self, dataframe: pd.DataFrame, address: TrouveAddress
     ) -> QueryResult:
         """Write a DataFrame to the warehouse. This makes or replaces the table."""
         ...

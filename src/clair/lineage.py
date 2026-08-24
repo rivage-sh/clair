@@ -13,7 +13,7 @@ def get_dag(project_root: str | Path) -> ClairDag:
 
     This function is the public Python API for the Clair lineage. The result is
     a ClairDag, a subclass of the networkx DiGraph class. In that graph:
-    - Each node is a physical_name, for example "analytics.revenue.daily_orders"
+    - Each node is a physical_address, for example "analytics.revenue.daily_orders"
     - Each edge is a (dependency, dependent) pair
     - Each node has a "trouve" attribute that holds the compiled Trouve
 

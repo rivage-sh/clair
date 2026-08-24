@@ -50,6 +50,7 @@ from clair.exceptions import (
     InvalidRoutingConfigError,
     InvalidTrouveAddressError,
 )
+from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, TrouveType
 
@@ -155,7 +156,7 @@ def _resolve_project_routing(project_root: Path, env_name: str) -> ProjectRoutin
             )
         )
         click.echo(
-            f"  Trouves write to their logical (production) names.\n"
+            f"  Trouves write to their logical (production) addresses.\n"
             f"  The file names: {', '.join(project_routing.environment_names) or 'nothing'}\n"
         )
 
@@ -177,8 +178,8 @@ def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> 
 
     click.echo(click.style(f"\nWarning: Clair found {header}", fg="yellow", bold=True))
 
-    for routed_target, logical_sources in collisions:
-        click.echo(f"\n  {routed_target}")
+    for physical_address, logical_sources in collisions:
+        click.echo(f"\n  {physical_address}")
         for source in logical_sources:
             click.echo(f"    ↳ {source}")
 
@@ -344,7 +345,7 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
             artifact_file = artifacts_dir / "/".join(parts[:-1]) / f"{parts[-1]}{extension}"
             logger.info("compile.node", trouve=node_info.name, dependencies=node_info.dependencies, artifact_file=str(artifact_file))
 
-        write_compile_output(dag, selected, project_root, on_node_compiled=_on_node_compiled, run_mode=run_mode_enum, run_id=run_id)
+        write_compile_output(dag, selected, project_root, on_node_compiled=_on_node_compiled, run_mode=run_mode_enum, run_id=run_id, use_staging=True)
         logger.info("compile.complete", run_id=run_id, artifacts_dir=str(artifacts_dir))
 
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
@@ -385,10 +386,10 @@ def validate(project: str, env: str | None) -> None:
         sys.exit(1)
 
     routing = project_routing.entry
-    # Keep the (logical name, type) pair, not the Trouve. The name is the only
-    # part that the collision report needs, and here it is never None.
-    routable: list[tuple[str, TrouveType]] = [
-        (trouve.compiled.logical_name, trouve.type)
+    # Keep the (logical address, type) pair, and not the Trouve. The address is
+    # the only part that the collision report needs, and here it is never None.
+    routable: list[tuple[TrouveAddress, TrouveType]] = [
+        (trouve.compiled.logical_address, trouve.type)
         for trouve in discovered
         if trouve.compiled is not None
     ]
@@ -399,19 +400,19 @@ def validate(project: str, env: str | None) -> None:
     click.echo(f"  Trouves to route: {len(routable)}\n")
 
     problems = collect_routing_problems(discovered, routing)
-    for logical_name, problem in problems:
-        click.echo(click.style(f"  ✗ {logical_name}", fg="red", bold=True))
+    for logical_address, problem in problems:
+        click.echo(click.style(f"  ✗ {logical_address}", fg="red", bold=True))
         click.echo(f"    {problem}\n")
 
     collisions: list[tuple[str, list[str]]] = []
     if not problems:
-        logical_to_routed = {
-            logical_name: route(logical_name, trouve_type, routing)
-            for logical_name, trouve_type in routable
+        logical_to_physical = {
+            str(logical_address): str(route(logical_address, trouve_type, routing))
+            for logical_address, trouve_type in routable
         }
-        collisions = detect_routing_collisions(logical_to_routed)
-        for routed_target, logical_sources in collisions:
-            click.echo(click.style(f"  ✗ {routed_target}", fg="red", bold=True))
+        collisions = detect_routing_collisions(logical_to_physical)
+        for physical_address, logical_sources in collisions:
+            click.echo(click.style(f"  ✗ {physical_address}", fg="red", bold=True))
             click.echo("    Two or more Trouves route to this one target:")
             for source in logical_sources:
                 click.echo(f"      ↳ {source}")
@@ -423,7 +424,7 @@ def validate(project: str, env: str | None) -> None:
         click.echo(click.style(f"  {problem_count} {label} found.\n", fg="red", bold=True))
         sys.exit(1)
 
-    click.echo(click.style("  ✓ Every routed name is valid. No collisions.\n", fg="green"))
+    click.echo(click.style("  ✓ Every physical address is valid. No collisions.\n", fg="green"))
 
 
 @cli.command()
@@ -552,6 +553,17 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
     run_mode_enum = RunMode(run_mode)
     run_id = uuid6.uuid7().hex
 
+    # Clair always writes through a staging address: build there, test there, and
+    # promote after the tests pass. The tests give the guarantee, so --no-test
+    # stops the staging step. Nothing then decides the promotion, and a staging
+    # address gives only cost.
+    use_staging = not no_test
+    if no_test:
+        logger.warning(
+            "run.staging_disabled",
+            reason="--no-test skips the tests that decide the promotion, so clair writes to each physical address directly",
+        )
+
     try:
         # Load the environment.
         env_name, environment = load_environment(env)
@@ -578,7 +590,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
             return
 
         recompile_for_selection(discovered, set(selected))
-        write_compile_output(dag, selected, project_root, run_mode=run_mode_enum, run_id=run_id)
+        write_compile_output(dag, selected, project_root, run_mode=run_mode_enum, run_id=run_id, use_staging=use_staging)
 
         # If account_locator is absent, tell the user. The query URLs stay empty.
         if not environment.account_locator:
@@ -590,8 +602,12 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
 
         test_failures: list[str] = []
 
-        def on_node_success(node_name: str) -> bool:
-            node_test_results = run_tests(dag, [node_name], adapter, use_sample=sample)
+        def on_node_success(node_name: str, query_address: str) -> bool:
+            node_test_results = run_tests(
+                dag, [node_name], adapter,
+                use_sample=sample,
+                query_addresses={node_name: query_address},
+            )
             passed = all(r.passed for r in node_test_results)
             if not passed:
                 test_failures.append(node_name)
@@ -599,13 +615,14 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
 
         try:
             total = len(selected)
-            logger.info("run.start", run_id=run_id, env=env_name, project=str(project_root), trouves=total, run_mode=run_mode)
+            logger.info("run.start", run_id=run_id, env=env_name, project=str(project_root), trouves=total, run_mode=run_mode, use_staging=use_staging)
 
             results = list(run_project(
                 dag, selected, adapter,
                 run_mode=run_mode_enum,
                 run_id=run_id,
                 after_node_success=on_node_success if not no_test else None,
+                use_staging=use_staging,
             ))
 
             counts = Counter(r.status for r in results)

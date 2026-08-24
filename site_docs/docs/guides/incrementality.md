@@ -137,8 +137,8 @@ trouve = Trouve(
 Generated SQL on an incremental run — 3 statements:
 
 ```sql
--- [1/3] make the staging table
-CREATE OR REPLACE TABLE example_3_database.derived.customer_order_summary__clair_staging_<run_id> AS (
+-- [1/3] make the merge source table
+CREATE OR REPLACE TABLE example_3_database.derived.customer_order_summary__clair_merge_<run_id> AS (
     select customer_id, count(*) as total_orders, ...
     from example_3_database.refined.orders
     group by customer_id
@@ -146,7 +146,7 @@ CREATE OR REPLACE TABLE example_3_database.derived.customer_order_summary__clair
 
 -- [2/3] merge into the target
 MERGE INTO example_3_database.derived.customer_order_summary AS target
-USING example_3_database.derived.customer_order_summary__clair_staging_<run_id> AS source
+USING example_3_database.derived.customer_order_summary__clair_merge_<run_id> AS source
 ON target.customer_id = source.customer_id
 WHEN MATCHED THEN UPDATE SET
     total_orders = source.total_orders,
@@ -157,8 +157,8 @@ WHEN MATCHED THEN UPDATE SET
 WHEN NOT MATCHED THEN INSERT (customer_id, total_orders, total_amount, first_order_at, last_order_at, last_updated_at)
     VALUES (source.customer_id, source.total_orders, source.total_amount, source.first_order_at, source.last_order_at, source.last_updated_at)
 
--- [3/3] drop the staging table
-DROP TABLE IF EXISTS example_3_database.derived.customer_order_summary__clair_staging_<run_id>
+-- [3/3] drop the merge source table
+DROP TABLE IF EXISTS example_3_database.derived.customer_order_summary__clair_merge_<run_id>
 ```
 
 ## Your own join conditions

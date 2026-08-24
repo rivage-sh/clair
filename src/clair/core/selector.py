@@ -41,10 +41,10 @@ class ParsedSelector:
     downstream_depth: int | None
 
 
-def match_selector(physical_name: str, pattern: str) -> bool:
-    """Compare the physical_name of a Trouve with a glob selector pattern.
+def match_selector(physical_address: str, pattern: str) -> bool:
+    """Compare the physical_address of a Trouve with a glob selector pattern.
 
-    The function applies the fnmatch rules to the dotted physical_name.
+    The function applies the fnmatch rules to the dotted physical_address.
 
     Examples:
         match_selector("mydb.analytics.orders", "mydb.*.orders") -> True
@@ -52,29 +52,29 @@ def match_selector(physical_name: str, pattern: str) -> bool:
         match_selector("mydb.analytics.orders", "mydb.analytics.orders") -> True
         match_selector("mydb.staging.users", "mydb.analytics.*") -> False
     """
-    return fnmatch(physical_name, pattern)
+    return fnmatch(physical_address, pattern)
 
 
-def filter_by_selector(full_names: list[str], pattern: str | None) -> list[str]:
-    """Keep each physical_name that agrees with the glob pattern.
+def filter_by_selector(addresses: list[str], pattern: str | None) -> list[str]:
+    """Keep each physical_address that agrees with the glob pattern.
 
     If the pattern is None, the function gives each name, with no change.
     """
     if pattern is None:
-        return full_names
-    return [name for name in full_names if match_selector(name, pattern)]
+        return addresses
+    return [name for name in addresses if match_selector(name, pattern)]
 
 
-def filter_by_selectors(full_names: list[str], patterns: tuple[str, ...] | None) -> list[str]:
-    """Keep each physical_name that agrees with one or more glob patterns.
+def filter_by_selectors(addresses: list[str], patterns: tuple[str, ...] | None) -> list[str]:
+    """Keep each physical_address that agrees with one or more glob patterns.
 
     If the patterns argument is None or an empty tuple, the function gives each
     name, with no change. A name that agrees with one pattern is sufficient. The
     function keeps the initial order of the names.
     """
     if not patterns:
-        return full_names
-    return [name for name in full_names if any(match_selector(name, pattern) for pattern in patterns)]
+        return addresses
+    return [name for name in addresses if any(match_selector(name, pattern) for pattern in patterns)]
 
 
 def parse_selector(pattern: str) -> ParsedSelector:
@@ -171,7 +171,7 @@ def _traverse_downstream(dag: nx.DiGraph, start_nodes: set[str], depth: int) -> 
 def expand_selector(dag: nx.DiGraph, pattern: str) -> set[str]:
     """Apply one selector pattern to the DAG. The pattern can contain a + operator.
 
-    Returns the set of full_names that agree with the pattern.
+    Returns the set of addresses that agree with the pattern.
     """
     parsed = parse_selector(pattern)
 

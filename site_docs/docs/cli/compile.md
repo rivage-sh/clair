@@ -19,6 +19,8 @@ clair compile --project . --env prod
 clair compile --project . --select='refined.orders.*'
 ```
 
+Each plan shows the staged path: the build at the staging address, a comment that marks the test step, and the promotion. See [Staging](../guides/staging.md).
+
 ## What it does
 
 1. Discovers all Trouves in the project
@@ -58,4 +60,5 @@ _clairtifacts/
 
 - [DAG](../concepts/dag.md)
 - [Selectors](../guides/selectors.md)
+- [Staging](../guides/staging.md)
 - [clair clean](clean.md)

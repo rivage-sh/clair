@@ -6,30 +6,33 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pandas as pd
+import pytest
 
 from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.runner import RunStatus, _run_pandas_trouve
+from clair.environments.routing import TrouveAddress
+from clair.exceptions import InvalidTrouveAddressError
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
 
-def _make_compiled(physical_name: str = "db.schema.table") -> CompiledAttributes:
+def _make_compiled(physical_address: str = "db.schema.table") -> CompiledAttributes:
     return CompiledAttributes(
-        physical_name=physical_name,
-        logical_name=physical_name,
+        physical_address=TrouveAddress.parse(physical_address),
+        logical_address=TrouveAddress.parse(physical_address),
         resolved_sql="",
-        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
-        module_name=physical_name,
+        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
+        module_name=physical_address,
         imports=[],
         config=ResolvedConfig(),
         execution_type=ExecutionType.PANDAS,
     )
 
 
-def _make_source(physical_name: str = "db.schema.source") -> Trouve:
+def _make_source(physical_address: str = "db.schema.source") -> Trouve:
     source = Trouve(type=TrouveType.SOURCE)
-    source.compiled = _make_compiled(physical_name)
+    source.compiled = _make_compiled(physical_address)
     return source
 
 
@@ -49,8 +52,8 @@ def _make_df_adapter(
     if fetch_side_effect:
         adapter.fetch_dataframe.side_effect = fetch_side_effect
     elif fetch_dataframes is not None:
-        def _fetch(physical_name: str) -> pd.DataFrame:
-            return fetch_dataframes[physical_name]
+        def _fetch(address: TrouveAddress) -> pd.DataFrame:
+            return fetch_dataframes[str(address)]
         adapter.fetch_dataframe.side_effect = _fetch
     else:
         adapter.fetch_dataframe.return_value = pd.DataFrame({"col": [1, 2, 3]})
@@ -81,10 +84,10 @@ class TestRunPandasTrouveHappyPath:
 
         adapter = _make_df_adapter(fetch_dataframes={"db.schema.events": input_df})
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
-        assert result.physical_name == "db.schema.summary"
+        assert result.physical_address == "db.schema.summary"
         adapter.write_dataframe.assert_called_once()
         call_kwargs = adapter.write_dataframe.call_args
         pd.testing.assert_frame_equal(call_kwargs.kwargs["dataframe"], result_df)
@@ -105,7 +108,7 @@ class TestRunPandasTrouveHappyPath:
             fetch_dataframes={"db.schema.a": df_a, "db.schema.b": df_b}
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
         assert adapter.fetch_dataframe.call_count == 2
@@ -123,13 +126,13 @@ class TestRunPandasTrouveHappyPath:
         trouve.compiled = _make_compiled("db.schema.summary")
 
         adapter = _make_df_adapter(fetch_dataframes={"db.schema.events": input_df})
-        _run_pandas_trouve(trouve, adapter)
+        _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert "events" in received_kwargs
         pd.testing.assert_frame_equal(received_kwargs["events"], input_df)
 
 
-class TestRunPandasTrouveFullNameParsing:
+class TestRunPandasTrouveAddress:
     def test_database_schema_table_parsed_correctly(self):
         source = _make_source("db.schema.events")
 
@@ -143,32 +146,19 @@ class TestRunPandasTrouveFullNameParsing:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
-        call_kwargs = adapter.write_dataframe.call_args.kwargs
-        assert call_kwargs["database_name"] == "mydb"
-        assert call_kwargs["schema_name"] == "myschema"
-        assert call_kwargs["table_name"] == "mytable"
-        assert call_kwargs["physical_name"] == "mydb.myschema.mytable"
+        address = adapter.write_dataframe.call_args.kwargs["address"]
+        assert address.database_name == "mydb"
+        assert address.schema_name == "myschema"
+        assert address.table_name == "mytable"
+        assert str(address) == "mydb.myschema.mytable"
 
-    def test_full_name_with_wrong_part_count_fails(self):
-        source = _make_source("db.schema.events")
-
-        def my_fn(events: pd.DataFrame) -> pd.DataFrame:
-            return pd.DataFrame({"x": [1]})
-
-        trouve = PandasTrouve(transform=my_fn, inputs=[source])
-        trouve.compiled = _make_compiled("only_two_parts.table")
-
-        adapter = _make_df_adapter(
-            fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
-        )
-
-        result = _run_pandas_trouve(trouve, adapter)
-
-        assert result.status == RunStatus.FAILURE
-        assert "cannot divide the physical_name" in result.error
+    def test_a_name_that_is_not_three_parts_never_reaches_the_write(self):
+        """TrouveAddress rejects the name, so the write path holds no test for it."""
+        with pytest.raises(InvalidTrouveAddressError):
+            TrouveAddress.parse("only_two_parts.table")
 
 
 class TestRunPandasTrouveTransformErrors:
@@ -185,7 +175,7 @@ class TestRunPandasTrouveTransformErrors:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert "The transform function failed" in result.error
@@ -204,7 +194,7 @@ class TestRunPandasTrouveTransformErrors:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert "must return a pandas DataFrame" in result.error
@@ -223,7 +213,7 @@ class TestRunPandasTrouveTransformErrors:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert "must return a pandas DataFrame" in result.error
@@ -243,7 +233,7 @@ class TestRunPandasTrouveFetchErrors:
             fetch_side_effect=RuntimeError("Snowflake connection lost")
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert "cannot read the input" in result.error
@@ -265,7 +255,7 @@ class TestRunPandasTrouveWriteErrors:
             write_side_effect=RuntimeError("Write failed"),
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert "cannot write the DataFrame" in result.error
@@ -284,7 +274,7 @@ class TestRunPandasTrouveWriteErrors:
             write_success=False,
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert result.error
@@ -305,7 +295,7 @@ class TestRunPandasTrouveResultFields:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
         assert result.duration_seconds >= 0.0
@@ -323,7 +313,7 @@ class TestRunPandasTrouveResultFields:
             fetch_side_effect=RuntimeError("fetch failed")
         )
 
-        result = _run_pandas_trouve(trouve, adapter)
+        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert result.duration_seconds >= 0.0

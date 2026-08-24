@@ -1,6 +1,6 @@
 # Routing
 
-Routing remaps logical Snowflake names to different physical targets. clair reads the logical names from your file system. You write the routing rules in `__routing__.py`, at the root of your project.
+Routing remaps the logical address of a Trouve to a different physical address. clair reads each logical address from your file system. You write the routing rules in `__routing__.py`, at the root of your project.
 
 The usual use: run a production project against a dev Snowflake database. You do not change a Trouve file.
 
@@ -70,7 +70,7 @@ class DeveloperRouting(RoutingEntry):
 
 
 class ProductionRouting(RoutingEntry):
-    """Production writes to the logical names, so the address stays the same."""
+    """Production writes to the logical address, so the address stays the same."""
 
     environment_name: str = EnvironmentName.PROD.value
 
@@ -129,10 +129,12 @@ Add a field for each value that the rule needs. Pydantic validates the fields, a
 
 ## Trouve addresses: logical and physical
 
-| Name | Meaning |
+| Address | Meaning |
 |---|---|
-| logical | The name that the file path gives. The DAG edges, the `--select` patterns and the Trouve files use it. |
-| physical | The name that clair writes to. Your routing entry can make it from the logical name. |
+| logical address | The address that the file path gives. The DAG edges, the `--select` patterns and the Trouve files use it. |
+| physical address | The address that clair writes to. Your routing entry makes it from the logical address. |
+
+A third address, the staging address, holds the data until the tests pass. See [Staging](staging.md).
 
 `clair run` logs both, thus you see the file that made the Trouve and the object that clair
 writes:
@@ -159,11 +161,11 @@ reads and writes one throwaway database.
 
 ## No entry for an environment
 
-An environment with no entry in the table gets passthrough routing: clair writes to the logical names. Those are the production names, so clair warns you first:
+An environment with no entry in the table gets passthrough routing: clair writes to each logical address. Those are the production addresses, so clair warns you first:
 
 ```
 Warning: __routing__.py does not name the environment 'staging'.
-  Trouves write to their logical (production) names.
+  Trouves write to their logical (production) addresses.
   The file names: dev, prod
 ```
 
@@ -171,7 +173,7 @@ To make the passthrough deliberate, write an entry that gives the address back, 
 
 ## Validation
 
-`TrouveAddress` validates every name that it holds. A name must start with a letter or an underscore, hold only letters, digits, underscores or dollar signs, and stay under 255 characters. This applies to the logical names that your directories give, and to the physical names that your rules build.
+`TrouveAddress` validates every name that it holds. A name must start with a letter or an underscore, hold only letters, digits, underscores or dollar signs, and stay under 255 characters. This applies to the logical addresses that your directories give, and to the physical addresses that your rules build.
 
 Run [`clair validate`](../cli/validate.md) to apply your rules to every Trouve without a Snowflake connection.
 

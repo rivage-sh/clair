@@ -138,7 +138,7 @@ class TestPandasTrouveArtifactContent:
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         return py_file.read_text()
 
-    def test_header_contains_full_name(self, tmp_path: Path):
+    def test_header_contains_address(self, tmp_path: Path):
         content = self._get_artifact_content(tmp_path)
         assert "# clair compiled: mydb.derived.summary" in content
 

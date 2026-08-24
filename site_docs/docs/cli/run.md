@@ -33,6 +33,8 @@ address that clair reads.
 
 clair runs the attached tests after each successful TABLE or VIEW. If a test fails, the run stops with a non-zero status code. Use `--no-test` to skip the tests.
 
+The tests decide the publication. They do not report a fault after it reaches production: clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes. See [Staging](../guides/staging.md).
+
 ## Flags
 
 | Flag | Default | Description |
@@ -47,10 +49,13 @@ clair runs the attached tests after each successful TABLE or VIEW. If a test fai
 ## Exit codes
 
 - `0` — all the Trouves ran, and all the tests passed
-- `1` — one or more Trouves failed, or one or more tests failed
+- `1` — one or more Trouves failed, or one or more tests failed. A Trouve whose
+  tests failed counts as a failure. Its physical object keeps the data that it
+  had, and the rejected candidate stays for you to query.
 
 ## See also
 
 - [Selectors](../guides/selectors.md)
 - [Incrementality](../guides/incrementality.md)
 - [Data Quality Tests](../guides/data-quality-tests.md)
+- [Staging](../guides/staging.md)

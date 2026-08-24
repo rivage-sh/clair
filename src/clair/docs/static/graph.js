@@ -135,7 +135,7 @@ var ClairdocsGraph = (function () {
         for (var i = 0; i < fullNames.length; i++) {
             var fn = fullNames[i];
             var t = trouves[fn];
-            // The compiled object holds physical_name. The key in the dict is the physical_name too.
+            // The compiled object holds physical_address. The key in the dict is the physical_address too.
             var parts = fn.split(".");
             var label = fn;
             var databaseName = parts.length >= 1 ? parts[0] : "";

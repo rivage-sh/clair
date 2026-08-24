@@ -41,10 +41,10 @@ class EnvironmentsFileNotFoundError(ClairError):
 class InvalidTrouveAddressError(ClairError):
     """Clair raises this error when a name is not a valid Trouve address."""
 
-    def __init__(self, physical_name: str, detail: str) -> None:
-        self.physical_name = physical_name
+    def __init__(self, physical_address: str, detail: str) -> None:
+        self.physical_address = physical_address
         self.detail = detail
-        super().__init__(f"Clair cannot use '{physical_name}' as an address: {detail}")
+        super().__init__(f"Clair cannot use '{physical_address}' as an address: {detail}")
 
 
 class InvalidEnvironmentError(ClairError):

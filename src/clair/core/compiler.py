@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import inspect
-import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -13,6 +12,12 @@ from pydantic import BaseModel
 from clair.core.dag import ClairDag
 from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.core.runner import resolve_effective_mode
+from clair.core.staging import (
+    build_clone_statement,
+    build_drop_staging_statement,
+    build_promote_statement,
+    make_staging_address,
+)
 from clair.exceptions import CompileError
 from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import RunMode
@@ -89,6 +94,48 @@ class CompileOutput(BaseModel):
         return "\n".join(parts)
 
 
+def build_statements(
+    trouve: Trouve,
+    run_mode: RunMode,
+    run_id: str,
+    use_staging: bool = True,
+) -> list[str]:
+    """Make the SQL statements of one Trouve, in the order that clair executes them.
+
+    A staged plan shows each step: the clone for an incremental Trouve, the build
+    at the staging address, and the promotion after the tests pass. The plan shows
+    the path of a run that passes. A run that fails a test stops after the build,
+    and the staging object stays.
+    """
+    effective_mode = resolve_effective_mode(trouve, run_mode)
+
+    if not use_staging:
+        return trouve.build_sql(effective_mode, run_id=run_id)
+
+    assert trouve.compiled is not None
+    physical_address = trouve.compiled.physical_address
+    staging_address = make_staging_address(physical_address, run_id)
+
+    statements: list[str] = []
+    if effective_mode == RunMode.INCREMENTAL:
+        statements.append(build_clone_statement(physical_address, staging_address))
+    statements.extend(
+        trouve.build_sql(effective_mode, run_id=run_id, staging_address=staging_address)
+    )
+
+    statements.append("-- staging: the data quality tests run here")
+    statements.append(
+        build_promote_statement(
+            trouve.type,
+            staging_address=staging_address,
+            physical_address=physical_address,
+            resolved_sql=trouve.compiled.resolved_sql,
+        )
+    )
+    statements.append(build_drop_staging_statement(trouve.type, staging_address))
+    return statements
+
+
 def write_compile_output(
     dag: ClairDag,
     selected: list[str],
@@ -96,19 +143,23 @@ def write_compile_output(
     on_node_compiled: Callable[[CompiledNodeInfo], None] = lambda _: None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     run_id: str = "",
+    use_staging: bool = True,
 ) -> CompileOutput:
     """Write the compiled SQL to _clairtifacts/<run_id>/ and give the output.
 
     Args:
         dag: The complete project DAG.
-        selected: The full_names to compile, in topological order. The list
-            holds no SOURCE Trouve.
+        selected: The names to compile, in topological order. The list holds no
+            SOURCE Trouve.
         project_root: The root directory of the project.
         on_node_compiled: A callback. Clair calls it after it compiles a node
             and writes the node to the disk. Thus the caller can show the
             output immediately.
         run_mode: The run mode for the new SQL statements.
         run_id: The UUIDv7 hex string that identifies this compile run.
+        use_staging: If True, the plan shows the staged path: the build at the
+            staging address, the test step, and the promotion. If False, the plan
+            writes to the physical address directly.
 
     Returns:
         A CompileOutput. It holds the data and supplies a .render() method.
@@ -129,6 +180,14 @@ def write_compile_output(
         deps = list(dag.predecessors(name))
 
         assert trouve.compiled is not None, f"Clair did not compile {name}"
+        # The artifact path follows the physical address: one directory for the
+        # database name, one for the schema name, and the table name as the file.
+        physical_address = trouve.compiled.physical_address
+        artifact_directory = (
+            artifacts_dir
+            / physical_address.database_name
+            / physical_address.schema_name
+        )
         node_info = None
         if trouve.compiled.execution_type == ExecutionType.PANDAS:
             assert isinstance(trouve, PandasTrouve)
@@ -155,13 +214,13 @@ def write_compile_output(
                 pass
 
             input_lines = [
-                f"#   {parameter_name}  ->  {upstream.physical_name}"
+                f"#   {parameter_name}  ->  {upstream.physical_address}"
                 for parameter_name, upstream in zip(
                     trouve.parameter_names(), trouve.upstream_trouves()
                 )
             ]
 
-            header = f"# clair compiled: {trouve.physical_name}\n# execution_type: pandas\n"
+            header = f"# clair compiled: {trouve.physical_address}\n# execution_type: pandas\n"
             if input_lines:
                 header += "# inputs:\n" + "\n".join(input_lines) + "\n"
             header += "\n"
@@ -176,14 +235,14 @@ def write_compile_output(
             )
             compiled_nodes.append(node_info)
 
-            parts = name.split(".")
-            artifact_path = artifacts_dir / os.sep.join(parts[:-1]) / f"{parts[-1]}.py"
+            artifact_path = artifact_directory / f"{physical_address.table_name}.py"
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text(artifact_content)
         elif trouve.compiled.execution_type == ExecutionType.SNOWFLAKE:
             assert isinstance(trouve, Trouve)
-            effective_mode = resolve_effective_mode(trouve, run_mode)
-            statements = trouve.build_sql(effective_mode, run_id=run_id)
+            statements = build_statements(
+                trouve, run_mode, run_id, use_staging=use_staging
+            )
 
             node_info = CompiledNodeInfo(
                 name=name,
@@ -194,8 +253,7 @@ def write_compile_output(
             )
             compiled_nodes.append(node_info)
 
-            parts = name.split(".")
-            sql_file = artifacts_dir / os.sep.join(parts[:-1]) / f"{parts[-1]}.sql"
+            sql_file = artifact_directory / f"{physical_address.table_name}.sql"
             sql_file.parent.mkdir(parents=True, exist_ok=True)
             sql_content = "\n\n---\n\n".join(s.strip() for s in statements)
             sql_file.write_text(sql_content + "\n")

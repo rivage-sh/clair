@@ -16,6 +16,7 @@ from clair.core.test_runner import (
     run_tests,
 )
 from clair.trouves._refs import THIS_PLACEHOLDER
+from clair.trouves.address import TrouveAddress
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.test import (
     THIS,
@@ -29,7 +30,7 @@ from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, Trou
 
 
 def _make_trouve_with_tests(
-    physical_name: str,
+    physical_address: str,
     trouve_type: TrouveType,
     tests: list,
     imports: list[str] | None = None,
@@ -39,11 +40,11 @@ def _make_trouve_with_tests(
     raw_sql = "" if trouve_type == TrouveType.SOURCE else sql
     t = Trouve(type=trouve_type, sql=raw_sql, tests=tests)
     t.compiled = CompiledAttributes(
-        physical_name=physical_name,
-        logical_name=physical_name,
+        physical_address=TrouveAddress.parse(physical_address),
+        logical_address=TrouveAddress.parse(physical_address),
         resolved_sql=raw_sql,
-        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
-        module_name=physical_name,
+        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
+        module_name=physical_address,
         imports=imports or [],
         config=ResolvedConfig(),
         execution_type=ExecutionType.SNOWFLAKE,
@@ -165,7 +166,7 @@ class TestFormatTestOutput:
     def test_format_includes_structured_counts(self):
         results = [
             TestResult(
-                physical_name="db.s.t",
+                physical_address="db.s.t",
                 test_index=0,
                 test_type="unique",
                 column_name="id",
@@ -175,7 +176,7 @@ class TestFormatTestOutput:
                 query_url="https://sf/#/qid-1",
             ),
             TestResult(
-                physical_name="db.s.t",
+                physical_address="db.s.t",
                 test_index=1,
                 test_type="not_null",
                 column_name="email",
@@ -203,12 +204,12 @@ class TestFormatTestOutput:
     def test_format_all_passed(self):
         results = [
             TestResult(
-                physical_name="db.s.t", test_index=0, test_type="unique",
+                physical_address="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=True, failing_row_count=0,
                 query_id="qid-1", query_url="https://sf/#/qid-1",
             ),
             TestResult(
-                physical_name="db.s.t", test_index=1, test_type="not_null",
+                physical_address="db.s.t", test_index=1, test_type="not_null",
                 column_name="email", passed=True, failing_row_count=0,
                 query_id="qid-2", query_url="https://sf/#/qid-2",
             ),
@@ -221,7 +222,7 @@ class TestFormatTestOutput:
     def test_format_all_failed(self):
         results = [
             TestResult(
-                physical_name="db.s.t", test_index=0, test_type="unique",
+                physical_address="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=False, failing_row_count=5,
                 query_id="qid-1", query_url="https://sf/#/qid-1",
             ),
@@ -234,7 +235,7 @@ class TestFormatTestOutput:
     def test_format_with_errors(self):
         results = [
             TestResult(
-                physical_name="db.s.t", test_index=0, test_type="unique",
+                physical_address="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=False, failing_row_count=0,
                 error="Query execution failed",
             ),
@@ -247,17 +248,17 @@ class TestFormatTestOutput:
     def test_format_mixed_pass_fail_error(self):
         results = [
             TestResult(
-                physical_name="db.s.t", test_index=0, test_type="unique",
+                physical_address="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=True, failing_row_count=0,
                 query_id="qid-1", query_url="https://sf/#/qid-1",
             ),
             TestResult(
-                physical_name="db.s.t", test_index=1, test_type="not_null",
+                physical_address="db.s.t", test_index=1, test_type="not_null",
                 column_name="email", passed=False, failing_row_count=3,
                 query_id="qid-2", query_url="https://sf/#/qid-2",
             ),
             TestResult(
-                physical_name="db.s.t", test_index=2, test_type="sql",
+                physical_address="db.s.t", test_index=2, test_type="sql",
                 column_name=None, passed=False, failing_row_count=0,
                 error="Syntax error",
             ),
@@ -270,17 +271,17 @@ class TestFormatTestOutput:
     def test_format_list_properties(self):
         results = [
             TestResult(
-                physical_name="db.s.t", test_index=0, test_type="unique",
+                physical_address="db.s.t", test_index=0, test_type="unique",
                 column_name="id", passed=True, failing_row_count=0,
                 query_id="qid-1", query_url="https://sf/#/qid-1",
             ),
             TestResult(
-                physical_name="db.s.t", test_index=1, test_type="not_null",
+                physical_address="db.s.t", test_index=1, test_type="not_null",
                 column_name="email", passed=False, failing_row_count=3,
                 query_id="qid-2", query_url="https://sf/#/qid-2",
             ),
             TestResult(
-                physical_name="db.s.t", test_index=2, test_type="sql",
+                physical_address="db.s.t", test_index=2, test_type="sql",
                 column_name=None, passed=False, failing_row_count=0,
                 error="Syntax error",
             ),
@@ -333,7 +334,7 @@ class TestRunTestsEdgeCases:
         results = run_tests(dag, ["db.s.orders"], adapter)
 
         r = results[0]
-        assert r.physical_name == "db.s.orders"
+        assert r.physical_address == "db.s.orders"
         assert r.test_index == 0
         assert r.test_type == "unique"
         assert r.column_name == "id"
