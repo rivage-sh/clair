@@ -13,14 +13,14 @@ from clair.trouves.trouve import TrouveAbc, TrouveType
 class ClairDag(nx.DiGraph):
     """A directed acyclic graph of the Clair Trouves.
 
-    Each node is a full_name, for example "analytics.revenue.daily_orders". Each
+    Each node is a physical_name, for example "analytics.revenue.daily_orders". Each
     node has a "trouve" attribute that holds the compiled Trouve. Each edge is a
     (dependency, dependent) pair. Clair reads the pairs from the Trouve imports.
     """
 
     def add_trouve(self, trouve: TrouveAbc) -> None:
-        """Add a compiled Trouve as a node. The key of the node is its full_name."""
-        self.add_node(trouve.full_name, trouve=trouve)
+        """Add a compiled Trouve as a node. The key of the node is its physical_name."""
+        self.add_node(trouve.physical_name, trouve=trouve)
 
     def add_dependency(self, dependency: str, dependent: str) -> None:
         """Add an edge from *dependency* to *dependent*.
@@ -40,18 +40,18 @@ class ClairDag(nx.DiGraph):
             )
         self.add_edge(dependency, dependent)
 
-    def get_trouve(self, full_name: str) -> TrouveAbc:
+    def get_trouve(self, physical_name: str) -> TrouveAbc:
         """Give the Trouve of a node.
 
         Raises:
-            KeyError: If the graph does not contain *full_name*.
+            KeyError: If the graph does not contain *physical_name*.
         """
-        if full_name not in self:
+        if physical_name not in self:
             raise KeyError(
-                f"Clair cannot find the node '{full_name}' in the DAG. "
+                f"Clair cannot find the node '{physical_name}' in the DAG. "
                 f"The DAG contains these nodes: {sorted(self.nodes)}"
             )
-        return self.nodes[full_name]["trouve"]
+        return self.nodes[physical_name]["trouve"]
 
     def validate(self) -> None:
         """Examine the structure of the DAG.
@@ -103,7 +103,7 @@ def build_dag(trouves: Sequence[TrouveAbc]) -> ClairDag:
     # name as its key. Make a map, so that each edge is correct with a routing
     # policy active.
     logical_to_routed = {
-        t.compiled.logical_name: t.full_name for t in trouves if t.compiled
+        t.compiled.logical_name: t.physical_name for t in trouves if t.compiled
     }
 
     for trouve in trouves:
@@ -111,7 +111,7 @@ def build_dag(trouves: Sequence[TrouveAbc]) -> ClairDag:
         for dep_name in trouve.compiled.imports:
             routed_dep = logical_to_routed.get(dep_name, dep_name)
             if routed_dep in dag:
-                dag.add_dependency(routed_dep, trouve.full_name)
+                dag.add_dependency(routed_dep, trouve.physical_name)
 
     dag.validate()
     return dag

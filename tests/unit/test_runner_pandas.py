@@ -14,22 +14,22 @@ from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
 
-def _make_compiled(full_name: str = "db.schema.table") -> CompiledAttributes:
+def _make_compiled(physical_name: str = "db.schema.table") -> CompiledAttributes:
     return CompiledAttributes(
-        full_name=full_name,
-        logical_name=full_name,
+        physical_name=physical_name,
+        logical_name=physical_name,
         resolved_sql="",
-        file_path=Path(f"/fake/{full_name.replace('.', '/')}.py"),
-        module_name=full_name,
+        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
+        module_name=physical_name,
         imports=[],
         config=ResolvedConfig(),
         execution_type=ExecutionType.PANDAS,
     )
 
 
-def _make_source(full_name: str = "db.schema.source") -> Trouve:
+def _make_source(physical_name: str = "db.schema.source") -> Trouve:
     source = Trouve(type=TrouveType.SOURCE)
-    source.compiled = _make_compiled(full_name)
+    source.compiled = _make_compiled(physical_name)
     return source
 
 
@@ -49,8 +49,8 @@ def _make_df_adapter(
     if fetch_side_effect:
         adapter.fetch_dataframe.side_effect = fetch_side_effect
     elif fetch_dataframes is not None:
-        def _fetch(full_name: str) -> pd.DataFrame:
-            return fetch_dataframes[full_name]
+        def _fetch(physical_name: str) -> pd.DataFrame:
+            return fetch_dataframes[physical_name]
         adapter.fetch_dataframe.side_effect = _fetch
     else:
         adapter.fetch_dataframe.return_value = pd.DataFrame({"col": [1, 2, 3]})
@@ -84,7 +84,7 @@ class TestRunPandasTrouveHappyPath:
         result = _run_pandas_trouve(trouve, adapter)
 
         assert result.status == RunStatus.SUCCESS
-        assert result.full_name == "db.schema.summary"
+        assert result.physical_name == "db.schema.summary"
         adapter.write_dataframe.assert_called_once()
         call_kwargs = adapter.write_dataframe.call_args
         pd.testing.assert_frame_equal(call_kwargs.kwargs["dataframe"], result_df)
@@ -150,7 +150,7 @@ class TestRunPandasTrouveFullNameParsing:
         assert call_kwargs["database_name"] == "mydb"
         assert call_kwargs["schema_name"] == "myschema"
         assert call_kwargs["table_name"] == "mytable"
-        assert call_kwargs["full_name"] == "mydb.myschema.mytable"
+        assert call_kwargs["physical_name"] == "mydb.myschema.mytable"
 
     def test_full_name_with_wrong_part_count_fails(self):
         source = _make_source("db.schema.events")
@@ -168,7 +168,7 @@ class TestRunPandasTrouveFullNameParsing:
         result = _run_pandas_trouve(trouve, adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert "cannot divide the full_name" in result.error
+        assert "cannot divide the physical_name" in result.error
 
 
 class TestRunPandasTrouveTransformErrors:

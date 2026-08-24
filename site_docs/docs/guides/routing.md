@@ -115,6 +115,23 @@ This second shape puts the projects of many developers in one shared schema. Eac
 
 Add a field for each value that the rule needs. Pydantic validates the fields, and the field values show in the CLI messages.
 
+## Trouve addresses: logical and physical
+
+| Name | Meaning |
+|---|---|
+| logical | The name that the file path gives. The DAG edges, the `--select` patterns and the Trouve files use it. |
+| physical | The name that clair writes to. Your routing entry can make it from the logical name. |
+
+`clair run` logs both, thus you see the file that made the Trouve and the object that clair
+writes:
+
+```
+[info    ] run.node.start
+  logical=analytics.orders.daily
+  physical=alice.orders.daily
+  effective_mode=full_refresh
+```
+
 ## SOURCE passthrough
 
 SOURCE Trouves always use their logical name. clair never calls `route` for a SOURCE Trouve. Routing applies to TABLE and VIEW Trouves only.

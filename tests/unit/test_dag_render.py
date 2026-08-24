@@ -23,7 +23,7 @@ from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, Trou
 
 
 def _make_trouve(
-    full_name: str,
+    physical_name: str,
     trouve_type: TrouveType = TrouveType.TABLE,
     imports: list[str] | None = None,
 ) -> Trouve:
@@ -31,11 +31,11 @@ def _make_trouve(
     sql = "select 1" if trouve_type != TrouveType.SOURCE else ""
     t = Trouve(type=trouve_type, sql=sql)
     t.compiled = CompiledAttributes(
-        full_name=full_name,
-        logical_name=full_name,
+        physical_name=physical_name,
+        logical_name=physical_name,
         resolved_sql=sql,
-        file_path=Path(f"/fake/{full_name.replace('.', '/')}.py"),
-        module_name=full_name,
+        file_path=Path(f"/fake/{physical_name.replace('.', '/')}.py"),
+        module_name=physical_name,
         imports=imports or [],
         config=ResolvedConfig(),
         execution_type=ExecutionType.SNOWFLAKE,
@@ -47,17 +47,17 @@ def _build_dag(
     nodes: list[tuple[str, TrouveType]],
     edges: list[tuple[str, str]] | None = None,
 ) -> ClairDag:
-    """Make a ClairDag from the (full_name, type) pairs and the (src, dst) edges."""
+    """Make a ClairDag from the (physical_name, type) pairs and the (src, dst) edges."""
     dag = ClairDag()
-    for full_name, ttype in nodes:
-        dag.add_trouve(_make_trouve(full_name, ttype))
+    for physical_name, ttype in nodes:
+        dag.add_trouve(_make_trouve(physical_name, ttype))
     for src, dst in edges or []:
         dag.add_dependency(src, dst)
     return dag
 
 
 def _node_name(line: str) -> str:
-    """Read the node full_name from one line of the output.
+    """Read the node physical_name from one line of the output.
 
     The function removes each tree character and each other prefix. It gives the
     full name alone.

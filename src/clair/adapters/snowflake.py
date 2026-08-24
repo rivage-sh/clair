@@ -134,14 +134,14 @@ class SnowflakeAdapter(WarehouseAdapter):
         finally:
             cursor.close()
 
-    def fetch_dataframe(self, full_name: str) -> pd.DataFrame:
+    def fetch_dataframe(self, physical_name: str) -> pd.DataFrame:
         """Read a complete Snowflake table into a pandas DataFrame."""
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
         cursor = self._conn.cursor()
         try:
-            cursor.execute(f"SELECT * FROM {full_name}")
+            cursor.execute(f"SELECT * FROM {physical_name}")
             dataframe = cursor.fetch_pandas_all()
             dataframe.columns = dataframe.columns.str.lower()
             return dataframe
@@ -151,7 +151,7 @@ class SnowflakeAdapter(WarehouseAdapter):
     def write_dataframe(
         self,
         dataframe: pd.DataFrame,
-        full_name: str,
+        physical_name: str,
         database_name: str,
         schema_name: str,
         table_name: str,

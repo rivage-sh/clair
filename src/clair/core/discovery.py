@@ -121,7 +121,7 @@ _PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 
 
 def _resolve_sql(sql: str, id_to_full_name: dict[int, str], this_name: str) -> str:
-    """Replace each placeholder token with the true full_name.
+    """Replace each placeholder token with the true physical_name.
 
     The function replaces a token that points to a different Trouve
     (``__CLAIR_TROUVE_<id>__``). It also replaces the THIS marker
@@ -138,7 +138,7 @@ def _resolve_sql(sql: str, id_to_full_name: dict[int, str], this_name: str) -> s
 def _detect_imports(
     sql: str, id_to_full_name: dict[int, str], own_full_name: str
 ) -> list[str]:
-    """Give the full_name of each other Trouve that the SQL points to with a token."""
+    """Give the physical_name of each other Trouve that the SQL points to with a token."""
     imports = []
     for obj_id_str in _PLACEHOLDER_RE.findall(sql):
         dep_name = id_to_full_name.get(int(obj_id_str))
@@ -215,7 +215,7 @@ def discover_project(
     errors: list[str] = []
 
     for file_path in candidates:
-        full_name = compute_full_name(file_path)
+        physical_name = compute_full_name(file_path)
         module_name = str(
             file_path.relative_to(project_root).with_suffix("")
         ).replace(os.sep, ".")
@@ -239,7 +239,7 @@ def discover_project(
         if not isinstance(trouve_obj, TrouveAbc):
             continue
 
-        collected.append((trouve_obj, full_name, file_path, module_name))
+        collected.append((trouve_obj, physical_name, file_path, module_name))
 
     # Phase A: make the logical name and the routed name of each Trouve.
     # logical_name = the name from the file path. DAG edges and selectors use it.
@@ -249,12 +249,12 @@ def discover_project(
     routed_names: dict[int, str] = {}
     collision_check: dict[str, str] = {}
 
-    for trouve_obj, full_name, _, _ in collected:
-        logical_names[id(trouve_obj)] = full_name
-        routed = route(full_name, trouve_obj.type, routing)
+    for trouve_obj, physical_name, _, _ in collected:
+        logical_names[id(trouve_obj)] = physical_name
+        routed = route(physical_name, trouve_obj.type, routing)
         routed_names[id(trouve_obj)] = routed
         if trouve_obj.type != TrouveType.SOURCE:
-            collision_check[full_name.upper()] = routed
+            collision_check[physical_name.upper()] = routed
 
     # Make a map from an id to a logical name, for the pandas dependencies. With
     # this map, clair finds the logical name of each Trouve that a PandasTrouve
@@ -269,7 +269,7 @@ def discover_project(
     # the production upstream tables. After the selection, call
     # recompile_for_selection() to change each selected upstream name to its
     # routed name.
-    for trouve_obj, full_name, file_path, module_name in collected:
+    for trouve_obj, physical_name, file_path, module_name in collected:
         logical = logical_names[id(trouve_obj)]
         routed = routed_names[id(trouve_obj)]
 
@@ -287,7 +287,7 @@ def discover_project(
                 resolved_transform = repr(trouve_obj.transform)
 
             trouve_obj.compiled = CompiledAttributes(
-                full_name=routed,
+                physical_name=routed,
                 logical_name=logical,
                 resolved_sql="",
                 resolved_transform=resolved_transform,
@@ -303,7 +303,7 @@ def discover_project(
         else:
             assert isinstance(trouve_obj, Trouve)
             trouve_obj.compiled = CompiledAttributes(
-                full_name=routed,
+                physical_name=routed,
                 logical_name=logical,
                 resolved_sql=_resolve_sql(trouve_obj.sql, logical_names, this_name=logical),
                 file_path=file_path.relative_to(project_root),
@@ -333,7 +333,7 @@ def find_routing_collisions(trouves: Sequence[TrouveAbc]) -> list[tuple[str, lis
     logical name and the routed name are equal for each Trouve.
     """
     logical_to_routed = {
-        trouve.compiled.logical_name: trouve.compiled.full_name
+        trouve.compiled.logical_name: trouve.compiled.physical_name
         for trouve in trouves
         if trouve.compiled and trouve.type != TrouveType.SOURCE
     }
@@ -366,11 +366,11 @@ def recompile_for_selection(trouves: Sequence[TrouveAbc], selected_names: set[st
     for t in trouves:
         if (
             t.compiled
-            and t.compiled.full_name in selected_names
+            and t.compiled.physical_name in selected_names
             and t.type != TrouveType.SOURCE
-            and t.compiled.full_name != t.compiled.logical_name
+            and t.compiled.physical_name != t.compiled.logical_name
         ):
-            logical_to_routed[t.compiled.logical_name] = t.compiled.full_name
+            logical_to_routed[t.compiled.logical_name] = t.compiled.physical_name
 
     if not logical_to_routed:
         return
@@ -380,7 +380,7 @@ def recompile_for_selection(trouves: Sequence[TrouveAbc], selected_names: set[st
     # identifier with the same prefix stays as it is. For example, the pattern
     # "db.s.foo" does not match the text "db.s.foobar".
     for t in trouves:
-        if not t.compiled or t.compiled.full_name not in selected_names:
+        if not t.compiled or t.compiled.physical_name not in selected_names:
             continue
 
         sql = t.compiled.resolved_sql

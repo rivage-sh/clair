@@ -30,8 +30,8 @@ def build_catalog(dag: ClairDag, project_root: Path) -> dict:
     """
     trouves_catalog: dict[str, dict] = {}
 
-    for full_name in dag.nodes:
-        trouve = dag.get_trouve(full_name)
+    for physical_name in dag.nodes:
+        trouve = dag.get_trouve(physical_name)
         trouve_data = trouve.model_dump(mode="json")
 
         resolved_sql = (
@@ -47,7 +47,7 @@ def build_catalog(dag: ClairDag, project_root: Path) -> dict:
 
         trouve_data["column_inference"] = inference.model_dump(mode="json")
 
-        trouves_catalog[full_name] = trouve_data
+        trouves_catalog[physical_name] = trouve_data
 
     return {
         "project_name": project_root.name,
