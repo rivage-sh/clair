@@ -84,6 +84,39 @@ else:
 comprehension, where the short name is most tempting. Use `database_name`, `schema_name`,
 `table_name`.
 
+**Comment only what the code cannot say.** A comment earns its place when it gives the
+reason for a decision, a constraint from outside the file, or a warning. A comment that
+repeats the signature, the type, or the next line is noise: it makes the reader read the
+same idea twice, and it goes stale.
+
+```python
+# Bad — the two lines below say this already.
+# Clair calls this method for every Trouve, and a SOURCE Trouve is not an
+# exception. Examine trouve_type to give a SOURCE a different rule.
+if trouve_type == TrouveType.SOURCE:
+    return trouve_address
+
+# Good — no comment. The condition is the documentation.
+if trouve_type == TrouveType.SOURCE:
+    return trouve_address
+```
+
+The same bar applies to a docstring, a README, and a page in `site_docs/docs/`. Say the
+rule once, in the place that owns it, and link to that place from everywhere else.
+
+**Do not write history in a comment.** A comment describes the code as it is now. Words
+such as "before this change", "no longer", "used to", "we now", or a pull request number
+mean nothing to a reader who never saw the old code. `git log` and `git blame` hold the
+history, and they stay correct.
+
+```python
+# Bad
+# We no longer skip a SOURCE here, because routing applies to every Trouve now.
+
+# Good
+# A TABLE that routes onto a SOURCE replaces the data it reads.
+```
+
 **Make the illegal state impossible.** Eager validation (invariant 5) is one case of a
 larger rule: let a type or a constructor reject bad input, so the code after it holds no
 defensive branch.
