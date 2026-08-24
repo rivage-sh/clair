@@ -259,7 +259,7 @@ def discover_project(
     # Phase A: make the logical address and the physical address of each Trouve.
     # The logical address comes from the file path. DAG edges and selectors use it.
     # The physical address is the target. The SQL and the DDL use it.
-    # A SOURCE Trouve always keeps its address, whatever the routing policy is.
+    # The routing entry sees every Trouve, a SOURCE too.
     logical_addresses: dict[int, TrouveAddress] = {}
     physical_addresses: dict[int, TrouveAddress] = {}
     collision_check: dict[str, TrouveAddress] = {}
@@ -268,8 +268,8 @@ def discover_project(
         logical_addresses[id(trouve_obj)] = logical_address
         physical_address = route(logical_address, trouve_obj.type, routing)
         physical_addresses[id(trouve_obj)] = physical_address
-        if trouve_obj.type != TrouveType.SOURCE:
-            collision_check[str(logical_address).upper()] = physical_address
+        # A TABLE that routes onto a SOURCE replaces the data that it reads.
+        collision_check[str(logical_address).upper()] = physical_address
 
     # Make a map from an id to a logical address, for the pandas dependencies.
     # With this map, clair finds the logical address of each Trouve that a PandasTrouve

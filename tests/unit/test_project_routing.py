@@ -27,7 +27,9 @@ class DatabaseOverride(RoutingEntry):
     environment_name: str = "dev"
     database_name: str
 
-    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+    def route(
+        self, trouve_address: TrouveAddress, trouve_type: TrouveType
+    ) -> TrouveAddress:
         return trouve_address.model_copy(update={"database_name": self.database_name})
 
 
@@ -100,7 +102,9 @@ class TestLoadProjectRouting:
             class DeveloperRouting(RoutingEntry):
                 environment_name: str = "dev"
 
-                def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+                def route(
+                    self, trouve_address: TrouveAddress, trouve_type: TrouveType
+                ) -> TrouveAddress:
                     user_name = os.environ["CLAIR_USER"].upper()
                     return trouve_address.model_copy(update={
                         "database_name": f"{trouve_address.database_name}_{user_name}"

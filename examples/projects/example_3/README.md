@@ -64,11 +64,12 @@ export CLAIR_USER=alice
 rule that gives an invalid name, and two Trouves that go to one target:
 
 ```bash
-clair validate --project example_projects/example_3
-clair validate --project example_projects/example_3 --env prod
+clair validate --project examples/projects/example_3
+clair validate --project examples/projects/example_3 --env prod
 ```
 
-SOURCE Trouves never route. The `source` schema keeps its logical name in every environment.
+This entry gives a SOURCE back unchanged, thus the `source` schema keeps its logical name
+in every environment.
 
 See the [routing guide](../../site_docs/docs/guides/routing.md) for the full rules.
 
@@ -80,10 +81,10 @@ All commands run from the repo root (`clair/`).
 
 ```bash
 # Preview full-refresh SQL (default)
-clair compile --project example_projects/example_3
+clair compile --project examples/projects/example_3
 
 # Preview incremental SQL — shows INSERT INTO and MERGE statements with <run_id> placeholder
-clair compile --project example_projects/example_3 --run-mode incremental
+clair compile --project examples/projects/example_3 --run-mode incremental
 ```
 
 ### 2. Full refresh run (first run)
@@ -91,7 +92,7 @@ clair compile --project example_projects/example_3 --run-mode incremental
 Creates all tables from scratch. Use this to initialise the derived tables before testing incremental.
 
 ```bash
-clair run --project example_projects/example_3 --env dev
+clair run --project examples/projects/example_3 --env dev
 ```
 
 Verify:
@@ -114,7 +115,7 @@ insert into example_3_database.source.orders values
 ### 4. Incremental run
 
 ```bash
-clair run --project example_projects/example_3 --env dev --run-mode incremental
+clair run --project examples/projects/example_3 --env dev --run-mode incremental
 ```
 
 Expected behaviour:

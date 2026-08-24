@@ -26,7 +26,8 @@ clair run --project . --env dev --no-test
 
 Trouves run in topological order — each dependency runs before its dependents. If a node fails, clair skips all the downstream dependents.
 
-SOURCE Trouves pass through. clair does not run SQL against them.
+clair does not run SQL against a SOURCE Trouve. The routing entry still gives the
+address that clair reads.
 
 ## Tests
 

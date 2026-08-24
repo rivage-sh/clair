@@ -44,7 +44,13 @@ class RoutingEntry(BaseModel, ABC):
             environment_name: str = "dev"
             user_variable: str = "CLAIR_USER"
 
-            def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+            def route(
+                self,
+                trouve_address: TrouveAddress,
+                trouve_type: TrouveType,
+            ) -> TrouveAddress:
+                if trouve_type == TrouveType.SOURCE:
+                    return trouve_address
                 user = os.environ[self.user_variable].upper()
                 return trouve_address.model_copy(
                     update={"database_name": f"{trouve_address.database_name}_{user}"}
@@ -55,17 +61,21 @@ class RoutingEntry(BaseModel, ABC):
     environment_name: str
 
     @abstractmethod
-    def route(self, trouve_address: TrouveAddress) -> TrouveAddress:
+    def route(
+        self, trouve_address: TrouveAddress, trouve_type: TrouveType
+    ) -> TrouveAddress:
         """Give the physical address for one logical address.
 
-        Clair never calls this method for a SOURCE Trouve. A SOURCE always reads
-        from the address that the file system gives.
+        Clair calls this method for every Trouve, and a SOURCE Trouve is not an
+        exception. To keep a SOURCE at the address that the file system gives,
+        examine ``trouve_type`` and give ``trouve_address`` back.
 
         Args:
             trouve_address: The logical address of the Trouve.
+            trouve_type: SOURCE, TABLE, or VIEW.
 
         Returns:
-            The physical address to write to.
+            The physical address to read from, or to write to.
         """
 
 
@@ -127,7 +137,7 @@ def describe_routing(routing: RoutingEntry | None) -> str:
 
 
 def _apply_routing(
-    logical_address: TrouveAddress, routing: RoutingEntry
+    logical_address: TrouveAddress, trouve_type: TrouveType, routing: RoutingEntry
 ) -> TrouveAddress:
     """Run one routing entry and confirm that it gave an address.
 
@@ -137,7 +147,7 @@ def _apply_routing(
     """
     entry_text = f"The routing entry `{describe_routing(routing)}`"
     try:
-        physical_address = routing.route(logical_address)
+        physical_address = routing.route(logical_address, trouve_type)
     except ValidationError as exc:
         raise InvalidRoutingConfigError(
             f"{entry_text} built a bad address for '{logical_address}': "
@@ -165,8 +175,10 @@ def route(
 ) -> TrouveAddress:
     """Apply a routing entry to a logical address.
 
-    The function validates the logical address first, then applies the entry. A
-    SOURCE Trouve keeps its logical address, whatever the entry is.
+    The function validates the logical address first, then applies the entry.
+    The entry sees every Trouve, and a SOURCE Trouve is not an exception. An
+    entry that must keep a SOURCE at its logical address examines
+    ``trouve_type``.
 
     Args:
         logical_address: The address that the file system gives. A string
@@ -184,10 +196,10 @@ def route(
     if isinstance(logical_address, str):
         logical_address = TrouveAddress.parse(logical_address)
 
-    if routing is None or trouve_type == TrouveType.SOURCE:
+    if routing is None:
         return logical_address
 
-    return _apply_routing(logical_address, routing)
+    return _apply_routing(logical_address, trouve_type, routing)
 
 
 def collect_routing_problems(

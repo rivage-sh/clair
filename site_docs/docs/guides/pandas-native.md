@@ -157,4 +157,4 @@ These are the `PandasTrouve` fields. See the [Trouve API reference](../reference
 
 ## Complete example
 
-`example_projects/example_4/` in the repository is a runnable project that uses `PandasTrouve`. See `example_4_database/derived/daily_event_counts.py`.
+`examples/projects/example_4/` in the repository is a runnable project that uses `PandasTrouve`. See `example_4_database/derived/daily_event_counts.py`.

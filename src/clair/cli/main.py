@@ -156,7 +156,7 @@ def _resolve_project_routing(project_root: Path, env_name: str) -> ProjectRoutin
             )
         )
         click.echo(
-            f"  Trouves write to their logical (production) names.\n"
+            f"  Trouves write to their logical (production) addresses.\n"
             f"  The file names: {', '.join(project_routing.environment_names) or 'nothing'}\n"
         )
 
@@ -391,7 +391,7 @@ def validate(project: str, env: str | None) -> None:
     routable: list[tuple[TrouveAddress, TrouveType]] = [
         (trouve.compiled.logical_address, trouve.type)
         for trouve in discovered
-        if trouve.compiled is not None and trouve.type != TrouveType.SOURCE
+        if trouve.compiled is not None
     ]
 
     click.echo(f"\n  environment: {env_name}")

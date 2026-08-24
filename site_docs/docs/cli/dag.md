@@ -9,7 +9,7 @@ clair dag [--project PATH] [--select PATTERN]...
 ## Example
 
 ```bash
-clair dag --project ./example_projects/example_1
+clair dag --project ./examples/projects/example_1
 ```
 
 Output:
