@@ -146,28 +146,15 @@ writes:
 
 ## The Trouve type
 
-clair calls `route` for every Trouve, and a SOURCE Trouve is not an exception. The second
-parameter gives the type, thus one entry can hold a different rule for each type.
-
-Most projects keep a SOURCE at its logical address: another system writes that table, thus
-the table does not move with your environment. Examine the type and give the address back:
+clair calls `route` for every Trouve, a SOURCE too. To keep a SOURCE at its logical
+address, give the address back:
 
 ```python
-from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
-
-
-class DeveloperRouting(RoutingEntry):
-    environment_name: str = "dev"
-
-    def route(
-        self, trouve_address: TrouveAddress, trouve_type: TrouveType
-    ) -> TrouveAddress:
-        if trouve_type == TrouveType.SOURCE:
-            return trouve_address
-        return trouve_address.model_copy(update={"database_name": "ALICE"})
+if trouve_type == TrouveType.SOURCE:
+    return trouve_address
 ```
 
-A test environment does the opposite: it routes the SOURCE too, thus the whole pipeline
+A test environment does the opposite, and routes the SOURCE too, thus the whole pipeline
 reads and writes one throwaway database.
 
 ## No entry for an environment

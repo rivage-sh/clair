@@ -79,9 +79,8 @@ clair validate --project examples/projects/example_1
 clair validate --project examples/projects/example_1 --env prod
 ```
 
-The routing entry sees every Trouve. This entry examines the Trouve type and gives a
-SOURCE back unchanged, thus the `source` schema keeps its logical name in every
-environment.
+This entry gives a SOURCE back unchanged, thus the `source` schema keeps its logical name
+in every environment.
 
 See the [routing guide](../../site_docs/docs/guides/routing.md) for the full rules.
 

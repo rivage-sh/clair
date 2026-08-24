@@ -44,11 +44,7 @@ class SchemaIsolationRouting(RoutingEntry):
 
 
 class SourceAwareRouting(RoutingEntry):
-    """Send each TABLE and VIEW to one database, and keep each SOURCE.
-
-    This entry shows the rule that a project uses most often: another system
-    writes the source table, thus the source table does not move.
-    """
+    """Send each TABLE and VIEW to one database, and keep each SOURCE."""
 
     environment_name: str = "dev"
     database_name: str

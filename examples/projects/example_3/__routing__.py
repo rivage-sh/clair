@@ -2,8 +2,7 @@
 
 Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
-and gives the physical TrouveAddress. The entry sees every Trouve, and
-a SOURCE Trouve is not an exception.
+and gives the physical TrouveAddress.
 
 Run `clair validate --project examples/projects/example_3` to find a rule that
 gives an invalid name, and two Trouves that go to one target.
@@ -39,8 +38,6 @@ class DeveloperRouting(RoutingEntry):
     def route(
         self, trouve_address: TrouveAddress, trouve_type: TrouveType
     ) -> TrouveAddress:
-        # A SOURCE reads a table that another system writes. It stays where it
-        # is, thus each person reads the same upstream data.
         if trouve_type == TrouveType.SOURCE:
             return trouve_address
         user_name = os.environ[self.user_variable]

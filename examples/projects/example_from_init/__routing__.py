@@ -2,8 +2,7 @@
 
 Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
-and gives the physical TrouveAddress. The entry sees every Trouve, and
-a SOURCE Trouve is not an exception.
+and gives the physical TrouveAddress.
 
 This file starts with one entry, and that entry changes nothing: the physical
 name stays equal to the logical name. Change the route method when you want a
