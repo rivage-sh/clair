@@ -47,6 +47,14 @@ Features go in a git worktree under `.claude/worktrees/<branch-name>/`. A worktr
 the git history but holds its own `.venv/`, so run `uv venv && uv sync` after you enter a
 new one, and run each command from inside the worktree — not from the repo root.
 
+A worktree shares each branch ref with the main checkout. Only the working tree and the
+index belong to one worktree. Therefore:
+
+- Branch with a new name: `git checkout -b <feature> origin/main`.
+- Never pass `-B`, and never name the branch `main`. `git checkout -B main origin/main`
+  moves the shared ref, and the main checkout keeps its old files under a new HEAD. Its
+  `git status` then shows a complete reverse diff, which reads like data loss.
+
 ## Code
 
 `.claude/memory/conventions.md` holds the quality bar. Two rules that CI cannot catch:
