@@ -75,8 +75,8 @@ export CLAIR_USER=alice
 rule that gives an invalid name, and two Trouves that go to one target:
 
 ```bash
-clair validate --project example_projects/example_4
-clair validate --project example_projects/example_4 --env prod
+clair validate --project examples/projects/example_4
+clair validate --project examples/projects/example_4 --env prod
 ```
 
 SOURCE Trouves never route. The `source` schema keeps its logical name in every environment.
@@ -89,10 +89,10 @@ From the project root (`clair/`):
 
 ```bash
 # Compile (offline -- resolves the DAG and prints the generated SQL)
-clair compile --project example_projects/example_4
+clair compile --project examples/projects/example_4
 
 # Run (executes against Snowflake)
-clair run --project example_projects/example_4 --env dev
+clair run --project examples/projects/example_4 --env dev
 ```
 
 After running, you should see three new tables in Snowflake:

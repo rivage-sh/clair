@@ -4,7 +4,7 @@ Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
 and gives the physical TrouveAddress. SOURCE Trouves never route.
 
-Run `clair validate --project example_projects/example_2` to find a rule that
+Run `clair validate --project examples/projects/example_2` to find a rule that
 gives an invalid name, and two Trouves that go to one target.
 """
 

@@ -469,7 +469,7 @@ Resolution order (later wins): environment defaults â†’ `__database_config__` â†
 
 ## Example projects
 
-Example projects are included under `example_projects/`:
+Example projects are included under `examples/projects/`:
 
 | Project | What it demonstrates |
 |---------|---------------------|
@@ -481,7 +481,7 @@ Example projects are included under `example_projects/`:
 
 Each numbered project holds a `__routing__.py` with a `dev` entry and a `prod` entry. The
 `dev` entry reads `CLAIR_USER`, thus each person writes to a separate database. Run
-`clair validate --project example_projects/example_1` to find a routing problem without a
+`clair validate --project examples/projects/example_1` to find a routing problem without a
 Snowflake connection.
 
 The README of each project holds the SQL that creates and seeds the source tables, and the SQL

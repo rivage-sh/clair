@@ -34,7 +34,7 @@ configuration language, full IDE support.
 
 `grep` `site_docs/docs/` to learn what a feature does — it is Markdown, and it is small
 (approximately 9000 words). Then confirm the exact API against `src/` or
-`example_projects/` before you depend on it. When the two disagree, the code wins and the
+`examples/projects/` before you depend on it. When the two disagree, the code wins and the
 page is a bug.
 
 The documentation rots. The pandas guide, the landing page and the README once documented
