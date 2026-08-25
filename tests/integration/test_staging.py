@@ -21,6 +21,7 @@ import pytest
 from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.staging import STAGING_SUFFIX, make_staging_address
+from clair.trouves.trouve import ExecutionType
 from tests.integration.config import IntegrationConfig
 from tests.integration.conftest import clair_environment, events_named, run_clair
 from tests.integration.projects import physical_address
@@ -232,6 +233,143 @@ class TestAFailedDataQualityTest:
         ]
         # The first run built it, thus it exists. It holds the old data.
         assert row_count(adapter, downstream) == 3
+
+
+class TestAPandasTrouveThatPasses:
+    """A pandas Trouve takes a different path to the staging address.
+
+    A SQL Trouve runs ``CREATE OR REPLACE TABLE`` there. A pandas Trouve calls
+    ``write_pandas``, and that function makes the table itself. Clair then
+    promotes that table with the same clone. This test runs that combination.
+    """
+
+    DATABASE_NAME = "staging_pandas_pass_database"
+
+    @pytest.fixture(scope="class")
+    def completed_run(
+        self,
+        snowflake_workspace: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+        clair_home: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> subprocess.CompletedProcess[str]:
+        schema_name = snowflake_workspace.schema_name
+        _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=3)
+        project_path = write_probe_project(
+            tmp_path_factory.mktemp("staging_pandas_pass"),
+            self.DATABASE_NAME,
+            minimum_rows=PASSING_LIMIT,
+            execution_type=ExecutionType.PANDAS,
+        )
+        environment = clair_environment(snowflake_workspace, clair_home)
+        return run_clair(["run", "--project", str(project_path)], environment)
+
+    def test_the_physical_address_holds_the_rows(
+        self,
+        completed_run: subprocess.CompletedProcess[str],
+        snowflake_workspace: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """Snowflake accepts a clone of the table that write_pandas made."""
+        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        assert table_exists(adapter, checked)
+        assert row_count(adapter, checked) == 3
+
+    def test_a_sql_dependent_reads_the_promoted_data(
+        self,
+        completed_run: subprocess.CompletedProcess[str],
+        snowflake_workspace: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """The downstream Trouve is SQL, and it reads the pandas Trouve."""
+        downstream = _downstream_address(
+            self.DATABASE_NAME, snowflake_workspace.schema_name
+        )
+        assert row_count(adapter, downstream) == 3
+
+    def test_clair_drops_the_staging_object(
+        self,
+        completed_run: subprocess.CompletedProcess[str],
+        snowflake_workspace: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        run_id = _run_id_of(completed_run)
+        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+
+        assert not table_exists(adapter, make_staging_address(checked, run_id))
+        assert (
+            staging_objects(
+                adapter, snowflake_workspace.schema_name, self.DATABASE_NAME
+            )
+            == []
+        )
+
+
+class TestAPandasTrouveThatFails:
+    """The physical table keeps its rows when the test of a DataFrame fails."""
+
+    DATABASE_NAME = "staging_pandas_fail_database"
+
+    @pytest.fixture(scope="class")
+    def failed_run(
+        self,
+        snowflake_workspace: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+        clair_home: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> subprocess.CompletedProcess[str]:
+        """Build 3 good rows, then write 5 rows that the test rejects."""
+        schema_name = snowflake_workspace.schema_name
+        environment = clair_environment(snowflake_workspace, clair_home)
+        destination = tmp_path_factory.mktemp("staging_pandas_fail")
+
+        _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=3)
+        good_project = write_probe_project(
+            destination / "good",
+            self.DATABASE_NAME,
+            minimum_rows=PASSING_LIMIT,
+            execution_type=ExecutionType.PANDAS,
+        )
+        run_clair(["run", "--project", str(good_project)], environment)
+
+        _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=5)
+        bad_project = write_probe_project(
+            destination / "bad",
+            self.DATABASE_NAME,
+            minimum_rows=FAILING_LIMIT,
+            execution_type=ExecutionType.PANDAS,
+        )
+        return run_clair(
+            ["run", "--project", str(bad_project)], environment, expect_success=False
+        )
+
+    def test_the_run_stops_with_the_status_code_1(
+        self, failed_run: subprocess.CompletedProcess[str]
+    ) -> None:
+        assert failed_run.returncode == 1
+
+    def test_the_physical_address_keeps_the_data_of_the_run_that_passed(
+        self,
+        failed_run: subprocess.CompletedProcess[str],
+        snowflake_workspace: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """write_pandas replaces a table, so it must never touch this one."""
+        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        assert row_count(adapter, checked) == 3
+
+    def test_clair_keeps_the_rejected_candidate(
+        self,
+        failed_run: subprocess.CompletedProcess[str],
+        snowflake_workspace: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        run_id = _run_id_of(failed_run)
+        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        staging = make_staging_address(checked, run_id)
+
+        assert table_exists(adapter, staging)
+        assert row_count(adapter, staging) == 5
 
 
 class TestThePromotionKeepsTheGrants:

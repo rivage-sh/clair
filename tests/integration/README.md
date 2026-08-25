@@ -49,6 +49,21 @@ Each test class gives its own database name, for example
 `staging_fail_database`, thus the tests never write one table. The test makes
 the SOURCE table itself, so these tests need no golden schema.
 
+The candidate Trouve runs on one of the two engines, because they write in
+different ways. A SQL Trouve runs `CREATE OR REPLACE TABLE` at the staging
+address. A pandas Trouve calls `write_pandas`, and that function makes the
+staging table itself. Clair then promotes both with the same clone.
+
+### The grants test
+
+`GRANT SELECT ON FUTURE TABLES IN DATABASE` gives SELECT to the test role on
+each new table. The promotion makes a new object, so Snowflake gives SELECT
+again on its own. A test that asks for SELECT therefore passes even when
+`COPY GRANTS` does nothing.
+
+Give a privilege with no future grant, for example INSERT. Then the promotion
+is the one path that can carry the privilege over, and the test can fail.
+
 ## The source tables
 
 `tests/integration/scripts/clair_pr_testing_setup.sql` makes one golden schema
