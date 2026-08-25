@@ -247,18 +247,24 @@ AS t(event_id, user_id, event_type, occurred_at, properties);
 
 
 -- ---------------------------------------------------------------------------
--- example_3 has no golden table
+-- The golden source tables of example_3
 -- ---------------------------------------------------------------------------
 --
--- example_3_database.derived.recent_orders selects
--- `created_at > dateadd('day', -3, current_timestamp())`. The rows must
--- therefore be young at each run. A golden table holds the timestamps of the
--- day that you ran this script, thus a clone of it gives 0 recent rows after 3
--- days.
---
--- tests/integration/setup.py makes the orders table of example_3 in the schema
--- of the run, with current_timestamp() at run time. See
--- tests/integration/README.md.
+-- Each date is fixed and old. example_3_database.derived.recent_orders selects
+-- `created_at > dateadd('day', -3, current_timestamp())`, thus no row below
+-- reaches that window. The incremental test inserts its own rows with
+-- current_timestamp(), and it then knows the exact number of new rows.
+
+CREATE OR REPLACE TABLE CLAIR_PR_TESTING.EXAMPLE_3.ORDERS AS
+SELECT order_id, customer_id, order_status, amount, created_at, updated_at
+FROM VALUES
+    ('ord_001', 'cust_a', 'delivered', 49.99,  '2024-01-05 09:00:00'::timestamp_ntz, '2024-01-07 12:00:00'::timestamp_ntz),
+    ('ord_002', 'cust_b', 'delivered', 120.00, '2024-01-06 10:30:00'::timestamp_ntz, '2024-01-08 14:00:00'::timestamp_ntz),
+    ('ord_003', 'cust_a', 'delivered', 35.50,  '2024-01-08 11:15:00'::timestamp_ntz, '2024-01-09 16:45:00'::timestamp_ntz),
+    ('ord_004', 'cust_c', 'shipped',   89.00,  '2024-01-12 08:20:00'::timestamp_ntz, '2024-01-13 09:10:00'::timestamp_ntz),
+    ('ord_005', 'cust_b', 'placed',    15.00,  '2024-01-14 17:05:00'::timestamp_ntz, '2024-01-14 17:05:00'::timestamp_ntz),
+    ('ord_006', 'cust_a', 'placed',    200.00, '2024-01-14 18:40:00'::timestamp_ntz, '2024-01-14 18:40:00'::timestamp_ntz)
+AS t(order_id, customer_id, order_status, amount, created_at, updated_at);
 
 
 -- The account identifier, for the GitHub secret:

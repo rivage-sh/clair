@@ -8,7 +8,6 @@ Run it as a module to prepare a schema by hand:
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from clair.adapters.snowflake import SnowflakeAdapter
 from tests.integration.config import (
@@ -26,11 +25,6 @@ from tests.integration.projects import (
 )
 from tests.integration.warehouse import connect, execute
 
-SEEDS_DIR = Path(__file__).parent / "seeds"
-
-# example_3 needs a young timestamp in each row, thus it has no golden table.
-SEED_FILES = {"example_3_database.source.orders": "example_3_orders.sql"}
-
 
 def create_schema(adapter: SnowflakeAdapter, schema_name: str) -> None:
     """Make the schema of the run. An existing schema keeps its content."""
@@ -38,25 +32,20 @@ def create_schema(adapter: SnowflakeAdapter, schema_name: str) -> None:
 
 
 def load_source_tables(adapter: SnowflakeAdapter, schema_name: str) -> list[str]:
-    """Put the source table of each example project in the schema of the run.
+    """Clone the golden source table of each example project into the schema.
 
-    A table with a golden copy arrives as a zero copy clone. example_3 has no
-    golden copy, thus its statement makes the rows again.
+    A clone is a zero copy operation. The run can write to its copy, thus the
+    golden table never changes.
 
     Returns:
-        The physical name of each table that this function made.
+        The name of each table that this function made.
     """
     made: list[str] = []
     for project_path in example_project_paths():
         for logical_name in source_logical_names(trouves_of(project_path)):
             target = f"{DATABASE_NAME}.{schema_name}.{physical_table_name(logical_name)}"
-            seed_file = SEED_FILES.get(logical_name)
-            if seed_file:
-                statement = (SEEDS_DIR / seed_file).read_text()
-                execute(adapter, statement.format(physical_name=target))
-            else:
-                golden = f"{DATABASE_NAME}.{golden_table_name(project_path, logical_name)}"
-                execute(adapter, f"create or replace table {target} clone {golden}")
+            golden = f"{DATABASE_NAME}.{golden_table_name(project_path, logical_name)}"
+            execute(adapter, f"create or replace table {target} clone {golden}")
             made.append(target)
     return made
 

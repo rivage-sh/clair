@@ -26,14 +26,14 @@ jobs:
     environment: snowflake-integration
 
     env:
-      CLAIR_CI_SCHEMA_NAME: >-
+      CLAIR_PR_TESTING_SCHEMA_NAME: >-
         ${{ github.event_name == 'pull_request'
             && format('pr_{0}', github.event.pull_request.number)
             || format('run_{0}', github.run_id) }}
-      CLAIR_CI_SNOWFLAKE_ACCOUNT: ${{ secrets.CLAIR_CI_SNOWFLAKE_ACCOUNT }}
+      CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT: ${{ secrets.CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT }}
       # Without this variable an absent secret makes each test skip, and the
       # job stays green after it ran nothing.
-      CLAIR_CI_REQUIRE_SNOWFLAKE: "1"
+      CLAIR_PR_TESTING_REQUIRE_SNOWFLAKE: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
 
       - name: Write the private key
         env:
-          PRIVATE_KEY_BASE64: ${{ secrets.CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_BASE64 }}
+          PRIVATE_KEY_BASE64: ${{ secrets.CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_BASE64 }}
         run: |
           set -euo pipefail
           umask 077
@@ -56,7 +56,7 @@ jobs:
           printf '%s' "$PRIVATE_KEY_BASE64" | base64 -d > "$key_path"
           chmod 600 "$key_path"
           head -n 1 "$key_path" | grep -q 'BEGIN .*PRIVATE KEY'
-          echo "CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          echo "CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
       - name: Run the integration tests
         run: uv run pytest tests/integration -m integration -v

@@ -12,11 +12,11 @@ example therefore breaks the build.
 |---|---|
 | `config.py` | The connection settings, and the schema name rules. |
 | `warehouse.py` | The Snowflake helpers: connect, execute, count. |
-| `projects.py` | The example projects, and the CI routing entry. |
+| `projects.py` | The example projects, and the test routing entry. |
 | `setup.py` | Makes the schema of the run, and loads the source tables. |
 | `clean_up.py` | Drops the schema of one run. |
 | `test_examples.py` | Runs each example project. |
-| `seeds/` | The SQL for a source table that needs a young timestamp. |
+| `scripts/` | The one-time Snowflake setup, for ACCOUNTADMIN. |
 
 ## How one run is isolated
 
@@ -39,16 +39,15 @@ copies the project to a temporary directory and writes the CI entry there.
 
 ## The source tables
 
-`scripts/snowflake_ci_setup.sql` makes one golden schema for each project, for
-example `clair_pr_testing.example_1`. A run clones each golden table into its
-own schema. A clone is a zero copy operation, thus it is fast, and the run can
-write to its copy.
+`tests/integration/scripts/clair_pr_testing_setup.sql` makes one golden schema
+for each project, for example `clair_pr_testing.example_1`. A run clones each
+golden table into its own schema. A clone is a zero copy operation, thus it is
+fast, and the run can write to its copy.
 
-`example_3` is the exception. Its `derived.recent_orders` Trouve selects
-`created_at > dateadd('day', -3, current_timestamp())`, thus the rows must be
-young at each run. A golden table holds the timestamps of the day that you made
-it. `seeds/example_3_orders.sql` therefore makes those rows again in the schema
-of the run.
+Each date in a golden table is fixed. `example_3_database.derived.recent_orders`
+selects `created_at > dateadd('day', -3, current_timestamp())`, and no golden
+row reaches that window. The incremental test inserts its own rows with
+`current_timestamp()`, thus it knows the exact number of new rows.
 
 ## The schemas stay after the tests
 
@@ -65,27 +64,27 @@ uv run python -m tests.integration.clean_up --schema-name pr_42
 ## Run the tests on your machine
 
 ```bash
-export CLAIR_CI_SNOWFLAKE_ACCOUNT=...
-export CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH=/path/to/clair_pr_testing_f.p8
+export CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT=...
+export CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PATH=/path/to/clair_pr_testing_f.p8
 uv run pytest tests/integration -m integration -v
 ```
 
 | Variable | Mandatory | Meaning |
 |---|---|---|
-| `CLAIR_CI_SNOWFLAKE_ACCOUNT` | Yes | The account identifier. |
-| `CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH` | One of the two | The path of the PEM private key. |
-| `CLAIR_CI_SNOWFLAKE_PASSWORD` | One of the two | A password. CI uses the key pair. |
-| `CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` | No | For an encrypted key. |
-| `CLAIR_CI_SNOWFLAKE_USER` | No | The default is `clair_pr_testing_user`. |
-| `CLAIR_CI_SNOWFLAKE_ROLE` | No | The default is `clair_pr_testing_f`. |
-| `CLAIR_CI_SNOWFLAKE_WAREHOUSE` | No | The default is `clair_pr_testing_wh`. |
-| `CLAIR_CI_SCHEMA_NAME` | No | The default is `local_<user>_<pid>`. |
+| `CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT` | Yes | The account identifier. |
+| `CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PATH` | One of the two | The path of the PEM private key. |
+| `CLAIR_PR_TESTING_SNOWFLAKE_PASSWORD` | One of the two | A password. The workflow uses the key pair. |
+| `CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` | No | For an encrypted key. |
+| `CLAIR_PR_TESTING_SNOWFLAKE_USER` | No | The default is `clair_pr_testing_user`. |
+| `CLAIR_PR_TESTING_SNOWFLAKE_ROLE` | No | The default is `clair_pr_testing_f`. |
+| `CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE` | No | The default is `clair_pr_testing_wh`. |
+| `CLAIR_PR_TESTING_SCHEMA_NAME` | No | The default is `local_<user>_<pid>`. |
 
 The user, the role and the warehouse are names inside the account, and
-`scripts/snowflake_ci_setup.sql` makes them. They are not secrets.
+`tests/integration/scripts/clair_pr_testing_setup.sql` makes them. They are not secrets.
 
 Without the account and the credentials, the tests **skip**. The integration
-workflow sets `CLAIR_CI_REQUIRE_SNOWFLAKE=1`, and the tests then **fail**
+workflow sets `CLAIR_PR_TESTING_REQUIRE_SNOWFLAKE=1`, and the tests then **fail**
 instead. A job with no credentials would otherwise report success after it ran
 nothing.
 
@@ -95,8 +94,8 @@ The `snowflake-integration` environment holds two secrets:
 
 | Secret | Value |
 |---|---|
-| `CLAIR_CI_SNOWFLAKE_ACCOUNT` | The account identifier. |
-| `CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_BASE64` | `base64 -i clair_pr_testing_f.p8 \| tr -d '\n'` |
+| `CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT` | The account identifier. |
+| `CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_BASE64` | `base64 -i clair_pr_testing_f.p8 \| tr -d '\n'` |
 
 An environment secret reaches a job that names that environment only. A future
 workflow therefore cannot read the Snowflake key by accident.

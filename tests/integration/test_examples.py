@@ -30,7 +30,7 @@ EXAMPLE_PROJECT_IDS = [path.name for path in EXAMPLE_PROJECT_PATHS]
 
 @pytest.fixture(scope="module")
 def project_copies(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
-    """Copy each example project once, with the CI routing entry."""
+    """Copy each example project once, with the test routing entry."""
     destination = tmp_path_factory.mktemp("projects")
     return {
         path.name: copy_with_ci_routing(path, destination)
@@ -88,18 +88,17 @@ def test_the_data_quality_tests_pass(
     assert failed == []
 
 
-def test_the_incremental_append_adds_the_rows_of_the_window(
+def test_the_incremental_append_adds_only_the_new_rows(
     project_copies: dict[str, Path],
     snowflake_workspace: IntegrationConfig,
     adapter: SnowflakeAdapter,
     clair_home: Path,
 ) -> None:
-    """example_3 appends each order of the last 3 days.
+    """example_3 appends the orders of the last 3 days.
 
-    The full refresh takes all 6 seed orders. The incremental run then appends
-    each order in the 3 day window: the 2 orders of yesterday, and the 2 orders
-    that this test inserts. The window gives that overlap on purpose, thus a row
-    that arrives late still reaches the table.
+    Each date in the golden table is old, thus no seed order reaches the 3 day
+    window. The full refresh takes all 6 orders, and the incremental run then
+    appends the 2 orders that this test inserts.
     """
     copy_path = project_copies["example_3"]
     environment = clair_environment(snowflake_workspace, clair_home)
@@ -123,7 +122,7 @@ def test_the_incremental_append_adds_the_rows_of_the_window(
     run_clair(
         ["run", "--project", str(copy_path), "--run-mode", "incremental"], environment
     )
-    assert row_count(adapter, recent_orders) == 10
+    assert row_count(adapter, recent_orders) == 8
 
 
 def test_select_builds_one_part_of_the_dag(

@@ -1,7 +1,7 @@
 """The Snowflake connection settings of the integration tests.
 
 Only the account and the private key come from a secret. The user, the role and
-the warehouse are names inside the account: `scripts/snowflake_ci_setup.sql`
+the warehouse are names inside the account: `tests/integration/scripts/clair_pr_testing_setup.sql`
 makes them, and that file is in the repository.
 """
 
@@ -19,7 +19,7 @@ DEFAULT_USER = "clair_pr_testing_user"
 DEFAULT_ROLE = "clair_pr_testing_f"
 DEFAULT_WAREHOUSE = "clair_pr_testing_wh"
 
-ENVIRONMENT_NAME = "ci"
+ENVIRONMENT_NAME = "pr_testing"
 
 # A schema name becomes a Snowflake identifier, thus it accepts letters,
 # digits and underscores only. Snowflake is not case sensitive, and clair uses
@@ -124,37 +124,37 @@ def load_config() -> IntegrationConfig:
     Raises:
         IntegrationConfigError: If the account or the credentials are absent.
     """
-    account = os.environ.get("CLAIR_CI_SNOWFLAKE_ACCOUNT", "").strip()
+    account = os.environ.get("CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT", "").strip()
     if not account:
         raise IntegrationConfigError(
-            "CLAIR_CI_SNOWFLAKE_ACCOUNT is empty. The integration tests need a "
+            "CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT is empty. The integration tests need a "
             "Snowflake account. See tests/integration/README.md."
         )
 
-    private_key_path = os.environ.get("CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH", "").strip()
-    password = os.environ.get("CLAIR_CI_SNOWFLAKE_PASSWORD", "").strip()
+    private_key_path = os.environ.get("CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PATH", "").strip()
+    password = os.environ.get("CLAIR_PR_TESTING_SNOWFLAKE_PASSWORD", "").strip()
     if not private_key_path and not password:
         raise IntegrationConfigError(
-            "The integration tests need CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PATH or "
-            "CLAIR_CI_SNOWFLAKE_PASSWORD. See tests/integration/README.md."
+            "The integration tests need CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PATH or "
+            "CLAIR_PR_TESTING_SNOWFLAKE_PASSWORD. See tests/integration/README.md."
         )
     if private_key_path and not Path(private_key_path).is_file():
         raise IntegrationConfigError(
             f"The private key file {private_key_path} does not exist."
         )
 
-    schema_name = os.environ.get("CLAIR_CI_SCHEMA_NAME", "").strip()
+    schema_name = os.environ.get("CLAIR_PR_TESTING_SCHEMA_NAME", "").strip()
     return IntegrationConfig(
         account=account,
-        user=os.environ.get("CLAIR_CI_SNOWFLAKE_USER", DEFAULT_USER).strip(),
-        role=os.environ.get("CLAIR_CI_SNOWFLAKE_ROLE", DEFAULT_ROLE).strip(),
+        user=os.environ.get("CLAIR_PR_TESTING_SNOWFLAKE_USER", DEFAULT_USER).strip(),
+        role=os.environ.get("CLAIR_PR_TESTING_SNOWFLAKE_ROLE", DEFAULT_ROLE).strip(),
         warehouse=os.environ.get(
-            "CLAIR_CI_SNOWFLAKE_WAREHOUSE", DEFAULT_WAREHOUSE
+            "CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE", DEFAULT_WAREHOUSE
         ).strip(),
         schema_name=normalise_schema_name(schema_name or default_schema_name()),
         private_key_path=private_key_path or None,
         private_key_passphrase=os.environ.get(
-            "CLAIR_CI_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"
+            "CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"
         )
         or None,
         password=password or None,

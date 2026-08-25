@@ -1,4 +1,4 @@
-"""Find the example projects, and give each one a CI routing entry.
+"""Find the example projects, and give each one a test routing entry.
 
 The integration tests run the projects in `examples/projects/`. A test copies a
 project to a temporary directory and writes a `__routing__.py` there, thus the
@@ -23,9 +23,9 @@ EXAMPLE_PROJECTS_DIR = REPOSITORY_ROOT / "examples" / "projects"
 SKIPPED_PROJECT_NAMES = frozenset({"example_from_init"})
 
 CI_ROUTING_FILE = '''\
-"""The routing entry of the integration tests.
+"""The routing entry of the pull request tests.
 
-Every Trouve goes to one schema of the CI database, and a SOURCE Trouve is not
+Every Trouve goes to one schema of the test database, and a SOURCE Trouve is not
 an exception. The three logical parts become one table name, thus two projects
 never collide.
 """
@@ -37,10 +37,10 @@ from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
 DATABASE_NAME = "clair_pr_testing"
 
 
-class ContinuousIntegrationRouting(RoutingEntry):
+class PullRequestTestingRouting(RoutingEntry):
     """Send every Trouve to clair_pr_testing.<schema>.<db>__<schema>__<table>."""
 
-    environment_name: str = "ci"
+    environment_name: str = "pr_testing"
 
     def route(
         self, trouve_address: TrouveAddress, trouve_type: TrouveType
@@ -52,12 +52,12 @@ class ContinuousIntegrationRouting(RoutingEntry):
         )
         return TrouveAddress(
             database_name=DATABASE_NAME,
-            schema_name=os.environ["CLAIR_CI_SCHEMA_NAME"],
+            schema_name=os.environ["CLAIR_PR_TESTING_SCHEMA_NAME"],
             table_name=table_name,
         )
 
 
-routing = RoutingTable(entries=[ContinuousIntegrationRouting()])
+routing = RoutingTable(entries=[PullRequestTestingRouting()])
 '''
 
 # Each example names `compute_wh`, which the CI role cannot use. The copy reads
@@ -68,7 +68,7 @@ import os
 from clair import DatabaseDefaults
 
 defaults = DatabaseDefaults(
-    warehouse=os.environ["CLAIR_CI_SNOWFLAKE_WAREHOUSE"],
+    warehouse=os.environ["CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE"],
 )
 '''
 
@@ -92,7 +92,7 @@ def physical_table_name(logical_name: str) -> str:
 
 
 def physical_address(logical_name: str, schema_name: str) -> TrouveAddress:
-    """Give the address that the CI routing entry makes for one logical name."""
+    """Give the address that the test routing entry makes for one logical name."""
     return TrouveAddress(
         database_name=DATABASE_NAME,
         schema_name=schema_name,
@@ -103,7 +103,7 @@ def physical_address(logical_name: str, schema_name: str) -> TrouveAddress:
 def golden_table_name(project_path: Path, logical_name: str) -> str:
     """Give the golden table that holds the rows of one SOURCE Trouve.
 
-    `scripts/snowflake_ci_setup.sql` makes one schema for each project, named
+    `tests/integration/scripts/clair_pr_testing_setup.sql` makes one schema for each project, named
     after the project directory.
     """
     table_name = logical_name.split(".")[-1]
@@ -134,7 +134,7 @@ def model_logical_names(trouves: list[TrouveAbc]) -> list[str]:
 
 
 def copy_with_ci_routing(project_path: Path, destination: Path) -> Path:
-    """Copy one project and give it the CI routing entry.
+    """Copy one project and give it the test routing entry.
 
     Returns:
         The path of the copy.
