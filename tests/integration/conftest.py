@@ -44,16 +44,24 @@ def integration_config() -> IntegrationConfig:
 
 
 @pytest.fixture(scope="session")
-def snowflake_workspace(integration_config: IntegrationConfig) -> Iterator[IntegrationConfig]:
-    """Make the schema of the run, and drop it after the last test."""
-    prepare(integration_config)
-    yield integration_config
+def snowflake_workspace(integration_config: IntegrationConfig) -> IntegrationConfig:
+    """Give one empty schema, with the source tables of each example project.
 
+    The run starts with a drop. A second commit of one pull request reuses the
+    schema name of the first, and a Trouve that the commit deleted would stay.
+
+    The run does not drop the schema at the end, thus you can read the tables of
+    a failed run. `.github/workflows/integration-cleanup.yml` drops the schema
+    when the pull request closes.
+    """
     adapter = connect(integration_config)
     try:
         drop_schema(adapter, integration_config.schema_name)
     finally:
         adapter.close()
+
+    prepare(integration_config)
+    return integration_config
 
 
 @pytest.fixture(scope="session")

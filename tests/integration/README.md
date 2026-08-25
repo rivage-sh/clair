@@ -26,7 +26,7 @@ Everything goes to one schema of the `clair_pr_testing` database:
 |---|---|
 | A pull request | `pr_<number>` |
 | A manual start | `run_<run_id>` |
-| Your machine | `local_<user>_<pid>` |
+| Your machine | `local_<user>` |
 
 The routing entry in `projects.py` sends **every** Trouve, a SOURCE too, to
 `clair_pr_testing.<schema>.<database>__<schema>__<table>`. The logical Trouve
@@ -49,11 +49,16 @@ selects `created_at > dateadd('day', -3, current_timestamp())`, and no golden
 row reaches that window. The incremental test inserts its own rows with
 `current_timestamp()`, thus it knows the exact number of new rows.
 
-## The schemas stay after the tests
+## The schema of a run
 
-The tests do not drop the schema at the end of a run in CI. You can therefore
-read the tables of a failed run. `.github/workflows/integration-cleanup.yml`
-drops the schema when the pull request closes, merged or not.
+The run **starts** with a drop of its own schema, then it makes the schema
+again. A second commit of one pull request reuses the schema name of the first,
+and a Trouve that the commit deleted would otherwise stay behind and give a
+false pass.
+
+The run does **not** drop the schema at the end. You can therefore read the
+tables of a failed run. `.github/workflows/integration-cleanup.yml` drops the
+schema when the pull request closes, merged or not.
 
 To drop one schema by hand:
 
@@ -78,7 +83,7 @@ uv run pytest tests/integration -m integration -v
 | `CLAIR_PR_TESTING_SNOWFLAKE_USER` | No | The default is `clair_pr_testing_user`. |
 | `CLAIR_PR_TESTING_SNOWFLAKE_ROLE` | No | The default is `clair_pr_testing_f`. |
 | `CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE` | No | The default is `clair_pr_testing_wh`. |
-| `CLAIR_PR_TESTING_SCHEMA_NAME` | No | The default is `local_<user>_<pid>`. |
+| `CLAIR_PR_TESTING_SCHEMA_NAME` | No | The default is `local_<user>`. |
 
 The user, the role and the warehouse are names inside the account, and
 `tests/integration/scripts/clair_pr_testing_setup.sql` makes them. They are not secrets.

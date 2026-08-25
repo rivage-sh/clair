@@ -1,7 +1,18 @@
 """Run each example project against Snowflake.
 
 The projects in `examples/projects/` are the fixtures. A change that breaks an
-example therefore breaks the build, and the documentation stays correct.
+example therefore breaks the build, and the documentation stays correct. A new
+project in that directory joins these tests with no change here.
+
+The test routing entry puts every Trouve, a SOURCE too, in one schema. For pull
+request 32 the mapping is:
+
+    example_1_database.refined.events
+        -> clair_pr_testing.pr_32.example_1_database__refined__events
+    example_3_database.source.orders
+        -> clair_pr_testing.pr_32.example_3_database__source__orders
+
+`physical_address(logical_name, schema_name)` builds that address.
 """
 
 from __future__ import annotations
@@ -49,6 +60,7 @@ def test_a_full_refresh_builds_every_model(
     """Each Trouve that clair builds exists in the schema of the run."""
     copy_path = project_copies[project_path.name]
     environment = clair_environment(snowflake_workspace, clair_home)
+    schema_name = snowflake_workspace.schema_name
 
     completed = run_clair(["run", "--project", str(copy_path)], environment)
 
@@ -56,16 +68,35 @@ def test_a_full_refresh_builds_every_model(
     assert logical_names, f"{project_path.name} builds no Trouve"
 
     absent = [
-        logical_name
+        str(physical_address(logical_name, schema_name))
         for logical_name in logical_names
-        if not table_exists(
-            adapter, physical_address(logical_name, snowflake_workspace.schema_name)
-        )
+        if not table_exists(adapter, physical_address(logical_name, schema_name))
     ]
     assert absent == []
 
     successes = events_named(completed, "run.node.success")
     assert len(successes) == len(logical_names)
+
+
+def test_the_address_of_a_trouve_is_the_one_that_you_expect(
+    snowflake_workspace: IntegrationConfig,
+) -> None:
+    """The test routing entry gives this exact address.
+
+    The other tests build an address with `physical_address`. This test writes
+    the answer out, thus a reader sees the shape with no indirection.
+    """
+    schema_name = snowflake_workspace.schema_name
+
+    assert str(physical_address("example_1_database.refined.events", schema_name)) == (
+        f"clair_pr_testing.{schema_name}.example_1_database__refined__events"
+    )
+    assert str(physical_address("example_3_database.source.orders", schema_name)) == (
+        f"clair_pr_testing.{schema_name}.example_3_database__source__orders"
+    )
+    assert str(
+        physical_address("example_2_database.reports.top_customers", schema_name)
+    ) == (f"clair_pr_testing.{schema_name}.example_2_database__reports__top_customers")
 
 
 @pytest.mark.parametrize("project_path", EXAMPLE_PROJECT_PATHS, ids=EXAMPLE_PROJECT_IDS)
@@ -108,7 +139,10 @@ def test_the_incremental_append_adds_only_the_new_rows(
     )
     source_orders = physical_address("example_3_database.source.orders", schema_name)
 
-    run_clair(["run", "--project", str(copy_path), "--run-mode", "full_refresh"], environment)
+    # clair_pr_testing.<schema>.example_3_database__derived__recent_orders
+    run_clair(
+        ["run", "--project", str(copy_path), "--run-mode", "full_refresh"], environment
+    )
     assert row_count(adapter, recent_orders) == 6
 
     adapter.execute(f"""
@@ -132,8 +166,9 @@ def test_select_builds_one_part_of_the_dag(
 ) -> None:
     """`--select` builds the named Trouve only.
 
-    A selector matches the physical name, thus the pattern holds the routed
-    name, not the logical name.
+    A selector matches the physical address, thus the pattern is
+    `clair_pr_testing.<schema>.example_1_database__refined__events`, not the
+    logical name `example_1_database.refined.events`.
     """
     copy_path = project_copies["example_1"]
     environment = clair_environment(snowflake_workspace, clair_home)

@@ -107,15 +107,16 @@ def normalise_schema_name(name: str) -> str:
 def default_schema_name() -> str:
     """Give the schema name for a run that names none.
 
-    GitHub Actions sets the prefix. On a workstation the name holds the user
-    name and the process id, thus two runs never collide.
+    The workflow sets the name. On a workstation the name holds the user name
+    only: each run of that user drops the schema first, thus the account does
+    not collect a schema for each run.
     """
     try:
         user_name = getpass.getuser()
     except (OSError, KeyError):
         user_name = "unknown"
     cleaned = re.sub(r"[^A-Za-z0-9]", "", user_name).lower() or "unknown"
-    return f"local_{cleaned}_{os.getpid()}"
+    return f"local_{cleaned}"
 
 
 def load_config() -> IntegrationConfig:
