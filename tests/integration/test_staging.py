@@ -251,6 +251,12 @@ class TestThePromotionKeepsTheGrants:
         The promotion replaces the object. Without ``COPY GRANTS`` the new
         object would hold OWNERSHIP only, and clair would remove each privilege
         that an administrator granted, on each run.
+
+        The test grants INSERT, and it must stay INSERT. The setup script runs
+        ``GRANT SELECT ON FUTURE TABLES IN DATABASE`` for this role, thus
+        Snowflake gives SELECT to each new table on its own. A test on SELECT
+        therefore passes even when ``COPY GRANTS`` does nothing. No future grant
+        covers INSERT, so only the promotion can carry it over.
         """
         schema_name = snowflake_workspace.schema_name
         role = snowflake_workspace.role
@@ -265,12 +271,12 @@ class TestThePromotionKeepsTheGrants:
         _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=3)
         run_clair(["run", "--project", str(project_path)], environment)
 
-        execute(adapter, f"grant select on table {checked} to role {role}")
-        assert "SELECT" in _privileges_on(adapter, checked)
+        execute(adapter, f"grant insert on table {checked} to role {role}")
+        assert "INSERT" in _privileges_on(adapter, checked)
 
         run_clair(["run", "--project", str(project_path)], environment)
 
-        assert "SELECT" in _privileges_on(adapter, checked)
+        assert "INSERT" in _privileges_on(adapter, checked)
 
 
 class TestTheNoTestFlag:
