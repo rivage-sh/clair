@@ -16,6 +16,8 @@ example therefore breaks the build.
 | `setup.py` | Makes the schema of the run, and loads the source tables. |
 | `clean_up.py` | Drops the schema of one run. |
 | `test_examples.py` | Runs each example project. |
+| `staging_project.py` | Makes a project whose data quality test fails on demand. |
+| `test_staging.py` | Runs the staging steps: build, test, promote or keep. |
 | `scripts/` | The one-time Snowflake setup, for ACCOUNTADMIN. |
 
 ## How one run is isolated
@@ -36,6 +38,16 @@ never write one object, and the three logical parts stay visible in the name.
 
 The example projects in the repository keep their own `__routing__.py`. A test
 copies the project to a temporary directory and writes the CI entry there.
+
+## The staging tests
+
+`test_staging.py` needs a run that **fails**, and each example project passes.
+`staging_project.py` therefore writes a small project with one `TestRowCount`.
+A low limit passes, and a limit above the row count fails.
+
+Each test class gives its own database name, for example
+`staging_fail_database`, thus the tests never write one table. The test makes
+the SOURCE table itself, so these tests need no golden schema.
 
 ## The source tables
 
