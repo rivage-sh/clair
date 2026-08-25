@@ -23,6 +23,10 @@ different ways, and staging must hold for both:
 
 Each test gives its own ``database_name``, thus two tests never write one table
 in the schema of the run.
+
+Each function below gives the text of one file. The file that the function
+writes holds an f-string of its own, and ``{{source_rows}}`` is that inner
+f-string. The outer f-string gives one pair of braces to the file.
 """
 
 from __future__ import annotations
@@ -32,7 +36,10 @@ from pathlib import Path
 from clair.trouves.trouve import ExecutionType
 from tests.integration.projects import CI_DATABASE_CONFIG_FILE, CI_ROUTING_FILE
 
-_SOURCE_FILE = '''\
+
+def source_file() -> str:
+    """Give the SOURCE Trouve. The test makes the table that it names."""
+    return '''\
 from clair import Column, ColumnType, Trouve, TrouveType
 
 trouve = Trouve(
@@ -44,8 +51,11 @@ trouve = Trouve(
 )
 '''
 
-_CHECKED_FILE = '''\
-from __DATABASE_NAME__.source.rows import trouve as source_rows
+
+def sql_checked_file(database_name: str, minimum_rows: int) -> str:
+    """Give the candidate Trouve that Snowflake materializes from SQL."""
+    return f'''\
+from {database_name}.source.rows import trouve as source_rows
 
 from clair import Column, ColumnType, TestRowCount, Trouve, TrouveType
 
@@ -53,18 +63,21 @@ trouve = Trouve(
     type=TrouveType.TABLE,
     docs="The candidate. TestRowCount decides if clair promotes it.",
     sql=f"""
-        select id from {source_rows}
+        select id from {{source_rows}}
     """,
     columns=[
         Column(name="id", type=ColumnType.STRING),
     ],
-    tests=[TestRowCount(min_rows=__MINIMUM_ROWS__)],
+    tests=[TestRowCount(min_rows={minimum_rows})],
 )
 '''
 
-_PANDAS_CHECKED_FILE = '''\
+
+def pandas_checked_file(database_name: str, minimum_rows: int) -> str:
+    """Give the candidate Trouve that a transform function gives."""
+    return f'''\
 import pandas as pd
-from __DATABASE_NAME__.source.rows import trouve as source_rows
+from {database_name}.source.rows import trouve as source_rows
 
 from clair import Column, ColumnType, PandasTrouve, TestRowCount
 
@@ -80,12 +93,15 @@ trouve = PandasTrouve(
     columns=[
         Column(name="id", type=ColumnType.STRING),
     ],
-    tests=[TestRowCount(min_rows=__MINIMUM_ROWS__)],
+    tests=[TestRowCount(min_rows={minimum_rows})],
 )
 '''
 
-_DOWNSTREAM_FILE = '''\
-from __DATABASE_NAME__.refined.checked import trouve as refined_checked
+
+def downstream_file(database_name: str) -> str:
+    """Give the dependent Trouve. Clair skips it after the candidate fails."""
+    return f'''\
+from {database_name}.refined.checked import trouve as refined_checked
 
 from clair import Column, ColumnType, Trouve, TrouveType
 
@@ -93,7 +109,7 @@ trouve = Trouve(
     type=TrouveType.TABLE,
     docs="A dependent. Clair skips it when the test of refined.checked fails.",
     sql=f"""
-        select id from {refined_checked}
+        select id from {{refined_checked}}
     """,
     columns=[
         Column(name="id", type=ColumnType.STRING),
@@ -120,6 +136,9 @@ def write_probe_project(
 
     Returns:
         The path of the project root.
+
+    Raises:
+        ValueError: If the execution type has no Trouve here.
     """
     project_path = destination / database_name
     database_path = project_path / database_name
@@ -129,18 +148,17 @@ def write_probe_project(
     (project_path / "__routing__.py").write_text(CI_ROUTING_FILE)
     (database_path / "__database_config__.py").write_text(CI_DATABASE_CONFIG_FILE)
 
-    (database_path / "source" / "rows.py").write_text(_SOURCE_FILE)
-    checked_template = (
-        _PANDAS_CHECKED_FILE
-        if execution_type == ExecutionType.PANDAS
-        else _CHECKED_FILE
-    )
-    (database_path / "refined" / "checked.py").write_text(
-        checked_template.replace("__DATABASE_NAME__", database_name).replace(
-            "__MINIMUM_ROWS__", str(minimum_rows)
-        )
-    )
+    checked_file = None
+    if execution_type == ExecutionType.PANDAS:
+        checked_file = pandas_checked_file(database_name, minimum_rows)
+    elif execution_type == ExecutionType.SNOWFLAKE:
+        checked_file = sql_checked_file(database_name, minimum_rows)
+    else:
+        raise ValueError(f"The probe project has no Trouve for {execution_type}.")
+
+    (database_path / "source" / "rows.py").write_text(source_file())
+    (database_path / "refined" / "checked.py").write_text(checked_file)
     (database_path / "derived" / "downstream.py").write_text(
-        _DOWNSTREAM_FILE.replace("__DATABASE_NAME__", database_name)
+        downstream_file(database_name)
     )
     return project_path

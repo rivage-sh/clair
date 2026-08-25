@@ -141,6 +141,34 @@ else:
 The `None` needs no annotation: the type checker infers `str` after the block, because the
 `else` always raises.
 
+**Build a generated file with an f-string, not a placeholder.** When a function writes a
+file of code — a fixture project, a scaffold, a CI configuration — give the function a
+parameter for each value that changes, and return an f-string. Do not write a constant
+with a token such as `__DATABASE_NAME__` and then call `.replace()` on it. The f-string
+shows each value at the place where it goes, the type checker sees the parameter, and
+nobody can forget one `.replace()` call.
+
+```python
+# Bad — the token and the value sit in two places, and nothing joins them.
+_CHECKED_FILE = """
+from __DATABASE_NAME__.source.rows import trouve as source_rows
+tests=[TestRowCount(min_rows=__MINIMUM_ROWS__)]
+"""
+text = _CHECKED_FILE.replace("__DATABASE_NAME__", database_name).replace(
+    "__MINIMUM_ROWS__", str(minimum_rows)
+)
+
+# Good — one function, one signature, each value at its place.
+def checked_file(database_name: str, minimum_rows: int) -> str:
+    return f"""
+from {database_name}.source.rows import trouve as source_rows
+tests=[TestRowCount(min_rows={minimum_rows})]
+"""
+```
+
+A generated file that holds an f-string of its own needs two braces, for example
+`{{source_rows}}`. Say so in the docstring of the module.
+
 **Data first, format last.** A function returns a Pydantic object that holds the data; a
 separate `format_*` function or `.render()` method makes the string for the CLI. This
 keeps the semantics testable and the format free to change. It applies to
