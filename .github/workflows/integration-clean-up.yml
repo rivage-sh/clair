@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: integration-cleanup-${{ github.event.pull_request.number || inputs.schema_name }}
+  group: integration-clean-up-${{ github.event.pull_request.number || inputs.schema_name }}
   cancel-in-progress: false
 
 jobs:

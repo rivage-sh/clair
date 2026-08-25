@@ -51,7 +51,7 @@ def snowflake_workspace(integration_config: IntegrationConfig) -> IntegrationCon
     schema name of the first, and a Trouve that the commit deleted would stay.
 
     The run does not drop the schema at the end, thus you can read the tables of
-    a failed run. `.github/workflows/integration-cleanup.yml` drops the schema
+    a failed run. `.github/workflows/integration-clean-up.yml` drops the schema
     when the pull request closes.
     """
     adapter = connect(integration_config)

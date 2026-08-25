@@ -57,7 +57,7 @@ and a Trouve that the commit deleted would otherwise stay behind and give a
 false pass.
 
 The run does **not** drop the schema at the end. You can therefore read the
-tables of a failed run. `.github/workflows/integration-cleanup.yml` drops the
+tables of a failed run. `.github/workflows/integration-clean-up.yml` drops the
 schema when the pull request closes, merged or not.
 
 To drop one schema by hand:
