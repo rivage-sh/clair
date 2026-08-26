@@ -284,14 +284,22 @@ class TestAMergeThatFails:
             expect_success=False,
         )
 
-    def test_the_run_reports_the_failure(
+    def test_the_merge_is_the_statement_that_failed(
         self, failed_run: subprocess.CompletedProcess[str]
     ) -> None:
+        """The error must name the duplicate row, and no other fault.
+
+        The next test asks if clair dropped the merge source table. That
+        question means nothing when the run stopped before the MERGE, because
+        clair makes the merge source table one statement earlier. This test
+        therefore reads the message of Snowflake.
+        """
         failures = events_named(failed_run, "run.node.failure")
         assert failed_run.returncode == 1
         assert [event.get("logical") for event in failures] == [
             f"{self.DATABASE_NAME}.refined.checked"
         ]
+        assert "duplicate row" in str(failures[0].get("error")).lower()
 
     def test_clair_drops_the_merge_source_table(
         self,
