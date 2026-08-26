@@ -92,7 +92,7 @@ def _make_adapter(fail_on: set[str] | None = None) -> MagicMock:
 class TestTheModuleGivesTheOperations:
     def test_each_operation_is_an_attribute_of_clair(self):
         """A user reaches the operations from the package, and imports no submodule."""
-        for name in ("run", "compile", "test", "catalog", "serve_docs"):
+        for name in ("run", "compile", "test", "docs", "catalog"):
             assert callable(getattr(clair, name)), name
 
     def test_an_unknown_attribute_raises(self):

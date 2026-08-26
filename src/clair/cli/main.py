@@ -401,7 +401,7 @@ def dag(select: tuple[str, ...], project: str) -> None:
 def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     """Start a local web UI. It shows the project documentation and the lineage."""
     try:
-        clair_api.serve_docs(project, host=host, port=port, open_browser=not no_browser)
+        clair_api.docs(project, host=host, port=port, open_browser=not no_browser)
     except OSError as e:
         if "address already in use" in str(e).lower():
             logger.error("docs.port_in_use", port=port, detail=f"Port {port} is in use. Use --port with a different number.")

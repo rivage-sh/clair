@@ -51,6 +51,8 @@ class RunResult(BaseModel):
             the Trouve and the fallback to a full refresh.
         error: The error message if the query failed.
         sql: The statements, in the order that clair executed them.
+        failed_statement_index: The index in *sql* of the statement that failed.
+            Clair sets it only for a FAILURE that a statement caused.
         duration_seconds: The clock time of the query.
         row_count: The number of rows that the last build statement changed.
         test_results: The data quality test results of this Trouve.
@@ -67,6 +69,7 @@ class RunResult(BaseModel):
     effective_run_mode: RunMode | None = None
     error: str = ""
     sql: list[str] | None = None
+    failed_statement_index: int | None = None
     duration_seconds: float = 0.0
     row_count: int = 0
     test_results: list[TestResult] = []
@@ -646,6 +649,7 @@ def run_project(
                 effective_run_mode=effective_mode,
                 error=error_message,
                 sql=statements,
+                failed_statement_index=failed_at,
                 duration_seconds=duration,
             )
             for desc in nx.descendants(dag, name):

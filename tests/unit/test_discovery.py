@@ -604,3 +604,66 @@ class TestDiscoveryRunMode:
         self._write_capture_module(tmp_path)
         discover_project(tmp_path)
         assert sys.modules["db.s.t"].captured_run_mode is None
+
+
+class TestTwoProjectsInOneProcess:
+    """A second discovery must read the files of its own project.
+
+    Two projects can give one module the same name, for example
+    ``mydb.refined.checked``. Python keeps the first module under that name, so
+    the second discovery gave the Trouve of the first project. The integration
+    tests run a project that passes and a project that fails, and both hold that
+    name.
+    """
+
+    def _write_project(self, root: Path, sql: str) -> Path:
+        """Write a project with one SOURCE Trouve and one TABLE that reads it."""
+        schema_dir = root / "mydb" / "refined"
+        schema_dir.mkdir(parents=True)
+        (root / "mydb" / "source").mkdir(parents=True)
+        (root / "mydb" / "source" / "rows.py").write_text(
+            textwrap.dedent("""
+                from clair import Trouve, TrouveType
+
+                trouve = Trouve(type=TrouveType.SOURCE, sql="")
+            """)
+        )
+        (schema_dir / "checked.py").write_text(
+            textwrap.dedent(f"""
+                from mydb.source.rows import trouve as rows
+
+                from clair import Trouve, TrouveType
+
+                trouve = Trouve(type=TrouveType.TABLE, sql=f"{sql}")
+            """)
+        )
+        return root
+
+    def test_the_second_project_gives_its_own_sql(self, tmp_path: Path):
+        first = self._write_project(tmp_path / "good", "select 1 as first_project from {rows}")
+        second = self._write_project(tmp_path / "bad", "select 2 as second_project from {rows}")
+
+        discover_project(first)
+        trouves = discover_project(second)
+
+        checked = [
+            trouve
+            for trouve in trouves
+            if trouve.compiled is not None
+            and str(trouve.compiled.logical_address) == "mydb.refined.checked"
+        ]
+        assert len(checked) == 1
+        compiled = checked[0].compiled
+        assert compiled is not None
+        assert "second_project" in compiled.resolved_sql
+
+    def test_the_root_of_the_first_project_leaves_sys_path(self, tmp_path: Path):
+        """A stale root would let an import read the files of the old project."""
+        first = self._write_project(tmp_path / "good", "select 1 as x from {rows}")
+        second = self._write_project(tmp_path / "bad", "select 2 as x from {rows}")
+
+        discover_project(first)
+        discover_project(second)
+
+        assert str(first.resolve()) not in sys.path
+        assert str(second.resolve()) in sys.path

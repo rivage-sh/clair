@@ -166,6 +166,74 @@ def _detect_imports(
     return imports
 
 
+
+# The root of each project that this process discovered. A second discovery
+# removes the modules of the projects before it, and takes their roots off
+# sys.path.
+_loaded_project_roots: set[str] = set()
+
+
+def _module_locations(module: object) -> list[str]:
+    """Give each file path and each directory path of one module.
+
+    A module gives ``__file__``. A package, a namespace package too, gives
+    ``__path__``. A namespace package has no ``__file__``, thus the path list
+    is the one way to find the project that it belongs to.
+    """
+    locations: list[str] = []
+    module_file = getattr(module, "__file__", None)
+    if module_file:
+        locations.append(str(module_file))
+    # A namespace package recalculates its path list, and that step reads the
+    # parent module. An earlier discovery can remove that parent, and the read
+    # then fails. Such a module has no path that a caller can use, thus an
+    # empty list is the correct answer.
+    try:
+        module_path = list(getattr(module, "__path__", []))
+    except Exception:  # noqa: BLE001 -- the import machinery raises many types here
+        module_path = []
+    locations.extend(str(entry) for entry in module_path)
+    return locations
+
+
+def _forget_project_modules(project_root: Path) -> None:
+    """Remove each Trouve module of a clair project from ``sys.modules``.
+
+    Two projects can give one module the same name. The probe projects of the
+    tests do this, and a notebook that runs two projects does it too. Python
+    keeps the first module under that name, so the second discovery would read
+    the files of the first project. The function therefore removes the modules
+    of each project that this process loaded, and takes the other project roots
+    off ``sys.path``.
+    """
+    roots = {str(project_root), *_loaded_project_roots}
+
+    # Read the locations of every module first, and delete after. A namespace
+    # package reads its parent module when it gives its path list, thus a
+    # deletion in the middle of the loop hides the modules that come after it.
+    locations_of = {
+        module_name: _module_locations(module)
+        for module_name, module in list(sys.modules.items())
+    }
+    for module_name, locations in locations_of.items():
+        if any(_is_inside(location, root) for location in locations for root in roots):
+            sys.modules.pop(module_name, None)
+
+    for other_root in _loaded_project_roots - {str(project_root)}:
+        if other_root in sys.path:
+            sys.path.remove(other_root)
+    _loaded_project_roots.clear()
+
+
+def _is_inside(location: str, root: str) -> bool:
+    """Tell you if *location* is the root directory, or a path below it."""
+    try:
+        Path(location).relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 def discover_project(
     project_root: Path,
     profile_defaults: dict[str, str | None] | None = None,
@@ -201,23 +269,16 @@ def discover_project(
     _clair_pkg.env = environment
     _clair_pkg.run_mode = run_mode
 
-    # Empty the refs registry and remove each project module from a previous
-    # run. Thus each discovery run starts from a clean state. This is important
-    # for the tests and for more than one call in one process.
+    # Empty the refs registry and remove the modules of each project that this
+    # process loaded. Thus each discovery run starts from a clean state.
     clear_refs()
-    for mod_name in list(sys.modules.keys()):
-        mod_file = getattr(sys.modules[mod_name], "__file__", None)
-        if mod_file:
-            try:
-                Path(mod_file).relative_to(project_root)
-                del sys.modules[mod_name]
-            except ValueError:
-                pass
+    _forget_project_modules(project_root)
 
     # Put the project root in sys.path. Thus an import of a different Trouve works.
     project_root_str = str(project_root)
     if project_root_str not in sys.path:
         sys.path.insert(0, project_root_str)
+    _loaded_project_roots.add(project_root_str)
 
     # Collect the candidate files.
     candidates: list[Path] = []

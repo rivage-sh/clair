@@ -1,8 +1,9 @@
 """The Python API of clair.
 
 Each function here does one complete operation on a project: compile it, run it,
-test it, or make the documentation catalog. The CLI calls these functions. A
-notebook, a test, or another program calls the same functions::
+test it, or serve the documentation. One function has the name of the command
+that calls it, thus `clair run` calls `clair.run()`. A notebook, a test, or
+another program calls the same functions::
 
     import clair
 
@@ -36,8 +37,6 @@ from clair.core.discovery import (
 from clair.core.runner import RunResult, RunSummary, run_project
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import TestResult, TestSummary, run_tests
-from clair.docs.catalog import build_catalog
-from clair.docs.server import serve
 from clair.environments.environments import Environment, load_environment
 from clair.environments.project_routing import (
     describe_unnamed_environment,
@@ -47,6 +46,8 @@ from clair.environments.routing import RoutingEntry
 from clair.exceptions import EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import TrouveAbc, TrouveType
+from clair.webui.catalog import build_catalog
+from clair.webui.server import serve
 
 logger = structlog.get_logger()
 
@@ -421,7 +422,7 @@ def catalog(project_dir: str | Path = ".") -> dict:
     return build_catalog(dag, project_root)
 
 
-def serve_docs(
+def docs(
     project_dir: str | Path = ".",
     *,
     host: str = "127.0.0.1",
@@ -450,4 +451,4 @@ def serve_docs(
     serve(project_catalog, host=host, port=port, open_browser=open_browser)
 
 
-__all__ = ["catalog", "compile", "run", "serve_docs", "test"]
+__all__ = ["catalog", "compile", "docs", "run", "test"]

@@ -16,8 +16,8 @@ does the same work with no `subprocess` call.
 | `clair.run()` | `clair run` |
 | `clair.compile()` | `clair compile` |
 | `clair.test()` | `clair test` |
+| `clair.docs()` | `clair docs` |
 | `clair.catalog()` | the data behind `clair docs` |
-| `clair.serve_docs()` | `clair docs` |
 
 Each function gives a result object with the complete data of the operation. No
 function writes to stdout, and no function stops the process: a fault raises a
@@ -99,6 +99,7 @@ class RunResult(BaseModel):
     effective_run_mode: RunMode | None
     error: str
     sql: list[str] | None
+    failed_statement_index: int | None
     duration_seconds: float
     row_count: int
     test_results: list[TestResult]
@@ -114,6 +115,7 @@ class RunResult(BaseModel):
 | `staging_address` | The run-scoped address that clair built at. `None` without staging. |
 | `effective_run_mode` | The mode that clair used, after the `RunConfig` of the Trouve and the fallback to a full refresh. See [Incrementality](../topics/incrementality.md). |
 | `sql` | The statements, in the order that clair executed them. |
+| `failed_statement_index` | The index in `sql` of the statement that failed. |
 | `duration_seconds` | The clock time of the statements. |
 | `row_count` | The rows that the last build statement changed. |
 | `test_results` | The data quality test results of this Trouve. |
@@ -178,25 +180,25 @@ for result in summary.failed_results:
     print(result.physical_address, result.test_type, result.failing_row_count)
 ```
 
-## `clair.catalog()` and `clair.serve_docs()`
+## `clair.docs()` and `clair.catalog()`
 
 ```python
-def catalog(project_dir: str | Path = ".") -> dict
-
-def serve_docs(
+def docs(
     project_dir: str | Path = ".",
     *,
     host: str = "127.0.0.1",
     port: int = 8741,
     open_browser: bool = True,
 ) -> None
+
+def catalog(project_dir: str | Path = ".") -> dict
 ```
 
-`catalog()` gives the documentation data of the project: one entry for each
-Trouve, and the lineage edges. It needs no connection.
+`docs()` starts the local web UI. The function does not give control back.
 
-`serve_docs()` starts the local web UI on that catalog. The function does not
-give control back.
+`catalog()` gives the documentation data that the UI shows: one entry for each
+Trouve, and the lineage edges. It needs no connection, and it is the one
+operation with no command of its own.
 
 ## Logs
 

@@ -14,8 +14,8 @@ gives a result object with the complete data of the operation::
     summary = clair.run("~/projects/analytics")
     print(summary.succeeded_count, summary.failed_count)
 
-``clair.run()``, ``clair.compile()``, ``clair.test()``, ``clair.catalog()`` and
-``clair.serve_docs()`` come from :mod:`clair.api`.
+``clair.run()``, ``clair.compile()``, ``clair.test()``, ``clair.docs()`` and
+``clair.catalog()`` come from :mod:`clair.api`.
 
 Runtime context
 ---------------
@@ -119,17 +119,17 @@ __all__ = [
     "UpsertConfig",
     "catalog",
     "compile",
+    "docs",
     "run",
-    "serve_docs",
     "test",
 ]
 
 
 # The operations of the Python API: clair.run(), clair.compile(), clair.test(),
-# clair.catalog() and clair.serve_docs(). The import is late, because
-# clair.api imports the packages that read a project, and each of those
-# packages imports this module.
-_API_NAMES = frozenset({"catalog", "compile", "run", "serve_docs", "test"})
+# clair.docs() and clair.catalog(). The import is late, because clair.api
+# imports the packages that read a project, and each of those packages imports
+# this module.
+_API_NAMES = frozenset({"catalog", "compile", "docs", "run", "test"})
 
 
 def __getattr__(name: str) -> Any:
