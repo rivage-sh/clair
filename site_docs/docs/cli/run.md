@@ -36,7 +36,7 @@ address that clair reads.
 
 clair runs more than one Trouve at one time. `--threads` gives the count, and the
 `threads` field of the environment gives the default. See
-[Environments](../concepts/environments.md).
+[Environments](../topics/environments.md).
 
 Each thread holds a private Snowflake connection, and clair opens each connection
 before the first Trouve starts. A connection holds the role and the warehouse of
@@ -45,13 +45,23 @@ the session, so two Trouves that need a different `warehouse` cannot share one.
 The output comes in completion order, not in DAG order. A quick Trouve that
 started second can thus report before a slow Trouve that started first.
 
-Two limits to know:
+Three limits to know:
 
-- More threads make more Snowflake sessions. Each one holds a warehouse, thus a
-  high count can queue your queries, or start more clusters than you expect.
-- With SSO (`authenticator: externalbrowser`), clair asks the connector to keep
-  the login token. The second connection reads that token, so a parallel run
-  opens one browser window and not one for each thread.
+- **A thread makes no compute.** Each thread sends its queries to the one
+  warehouse of the environment. A warehouse runs `MAX_CONCURRENCY_LEVEL`
+  statements at one time. The default is 8. It queues the statements above that
+  number. A multi-cluster warehouse in the auto-scale mode starts another
+  cluster instead, and Snowflake bills each cluster that runs. Thus a thread
+  count above 8 gives no more parallel work on a warehouse that keeps the
+  default, and it can raise your bill on a multi-cluster warehouse.
+- **A connection costs no credits.** Snowflake bills the warehouse per second
+  while it runs, with a minimum of 60 seconds each time it starts. A session
+  that sends no query starts no warehouse. A connection costs one login, thus a
+  high thread count makes the start slower, and nothing more. clair opens no
+  more connections than the run has Trouves.
+- **SSO opens one browser window.** With `authenticator: externalbrowser`, clair
+  asks the connector to keep the login token. The second connection reads that
+  token, thus a parallel run does not open one window for each thread.
 
 ## Tests
 

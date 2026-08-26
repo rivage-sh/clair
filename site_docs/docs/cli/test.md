@@ -31,7 +31,7 @@ clair test --project . --env dev --threads 8
 - clair tests more than one Trouve at one time. The tests of one Trouve always run
   one after the other. Each thread holds a private Snowflake connection, and the
   output keeps the same order at each thread count. See
-  [Environments](../concepts/environments.md).
+  [Environments](../topics/environments.md).
 
 ## `--sample` mode
 

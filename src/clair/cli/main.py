@@ -659,8 +659,9 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
 
         try:
             total = len(selected)
-            # More connections than Trouves gives only cost, and each connection
-            # is a warehouse session.
+            # A connection that no Trouve uses gives nothing. A connection
+            # costs one login, not credits: Snowflake bills the warehouse per
+            # second while it runs, and an idle session starts no warehouse.
             thread_count = min(thread_count, total)
             logger.info("run.start", run_id=run_id, env=env_name, project=str(project_root), trouves=total, run_mode=run_mode, use_staging=use_staging, threads=thread_count)
 
@@ -763,8 +764,8 @@ def test(
         adapter.connect(environment.to_connection_dict())
 
         try:
-            # More connections than Trouves gives only cost, and each connection
-            # is a warehouse session.
+            # A connection that no Trouve uses gives nothing. A connection
+            # costs one login, not credits.
             thread_count = min(thread_count, len(selected))
             logger.info("test.start", project=str(project_root), trouves=len(selected), threads=thread_count)
             results = run_tests(dag, selected, adapter, use_sample=sample, threads=thread_count)

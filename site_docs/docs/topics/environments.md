@@ -90,8 +90,19 @@ sessions that clair opens. `clair run --threads` and `clair test --threads`
 replace the value for one command.
 
 The value belongs to the environment, because the correct number comes from the
-warehouse. A development environment on an XS warehouse is content with 4. A
-production environment on a multi-cluster warehouse can use 16.
+warehouse. The default is 4, which is also the dbt default.
+
+A thread makes no compute of its own. Each thread sends its queries to the one
+warehouse of the environment, thus the warehouse decides how many of them run:
+
+| The warehouse | The result of a high thread count |
+|---|---|
+| One cluster | It runs `MAX_CONCURRENCY_LEVEL` statements at one time, 8 by default. It queues the others. A count above 8 gives no more parallel work. |
+| Many clusters, auto-scale mode | It starts another cluster when the queue grows. Snowflake bills each cluster that runs, thus a high count can raise your bill. |
+
+A connection costs no credits. Snowflake bills the warehouse per second while it
+runs, and a session that sends no query starts no warehouse. Raise the count
+against a warehouse that queues your Trouves, and not against one that is idle.
 
 ```yaml
 dev:
