@@ -1,10 +1,13 @@
-"""The runner. It executes the DAG on Snowflake in topological order."""
+"""The runner. It executes the DAG on Snowflake in dependency order."""
 
 from __future__ import annotations
 
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import StrEnum
+from typing import NamedTuple
 
 import networkx as nx
 import pandas as pd
@@ -12,6 +15,7 @@ import structlog
 from pydantic import BaseModel, model_validator
 
 from clair.adapters.base import WarehouseAdapter
+from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag, get_executable_nodes
 from clair.core.staging import (
     build_clone_statement,
@@ -374,254 +378,439 @@ def _logical_address_of(dag: ClairDag, physical_address: str) -> str:
     return str(trouve.compiled.logical_address)
 
 
-def run_project(
-    dag: ClairDag,
-    selected: list[str],
-    adapter: WarehouseAdapter,
-    run_mode: RunMode = RunMode.FULL_REFRESH,
-    run_id: str = "",
-    after_node_success: Callable[[str, str], bool] | None = None,
-    use_staging: bool = False,
-) -> Iterator[RunResult]:
-    """Execute the selected Trouves in topological order. Give each result immediately.
+class _NodeOutcome(NamedTuple):
+    """The report of one node to the scheduler.
 
-    If a node fails, clair marks each node downstream of it as skipped. Then
-    clair continues with the other branches.
-
-    after_node_success: an optional callback. Clair calls it after each node
-        that succeeds, before the next node starts. The two arguments are the
-        node name and the address that holds the new data. Give False to make
-        clair treat the node as a failure and skip each node downstream of it.
-        This stops the run early when a test fails.
-    use_staging: if True, clair writes each node to a run-scoped staging address,
-        runs the tests there, and promotes the object only after the tests pass.
-        The tests decide the promotion, so this needs after_node_success.
+    Attributes:
+        result: The result to give to the caller. It is None when the Trouve
+            makes no statement, because clair then has nothing to tell.
+        downstream_ok: False when clair must skip each node downstream. A node
+            that fails gives False. A node that succeeds, but does not pass its
+            tests, gives False too.
     """
-    if use_staging and after_node_success is None:
-        raise RunError(
-            "A staged run needs the tests. Give after_node_success, because the "
-            "tests decide if clair promotes a Trouve."
-        )
-    all_executable = get_executable_nodes(dag)
-    to_run = [name for name in all_executable if name in selected]
 
-    skip_reasons: dict[str, str] = {}
+    result: RunResult | None
+    downstream_ok: bool
 
-    for name in to_run:
-        # Each DAG node has the physical address as its key. The logs and the
-        # results show both names, thus the reader sees the file that made the
-        # Trouve, and the object that clair writes.
-        logical_address = _logical_address_of(dag, name)
-        if name in skip_reasons:
-            logger.info("run.node.skipped", logical=logical_address, physical=name, skipped_by=skip_reasons[name])
-            yield RunResult(
-                logical_address=logical_address,
-                physical_address=name,
-                status=RunStatus.SKIPPED,
-                skipped_by=skip_reasons[name],
-            )
+
+def _make_databases_and_schemas(
+    dag: ClairDag, selected: list[str], adapter: WarehouseAdapter
+) -> None:
+    """Make each database and each schema that the run writes to.
+
+    Clair does this one time, before the threads start. Many Trouves write to
+    one schema. Concurrent CREATE SCHEMA IF NOT EXISTS statements against that
+    schema can collide in the warehouse, and this function prevents it.
+    """
+    made: set[tuple[str, str]] = set()
+
+    for name in selected:
+        trouve = dag.get_trouve(name)
+        if trouve.type == TrouveType.SOURCE:
             continue
 
-        trouve = dag.get_trouve(name)
         assert trouve.compiled is not None
+        physical_address = trouve.compiled.physical_address
+        key = (physical_address.database_name, physical_address.schema_name)
+        if key in made:
+            continue
+        made.add(key)
 
-        context_warehouse = trouve.compiled.config.warehouse if trouve.compiled.config.warehouse and trouve.compiled.config.warehouse.strip() else None
-        context_role = trouve.compiled.config.role if trouve.compiled.config.role and trouve.compiled.config.role.strip() else None
-        if context_warehouse or context_role:
-            try:
-                adapter.set_context(warehouse=context_warehouse, role=context_role)
-            except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
-                logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=context_warehouse, role=context_role, error=str(e))
-                yield RunResult(
+        adapter.execute(f"CREATE DATABASE IF NOT EXISTS {physical_address.database_name}")
+        adapter.execute(
+            f"CREATE SCHEMA IF NOT EXISTS "
+            f"{physical_address.database_name}.{physical_address.schema_name}"
+        )
+
+
+def _run_node(
+    name: str,
+    dag: ClairDag,
+    adapter: WarehouseAdapter,
+    run_mode: RunMode,
+    run_id: str,
+    after_node_success: Callable[[str, str, WarehouseAdapter], bool] | None,
+    use_staging: bool,
+) -> _NodeOutcome:
+    """Materialize one Trouve in the warehouse.
+
+    A thread of the run calls this function. *adapter* is the private connection
+    of that thread, and the function gives the same adapter to each callback.
+
+    Args:
+        name: The physical address of the node, which is the key in the DAG.
+        dag: The project DAG.
+        adapter: The warehouse adapter of the thread that calls this function.
+        run_mode: The run mode that the command line gives.
+        run_id: The identifier of the run. A staging address holds it.
+        after_node_success: The callback that runs the data quality tests.
+        use_staging: True if clair writes to a staging address first.
+
+    Returns:
+        A _NodeOutcome. It holds the result, and it tells you if clair can
+        continue with the nodes downstream.
+    """
+    # Each DAG node has the physical address as its key. The logs and the
+    # results show both names, thus the reader sees the file that made the
+    # Trouve, and the object that clair writes.
+    logical_address = _logical_address_of(dag, name)
+    trouve = dag.get_trouve(name)
+    assert trouve.compiled is not None
+
+    context_warehouse = trouve.compiled.config.warehouse if trouve.compiled.config.warehouse and trouve.compiled.config.warehouse.strip() else None
+    context_role = trouve.compiled.config.role if trouve.compiled.config.role and trouve.compiled.config.role.strip() else None
+    if context_warehouse or context_role:
+        try:
+            adapter.set_context(warehouse=context_warehouse, role=context_role)
+        except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
+            logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=context_warehouse, role=context_role, error=str(e))
+            return _NodeOutcome(
+                RunResult(
                     logical_address=logical_address,
                     physical_address=name,
                     status=RunStatus.FAILURE,
                     error=f"Clair cannot set the session context: {e}",
-                )
-                for desc in nx.descendants(dag, name):
-                    skip_reasons.setdefault(desc, name)
-                continue
-
-        assert trouve.compiled is not None
-        physical_address = trouve.compiled.physical_address
-
-        if trouve.type != TrouveType.SOURCE:
-            adapter.execute(
-                f"CREATE DATABASE IF NOT EXISTS {physical_address.database_name}"
-            )
-            adapter.execute(
-                f"CREATE SCHEMA IF NOT EXISTS "
-                f"{physical_address.database_name}.{physical_address.schema_name}"
+                ),
+                downstream_ok=False,
             )
 
-        # A staged run materializes the Trouve at a run-scoped address beside the
-        # physical one. Clair writes the physical address only after the tests on
-        # that object pass.
-        staging_address = None
-        if use_staging:
-            try:
-                staging_address = make_staging_address(physical_address, run_id)
-            except ClairError as naming_error:
-                logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(naming_error))
-                yield RunResult(
+    physical_address = trouve.compiled.physical_address
+
+    # A staged run materializes the Trouve at a run-scoped address beside the
+    # physical one. Clair writes the physical address only after the tests on
+    # that object pass.
+    staging_address = None
+    if use_staging:
+        try:
+            staging_address = make_staging_address(physical_address, run_id)
+        except ClairError as naming_error:
+            logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(naming_error))
+            return _NodeOutcome(
+                RunResult(
                     logical_address=logical_address,
                     physical_address=name,
                     status=RunStatus.FAILURE,
                     error=str(naming_error),
-                )
-                for desc in nx.descendants(dag, name):
-                    skip_reasons.setdefault(desc, name)
-                continue
-
-        # A PandasTrouve is different. Clair reads the data, transforms it and
-        # writes it. Clair does not execute SQL.
-        if trouve.execution_type == ExecutionType.PANDAS:
-            assert isinstance(trouve, PandasTrouve)
-            logger.info("run.node.start", logical=logical_address, physical=name, effective_mode="full_refresh")
-            result = _run_pandas_trouve(trouve, adapter, physical_address, staging_address)
-
-            if result.status == RunStatus.SUCCESS and staging_address is not None:
-                assert after_node_success is not None
-                tests_passed = after_node_success(name, str(staging_address))
-                promote_ids, promote_urls, staging_error = _promote_or_keep(
-                    trouve, adapter, staging_address, physical_address, tests_passed
-                )
-                result = result.model_copy(
-                    update={
-                        "query_ids": result.query_ids + promote_ids,
-                        "query_urls": result.query_urls + promote_urls,
-                        "status": RunStatus.FAILURE if staging_error else result.status,
-                        "error": staging_error or result.error,
-                    }
-                )
-            elif result.status == RunStatus.FAILURE and staging_address is not None:
-                result = result.model_copy(
-                    update={
-                        "error": (
-                            f"{result.error}. Clair keeps the staging object at "
-                            f"{staging_address}, if the write made one"
-                        )
-                    }
-                )
-
-            yield result
-
-            if result.status == RunStatus.SUCCESS:
-                logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3))
-                if staging_address is None and after_node_success is not None and not after_node_success(name, str(physical_address)):
-                    for desc in nx.descendants(dag, name):
-                        skip_reasons.setdefault(desc, name)
-            else:
-                logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3), error=result.error)
-                for desc in nx.descendants(dag, name):
-                    skip_reasons.setdefault(desc, name)
-            continue
-
-        assert isinstance(trouve, Trouve)
-        effective_mode = resolve_effective_mode(trouve, run_mode)
-        # If the target table does not exist yet, change to the full refresh mode.
-        if effective_mode == RunMode.INCREMENTAL:
-            table_exists = adapter.table_exists(
-                physical_address.database_name,
-                physical_address.schema_name,
-                physical_address.table_name,
+                ),
+                downstream_ok=False,
             )
-            if not table_exists:
-                logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="table_not_found")
-                effective_mode = RunMode.FULL_REFRESH
 
-        logger.info("run.node.start", logical=logical_address, physical=name, effective_mode=effective_mode.value)
-        statements = trouve.build_sql(effective_mode, run_id, staging_address=staging_address)
+    # A PandasTrouve is different. Clair reads the data, transforms it and
+    # writes it. Clair does not execute SQL.
+    if trouve.execution_type == ExecutionType.PANDAS:
+        assert isinstance(trouve, PandasTrouve)
+        logger.info("run.node.start", logical=logical_address, physical=name, effective_mode="full_refresh")
+        result = _run_pandas_trouve(trouve, adapter, physical_address, staging_address)
 
-        # An incremental run changes data that already exists, so the staging
-        # table needs that data first. A zero-copy clone gives it in constant time.
-        if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
-            statements = [build_clone_statement(physical_address, staging_address)] + statements
+        downstream_ok = True
 
-        if not statements:
-            continue
-
-        start = time.monotonic()
-        last_result = None
-        all_succeeded = True
-        failed_at = None
-        query_ids: list[str] = []
-        query_urls: list[str] = []
-
-        for stmt_idx, stmt in enumerate(statements):
-            query_result = adapter.execute(stmt)
-            last_result = query_result
-            if query_result.query_id:
-                query_ids.append(query_result.query_id)
-            if query_result.query_url:
-                query_urls.append(query_result.query_url)
-            if not query_result.success:
-                all_succeeded = False
-                failed_at = stmt_idx
-                break
-
-        duration = time.monotonic() - start
-
-        # UPSERT cleanup. The UPSERT mode always ends with these three statements:
-        # make the merge table, merge it, drop it. If the merge failed, drop the
-        # merge table anyway. The index comes from the end of the list, because a
-        # staged incremental run puts a clone in front of the three.
-        if not all_succeeded and len(statements) >= 3:
-            merge_index = len(statements) - 2
-            drop_index = len(statements) - 1
-            if failed_at == merge_index:
-                adapter.execute(statements[drop_index])
-
-        # A staged run tests the staging object, then promotes it or keeps it.
-        staging_error = ""
-        if all_succeeded and staging_address is not None:
+        if result.status == RunStatus.SUCCESS and staging_address is not None:
             assert after_node_success is not None
-            tests_passed = after_node_success(name, str(staging_address))
+            tests_passed = after_node_success(name, str(staging_address), adapter)
             promote_ids, promote_urls, staging_error = _promote_or_keep(
                 trouve, adapter, staging_address, physical_address, tests_passed
             )
-            query_ids.extend(promote_ids)
-            query_urls.extend(promote_urls)
-            all_succeeded = not staging_error
+            result = result.model_copy(
+                update={
+                    "query_ids": result.query_ids + promote_ids,
+                    "query_urls": result.query_urls + promote_urls,
+                    "status": RunStatus.FAILURE if staging_error else result.status,
+                    "error": staging_error or result.error,
+                }
+            )
+        elif result.status == RunStatus.FAILURE and staging_address is not None:
+            result = result.model_copy(
+                update={
+                    "error": (
+                        f"{result.error}. Clair keeps the staging object at "
+                        f"{staging_address}, if the write made one"
+                    )
+                }
+            )
 
-        if all_succeeded:
-            logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(duration, 3), query_ids=query_ids)
-            yield RunResult(
+        result = result.model_copy(update={"logical_address": logical_address})
+
+        if result.status == RunStatus.SUCCESS:
+            logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3))
+            # Without staging the tests run after clair wrote the physical object.
+            if staging_address is None and after_node_success is not None:
+                downstream_ok = after_node_success(name, str(physical_address), adapter)
+        else:
+            logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3), error=result.error)
+            downstream_ok = False
+
+        return _NodeOutcome(result, downstream_ok)
+
+    assert isinstance(trouve, Trouve)
+    effective_mode = resolve_effective_mode(trouve, run_mode)
+    # If the target table does not exist yet, change to the full refresh mode.
+    if effective_mode == RunMode.INCREMENTAL:
+        table_exists = adapter.table_exists(
+            physical_address.database_name,
+            physical_address.schema_name,
+            physical_address.table_name,
+        )
+        if not table_exists:
+            logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="table_not_found")
+            effective_mode = RunMode.FULL_REFRESH
+
+    logger.info("run.node.start", logical=logical_address, physical=name, effective_mode=effective_mode.value)
+    statements = trouve.build_sql(effective_mode, run_id, staging_address=staging_address)
+
+    # An incremental run changes data that already exists, so the staging
+    # table needs that data first. A zero-copy clone gives it in constant time.
+    if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
+        statements = [build_clone_statement(physical_address, staging_address)] + statements
+
+    if not statements:
+        return _NodeOutcome(None, downstream_ok=True)
+
+    start = time.monotonic()
+    last_result = None
+    all_succeeded = True
+    failed_at = None
+    query_ids: list[str] = []
+    query_urls: list[str] = []
+
+    for stmt_idx, stmt in enumerate(statements):
+        query_result = adapter.execute(stmt)
+        last_result = query_result
+        if query_result.query_id:
+            query_ids.append(query_result.query_id)
+        if query_result.query_url:
+            query_urls.append(query_result.query_url)
+        if not query_result.success:
+            all_succeeded = False
+            failed_at = stmt_idx
+            break
+
+    duration = time.monotonic() - start
+
+    # UPSERT cleanup. The UPSERT mode always ends with these three statements:
+    # make the merge table, merge it, drop it. If the merge failed, drop the
+    # merge table anyway. The index comes from the end of the list, because a
+    # staged incremental run puts a clone in front of the three.
+    if not all_succeeded and len(statements) >= 3:
+        merge_index = len(statements) - 2
+        drop_index = len(statements) - 1
+        if failed_at == merge_index:
+            adapter.execute(statements[drop_index])
+
+    # A staged run tests the staging object, then promotes it or keeps it.
+    staging_error = ""
+    if all_succeeded and staging_address is not None:
+        assert after_node_success is not None
+        tests_passed = after_node_success(name, str(staging_address), adapter)
+        promote_ids, promote_urls, staging_error = _promote_or_keep(
+            trouve, adapter, staging_address, physical_address, tests_passed
+        )
+        query_ids.extend(promote_ids)
+        query_urls.extend(promote_urls)
+        all_succeeded = not staging_error
+
+    if all_succeeded:
+        logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(duration, 3), query_ids=query_ids)
+        downstream_ok = True
+        # Without staging the tests run after clair wrote the physical object.
+        if staging_address is None and after_node_success is not None:
+            downstream_ok = after_node_success(name, str(physical_address), adapter)
+        return _NodeOutcome(
+            RunResult(
                 logical_address=logical_address,
                 physical_address=name,
                 status=RunStatus.SUCCESS,
                 query_ids=query_ids,
                 query_urls=query_urls,
                 duration_seconds=duration,
+            ),
+            downstream_ok,
+        )
+
+    if staging_error:
+        error_message = staging_error
+    else:
+        assert last_result is not None
+        error_message = last_result.error or ""
+        if staging_address is not None:
+            error_message = (
+                f"{error_message}. Clair keeps the staging object at "
+                f"{staging_address}, if the build made one"
             )
-            # Without staging the tests run after clair wrote the physical object.
-            if staging_address is None and after_node_success is not None and not after_node_success(name, str(physical_address)):
-                for desc in nx.descendants(dag, name):
-                    skip_reasons.setdefault(desc, name)
-        else:
-            if staging_error:
-                error_message = staging_error
-            else:
-                assert last_result is not None
-                error_message = last_result.error or ""
-                if staging_address is not None:
-                    error_message = (
-                        f"{error_message}. Clair keeps the staging object at "
-                        f"{staging_address}, if the build made one"
-                    )
-            logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(duration, 3), error=error_message, query_ids=query_ids)
-            yield RunResult(
-                logical_address=logical_address,
-                physical_address=name,
-                status=RunStatus.FAILURE,
-                query_ids=query_ids,
-                query_urls=query_urls,
-                error=error_message,
-                sql=statements,
-                duration_seconds=duration,
-            )
-            for desc in nx.descendants(dag, name):
-                skip_reasons.setdefault(desc, name)
+    logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(duration, 3), error=error_message, query_ids=query_ids)
+    return _NodeOutcome(
+        RunResult(
+            logical_address=logical_address,
+            physical_address=name,
+            status=RunStatus.FAILURE,
+            query_ids=query_ids,
+            query_urls=query_urls,
+            error=error_message,
+            sql=statements,
+            duration_seconds=duration,
+        ),
+        downstream_ok=False,
+    )
+
+
+def run_project(
+    dag: ClairDag,
+    selected: list[str],
+    adapter: WarehouseAdapter,
+    run_mode: RunMode = RunMode.FULL_REFRESH,
+    run_id: str = "",
+    after_node_success: Callable[[str, str, WarehouseAdapter], bool] | None = None,
+    use_staging: bool = False,
+    threads: int = 1,
+) -> Iterator[RunResult]:
+    """Execute the selected Trouves. Give each result when the Trouve completes.
+
+    Clair starts a Trouve when each Trouve that it imports completed. With more
+    than one thread, clair starts as many Trouves at one time as the thread
+    count permits. Each thread holds a private warehouse connection.
+
+    If a node fails, clair marks each node downstream of it as skipped. Then
+    clair continues with the other branches.
+
+    The results come in completion order, not in topological order. A slow
+    Trouve that starts first can thus arrive after a quick Trouve. Sort the
+    results against `get_execution_order(dag)` if you need the DAG order.
+
+    Args:
+        dag: The project DAG.
+        selected: The names of the Trouves to run.
+        adapter: A warehouse adapter with an open connection. Clair uses it as
+            the first connection of the pool, and opens `threads - 1` more.
+        run_mode: The run mode that the command line gives.
+        run_id: The identifier of the run. A staging address holds it.
+        after_node_success: an optional callback. Clair calls it after each node
+            that succeeds, before the promotion. The three arguments are the
+            node name, the address that holds the new data, and the connection
+            of the thread. Give False to make clair treat the node as a failure
+            and skip each node downstream of it. This stops the run early when
+            a test fails.
+        use_staging: if True, clair writes each node to a run-scoped staging
+            address, runs the tests there, and promotes the object only after
+            the tests pass. The tests decide the promotion, so this needs
+            after_node_success.
+        threads: The number of Trouves that clair runs at one time, and thus the
+            number of warehouse connections.
+
+    Raises:
+        RunError: If *use_staging* is True and *after_node_success* is None.
+        ValueError: If *threads* is less than 1.
+    """
+    if use_staging and after_node_success is None:
+        raise RunError(
+            "A staged run needs the tests. Give after_node_success, because the "
+            "tests decide if clair promotes a Trouve."
+        )
+    if threads < 1:
+        raise ValueError(f"The thread count must be 1 or more, but it is {threads}")
+
+    all_executable = get_executable_nodes(dag)
+    to_run = [name for name in all_executable if name in selected]
+    if not to_run:
+        return
+
+    _make_databases_and_schemas(dag, to_run, adapter)
+
+    # Each node of this run that is downstream of *name*, direct or not. A node
+    # that the selector removed is not in the map, but clair looks through it:
+    # with A -> B -> C, and B removed, C is still downstream of A. Thus C waits
+    # for A, and a failure of A still skips C.
+    to_run_set = set(to_run)
+    downstream_nodes = {
+        name: nx.descendants(dag, name) & to_run_set for name in to_run
+    }
+
+    # The number of Trouves upstream of each node that did not complete yet.
+    unmet_count = dict.fromkeys(to_run, 0)
+    for downstream_of_name in downstream_nodes.values():
+        for downstream in downstream_of_name:
+            unmet_count[downstream] += 1
+
+    # to_run is in topological order, thus the first ready nodes keep that order.
+    ready = deque(name for name in to_run if unmet_count[name] == 0)
+    skip_reasons: dict[str, str] = {}
+
+    def release(name: str) -> None:
+        """Tell each node downstream that *name* completed. At zero it is ready."""
+        for downstream in downstream_nodes[name]:
+            unmet_count[downstream] -= 1
+            if unmet_count[downstream] == 0:
+                ready.append(downstream)
+
+    pool = AdapterPool(adapter, threads)
+
+    def run_one(name: str) -> _NodeOutcome:
+        """Run one node on the connection of this thread."""
+        return _run_node(
+            name,
+            dag,
+            pool.acquire(),
+            run_mode,
+            run_id,
+            after_node_success,
+            use_staging,
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=threads, thread_name_prefix="clair-run") as executor:
+            running: dict[Future[_NodeOutcome], str] = {}
+
+            while ready or running:
+                # Report each node that clair must skip, and start the others.
+                while ready and len(running) < threads:
+                    name = ready.popleft()
+
+                    if name in skip_reasons:
+                        logical_address = _logical_address_of(dag, name)
+                        logger.info("run.node.skipped", logical=logical_address, physical=name, skipped_by=skip_reasons[name])
+                        yield RunResult(
+                            logical_address=logical_address,
+                            physical_address=name,
+                            status=RunStatus.SKIPPED,
+                            skipped_by=skip_reasons[name],
+                        )
+                        release(name)
+                        continue
+
+                    running[executor.submit(run_one, name)] = name
+
+                # The loop above can report only skipped nodes, and start
+                # nothing. The outer condition then ends the run. wait() on an
+                # empty set would give an endless loop.
+                if not running:
+                    continue
+
+                done, _ = wait(running, return_when=FIRST_COMPLETED)
+
+                for future in done:
+                    name = running.pop(future)
+                    try:
+                        outcome = future.result()
+                    except Exception as node_error:  # noqa: BLE001 — one node that breaks must not stop the other branches
+                        logger.warning("run.node.failure", physical=name, error=str(node_error))
+                        outcome = _NodeOutcome(
+                            RunResult(
+                                logical_address=_logical_address_of(dag, name),
+                                physical_address=name,
+                                status=RunStatus.FAILURE,
+                                error=str(node_error),
+                            ),
+                            downstream_ok=False,
+                        )
+
+                    if outcome.result is not None:
+                        yield outcome.result
+
+                    if not outcome.downstream_ok:
+                        for descendant in downstream_nodes[name]:
+                            skip_reasons.setdefault(descendant, name)
+
+                    release(name)
+    finally:
+        pool.close()
 
 
 def format_run_output(results: list[RunResult], env_name: str) -> RunSummary:

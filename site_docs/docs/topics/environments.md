@@ -13,6 +13,7 @@ dev:
   role: analyst
   region: us-east-1
   account_locator: abc12345
+  threads: 4
 
 prod:
   account: myorg-myaccount
@@ -22,6 +23,7 @@ prod:
   role: transformer
   region: us-east-1
   account_locator: abc12345
+  threads: 16
 ```
 
 ## Authentication methods
@@ -78,6 +80,45 @@ prod:
 | `role` | — | Default role. If you omit it, Snowflake uses the default role of the user. |
 | `region` | — | AWS/Azure region. clair needs it for the query URLs in the logs. |
 | `account_locator` | — | Classic account locator. clair needs it for the query URLs. |
+| `threads` | — | The number of Trouves that clair runs at one time. The default is `4`. See [Parallel execution](#parallel-execution). |
+
+## Parallel execution
+
+`threads` gives the number of Trouves that clair runs at one time. Each thread
+holds a private Snowflake connection, thus the value is also the number of
+sessions that clair opens. `clair run --threads` and `clair test --threads`
+replace the value for one command.
+
+The value belongs to the environment, because the correct number comes from the
+warehouse. The default is 4, which is also the dbt default.
+
+A thread makes no compute of its own. Each thread sends its queries to the one
+warehouse of the environment, thus the warehouse decides how many of them run:
+
+| The warehouse | The result of a high thread count |
+|---|---|
+| One cluster | It runs `MAX_CONCURRENCY_LEVEL` statements at one time, 8 by default. It queues the others. A count above 8 gives no more parallel work. |
+| Many clusters, auto-scale mode | It starts another cluster when the queue grows. Snowflake bills each cluster that runs, thus a high count can raise your bill. |
+
+A connection costs no credits. Snowflake bills the warehouse per second while it
+runs, and a session that sends no query starts no warehouse. Raise the count
+against a warehouse that queues your Trouves, and not against one that is idle.
+
+```yaml
+dev:
+  # ...
+  threads: 4
+
+prod:
+  # ...
+  threads: 16
+```
+
+clair opens each connection before the first Trouve starts. With SSO
+(`authenticator: externalbrowser`), clair asks the Snowflake connector to keep
+the login token in the credential store of your operating system. The second
+connection reads that token, thus clair opens one browser window and not one for
+each thread.
 
 ## Select an environment
 
