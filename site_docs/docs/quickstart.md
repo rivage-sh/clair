@@ -34,6 +34,8 @@ Region (e.g. us-east-1): us-east-1
   hint: select current_account() as account_locator;
 Account locator (e.g. abc12345): abc12345
 
+Trouves that run at one time (threads) [4]: 4
+
 Give an example Snowflake table that contains source data (for example source.orders.raw) [source]: source.products.catalog
 
   created  /path/to/my_project/source/products/catalog.py

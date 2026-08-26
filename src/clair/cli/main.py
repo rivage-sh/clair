@@ -9,12 +9,14 @@ import sys
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import click
 import structlog
 import uuid6
 
 from clair._logging import configure_logging
+from clair.adapters.base import WarehouseAdapter
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.compiler import CompiledNodeInfo, write_compile_output
 from clair.core.dag import build_dag
@@ -31,7 +33,7 @@ from clair.core.selector import expand_selectors
 from clair.core.test_runner import format_test_output, run_tests
 from clair.docs.catalog import build_catalog
 from clair.docs.server import serve
-from clair.environments.environments import load_environment
+from clair.environments.environments import DEFAULT_THREADS, load_environment
 from clair.environments.project_routing import (
     ROUTING_FILE_NAME,
     ProjectRouting,
@@ -220,7 +222,7 @@ def _prompt_and_write_environment() -> None:
     click.echo("  3. SSO (externalbrowser)")
     auth_choice = click.prompt("Enter choice", default="1", type=str)
 
-    env_data: dict[str, str] = {
+    env_data: dict[str, Any] = {
         "account": account,
         "user": user,
     }
@@ -259,6 +261,14 @@ def _prompt_and_write_environment() -> None:
     _hint("current_account() as account_locator")
     account_locator = _require("Account locator (e.g. abc12345)")
     env_data["account_locator"] = account_locator
+
+    click.echo("")
+    threads = click.prompt(
+        "Trouves that run at one time (threads)",
+        default=DEFAULT_THREADS,
+        type=click.IntRange(min=1),
+    )
+    env_data["threads"] = threads
 
     click.echo("")
     write_environments_yml(env_data, env_name=env_name)
@@ -547,7 +557,13 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     default=False,
     help="Run the tests on a sample of each Trouve. Clair does not run the row count tests.",
 )
-def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool) -> None:
+@click.option(
+    "--threads",
+    type=click.IntRange(min=1),
+    default=None,
+    help="The number of Trouves that run at one time. The default comes from the environment.",
+)
+def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool, threads: int | None) -> None:
     """Run the Trouves on Snowflake. Then run the data quality tests."""
     project_root = Path(project).resolve()
     run_mode_enum = RunMode(run_mode)
@@ -567,6 +583,9 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
     try:
         # Load the environment.
         env_name, environment = load_environment(env)
+
+        # The command line replaces the thread count of the environment.
+        thread_count = threads if threads is not None else environment.threads
 
         # Find the Trouves and make the DAG.
         profile_defaults = {
@@ -602,20 +621,29 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
 
         test_failures: list[str] = []
 
-        def on_node_success(node_name: str, query_address: str) -> bool:
+        def on_node_success(
+            node_name: str, query_address: str, node_adapter: WarehouseAdapter
+        ) -> bool:
+            # node_adapter is the connection of the thread that ran the node.
+            # A parallel run must not send these test queries on a different
+            # connection, because that connection holds a different context.
             node_test_results = run_tests(
-                dag, [node_name], adapter,
+                dag, [node_name], node_adapter,
                 use_sample=sample,
                 query_addresses={node_name: query_address},
             )
             passed = all(r.passed for r in node_test_results)
             if not passed:
+                # list.append is atomic, thus the threads need no lock here.
                 test_failures.append(node_name)
             return passed
 
         try:
             total = len(selected)
-            logger.info("run.start", run_id=run_id, env=env_name, project=str(project_root), trouves=total, run_mode=run_mode, use_staging=use_staging)
+            # More connections than Trouves gives only cost, and each connection
+            # is a warehouse session.
+            thread_count = min(thread_count, total)
+            logger.info("run.start", run_id=run_id, env=env_name, project=str(project_root), trouves=total, run_mode=run_mode, use_staging=use_staging, threads=thread_count)
 
             results = list(run_project(
                 dag, selected, adapter,
@@ -623,6 +651,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
                 run_id=run_id,
                 after_node_success=on_node_success if not no_test else None,
                 use_staging=use_staging,
+                threads=thread_count,
             ))
 
             counts = Counter(r.status for r in results)
@@ -671,8 +700,14 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
     default=False,
     help="Run the tests on a sample of each Trouve. Clair does not run the row count tests.",
 )
+@click.option(
+    "--threads",
+    type=click.IntRange(min=1),
+    default=None,
+    help="The number of Trouves that clair tests at one time. The default comes from the environment.",
+)
 def test(
-    select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, sample: bool
+    select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, sample: bool, threads: int | None
 ) -> None:
     """Run the data quality tests on Snowflake."""
     project_root = Path(project).resolve()
@@ -680,6 +715,9 @@ def test(
     try:
         # Load the environment.
         env_name, environment = load_environment(env)
+
+        # The command line replaces the thread count of the environment.
+        thread_count = threads if threads is not None else environment.threads
 
         # Find the Trouves and make the DAG.
         profile_defaults = {
@@ -706,8 +744,11 @@ def test(
         adapter.connect(environment.to_connection_dict())
 
         try:
-            logger.info("test.start", project=str(project_root), trouves=len(selected))
-            results = run_tests(dag, selected, adapter, use_sample=sample)
+            # More connections than Trouves gives only cost, and each connection
+            # is a warehouse session.
+            thread_count = min(thread_count, len(selected))
+            logger.info("test.start", project=str(project_root), trouves=len(selected), threads=thread_count)
+            results = run_tests(dag, selected, adapter, use_sample=sample, threads=thread_count)
 
             if not results:
                 logger.info("test.no_tests_found")

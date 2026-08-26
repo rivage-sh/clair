@@ -13,6 +13,7 @@ dev:
   role: analyst
   region: us-east-1
   account_locator: abc12345
+  threads: 4
 
 prod:
   account: myorg-myaccount
@@ -22,6 +23,7 @@ prod:
   role: transformer
   region: us-east-1
   account_locator: abc12345
+  threads: 16
 ```
 
 ## Authentication methods
@@ -78,6 +80,34 @@ prod:
 | `role` | — | Default role. If you omit it, Snowflake uses the default role of the user. |
 | `region` | — | AWS/Azure region. clair needs it for the query URLs in the logs. |
 | `account_locator` | — | Classic account locator. clair needs it for the query URLs. |
+| `threads` | — | The number of Trouves that clair runs at one time. The default is `4`. See [Parallel execution](#parallel-execution). |
+
+## Parallel execution
+
+`threads` gives the number of Trouves that clair runs at one time. Each thread
+holds a private Snowflake connection, thus the value is also the number of
+sessions that clair opens. `clair run --threads` and `clair test --threads`
+replace the value for one command.
+
+The value belongs to the environment, because the correct number comes from the
+warehouse. A development environment on an XS warehouse is content with 4. A
+production environment on a multi-cluster warehouse can use 16.
+
+```yaml
+dev:
+  # ...
+  threads: 4
+
+prod:
+  # ...
+  threads: 16
+```
+
+clair opens each connection before the first Trouve starts. With SSO
+(`authenticator: externalbrowser`), clair asks the Snowflake connector to keep
+the login token in the credential store of your operating system. The second
+connection reads that token, thus clair opens one browser window and not one for
+each thread.
 
 ## Select an environment
 

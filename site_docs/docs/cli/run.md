@@ -1,9 +1,9 @@
 # clair run
 
-Run Trouves against Snowflake in topological order, then run the data quality tests.
+Run Trouves against Snowflake in dependency order, then run the data quality tests.
 
 ```bash
-clair run [--project PATH] [--env NAME] [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample]
+clair run [--project PATH] [--env NAME] [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample] [--threads N]
 ```
 
 ## Example
@@ -20,14 +20,38 @@ clair run --project . --env prod --run-mode full_refresh
 
 # Skip tests
 clair run --project . --env dev --no-test
+
+# Run 8 Trouves at one time
+clair run --project . --env dev --threads 8
 ```
 
 ## Run order
 
-Trouves run in topological order — each dependency runs before its dependents. If a node fails, clair skips all the downstream dependents.
+clair starts a Trouve when each Trouve that it imports completed. If a node fails, clair skips all the downstream dependents. clair continues with the other branches.
 
 clair does not run SQL against a SOURCE Trouve. The routing entry still gives the
 address that clair reads.
+
+## Parallel execution
+
+clair runs more than one Trouve at one time. `--threads` gives the count, and the
+`threads` field of the environment gives the default. See
+[Environments](../concepts/environments.md).
+
+Each thread holds a private Snowflake connection, and clair opens each connection
+before the first Trouve starts. A connection holds the role and the warehouse of
+the session, so two Trouves that need a different `warehouse` cannot share one.
+
+The output comes in completion order, not in DAG order. A quick Trouve that
+started second can thus report before a slow Trouve that started first.
+
+Two limits to know:
+
+- More threads make more Snowflake sessions. Each one holds a warehouse, thus a
+  high count can queue your queries, or start more clusters than you expect.
+- With SSO (`authenticator: externalbrowser`), clair asks the connector to keep
+  the login token. The second connection reads that token, so a parallel run
+  opens one browser window and not one for each thread.
 
 ## Tests
 
@@ -45,6 +69,7 @@ The tests decide the publication. They do not report a fault after it reaches pr
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides the `run_config` of each Trouve. |
 | `--no-test` | `false` | Skip the data quality tests |
 | `--sample` | `false` | Run the tests against `SELECT TOP 1000 *` (skips `TestRowCount`) |
+| `--threads` | the `threads` field of the environment, or `4` | The number of Trouves that run at one time. Each thread holds one Snowflake connection. |
 
 ## Exit codes
 

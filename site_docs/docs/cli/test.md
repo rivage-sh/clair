@@ -3,7 +3,7 @@
 Run data quality tests against live Snowflake tables.
 
 ```bash
-clair test [--project PATH] [--env NAME] [--select PATTERN]... [--sample]
+clair test [--project PATH] [--env NAME] [--select PATTERN]... [--sample] [--threads N]
 ```
 
 ## Example
@@ -17,6 +17,9 @@ clair test --project . --env dev --select='refined.orders.*'
 
 # Run against a sample (faster; skips TestRowCount)
 clair test --project . --env dev --sample
+
+# Test 8 Trouves at one time
+clair test --project . --env dev --threads 8
 ```
 
 ## Behavior
@@ -25,6 +28,10 @@ clair test --project . --env dev --sample
 - The command runs all the tests that you attach to each selected Trouve.
 - clair skips SOURCE Trouves. They do not have tests.
 - If no selected Trouve has tests, the command writes a log message and stops with success.
+- clair tests more than one Trouve at one time. The tests of one Trouve always run
+  one after the other. Each thread holds a private Snowflake connection, and the
+  output keeps the same order at each thread count. See
+  [Environments](../concepts/environments.md).
 
 ## `--sample` mode
 
@@ -38,6 +45,7 @@ If you give `--sample`, most tests run against `SELECT TOP 1000 *` instead of th
 | `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../guides/selectors.md). Repeat the flag to add more patterns. |
 | `--sample` | `false` | Run the tests against `SELECT TOP 1000 *` |
+| `--threads` | the `threads` field of the environment, or `4` | The number of Trouves that clair tests at one time. Each thread holds one Snowflake connection. |
 
 ## Exit codes
 
