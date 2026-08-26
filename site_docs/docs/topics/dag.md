@@ -67,4 +67,4 @@ Discovery skips these files:
 
 - Files and directories with a name that starts with `_`, such as `_clairtifacts/` and `__pycache__/`
 - `.git/`, `.venv/`
-- `__database_config__.py` and `__schema_config__.py` — these are configuration files, not Trouves (see [Per-Database & Schema Config](../guides/per-database-schema-config.md))
+- `__database_config__.py` and `__schema_config__.py` — these are configuration files, not Trouves (see [Per-Database & Schema Config](per-database-schema-config.md))

@@ -34,10 +34,10 @@ clair dag --project . --select='refined.*.*'
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
-| `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../guides/selectors.md). Repeat the flag to add more patterns. |
+| `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 
 ## See also
 
-- [DAG concepts](../concepts/dag.md)
-- [Selectors](../guides/selectors.md)
+- [DAG](../topics/dag.md)
+- [Selectors](../topics/selectors.md)
 - [clair docs](docs.md) — interactive visual DAG in the browser

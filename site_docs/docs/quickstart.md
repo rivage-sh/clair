@@ -160,8 +160,8 @@ clair run --project=my_project --env=dev
 
 ## Next steps
 
-- [Pandas-native transformations](guides/pandas-native.md) — write pipeline steps as Python functions
-- [Incrementality](guides/incrementality.md) — APPEND and UPSERT strategies for large tables
-- [Data quality tests](guides/data-quality-tests.md) — all four test types
-- [Selectors](guides/selectors.md) — run only a subset of Trouves
+- [Pandas-native transformations](topics/pandas-native.md) — write pipeline steps as Python functions
+- [Incrementality](topics/incrementality.md) — APPEND and UPSERT strategies for large tables
+- [Data quality tests](topics/data-quality-tests.md) — all four test types
+- [Selectors](topics/selectors.md) — run only a subset of Trouves
 - [CLI reference](cli/overview.md) — all commands and flags

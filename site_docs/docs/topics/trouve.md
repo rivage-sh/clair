@@ -25,16 +25,10 @@ trouve = Trouve(
 
 `{source_catalog}` calls `Trouve.__format__`, which registers a placeholder token. At discovery, clair replaces that token with the real fully-qualified Snowflake name, such as `source.products.catalog`. The Python import also tells clair about the dependency. clair does not need a separate DAG configuration.
 
-## Field reference
+## Fields
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `type` | `TrouveType` | `TABLE` | SOURCE, TABLE, or VIEW |
-| `sql` | `str` | `""` | SQL query. Required for TABLE/VIEW, must be empty for SOURCE. |
-| `columns` | `list[Column]` | `[]` | Column definitions. Required for UPSERT mode. See [Column](../reference/column-api.md). |
-| `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](../guides/data-quality-tests.md). |
-| `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
-| `run_config` | `RunConfig` | full refresh | Materialization strategy. See [Incrementality](../guides/incrementality.md). |
+The [Trouve API reference](../reference/trouve-api.md) holds the full field table of each
+class. The fields you set most are `sql`, `columns`, `tests`, `docs`, and `run_config`.
 
 ## Examples
 
@@ -149,7 +143,7 @@ The two backends have these differences:
 
 All the other behaviour is the same: the DAG, the `--select` flag, the data quality tests, and the `clair dag` output. The two classes have the same base class, `TrouveAbc`. That base class holds `columns`, `tests`, `docs`, and `run_config`.
 
-See the [Pandas-native guide](../guides/pandas-native.md) for a full example.
+See the [Pandas-Native Transformations](pandas-native.md) for a full example.
 
 ## After discovery
 
