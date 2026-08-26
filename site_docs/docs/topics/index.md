@@ -1,11 +1,12 @@
 # Topics
 
 Each page starts with what the subject is, then shows how to configure it. Read the first
-four pages before you use clair. Read the others when you need the behaviour.
+five pages before you use clair. Read the others when you need the behaviour.
 
 - **[Trouve](trouve.md)** — the basic unit. One Python file, one Snowflake object.
 - **[Project Layout](project-layout.md)** — how the directory structure maps to Snowflake names.
 - **[DAG](dag.md)** — the dependency graph. clair builds it from the Python imports.
+- **[The Anatomy of a Run](anatomy-of-a-run.md)** — the seven steps of `clair run`, and the address that each Trouve reads.
 - **[Environments](environments.md)** — Snowflake connection profiles.
 - **[Selectors](selectors.md)** — run only a subset of your project.
 - **[Data Quality Tests](data-quality-tests.md)** — attach tests to Trouves.

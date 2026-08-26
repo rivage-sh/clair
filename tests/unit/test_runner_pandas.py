@@ -30,6 +30,20 @@ def _make_compiled(physical_address: str = "db.schema.table") -> CompiledAttribu
     )
 
 
+def _compile_pandas(trouve: PandasTrouve, physical_address: str) -> None:
+    """Compile a PandasTrouve, as discovery does.
+
+    input_addresses holds the address that each input reads. Discovery writes
+    the logical address, and recompile_for_selection() changes it to a physical
+    address for each input that the run builds. These tests give one address to
+    each input, thus the two addresses are equal.
+    """
+    trouve.compiled = _make_compiled(physical_address)
+    trouve.compiled.input_addresses = [
+        str(upstream.physical_address) for upstream in trouve.inputs
+    ]
+
+
 def _make_source(physical_address: str = "db.schema.source") -> Trouve:
     source = Trouve(type=TrouveType.SOURCE)
     source.compiled = _make_compiled(physical_address)
@@ -80,7 +94,7 @@ class TestRunPandasTrouveHappyPath:
             return result_df
 
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(fetch_dataframes={"db.schema.events": input_df})
 
@@ -102,7 +116,7 @@ class TestRunPandasTrouveHappyPath:
             return pd.DataFrame({"z": [3]})
 
         trouve = PandasTrouve(transform=my_fn, inputs=[source_a, source_b])
-        trouve.compiled = _make_compiled("db.schema.output")
+        _compile_pandas(trouve, "db.schema.output")
 
         adapter = _make_df_adapter(
             fetch_dataframes={"db.schema.a": df_a, "db.schema.b": df_b}
@@ -123,7 +137,7 @@ class TestRunPandasTrouveHappyPath:
             return pd.DataFrame({"out": [1]})
 
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(fetch_dataframes={"db.schema.events": input_df})
         _run_pandas_trouve(trouve, adapter, trouve.physical_address)
@@ -140,7 +154,7 @@ class TestRunPandasTrouveAddress:
             return pd.DataFrame({"x": [1]})
 
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
-        trouve.compiled = _make_compiled("mydb.myschema.mytable")
+        _compile_pandas(trouve, "mydb.myschema.mytable")
 
         adapter = _make_df_adapter(
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
@@ -169,7 +183,7 @@ class TestRunPandasTrouveTransformErrors:
             raise ValueError("something went wrong")
 
         trouve = PandasTrouve(transform=bad_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
@@ -188,7 +202,7 @@ class TestRunPandasTrouveTransformErrors:
             return {"not": "a dataframe"}  # type: ignore
 
         trouve = PandasTrouve(transform=bad_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
@@ -207,7 +221,7 @@ class TestRunPandasTrouveTransformErrors:
             return None  # type: ignore
 
         trouve = PandasTrouve(transform=bad_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
@@ -227,7 +241,7 @@ class TestRunPandasTrouveFetchErrors:
             return events
 
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(
             fetch_side_effect=RuntimeError("Snowflake connection lost")
@@ -248,7 +262,7 @@ class TestRunPandasTrouveWriteErrors:
             return pd.DataFrame({"x": [1]})
 
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})},
@@ -267,7 +281,7 @@ class TestRunPandasTrouveWriteErrors:
             return pd.DataFrame({"x": [1]})
 
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})},
@@ -289,7 +303,7 @@ class TestRunPandasTrouveResultFields:
             return pd.DataFrame({"x": [1]})
 
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
@@ -307,7 +321,7 @@ class TestRunPandasTrouveResultFields:
             raise ValueError("oops")
 
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
-        trouve.compiled = _make_compiled("db.schema.summary")
+        _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(
             fetch_side_effect=RuntimeError("fetch failed")

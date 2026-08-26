@@ -72,6 +72,7 @@ nav:
     - Trouve: topics/trouve.md
     - Project Layout: topics/project-layout.md
     - DAG: topics/dag.md
+    - The Anatomy of a Run: topics/anatomy-of-a-run.md
     - Environments: topics/environments.md
     - Selectors: topics/selectors.md
     - Data Quality Tests: topics/data-quality-tests.md

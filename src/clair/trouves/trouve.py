@@ -59,6 +59,10 @@ class CompiledAttributes(BaseModel):
     logical_address: TrouveAddress
     resolved_sql: str
     resolved_transform: str = ""
+    # The address that each input of a PANDAS Trouve reads, in the parameter
+    # order of the transform. A SQL Trouve keeps its addresses in resolved_sql,
+    # thus this list stays empty for it.
+    input_addresses: list[str] = []
     file_path: Path
     module_name: str
     imports: list[str]
