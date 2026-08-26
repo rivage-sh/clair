@@ -25,6 +25,44 @@ clair validate --project path/to/project
 - The entry for this environment runs on every TABLE and VIEW Trouve.
 - Every address that the entry gives is a valid Snowflake identifier.
 - No two Trouves go to one physical target.
+- No Trouve names a different Trouve as text. See below.
+
+## An address that is text
+
+You point to a different Trouve with an import and an f-string:
+
+```python
+from mydb.refined.events import trouve as refined_events
+
+trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {refined_events}")
+```
+
+The f-string makes a token, and clair replaces the token with an address. If you write the
+same address as text, you get no token:
+
+```python
+# Wrong: clair reads no reference from this text.
+trouve = Trouve(type=TrouveType.TABLE, sql="SELECT * FROM mydb.refined.events")
+```
+
+Two faults follow, and Snowflake reports neither:
+
+- The text makes no DAG edge. clair can build this Trouve before the Trouve that it reads.
+- Routing does not move the text. In your dev environment this Trouve reads the production
+  table, and each Trouve beside it reads your dev table.
+
+`clair validate` reads the syntax tree of your SQL, thus it reports a true table name only.
+An address in a comment or in a string literal is correct, and the command stays quiet:
+
+```sql
+-- This name is correct: mydb.refined.events
+SELECT 'mydb.refined.events' AS source_name, * FROM {refined_events}
+```
+
+The command examines the SQL of each Trouve and the SQL of each `TestSql`. It reports a
+name only when that name is the logical address of a Trouve in your project. A table that
+clair does not hold is correct SQL. SQL that the parser cannot read gives no report,
+because Snowflake owns the SQL syntax.
 
 ## Output
 
@@ -36,7 +74,7 @@ A project with no problems:
   entry: DeveloperRouting(environment_name='dev', user_variable='CLAIR_USER')
   Trouves to route: 12
 
-  ✓ Every physical address is valid. No collisions.
+  ✓ Every physical address is valid. No collisions. Each reference is a Trouve.
 ```
 
 A project with a problem gives exit code 1:
@@ -59,7 +97,7 @@ A project with a problem gives exit code 1:
 
 | Code | Meaning |
 |------|---------|
-| 0 | Every physical address is valid, and no two Trouves collide. |
+| 0 | Every physical address is valid, no two Trouves collide, and each reference is a Trouve. |
 | 1 | clair found one problem or more. |
 
 ## In CI
@@ -70,4 +108,6 @@ A project with a problem gives exit code 1:
     uv run clair validate --env prod
 ```
 
-See the [routing guide](../guides/routing.md) for the entry types and how to write a `route` method.
+See the [routing guide](../guides/routing.md) for the entry types and how to write a `route`
+method. See [The anatomy of a run](../concepts/anatomy-of-a-run.md) for the address that
+each Trouve reads.

@@ -47,6 +47,9 @@ each upstream Trouve, because it does not know the selection yet.
 step 6 renders it a second time from the same source. Only a token becomes an address: an
 address that you type as text, in a comment or in a string literal, stays as you wrote it.
 
+Thus an address that you type as a table name makes no DAG edge, and routing does not move
+it. [`clair validate`](../cli/validate.md) reports that fault.
+
 A pandas Trouve holds the same information in a list. Its `input_addresses` gives the
 address of each input, in the parameter order of the transform.
 
@@ -121,5 +124,7 @@ its previous data. See [Staging](../guides/staging.md).
 `clair compile` does steps 1 to 6, and it writes the SQL to `target/`. It does not connect
 to Snowflake. Run it to read the SQL that a run executes.
 
-`clair validate` does steps 1 to 4, and it applies the routing entry to every Trouve. It
-reports every routing problem at once, and it needs no Snowflake connection.
+`clair validate` does steps 2 and 3, and then it applies the routing entry to every Trouve.
+It reads the environment name, but it opens no profile and it builds no DAG, thus it needs
+no Snowflake connection and no credentials. It reports every problem at once: a bad
+address, a collision, and an address that you type as text.
