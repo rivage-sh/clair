@@ -130,3 +130,14 @@ def get_executable_nodes(dag: ClairDag) -> list[str]:
         name for name in get_execution_order(dag)
         if dag.get_trouve(name).type != TrouveType.SOURCE
     ]
+
+
+def logical_address_of(dag: ClairDag, physical_address: str) -> str:
+    """Give the logical address of the DAG node that *physical_address* keys.
+
+    Give the physical address back if the node holds no compiled attributes.
+    """
+    trouve = dag.get_trouve(physical_address)
+    if trouve.compiled is None:
+        return physical_address
+    return str(trouve.compiled.logical_address)

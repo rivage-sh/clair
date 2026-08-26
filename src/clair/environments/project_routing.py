@@ -145,3 +145,21 @@ def load_project_routing(project_root: Path, env_name: str) -> ProjectRouting:
         environment_names=table.environment_names,
         has_entry=entry is not None,
     )
+
+
+def describe_unnamed_environment(
+    project_routing: ProjectRouting, env_name: str
+) -> str | None:
+    """Make the warning text for a routing file that omits *env_name*.
+
+    Give None if the file names the environment, or if the project has no
+    routing file. The CLI and the Python API both show this text.
+    """
+    if not project_routing.is_unnamed_environment:
+        return None
+    names = ", ".join(project_routing.environment_names) or "nothing"
+    return (
+        f"{ROUTING_FILE_NAME} does not name the environment '{env_name}'. "
+        f"Trouves write to their logical (production) addresses. "
+        f"The file names: {names}"
+    )

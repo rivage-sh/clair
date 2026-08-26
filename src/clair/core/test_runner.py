@@ -233,15 +233,3 @@ def run_tests(
                 )
 
     return results
-
-
-def format_test_output(results: list[TestResult]) -> TestSummary:
-    """Make a TestSummary from the test results.
-
-    Args:
-        results: A list of TestResult objects.
-
-    Returns:
-        A TestSummary. It holds the data and supplies a .render() method.
-    """
-    return TestSummary(results=results)

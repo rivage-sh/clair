@@ -4,6 +4,19 @@ Public API exports. Users import from here in their Trouve files:
 
     from clair import Trouve, TrouveType, Column, ColumnType
 
+Operations
+----------
+The package also holds one function for each operation of the CLI. Each one
+gives a result object with the complete data of the operation::
+
+    import clair
+
+    summary = clair.run("~/projects/analytics")
+    print(summary.succeeded_count, summary.failed_count)
+
+``clair.run()``, ``clair.compile()``, ``clair.test()``, ``clair.catalog()`` and
+``clair.serve_docs()`` come from :mod:`clair.api`.
+
 Runtime context
 ---------------
 Discovery sets ``clair.env`` to the active
@@ -38,7 +51,7 @@ the project.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
@@ -104,4 +117,24 @@ __all__ = [
     "TrouveAddress",
     "TrouveType",
     "UpsertConfig",
+    "catalog",
+    "compile",
+    "run",
+    "serve_docs",
+    "test",
 ]
+
+
+# The operations of the Python API: clair.run(), clair.compile(), clair.test(),
+# clair.catalog() and clair.serve_docs(). The import is late, because
+# clair.api imports the packages that read a project, and each of those
+# packages imports this module.
+_API_NAMES = frozenset({"catalog", "compile", "run", "serve_docs", "test"})
+
+
+def __getattr__(name: str) -> Any:
+    if name in _API_NAMES:
+        from clair import api
+
+        return getattr(api, name)
+    raise AttributeError(f"module 'clair' has no attribute '{name}'")

@@ -25,22 +25,67 @@ from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
 
 
 class CompiledNodeInfo(BaseModel):
-    """The data of one compiled node."""
+    """The data of one compiled node.
+
+    Attributes:
+        name: The physical address, as the DAG keys the node.
+        logical_address: The name that the file path gives.
+        physical_address: The name that clair writes to. A routing entry makes
+            it from the logical address.
+        staging_address: The run-scoped address that a staged plan builds at. It
+            is None when the plan writes to the physical address directly.
+        type: TABLE, VIEW or SOURCE.
+        execution_type: SNOWFLAKE or PANDAS.
+        effective_run_mode: The run mode after clair applied the RunConfig of
+            the Trouve to the run mode of the caller.
+        dependencies: The physical address of each upstream Trouve.
+        sql: The statements, in the order that clair executes them. A pandas
+            Trouve has no statements.
+        artifact_path: The file that holds the compiled text.
+    """
 
     name: str
+    logical_address: str = ""
+    physical_address: str = ""
+    staging_address: str | None = None
     type: str
     execution_type: ExecutionType
+    effective_run_mode: RunMode = RunMode.FULL_REFRESH
     dependencies: list[str]
     sql: list[str]
+    artifact_path: Path | None = None
 
 
 class CompileOutput(BaseModel):
-    """The result of one compile operation."""
+    """The result of one compile operation.
+
+    Attributes:
+        trouve_count: The number of Trouves in the DAG.
+        source_count: The number of sources in the DAG.
+        compiled_nodes: One entry for each Trouve that clair compiled, in the
+            order that clair executes them.
+        artifacts_dir: The directory that holds the compiled text.
+        run_id: The UUIDv7 hex string that identifies this compile run.
+        project_root: The root directory of the project.
+        env_name: The name of the active environment.
+        run_mode: The run mode that the caller gave.
+    """
 
     trouve_count: int
     source_count: int
     compiled_nodes: list[CompiledNodeInfo]
     artifacts_dir: Path
+    run_id: str = ""
+    project_root: Path | None = None
+    env_name: str = ""
+    run_mode: RunMode = RunMode.FULL_REFRESH
+
+    def node(self, address: str) -> CompiledNodeInfo | None:
+        """Find one compiled node by its logical address or its physical address."""
+        for node_info in self.compiled_nodes:
+            if address in (node_info.name, node_info.logical_address, node_info.physical_address):
+                return node_info
+        return None
 
     @staticmethod
     def render_header(trouve_count: int, source_count: int, compiled_nodes: list[CompiledNodeInfo]) -> str:
@@ -188,6 +233,10 @@ def write_compile_output(
             / physical_address.database_name
             / physical_address.schema_name
         )
+        staging_address = (
+            str(make_staging_address(physical_address, run_id)) if use_staging else None
+        )
+
         node_info = None
         if trouve.compiled.execution_type == ExecutionType.PANDAS:
             assert isinstance(trouve, PandasTrouve)
@@ -226,16 +275,22 @@ def write_compile_output(
             header += "\n"
             artifact_content = header + imports_section + fn_source
 
+            artifact_path = artifact_directory / f"{physical_address.table_name}.py"
+
             node_info = CompiledNodeInfo(
                 name=name,
+                logical_address=str(trouve.compiled.logical_address),
+                physical_address=str(physical_address),
+                staging_address=staging_address,
                 type=trouve.type.value.upper(),
                 execution_type=ExecutionType.PANDAS,
+                effective_run_mode=RunMode.FULL_REFRESH,
                 dependencies=deps,
                 sql=[],
+                artifact_path=artifact_path,
             )
             compiled_nodes.append(node_info)
 
-            artifact_path = artifact_directory / f"{physical_address.table_name}.py"
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text(artifact_content)
         elif trouve.compiled.execution_type == ExecutionType.SNOWFLAKE:
@@ -244,16 +299,22 @@ def write_compile_output(
                 trouve, run_mode, run_id, use_staging=use_staging
             )
 
+            sql_file = artifact_directory / f"{physical_address.table_name}.sql"
+
             node_info = CompiledNodeInfo(
                 name=name,
+                logical_address=str(trouve.compiled.logical_address),
+                physical_address=str(physical_address),
+                staging_address=staging_address,
                 type=trouve.type.value.upper(),
                 execution_type=ExecutionType.SNOWFLAKE,
+                effective_run_mode=resolve_effective_mode(trouve, run_mode),
                 dependencies=deps,
                 sql=statements,
+                artifact_path=sql_file,
             )
             compiled_nodes.append(node_info)
 
-            sql_file = artifact_directory / f"{physical_address.table_name}.sql"
             sql_file.parent.mkdir(parents=True, exist_ok=True)
             sql_content = "\n\n---\n\n".join(s.strip() for s in statements)
             sql_file.write_text(sql_content + "\n")
@@ -267,4 +328,7 @@ def write_compile_output(
         source_count=source_count,
         compiled_nodes=compiled_nodes,
         artifacts_dir=artifacts_dir,
+        run_id=run_id,
+        project_root=project_root,
+        run_mode=run_mode,
     )

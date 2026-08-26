@@ -1,5 +1,10 @@
 # CLI Overview
 
+Each command parses the arguments and calls one function of the
+[Python API](../reference/python-api.md). `clair run` calls `clair.run()`,
+`clair compile` calls `clair.compile()`, and so on. A notebook or a program does
+the same work with no `subprocess` call.
+
 All commands share two common flags:
 
 - `--project` — path to the clair project root (default: `.`)

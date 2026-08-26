@@ -30,7 +30,7 @@ Packages inside `src/clair/`:
 | `adapters/` | `base.py` holds the `WarehouseAdapter` ABC. `snowflake.py` is the only implementation. |
 | `environments/` | `environments.py` reads `~/.clair/environments.yml`. `routing.py` remaps targets. |
 | `docs/` | `clair docs` server: `catalog.py`, `columns.py`, `server.py`, bundled SPA in `static/`. |
-| (top level) | `__init__.py` is the public API surface. Also `lineage.py`, `exceptions.py`, `_logging.py`. |
+| (top level) | `api.py` holds the operations: `run`, `compile`, `test`, `catalog`, `serve_docs`. The CLI calls them. `__init__.py` is the public API surface. Also `lineage.py`, `exceptions.py`, `_logging.py`. |
 
 ## Tooling: uv and worktrees
 
