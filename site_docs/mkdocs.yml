@@ -71,6 +71,7 @@ nav:
     - concepts/index.md
     - Trouve: concepts/trouve.md
     - DAG: concepts/dag.md
+    - The Anatomy of a Run: concepts/anatomy-of-a-run.md
     - Project Layout: concepts/project-layout.md
     - Environments: concepts/environments.md
   - Guides:

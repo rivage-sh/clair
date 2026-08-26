@@ -166,17 +166,24 @@ class TestSql(Test):
 
     Put ``{THIS}`` in an f-string to point to the table name of the parent
     Trouve. Put ``{other_trouve}`` to point to a different Trouve, as in
-    ``Trouve.sql``. Discovery replaces each token that points to a different
-    Trouve. ``to_sql(physical_address)`` replaces ``{THIS}`` when the test runs::
+    ``Trouve.sql``::
 
         from clair import THIS
         from db.schema.customers import trouve as customers
 
         TestSql(sql=f"SELECT * FROM {THIS} t LEFT JOIN {customers} c ON t.cid = c.id WHERE c.id IS NULL")
+
+    ``sql`` keeps the tokens that the f-string makes. Discovery writes the SQL
+    with the true addresses to ``resolved_sql``, and the test runner executes
+    that. The two fields are the counterpart of ``Trouve.sql`` and
+    ``CompiledAttributes.resolved_sql``.
     """
 
     type: Literal["sql"] = "sql"
     sql: str
+    # Discovery sets this from sql. recompile_for_selection() sets it a second
+    # time, because the selection decides the address of each upstream Trouve.
+    resolved_sql: str = ""
 
     @property
     def is_run_with_sample(self) -> bool:
@@ -184,7 +191,7 @@ class TestSql(Test):
         return False
 
     def to_sql(self, physical_address: str) -> str:
-        return self.sql
+        return self.resolved_sql
 
 
 AnyTest = Annotated[
