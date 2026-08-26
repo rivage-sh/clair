@@ -18,6 +18,7 @@ example therefore breaks the build.
 | `test_examples.py` | Runs each example project. |
 | `staging_project.py` | Makes a project whose data quality test fails on demand. |
 | `test_staging.py` | Runs the staging steps: build, test, promote or keep. |
+| `test_staging_incremental.py` | Runs the clone and the MERGE of an incremental run. |
 | `scripts/` | The one-time Snowflake setup, for ACCOUNTADMIN. |
 
 ## How one run is isolated
@@ -48,6 +49,13 @@ A low limit passes, and a limit above the row count fails.
 Each test class gives its own database name, for example
 `staging_fail_database`, thus the tests never write one table. The test makes
 the SOURCE table itself, so these tests need no golden schema.
+
+An incremental candidate makes two objects, and a full refresh makes one:
+
+| Object | Holds |
+|---|---|
+| `<table>__clair_<run_id>` | The staging table. A zero copy clone seeds it. |
+| `<table>__clair_merge_<run_id>` | The new rows that the MERGE of an UPSERT reads. An APPEND makes no such table. |
 
 The candidate Trouve runs on one of the two engines, because they write in
 different ways. A SQL Trouve runs `CREATE OR REPLACE TABLE` at the staging

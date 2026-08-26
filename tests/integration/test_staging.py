@@ -23,9 +23,18 @@ from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.staging import STAGING_SUFFIX, make_staging_address
 from clair.trouves.trouve import ExecutionType
 from tests.integration.config import IntegrationConfig
-from tests.integration.conftest import clair_environment, events_named, run_clair
-from tests.integration.projects import physical_address
-from tests.integration.staging_project import write_probe_project
+from tests.integration.conftest import (
+    clair_environment,
+    events_named,
+    run_clair,
+    run_id_of,
+)
+from tests.integration.staging_project import (
+    checked_address,
+    downstream_address,
+    make_source_rows,
+    write_probe_project,
+)
 from tests.integration.warehouse import (
     execute,
     query_rows,
@@ -42,38 +51,16 @@ PASSING_LIMIT = 1
 FAILING_LIMIT = 1_000_000
 
 
-def _source_address(database_name: str, schema_name: str) -> TrouveAddress:
-    """Give the address of the SOURCE table of one probe project."""
-    return physical_address(f"{database_name}.source.rows", schema_name)
-
-
-def _checked_address(database_name: str, schema_name: str) -> TrouveAddress:
-    """Give the address of the Trouve that holds the data quality test."""
-    return physical_address(f"{database_name}.refined.checked", schema_name)
-
-
-def _downstream_address(database_name: str, schema_name: str) -> TrouveAddress:
-    """Give the address of the dependent Trouve."""
-    return physical_address(f"{database_name}.derived.downstream", schema_name)
-
-
 def _make_source_rows(
     adapter: SnowflakeAdapter, database_name: str, schema_name: str, rows: int
 ) -> None:
     """Make the SOURCE table of one probe project, with *rows* rows."""
-    address = _source_address(database_name, schema_name)
-    values = ", ".join(f"('id_{index:03d}')" for index in range(rows))
-    execute(adapter, f"create or replace table {address} (id string)")
-    execute(adapter, f"insert into {address} values {values}")
-
-
-def _run_id_of(completed: subprocess.CompletedProcess[str]) -> str:
-    """Read the run_id out of the run.start event."""
-    starts = events_named(completed, "run.start")
-    assert starts, "clair logged no run.start event"
-    run_id = starts[0].get("run_id")
-    assert isinstance(run_id, str)
-    return run_id
+    make_source_rows(
+        adapter,
+        database_name,
+        schema_name,
+        {f"id_{index:03d}": 1 for index in range(rows)},
+    )
 
 
 class TestASuccessfulRun:
@@ -107,7 +94,7 @@ class TestASuccessfulRun:
         adapter: SnowflakeAdapter,
     ) -> None:
         """The promotion moves the data to the address that the SQL names."""
-        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
         assert table_exists(adapter, checked)
         assert row_count(adapter, checked) == 3
 
@@ -118,7 +105,7 @@ class TestASuccessfulRun:
         adapter: SnowflakeAdapter,
     ) -> None:
         """Clair promotes each node before the next node starts."""
-        downstream = _downstream_address(
+        downstream = downstream_address(
             self.DATABASE_NAME, snowflake_workspace.schema_name
         )
         assert row_count(adapter, downstream) == 3
@@ -130,8 +117,8 @@ class TestASuccessfulRun:
         adapter: SnowflakeAdapter,
     ) -> None:
         """A run that passed leaves no object beside the physical one."""
-        run_id = _run_id_of(completed_run)
-        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        run_id = run_id_of(completed_run)
+        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
         staging = make_staging_address(checked, run_id)
 
         assert not table_exists(adapter, staging)
@@ -198,7 +185,7 @@ class TestAFailedDataQualityTest:
         adapter: SnowflakeAdapter,
     ) -> None:
         """The 5 rejected rows never reach the physical table."""
-        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
         assert row_count(adapter, checked) == 3
 
     def test_clair_keeps_the_rejected_candidate(
@@ -208,8 +195,8 @@ class TestAFailedDataQualityTest:
         adapter: SnowflakeAdapter,
     ) -> None:
         """The candidate holds the exact data that failed the test."""
-        run_id = _run_id_of(failed_run)
-        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        run_id = run_id_of(failed_run)
+        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
         staging = make_staging_address(checked, run_id)
 
         assert table_exists(adapter, staging)
@@ -224,7 +211,7 @@ class TestAFailedDataQualityTest:
     ) -> None:
         """A dependent of a Trouve that failed never runs."""
         skipped = events_named(failed_run, "run.node.skipped")
-        downstream = _downstream_address(
+        downstream = downstream_address(
             self.DATABASE_NAME, snowflake_workspace.schema_name
         )
 
@@ -271,7 +258,7 @@ class TestAPandasTrouveThatPasses:
         adapter: SnowflakeAdapter,
     ) -> None:
         """Snowflake accepts a clone of the table that write_pandas made."""
-        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
         assert table_exists(adapter, checked)
         assert row_count(adapter, checked) == 3
 
@@ -282,7 +269,7 @@ class TestAPandasTrouveThatPasses:
         adapter: SnowflakeAdapter,
     ) -> None:
         """The downstream Trouve is SQL, and it reads the pandas Trouve."""
-        downstream = _downstream_address(
+        downstream = downstream_address(
             self.DATABASE_NAME, snowflake_workspace.schema_name
         )
         assert row_count(adapter, downstream) == 3
@@ -293,8 +280,8 @@ class TestAPandasTrouveThatPasses:
         snowflake_workspace: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
-        run_id = _run_id_of(completed_run)
-        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        run_id = run_id_of(completed_run)
+        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
 
         assert not table_exists(adapter, make_staging_address(checked, run_id))
         assert (
@@ -355,7 +342,7 @@ class TestAPandasTrouveThatFails:
         adapter: SnowflakeAdapter,
     ) -> None:
         """write_pandas replaces a table, so it must never touch this one."""
-        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
         assert row_count(adapter, checked) == 3
 
     def test_clair_keeps_the_rejected_candidate(
@@ -364,8 +351,8 @@ class TestAPandasTrouveThatFails:
         snowflake_workspace: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
-        run_id = _run_id_of(failed_run)
-        checked = _checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        run_id = run_id_of(failed_run)
+        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
         staging = make_staging_address(checked, run_id)
 
         assert table_exists(adapter, staging)
@@ -404,7 +391,7 @@ class TestThePromotionKeepsTheGrants:
             self.DATABASE_NAME,
             minimum_rows=PASSING_LIMIT,
         )
-        checked = _checked_address(self.DATABASE_NAME, schema_name)
+        checked = checked_address(self.DATABASE_NAME, schema_name)
 
         _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=3)
         run_clair(["run", "--project", str(project_path)], environment)
@@ -436,14 +423,14 @@ class TestTheNoTestFlag:
             self.DATABASE_NAME,
             minimum_rows=FAILING_LIMIT,
         )
-        checked = _checked_address(self.DATABASE_NAME, schema_name)
+        checked = checked_address(self.DATABASE_NAME, schema_name)
 
         _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=3)
         completed = run_clair(
             ["run", "--project", str(project_path), "--no-test"], environment
         )
 
-        run_id = _run_id_of(completed)
+        run_id = run_id_of(completed)
         # The test of this project always fails. The run passes, thus clair did
         # not run it, and it did not decide the promotion.
         assert completed.returncode == 0
