@@ -142,3 +142,16 @@ def events_named(
 ) -> list[dict[str, object]]:
     """Give each event with one name."""
     return [event for event in log_events(completed) if event.get("event") == event_name]
+
+
+def run_id_of(completed: subprocess.CompletedProcess[str]) -> str:
+    """Read the run_id out of the run.start event.
+
+    The run_id gives the suffix of each staging address of that run, thus a
+    test can name the object that clair made.
+    """
+    starts = events_named(completed, "run.start")
+    assert starts, "clair logged no run.start event"
+    run_id = starts[0].get("run_id")
+    assert isinstance(run_id, str)
+    return run_id

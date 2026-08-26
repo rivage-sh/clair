@@ -40,6 +40,13 @@ class ExecutionType(StrEnum):
     PANDAS = "pandas"
 
 
+# The MERGE of an UPSERT reads a table that holds the new rows. This suffix and
+# the run_id make the name of that table. It is not the staging suffix of
+# clair.core.staging: the two objects hold different data, and an incremental
+# run makes both.
+MERGE_SUFFIX = "__clair_merge_"
+
+
 class CompiledAttributes(BaseModel):
     """The attributes that discovery sets after it loads a Trouve.
 
@@ -228,7 +235,7 @@ class Trouve(TrouveAbc):
         # The MERGE needs a source table. It is not the staging address: it holds
         # the new rows only, and the MERGE reads it. The name comes from the
         # physical address, thus the two suffixes do not go on top of each other.
-        merge_source = f"{self.physical_address}__clair_merge_{run_id}"
+        merge_source = f"{self.physical_address}{MERGE_SUFFIX}{run_id}"
         all_col_names = [c.name for c in self.columns]
         unique_keys = set(self.run_config.primary_key_columns or [])
 
