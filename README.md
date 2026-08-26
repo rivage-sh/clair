@@ -138,7 +138,7 @@ uv add rivage-clair
 Run `clair init`. It asks for your Snowflake connection details and writes two files:
 
 - `~/.clair/environments.yml` — your connection settings. Do not commit this file.
-- `<project>/__routing__.py` — the [routing](https://clair.rivage.sh/guides/routing/) entry of each environment. Commit this file.
+- `<project>/__routing__.py` — the [routing](https://clair.rivage.sh/topics/routing/) entry of each environment. Commit this file.
 
 ### 2. Create a project
 
@@ -421,7 +421,7 @@ Clair binds `inputs` to the transform parameters by position. Because the transf
 
 > **Note:** pandas transformations run on the machine executing clair, not inside Snowflake. Keep this in mind for large tables.
 
-See the [Pandas-Native Transformations guide](https://rivage-sh.github.io/clair/guides/pandas-native/) for the full field reference, DAG integration details, and limitations.
+See [Pandas-Native Transformations](https://rivage-sh.github.io/clair/topics/pandas-native/) for the full field reference, DAG integration details, and limitations.
 
 ---
 

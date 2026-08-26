@@ -108,6 +108,6 @@ A project with a problem gives exit code 1:
     uv run clair validate --env prod
 ```
 
-See the [routing guide](../guides/routing.md) for the entry types and how to write a `route`
-method. See [The anatomy of a run](../concepts/anatomy-of-a-run.md) for the address that
-each Trouve reads.
+See [Routing](../topics/routing.md) for the entry types and how to write a `route` method.
+See [The Anatomy of a Run](../topics/anatomy-of-a-run.md) for the address that each Trouve
+reads.

@@ -109,4 +109,4 @@ In CI, set `CLAIR_ENV` and use key-pair authentication. This method does not nee
 
 An environment holds connection settings only. The routing rules are in `__routing__.py`, at the root of your project. clair joins the two files by the environment name.
 
-An unknown key in an environment block is an error. A `routing:` block from an older version of clair therefore stops the run, and the message tells you to move the rule. See [Routing](../guides/routing.md).
+An unknown key in an environment block is an error. A `routing:` block from an older version of clair therefore stops the run, and the message tells you to move the rule. See [Routing](routing.md).

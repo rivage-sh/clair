@@ -19,7 +19,7 @@ clair compile --project . --env prod
 clair compile --project . --select='refined.orders.*'
 ```
 
-Each plan shows the staged path: the build at the staging address, a comment that marks the test step, and the promotion. See [Staging](../guides/staging.md).
+Each plan shows the staged path: the build at the staging address, a comment that marks the test step, and the promotion. See [Staging](../topics/staging.md).
 
 ## What it does
 
@@ -53,12 +53,12 @@ _clairtifacts/
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
 | `--env` | optional | Environment name. It selects the entry in `__routing__.py` that clair applies to the generated SQL. |
-| `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../guides/selectors.md). Repeat the flag to add more patterns. |
+| `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Selects which SQL variant clair generates. |
 
 ## See also
 
-- [DAG](../concepts/dag.md)
-- [Selectors](../guides/selectors.md)
-- [Staging](../guides/staging.md)
+- [DAG](../topics/dag.md)
+- [Selectors](../topics/selectors.md)
+- [Staging](../topics/staging.md)
 - [clair clean](clean.md)

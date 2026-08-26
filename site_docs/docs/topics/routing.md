@@ -138,7 +138,7 @@ A third address, the staging address, holds the data until the tests pass. See [
 
 In a partial run, a Trouve reads the physical address of an upstream Trouve that the run
 builds, and the logical address of an upstream Trouve that it does not build. See
-[The anatomy of a run](../concepts/anatomy-of-a-run.md).
+[The anatomy of a run](anatomy-of-a-run.md).
 
 `clair run` logs both, thus you see the file that made the Trouve and the object that clair
 writes:

@@ -25,7 +25,7 @@ environment name, which step 2 needs. See [Environments](environments.md).
 
 clair loads `__routing__.py` and finds the entry with the environment name of step 1. An
 environment with no entry gets `None`, which means passthrough: each physical address is
-the logical address. See [Routing](../guides/routing.md).
+the logical address. See [Routing](routing.md).
 
 ## 3. Discover the project
 
@@ -97,7 +97,7 @@ production for everything else. You do not build 40 tables to test 10.
     clair reads an unselected Trouve at its logical address. This assumes that your
     production runs write there — which a passthrough routing entry does. If your `prod`
     entry moves the address, a partial `dev` run reads a table that nothing writes. Give
-    `prod` an entry that gives the address back, as [Routing](../guides/routing.md) shows.
+    `prod` an entry that gives the address back, as [Routing](routing.md) shows.
 
 This step is the same for both backends. A SQL Trouve holds its addresses in its SQL, and
 a pandas Trouve holds them in `input_addresses`. The rule above decides both. A `TestSql`
@@ -108,7 +108,7 @@ gets its addresses from the same step, thus a test reads the tables that its Tro
 clair runs the Trouves in topological order. Each Trouve writes to a staging address, the
 tests run against the staging data, and clair promotes the data to the physical address
 after the tests pass. A failed test stops the promotion, thus the physical address keeps
-its previous data. See [Staging](../guides/staging.md).
+its previous data. See [Staging](staging.md).
 
 `clair run` logs both addresses for each node:
 

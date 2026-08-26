@@ -124,4 +124,4 @@ Each test class has a `type` literal field. clair uses it as the discriminator: 
 
 ## See also
 
-- [Data Quality Tests guide](../guides/data-quality-tests.md)
+- [Data Quality Tests](../topics/data-quality-tests.md)
