@@ -67,21 +67,20 @@ nav:
     - index.md
     - Installation: installation.md
     - Quickstart: quickstart.md
-  - Concepts:
-    - concepts/index.md
-    - Trouve: concepts/trouve.md
-    - DAG: concepts/dag.md
-    - Project Layout: concepts/project-layout.md
-    - Environments: concepts/environments.md
-  - Guides:
-    - guides/index.md
-    - Pandas-Native Transformations: guides/pandas-native.md
-    - Incrementality: guides/incrementality.md
-    - Data Quality Tests: guides/data-quality-tests.md
-    - Staging: guides/staging.md
-    - Selectors: guides/selectors.md
-    - Routing: guides/routing.md
-    - Per-Database & Schema Config: guides/per-database-schema-config.md
+  - Topics:
+    - topics/index.md
+    - Trouve: topics/trouve.md
+    - Project Layout: topics/project-layout.md
+    - DAG: topics/dag.md
+    - The Anatomy of a Run: topics/anatomy-of-a-run.md
+    - Environments: topics/environments.md
+    - Selectors: topics/selectors.md
+    - Data Quality Tests: topics/data-quality-tests.md
+    - Staging: topics/staging.md
+    - Incrementality: topics/incrementality.md
+    - Pandas-Native Transformations: topics/pandas-native.md
+    - Routing: topics/routing.md
+    - Per-Database & Schema Config: topics/per-database-schema-config.md
   - CLI:
     - cli/overview.md
     - clair init: cli/init.md

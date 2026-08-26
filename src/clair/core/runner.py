@@ -210,15 +210,25 @@ def _run_pandas_trouve(
 
     # 1. Read each input DataFrame. Clair keeps the order of trouve.inputs.
     input_dataframes: list[pd.DataFrame] = []
-    for parameter_name, upstream in zip(trouve.parameter_names(), trouve.upstream_trouves()):
+    # compiled.input_addresses holds the address of each input, in the parameter
+    # order of the transform. recompile_for_selection() sets it: the physical
+    # address of an input that this run builds, and the logical production
+    # address of an input that it does not build.
+    assert trouve.compiled is not None
+    assert len(trouve.compiled.input_addresses) == len(trouve.inputs)
+    for parameter_name, input_address in zip(
+        trouve.parameter_names(), trouve.compiled.input_addresses
+    ):
         try:
-            input_dataframes.append(adapter.fetch_dataframe(upstream.physical_address))
+            input_dataframes.append(
+                adapter.fetch_dataframe(TrouveAddress.parse(input_address))
+            )
         except Exception as fetch_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
             duration = time.monotonic() - start
             return RunResult(
                 physical_address=str(trouve.physical_address),
                 status=RunStatus.FAILURE,
-                error=f"Clair cannot read the input '{parameter_name}' ({upstream.physical_address}): {fetch_error}",
+                error=f"Clair cannot read the input '{parameter_name}' ({input_address}): {fetch_error}",
                 duration_seconds=duration,
             )
 

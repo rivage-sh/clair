@@ -499,18 +499,18 @@ class TestUseSample:
 
 
 class TestTestSql:
-    def test_to_sql_is_passthrough(self):
-        """to_sql gives self.sql with no change. Discovery replaces each token."""
+    def test_to_sql_gives_the_resolved_sql(self):
+        """to_sql gives resolved_sql. Discovery replaces each token in sql."""
         pre_resolved = "SELECT * FROM db.schema.orders WHERE amount < 0"
-        test = TestSql(sql=pre_resolved)
+        test = TestSql(sql=pre_resolved, resolved_sql=pre_resolved)
         assert test.to_sql("db.schema.orders") == pre_resolved
 
     def test_label_is_sql(self):
-        test = TestSql(sql="SELECT 1")
+        test = TestSql(sql="SELECT 1", resolved_sql="SELECT 1")
         assert test.label == "sql"
 
     def test_is_run_with_sample_false(self):
-        test = TestSql(sql="SELECT 1")
+        test = TestSql(sql="SELECT 1", resolved_sql="SELECT 1")
         assert test.is_run_with_sample is False
 
     def test_this_sentinel_format_returns_placeholder(self):
@@ -521,7 +521,7 @@ class TestTestSql:
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
-            [TestSql(sql="SELECT * FROM db.s.orders WHERE amount < 0")],
+            [TestSql(sql="SELECT * FROM db.s.orders WHERE amount < 0", resolved_sql="SELECT * FROM db.s.orders WHERE amount < 0")],
         )
         dag = build_dag([dt])
         adapter = _make_mock_adapter(row_count=0)
@@ -537,7 +537,7 @@ class TestTestSql:
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
-            [TestSql(sql="SELECT * FROM db.s.orders WHERE amount < 0")],
+            [TestSql(sql="SELECT * FROM db.s.orders WHERE amount < 0", resolved_sql="SELECT * FROM db.s.orders WHERE amount < 0")],
         )
         dag = build_dag([dt])
         adapter = _make_mock_adapter(row_count=4)
@@ -549,12 +549,12 @@ class TestTestSql:
         assert results[0].failing_row_count == 4
 
     def test_sql_sent_to_adapter_verbatim(self):
-        """The adapter executes test.sql exactly. Clair changes nothing at run time."""
+        """The adapter executes resolved_sql exactly. Clair changes nothing at run time."""
         pre_resolved = "SELECT * FROM db.s.orders WHERE amount < 0"
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
-            [TestSql(sql=pre_resolved)],
+            [TestSql(sql=pre_resolved, resolved_sql=pre_resolved)],
         )
         dag = build_dag([dt])
         adapter = _make_mock_adapter(row_count=0)
@@ -568,7 +568,7 @@ class TestTestSql:
         dt = _make_trouve_with_tests(
             "db.s.raw",
             TrouveType.SOURCE,
-            [TestSql(sql="SELECT * FROM db.s.raw WHERE 1=0")],
+            [TestSql(sql="SELECT * FROM db.s.raw WHERE 1=0", resolved_sql="SELECT * FROM db.s.raw WHERE 1=0")],
         )
         dag = build_dag([dt])
         adapter = _make_mock_adapter(row_count=0)
@@ -583,7 +583,7 @@ class TestTestSql:
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
-            [TestSql(sql="SELECT * FROM db.s.orders WHERE amount < 0")],
+            [TestSql(sql="SELECT * FROM db.s.orders WHERE amount < 0", resolved_sql="SELECT * FROM db.s.orders WHERE amount < 0")],
         )
         dag = build_dag([dt])
         adapter = _make_mock_adapter(row_count=0)

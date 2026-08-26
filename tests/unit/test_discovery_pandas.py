@@ -5,9 +5,10 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from clair.core.discovery import discover_project
+from clair.core.discovery import discover_project, recompile_for_selection
 from clair.trouves.pandas_trouve import PandasTrouve
-from clair.trouves.trouve import Trouve
+from clair.trouves.trouve import Trouve, TrouveAbc
+from tests.helpers import DatabaseOverrideRouting
 
 
 def _make_pandas_project(tmp_path: Path) -> Path:
@@ -229,3 +230,89 @@ class TestMixedDag:
         refined = next(t for t in trouves if str(t.physical_address) == "mydb.refined.events")
         assert refined.compiled is not None
         assert "mydb.source.events" in refined.compiled.imports
+
+
+class TestPandasInputAddresses:
+    """The tests of input_addresses, the read address of each pandas input.
+
+    A pandas Trouve names its inputs in a list, and not in SQL. These tests
+    confirm that the list obeys the same rule as the SQL of a SQL Trouve.
+    """
+
+    def _addresses_of(
+        self, trouves: list[TrouveAbc], logical_address: str
+    ) -> list[str]:
+        trouve = next(
+            t for t in trouves
+            if t.compiled and str(t.compiled.logical_address) == logical_address
+        )
+        assert trouve.compiled is not None
+        return trouve.compiled.input_addresses
+
+    def test_discovery_gives_the_logical_address(self, tmp_path: Path):
+        """Before the selection, each input holds its logical address."""
+        project = _make_chained_pandas_project(tmp_path)
+        trouves = discover_project(
+            project, routing=DatabaseOverrideRouting(database_name="omer")
+        )
+
+        assert self._addresses_of(trouves, "mydb.derived.step_two") == [
+            "mydb.derived.step_one"
+        ]
+
+    def test_a_selected_input_takes_its_physical_address(self, tmp_path: Path):
+        """This run builds step_one, thus step_two reads the new table."""
+        project = _make_chained_pandas_project(tmp_path)
+        trouves = discover_project(
+            project, routing=DatabaseOverrideRouting(database_name="omer")
+        )
+
+        recompile_for_selection(
+            trouves, {"omer.derived.step_one", "omer.derived.step_two"}
+        )
+
+        assert self._addresses_of(trouves, "mydb.derived.step_two") == [
+            "omer.derived.step_one"
+        ]
+
+    def test_an_input_outside_the_selection_stays_logical(self, tmp_path: Path):
+        """This run does not build step_one, thus step_two reads production."""
+        project = _make_chained_pandas_project(tmp_path)
+        trouves = discover_project(
+            project, routing=DatabaseOverrideRouting(database_name="omer")
+        )
+
+        recompile_for_selection(trouves, {"omer.derived.step_two"})
+
+        assert self._addresses_of(trouves, "mydb.derived.step_two") == [
+            "mydb.derived.step_one"
+        ]
+
+    def test_a_routed_source_input_takes_its_physical_address(self, tmp_path: Path):
+        """Clair never builds a SOURCE, thus the routing entry decides its address."""
+        project = _make_chained_pandas_project(tmp_path)
+        trouves = discover_project(
+            project, routing=DatabaseOverrideRouting(database_name="omer")
+        )
+
+        recompile_for_selection(trouves, {"omer.derived.step_one"})
+
+        assert self._addresses_of(trouves, "mydb.derived.step_one") == [
+            "omer.source.events"
+        ]
+
+    def test_no_routing_keeps_each_input_logical(self, tmp_path: Path):
+        """With no routing entry, the logical address is the physical address."""
+        project = _make_chained_pandas_project(tmp_path)
+        trouves = discover_project(project, routing=None)
+
+        recompile_for_selection(
+            trouves, {"mydb.derived.step_one", "mydb.derived.step_two"}
+        )
+
+        assert self._addresses_of(trouves, "mydb.derived.step_two") == [
+            "mydb.derived.step_one"
+        ]
+        assert self._addresses_of(trouves, "mydb.derived.step_one") == [
+            "mydb.source.events"
+        ]

@@ -60,4 +60,4 @@ Would remove 3 artifact run(s):
 ## See also
 
 - [clair compile](compile.md)
-- [DAG concepts — artifacts](../concepts/dag.md#artifacts)
+- [DAG — artifacts](../topics/dag.md#artifacts)

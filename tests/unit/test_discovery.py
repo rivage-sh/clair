@@ -365,6 +365,59 @@ class TestRecompileForSelection:
         assert "omer.source.events" in refined.compiled.resolved_sql
         assert "mydb.source.events" not in refined.compiled.resolved_sql
 
+    def test_an_address_in_text_stays_as_the_author_wrote_it(self, tmp_path: Path):
+        """Only a token becomes an address. Clair reads no address out of the text.
+
+        The author points to a Trouve with an f-string, and that makes a token.
+        An address that the author types as text makes no DAG edge, thus clair
+        must not move it. A string literal and a comment keep their text too.
+        """
+        (tmp_path / "mydb" / "source").mkdir(parents=True)
+        (tmp_path / "mydb" / "refined").mkdir(parents=True)
+
+        (tmp_path / "mydb" / "source" / "events.py").write_text(textwrap.dedent("""\
+            from clair import Trouve, TrouveType
+            trouve = Trouve(type=TrouveType.SOURCE)
+        """))
+        (tmp_path / "mydb" / "refined" / "events.py").write_text(textwrap.dedent("""\
+            from mydb.source.events import trouve as source_events
+            from clair import Trouve, TrouveType
+            trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {source_events}")
+        """))
+        (tmp_path / "mydb" / "refined" / "report.py").write_text(textwrap.dedent("""\
+            from mydb.refined.events import trouve as refined_events
+            from clair import Trouve, TrouveType
+            trouve = Trouve(
+                type=TrouveType.TABLE,
+                sql=f'''
+                    -- The old name was mydb.refined.events.
+                    SELECT '{"mydb.refined.events"}' AS source_name, *
+                    FROM {refined_events}
+                ''',
+            )
+        """))
+
+        routing = DatabaseOverrideRouting(database_name="omer")
+        trouves = discover_project(tmp_path, routing=routing)
+        selected = {
+            str(t.compiled.physical_address)
+            for t in trouves
+            if t.compiled and t.type != TrouveType.SOURCE
+        }
+        recompile_for_selection(trouves, selected)
+
+        report = next(
+            t for t in trouves
+            if t.compiled and str(t.compiled.logical_address) == "mydb.refined.report"
+        )
+        assert report.compiled is not None
+        sql = report.compiled.resolved_sql
+        # The token becomes the physical address.
+        assert "FROM omer.refined.events" in sql
+        # The comment and the string literal keep the text of the author.
+        assert "-- The old name was mydb.refined.events." in sql
+        assert "'mydb.refined.events' AS source_name" in sql
+
     def test_a_source_that_stays_keeps_its_logical_address(self, tmp_path: Path):
         """An entry that gives a SOURCE back leaves the address in the SQL."""
         project = _make_chained_project(tmp_path)
@@ -442,7 +495,7 @@ class TestRecompileForSelectionTestSql:
         return tmp_path
 
     def test_discovery_resolves_cross_trouve_placeholder_in_test_sql(self, tmp_path: Path):
-        """After discover_project, each token in TestSql.sql is a logical address."""
+        """After discover_project, TestSql.resolved_sql holds each logical address."""
         from clair.trouves._refs import THIS_PLACEHOLDER
         project = self._make_project_with_test_sql(tmp_path)
         trouves = discover_project(project)
@@ -452,13 +505,15 @@ class TestRecompileForSelectionTestSql:
         assert isinstance(test, TestSql)
 
         # Discovery replaces the THIS token and each token that points to a
-        # different Trouve.
-        assert "mydb.refined.orders" in test.sql
-        assert "mydb.source.customers" in test.sql
-        assert THIS_PLACEHOLDER not in test.sql
+        # different Trouve. It writes the result to resolved_sql, and it keeps
+        # the tokens in sql.
+        assert "mydb.refined.orders" in test.resolved_sql
+        assert "mydb.source.customers" in test.resolved_sql
+        assert THIS_PLACEHOLDER not in test.resolved_sql
+        assert THIS_PLACEHOLDER in test.sql
 
     def test_recompile_upgrades_cross_trouve_test_sql_refs(self, tmp_path: Path):
-        """recompile_for_selection changes each name in TestSql.sql to a physical address."""
+        """recompile_for_selection makes TestSql.resolved_sql from the tokens again."""
         project = self._make_project_with_test_sql(tmp_path)
         routing = DatabaseOverrideRouting(database_name="dev")
         trouves = discover_project(project, routing=routing)
@@ -474,7 +529,7 @@ class TestRecompileForSelectionTestSql:
         assert isinstance(test, TestSql)
         # customers is a SOURCE, and this entry gives it a new address. The
         # test SQL therefore reads that address.
-        assert "dev.source.customers" in test.sql
+        assert "dev.source.customers" in test.resolved_sql
 
     def test_recompile_upgrades_table_refs_in_test_sql(self, tmp_path: Path):
         """A TestSql name that points to a selected upstream TABLE becomes a physical address."""
@@ -517,8 +572,8 @@ class TestRecompileForSelectionTestSql:
         test = top.tests[0]
         assert isinstance(test, TestSql)
         # The selection contains base, and thus the test SQL holds dev.refined.base.
-        assert "dev.refined.base" in test.sql
-        assert "mydb.refined.base" not in test.sql
+        assert "dev.refined.base" in test.resolved_sql
+        assert "mydb.refined.base" not in test.resolved_sql
 
 
 class TestDiscoveryRunMode:

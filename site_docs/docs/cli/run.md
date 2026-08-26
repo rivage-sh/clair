@@ -57,7 +57,7 @@ Two limits to know:
 
 clair runs the attached tests after each successful TABLE or VIEW. If a test fails, the run stops with a non-zero status code. Use `--no-test` to skip the tests.
 
-The tests decide the publication. They do not report a fault after it reaches production: clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes. See [Staging](../guides/staging.md).
+The tests decide the publication. They do not report a fault after it reaches production: clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes. See [Staging](../topics/staging.md).
 
 ## Flags
 
@@ -65,7 +65,7 @@ The tests decide the publication. They do not report a fault after it reaches pr
 |------|---------|-------------|
 | `--project` | `.` | Path to the clair project root |
 | `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
-| `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../guides/selectors.md). Repeat the flag to add more patterns. |
+| `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides the `run_config` of each Trouve. |
 | `--no-test` | `false` | Skip the data quality tests |
 | `--sample` | `false` | Run the tests against `SELECT TOP 1000 *` (skips `TestRowCount`) |
@@ -80,7 +80,7 @@ The tests decide the publication. They do not report a fault after it reaches pr
 
 ## See also
 
-- [Selectors](../guides/selectors.md)
-- [Incrementality](../guides/incrementality.md)
-- [Data Quality Tests](../guides/data-quality-tests.md)
-- [Staging](../guides/staging.md)
+- [Selectors](../topics/selectors.md)
+- [Incrementality](../topics/incrementality.md)
+- [Data Quality Tests](../topics/data-quality-tests.md)
+- [Staging](../topics/staging.md)

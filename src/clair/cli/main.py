@@ -31,6 +31,7 @@ from clair.core.runner import RunStatus, run_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import format_test_output, run_tests
+from clair.core.text_references import find_text_references
 from clair.docs.catalog import build_catalog
 from clair.docs.server import serve
 from clair.environments.environments import DEFAULT_THREADS, load_environment
@@ -428,13 +429,31 @@ def validate(project: str, env: str | None) -> None:
                 click.echo(f"      ↳ {source}")
             click.echo("")
 
-    problem_count = len(problems) + len(collisions)
+    # An address that an author writes as text makes no DAG edge, and routing
+    # does not move it. Both faults are silent at run time.
+    text_references = find_text_references(discovered)
+    for reference in text_references:
+        click.echo(click.style(f"  ✗ {reference.logical_address}", fg="red", bold=True))
+        click.echo(
+            f"    The {reference.location} names '{reference.text_address}' as text."
+        )
+        click.echo(
+            "    Import that Trouve and put it in an f-string. Clair then makes a DAG\n"
+            "    edge, and the routing entry moves the address.\n"
+        )
+
+    problem_count = len(problems) + len(collisions) + len(text_references)
     if problem_count:
         label = "problem" if problem_count == 1 else "problems"
         click.echo(click.style(f"  {problem_count} {label} found.\n", fg="red", bold=True))
         sys.exit(1)
 
-    click.echo(click.style("  ✓ Every physical address is valid. No collisions.\n", fg="green"))
+    click.echo(
+        click.style(
+            "  ✓ Every physical address is valid. No collisions. Each reference is a Trouve.\n",
+            fg="green",
+        )
+    )
 
 
 @cli.command()

@@ -179,7 +179,7 @@ trouve = PandasTrouve(
 )
 ```
 
-See the [Pandas-native guide](../guides/pandas-native.md) for a full example.
+See the [Pandas-Native Transformations](../topics/pandas-native.md) for a full example.
 
 ## The f-string pattern
 

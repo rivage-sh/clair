@@ -60,6 +60,22 @@ one home, nothing repeats, and names say what they mean.
 make one piece and give it a parameter. Two copies that drift apart are worse than one
 function with an argument. `grep` for a helper before you add one.
 
+**A closed set of values is a `StrEnum`.** When a field, an argument, or a return value
+holds one of a known set of strings, declare a `StrEnum` and use its members. Do not write
+the raw string at the definition site or at the call site. The enum gives one home for the
+set, the type checker finds a name that is not a member, and a reader sees each permitted
+value. See `TrouveType`, `RunMode`, and `TextReferenceLocation`.
+
+```python
+# Bad — the set of values lives in nobody's head but the author's.
+location: str
+sources.append(("test sql", test.sql))
+
+# Good — the set has one home.
+location: TextReferenceLocation
+sources.append((TextReferenceLocation.TEST_SQL, test.sql))
+```
+
 **Reference, do not copy.** A function calls the shared function, a document links to the
 page, a test uses `tests/conftest.py` or `tests/helpers.py`. A copy becomes wrong when the
 original changes, and nobody knows that it did.

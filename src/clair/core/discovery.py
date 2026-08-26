@@ -24,6 +24,7 @@ from clair.environments.routing import (
     detect_routing_collisions,
     route,
 )
+from clair.exceptions import DiscoveryError
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
@@ -127,19 +128,23 @@ _PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 
 def _resolve_sql(
     sql: str,
-    id_to_logical_address: dict[int, TrouveAddress],
+    id_to_address: dict[int, TrouveAddress],
     this_address: TrouveAddress,
 ) -> str:
-    """Replace each placeholder token with the true logical address.
+    """Render the SQL of the author into SQL with true addresses.
 
     The function replaces a token that points to a different Trouve
-    (``__CLAIR_TROUVE_<id>__``). It also replaces the THIS marker
-    (``__CLAIR_THIS__``) with ``this_address``, the logical address of the
-    current Trouve. Later, ``recompile_for_selection`` changes a logical address
-    to a physical address for each selected upstream Trouve.
+    (``__CLAIR_TROUVE_<id>__``) with the address in ``id_to_address``. It also
+    replaces the THIS marker (``__CLAIR_THIS__``) with ``this_address``.
+
+    Clair calls this function two times, and the map decides the difference.
+    discover_project() gives the logical addresses, because it does not know the
+    selection. recompile_for_selection() gives the address that the selection
+    decides. Both calls read the same source string, thus the second call needs
+    no text substitution on the result of the first.
     """
     def replace(m: re.Match[str]) -> str:
-        address = id_to_logical_address.get(int(m.group(1)))
+        address = id_to_address.get(int(m.group(1)))
         return str(address) if address else m.group(0)
     result = _PLACEHOLDER_RE.sub(replace, sql)
     return result.replace(THIS_PLACEHOLDER, str(this_address))
@@ -291,9 +296,24 @@ def discover_project(
         if trouve_obj.execution_type == ExecutionType.PANDAS:
             assert isinstance(trouve_obj, PandasTrouve)
             transform_imports: list[str] = []
+            # The address that each input reads, in the parameter order of the
+            # transform. This list is the counterpart of the addresses in the
+            # SQL of a SQL Trouve: discovery writes the logical address, and
+            # recompile_for_selection() changes it in the same way. Thus the two
+            # backends read the same tables.
+            input_addresses: list[str] = []
             for upstream in trouve_obj.upstream_trouves():
                 dependency = id_to_logical_address.get(id(upstream))
-                if dependency is None or dependency == logical:
+                if dependency is None:
+                    raise DiscoveryError(
+                        str(file_path),
+                        f"the Trouve '{logical}' names an input that clair did "
+                        "not find. Each input must be the `trouve` object of a "
+                        "file in this project.",
+                    )
+                input_addresses.append(str(dependency))
+
+                if dependency == logical:
                     continue
                 if str(dependency) not in transform_imports:
                     transform_imports.append(str(dependency))
@@ -311,12 +331,15 @@ def discover_project(
                 file_path=file_path.relative_to(project_root),
                 module_name=module_name,
                 imports=transform_imports,
+                input_addresses=input_addresses,
                 config=_resolve_config(file_path, project_root, profile_defaults),
                 execution_type=ExecutionType.PANDAS,
             )
             for test in trouve_obj.tests:
                 if isinstance(test, TestSql):
-                    test.sql = _resolve_sql(test.sql, logical_addresses, this_address=logical)
+                    test.resolved_sql = _resolve_sql(
+                        test.sql, logical_addresses, this_address=logical
+                    )
         else:
             assert isinstance(trouve_obj, Trouve)
             trouve_obj.compiled = CompiledAttributes(
@@ -331,7 +354,9 @@ def discover_project(
             )
             for test in trouve_obj.tests:
                 if isinstance(test, TestSql):
-                    test.sql = _resolve_sql(test.sql, logical_addresses, this_address=logical)
+                    test.resolved_sql = _resolve_sql(
+                        test.sql, logical_addresses, this_address=logical
+                    )
 
     trouve_count = len(collected)
     logger.info("discovery.complete", project_root=str(project_root), trouves=trouve_count, errors=len(errors))
@@ -357,66 +382,98 @@ def find_routing_collisions(trouves: Sequence[TrouveAbc]) -> list[tuple[str, lis
     return detect_routing_collisions(logical_to_physical)
 
 
+def _reference_addresses_for_selection(
+    trouves: Sequence[TrouveAbc], selected_addresses: set[str]
+) -> dict[int, TrouveAddress]:
+    """Give the address that each Trouve reads at, keyed by the object id.
+
+    Three rules decide the address:
+
+    * This run builds the Trouve, thus a reader takes the physical address. The
+      new data goes there.
+    * This run does not build the Trouve, thus a reader takes the logical
+      address. Nothing writes a new copy, thus the production table holds the
+      newest data.
+    * The Trouve is a SOURCE, thus a reader takes the physical address. Clair
+      never builds a SOURCE, thus the routing entry is the only statement about
+      where the data is.
+    """
+    reference_addresses: dict[int, TrouveAddress] = {}
+    for trouve in trouves:
+        if not trouve.compiled:
+            continue
+        this_run_builds_it = (
+            str(trouve.compiled.physical_address) in selected_addresses
+        )
+        if trouve.type == TrouveType.SOURCE or this_run_builds_it:
+            reference_addresses[id(trouve)] = trouve.compiled.physical_address
+        else:
+            reference_addresses[id(trouve)] = trouve.compiled.logical_address
+    return reference_addresses
+
+
 def recompile_for_selection(
     trouves: Sequence[TrouveAbc], selected_addresses: set[str]
 ) -> None:
-    """Change each selected upstream address in the SQL from logical to physical.
+    """Resolve each address again, now that clair knows the selection.
 
-    After discover_project(), the resolved_sql of each Trouve holds the logical
-    production address of each upstream Trouve. This function changes the
-    address of each selected TABLE or VIEW upstream Trouve to its physical
-    address, because clair materializes that Trouve there in this run.
+    discover_project() resolves each reference to a logical production address,
+    because it does not know the selection yet. This function resolves each
+    reference a second time, and the selection now decides each address. See
+    ``_reference_addresses_for_selection`` for the rule.
 
-    A routed SOURCE upstream Trouve always takes its physical address: clair
-    never builds a SOURCE, thus the physical address is the only place that holds
-    it. A TABLE or VIEW upstream Trouve that the user did not select keeps its
-    logical address. Thus a partial run reads the correct production tables.
+    The function reads the placeholder tokens of the author, and not the
+    addresses that discovery wrote. ``Trouve.sql`` and ``TestSql.sql`` keep
+    those tokens, thus clair renders the SQL again from the source. Only a token
+    becomes an address. An address that the author types as text stays as it is,
+    and it makes no DAG edge either.
 
-    This function changes each Trouve in place. It does nothing when no routing
-    policy is active, because the two addresses are then equal.
+    This function changes each Trouve in place. It writes three places: the
+    resolved_sql of a SQL Trouve, the resolved_sql of each TestSql, and the
+    input_addresses of a pandas Trouve. It changes nothing for a Trouve outside
+    the selection, because this run does not execute that Trouve.
 
     Args:
         trouves: Each Trouve from discover_project().
         selected_addresses: The physical addresses of the Trouves for this run.
             The DAG selector gives them.
     """
-    # Map the logical address to the physical address of each Trouve that goes
-    # somewhere else. A SOURCE is never in selected_addresses, because clair does
-    # not build it, and the physical address is the only place that holds it.
-    logical_to_physical: dict[str, str] = {}
-    for t in trouves:
-        if not t.compiled or t.compiled.physical_address == t.compiled.logical_address:
+    reference_addresses = _reference_addresses_for_selection(
+        trouves, selected_addresses
+    )
+
+    for trouve in trouves:
+        if not trouve.compiled:
             continue
-        if (
-            t.type == TrouveType.SOURCE
-            or str(t.compiled.physical_address) in selected_addresses
-        ):
-            logical_to_physical[str(t.compiled.logical_address)] = str(
-                t.compiled.physical_address
+        if str(trouve.compiled.physical_address) not in selected_addresses:
+            continue
+
+        # The Trouve writes to its own physical address, thus its own SQL points
+        # to the physical address too. An incremental Trouve reads the target
+        # with the THIS marker.
+        this_address = trouve.compiled.physical_address
+
+        if isinstance(trouve, Trouve):
+            trouve.compiled = trouve.compiled.model_copy(
+                update={
+                    "resolved_sql": _resolve_sql(
+                        trouve.sql, reference_addresses, this_address=this_address
+                    )
+                }
+            )
+        elif isinstance(trouve, PandasTrouve):
+            # A pandas Trouve names each input in a list, and not in SQL.
+            trouve.compiled = trouve.compiled.model_copy(
+                update={
+                    "input_addresses": [
+                        str(reference_addresses[id(upstream)])
+                        for upstream in trouve.upstream_trouves()
+                    ]
+                }
             )
 
-    if not logical_to_physical:
-        return
-
-    # In the SQL of each selected Trouve, replace the logical upstream address
-    # with the physical address. The pattern has a negative lookaround. A longer
-    # identifier with the same prefix stays as it is. For example, the pattern
-    # "db.s.foo" does not match the text "db.s.foobar".
-    for t in trouves:
-        if not t.compiled or str(t.compiled.physical_address) not in selected_addresses:
-            continue
-
-        sql = t.compiled.resolved_sql
-        for logical, physical in logical_to_physical.items():
-            pattern = r"(?<![A-Za-z0-9_.\\])" + re.escape(logical) + r"(?![A-Za-z0-9_.])"
-            sql = re.sub(pattern, physical, sql, flags=re.IGNORECASE)
-
-        t.compiled = t.compiled.model_copy(update={"resolved_sql": sql})
-
-        for test in t.tests:
+        for test in trouve.tests:
             if isinstance(test, TestSql):
-                test_sql = test.sql
-                for logical, physical in logical_to_physical.items():
-                    pattern = r"(?<![A-Za-z0-9_.\\])" + re.escape(logical) + r"(?![A-Za-z0-9_.])"
-                    test_sql = re.sub(pattern, physical, test_sql, flags=re.IGNORECASE)
-                test.sql = test_sql
+                test.resolved_sql = _resolve_sql(
+                    test.sql, reference_addresses, this_address=this_address
+                )

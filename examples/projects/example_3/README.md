@@ -71,7 +71,7 @@ clair validate --project examples/projects/example_3 --env prod
 This entry gives a SOURCE back unchanged, thus the `source` schema keeps its logical name
 in every environment.
 
-See the [routing guide](../../site_docs/docs/guides/routing.md) for the full rules.
+See the [Routing](../../site_docs/docs/topics/routing.md) for the full rules.
 
 ## Running the example
 
