@@ -6,7 +6,7 @@ import textwrap
 from pathlib import Path
 
 from clair.core.discovery import discover_project
-from clair.core.text_references import find_text_references
+from clair.core.text_references import TextReferenceLocation, find_text_references
 
 
 def _write_source(root: Path) -> None:
@@ -38,7 +38,7 @@ class TestFindTextReferences:
         assert len(references) == 1
         assert references[0].logical_address == "mydb.refined.report"
         assert references[0].text_address == "mydb.source.events"
-        assert references[0].location == "sql"
+        assert references[0].location == TextReferenceLocation.SQL
 
     def test_an_f_string_reference_is_correct(self, tmp_path: Path):
         """The author imports the Trouve, thus the SQL holds a token."""
@@ -128,7 +128,7 @@ class TestFindTextReferences:
         references = find_text_references(discover_project(tmp_path))
 
         assert len(references) == 1
-        assert references[0].location == "test sql"
+        assert references[0].location == TextReferenceLocation.TEST_SQL
         assert references[0].text_address == "mydb.source.events"
 
     def test_a_pandas_trouve_has_no_sql_to_read(self, tmp_path: Path):

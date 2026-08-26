@@ -27,6 +27,7 @@ string literal is not a fault: only a true table name is.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from enum import StrEnum
 
 import sqlglot
 import structlog
@@ -47,18 +48,25 @@ _DIALECT = "snowflake"
 _ADDRESS_PART_COUNT = 3
 
 
+class TextReferenceLocation(StrEnum):
+    """The part of a Trouve that holds the text."""
+
+    SQL = "sql"
+    TEST_SQL = "test sql"
+
+
 class TextReference(BaseModel):
     """One address that a Trouve names as text.
 
     Attributes:
         logical_address: The Trouve that holds the text.
         text_address: The address that the author wrote as text.
-        location: Where the text is: "sql" or "test sql".
+        location: The part of the Trouve that holds the text.
     """
 
     logical_address: str
     text_address: str
-    location: str
+    location: TextReferenceLocation
 
 
 def _table_names(sql: str) -> list[str]:
@@ -118,12 +126,12 @@ def find_text_references(trouves: Sequence[TrouveAbc]) -> list[TextReference]:
             continue
         own_address = str(trouve.compiled.logical_address)
 
-        sources: list[tuple[str, str]] = []
+        sources: list[tuple[TextReferenceLocation, str]] = []
         if isinstance(trouve, Trouve):
-            sources.append(("sql", trouve.sql))
+            sources.append((TextReferenceLocation.SQL, trouve.sql))
         for test in trouve.tests:
             if isinstance(test, TestSql):
-                sources.append(("test sql", test.sql))
+                sources.append((TextReferenceLocation.TEST_SQL, test.sql))
 
         for location, sql in sources:
             for name in _table_names(sql):
