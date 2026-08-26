@@ -1,0 +1,15 @@
+/* A small line below a heading. It points to the source code of the step. */
+.source-link {
+  margin-top: -0.6em;
+  font-size: 0.7rem;
+  color: var(--md-default-fg-color--light);
+}
+
+/* Each row of a table in this wrapper jumps to the section of its link. */
+.clickable-rows tbody tr {
+  cursor: pointer;
+}
+
+.clickable-rows tbody tr:hover {
+  background-color: var(--md-accent-fg-color--transparent);
+}

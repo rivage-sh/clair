@@ -5,17 +5,26 @@ exists. Read it when you must know which table a Trouve reads in a partial run.
 
 ## The seven steps
 
+Each row below moves you to its section. Each section links to its source code.
+
+<div class="clickable-rows" markdown>
+
 | # | Step | Result |
 |---|---|---|
-| 1 | Load the environment | The connection settings, and the environment name |
-| 2 | Find the routing entry | One `RoutingEntry`, or `None` |
-| 3 | Discover the project | One compiled Trouve for each file |
-| 4 | Build the DAG | The dependency graph |
-| 5 | Apply the selection | The Trouves that this run builds |
-| 6 | Resolve the addresses | The table that each Trouve reads |
-| 7 | Execute | One Snowflake object for each Trouve |
+| 1 | [Load the environment](#1-load-the-environment) | The connection settings, and the environment name |
+| 2 | [Find the routing entry](#2-find-the-routing-entry) | One `RoutingEntry`, or `None` |
+| 3 | [Discover the project](#3-discover-the-project) | One compiled Trouve for each file |
+| 4 | [Build the DAG](#4-build-the-dag) | The dependency graph |
+| 5 | [Apply the selection](#5-apply-the-selection) | The Trouves that this run builds |
+| 6 | [Resolve the addresses](#6-resolve-the-addresses) | The table that each Trouve reads |
+| 7 | [Execute](#7-execute) | One Snowflake object for each Trouve |
+
+</div>
 
 ## 1. Load the environment
+
+Source: [`environments/environments.py`][environments-py] — `load_environment()`
+{ .source-link }
 
 `clair run --env dev` reads the `dev` profile from `~/.clair/environments.yml`. The profile
 gives the account, the warehouse, the role, and the credentials. It also gives the
@@ -23,11 +32,17 @@ environment name, which step 2 needs. See [Environments](environments.md).
 
 ## 2. Find the routing entry
 
+Source: [`environments/project_routing.py`][project-routing-py] — `load_project_routing()`, and [`environments/routing.py`][routing-py] — `route()`
+{ .source-link }
+
 clair loads `__routing__.py` and finds the entry with the environment name of step 1. An
 environment with no entry gets `None`, which means passthrough: each physical address is
 the logical address. See [Routing](routing.md).
 
 ## 3. Discover the project
+
+Source: [`core/discovery.py`][discovery-py] — `discover_project()`, [`trouves/_refs.py`][refs-py], and [`core/text_references.py`][text-references-py]
+{ .source-link }
 
 clair walks the project directory and imports each Python file that holds a `trouve`
 object. Each file gets three addresses.
@@ -55,17 +70,26 @@ address of each input, in the parameter order of the transform.
 
 ## 4. Build the DAG
 
+Source: [`core/dag.py`][dag-py] — `build_dag()`
+{ .source-link }
+
 Each DAG node holds the physical address of a Trouve, because that address is unique in
 the warehouse. The compiled `imports` hold logical addresses, thus clair maps one to the
 other to make each edge. See [DAG](dag.md).
 
 ## 5. Apply the selection
 
+Source: [`core/selector.py`][selector-py] — `expand_selectors()`
+{ .source-link }
+
 `--select` expands its globs and its `+` operators against the **logical** addresses.
 clair then removes each SOURCE, because clair never builds a SOURCE, and it subtracts
 `--exclude`. The result is the set of Trouves that this run builds.
 
 ## 6. Resolve the addresses
+
+Source: [`core/discovery.py`][discovery-py] — `recompile_for_selection()`
+{ .source-link }
 
 This step decides which table each Trouve reads. clair renders the SQL a second time, from
 the tokens of step 3, and the selection now decides each address.
@@ -105,6 +129,9 @@ gets its addresses from the same step, thus a test reads the tables that its Tro
 
 ## 7. Execute
 
+Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/staging.py`][staging-py]
+{ .source-link }
+
 clair runs the Trouves in topological order. Each Trouve writes to a staging address, the
 tests run against the staging data, and clair promotes the data to the physical address
 after the tests pass. A failed test stops the promotion, thus the physical address keeps
@@ -121,6 +148,9 @@ its previous data. See [Staging](staging.md).
 
 ## The related commands
 
+Source: [`cli/main.py`][cli-main-py], and [`core/compiler.py`][compiler-py] — `write_compile_output()`
+{ .source-link }
+
 `clair compile` does steps 1 to 6, and it writes the SQL to `target/`. It does not connect
 to Snowflake. Run it to read the SQL that a run executes.
 
@@ -128,3 +158,16 @@ to Snowflake. Run it to read the SQL that a run executes.
 It reads the environment name, but it opens no profile and it builds no DAG, thus it needs
 no Snowflake connection and no credentials. It reports every problem at once: a bad
 address, a collision, and an address that you type as text.
+
+[environments-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/environments/environments.py
+[project-routing-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/environments/project_routing.py
+[routing-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/environments/routing.py
+[discovery-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/discovery.py
+[refs-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/trouves/_refs.py
+[text-references-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/text_references.py
+[dag-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/dag.py
+[selector-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/selector.py
+[runner-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/runner.py
+[staging-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/staging.py
+[cli-main-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/cli/main.py
+[compiler-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/compiler.py
