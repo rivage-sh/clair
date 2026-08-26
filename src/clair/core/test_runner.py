@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import structlog
 from pydantic import BaseModel
 
 from clair.adapters.base import WarehouseAdapter
+from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag
 from clair.trouves.trouve import TrouveType
 
@@ -119,12 +121,120 @@ class TestSummary(BaseModel):
         return "\n".join(lines)
 
 
+def _run_trouve_tests(
+    name: str,
+    dag: ClairDag,
+    adapter: WarehouseAdapter,
+    use_sample: bool,
+    query_addresses: dict[str, str],
+) -> list[TestResult]:
+    """Execute each data quality test of one Trouve.
+
+    A thread of the test run calls this function. *adapter* is the private
+    connection of that thread.
+
+    Args:
+        name: The name of the Trouve in the DAG.
+        dag: The project DAG.
+        adapter: The warehouse adapter of the thread that calls this function.
+        use_sample: If True, the function takes a sample of the Trouve.
+        query_addresses: The map of node name to the address to query.
+
+    Returns:
+        A list of TestResult, one item for each test. The list is empty for a
+        SOURCE Trouve, because clair makes no table for a SOURCE Trouve.
+    """
+    results: list[TestResult] = []
+    trouve = dag.get_trouve(name)
+
+    # Skip each SOURCE. Clair makes no table for a SOURCE Trouve.
+    if trouve.type == TrouveType.SOURCE:
+        return results
+
+    for test_index, test in enumerate(trouve.tests):
+        # A column test supplies column_name. A different test gives None.
+        column_name = getattr(test, "column", None)
+
+        assert trouve.compiled is not None
+        physical_address = str(trouve.compiled.physical_address)
+        queried_address = query_addresses.get(name, physical_address)
+
+        # Skip each test that needs the complete table.
+        if use_sample and not test.is_run_with_sample:
+            logger.info(
+                "test.skipped_for_sample",
+                trouve=physical_address,
+                test_type=test.label,
+                reason="is_run_with_sample=False",
+            )
+            continue
+
+        try:
+            sql = test.to_sql(queried_address)
+
+            if use_sample:
+                # sample() gives the physical address of the Trouve. Point it
+                # at the object that the test examines.
+                sample_subquery = trouve.sample().replace(physical_address, queried_address)
+                pattern = re.compile(re.escape(f"FROM {queried_address}"), re.IGNORECASE)
+                sql = pattern.sub(f"FROM {sample_subquery}", sql)
+
+            query_result = adapter.execute(sql)
+
+            if not query_result.success:
+                logger.warning("test.query_error", trouve=name, test_type=test.label, column=column_name, error=query_result.error, query_id=query_result.query_id)
+                results.append(
+                    TestResult(
+                        physical_address=physical_address,
+                        test_index=test_index,
+                        test_type=test.label,
+                        column_name=column_name,
+                        passed=False,
+                        failing_row_count=0,
+                        query_id=query_result.query_id,
+                        query_url=query_result.query_url,
+                        error=query_result.error,
+                    )
+                )
+            else:
+                passed = query_result.row_count == 0
+                logger.info("test.result", trouve=physical_address, test_type=test.label, column=column_name, passed=passed, failing_rows=query_result.row_count, query_id=query_result.query_id)
+                results.append(
+                    TestResult(
+                        physical_address=physical_address,
+                        test_index=test_index,
+                        test_type=test.label,
+                        column_name=column_name,
+                        passed=passed,
+                        failing_row_count=query_result.row_count,
+                        query_id=query_result.query_id,
+                        query_url=query_result.query_url,
+                    )
+                )
+        except Exception as e:  # noqa: BLE001 — one test that fails must not stop the complete run
+            logger.warning("test.exception", trouve=physical_address, test_type=test.label, column=column_name, error=str(e))
+            results.append(
+                TestResult(
+                    physical_address=physical_address,
+                    test_index=test_index,
+                    test_type=test.label,
+                    column_name=column_name,
+                    passed=False,
+                    failing_row_count=0,
+                    error=str(e),
+                )
+            )
+
+    return results
+
+
 def run_tests(
     dag: ClairDag,
     selected: list[str],
     adapter: WarehouseAdapter,
     use_sample: bool = False,
     query_addresses: dict[str, str] | None = None,
+    threads: int = 1,
 ) -> list[TestResult]:
     """Execute the data quality tests of the selected Trouves.
 
@@ -136,7 +246,9 @@ def run_tests(
     Args:
         dag: The project DAG.
         selected: The names of the Trouves to test.
-        adapter: A warehouse adapter with an open connection.
+        adapter: A warehouse adapter with an open connection. With more than one
+            thread, clair uses it as the first connection of the pool, and it
+            opens `threads - 1` more.
         use_sample: If True, the function takes a sample of each Trouve with
             ``trouve.sample()``. It also skips each test that needs the
             complete table, such as ``TestRowCount``.
@@ -144,95 +256,45 @@ def run_tests(
             The runner gives the staging address here, so the tests examine the
             candidate before clair promotes it. Each result still reports the
             physical address, so the output does not change with the query address.
+        threads: The number of Trouves that clair tests at one time, and thus
+            the number of warehouse connections. The tests of one Trouve always
+            run one after the other.
 
     Returns:
-        A list of TestResult, one item for each test.
+        A list of TestResult, one item for each test. The list keeps the order
+        of *selected*, also with more than one thread.
+
+    Raises:
+        ValueError: If *threads* is less than 1.
     """
-    results: list[TestResult] = []
+    if threads < 1:
+        raise ValueError(f"The thread count must be 1 or more, but it is {threads}")
+
     query_addresses = query_addresses or {}
 
-    for name in selected:
-        trouve = dag.get_trouve(name)
+    if threads == 1:
+        results: list[TestResult] = []
+        for name in selected:
+            results.extend(
+                _run_trouve_tests(name, dag, adapter, use_sample, query_addresses)
+            )
+        return results
 
-        # Skip each SOURCE. Clair makes no table for a SOURCE Trouve.
-        if trouve.type == TrouveType.SOURCE:
-            continue
+    pool = AdapterPool(adapter, threads)
 
-        for test_index, test in enumerate(trouve.tests):
-            # A column test supplies column_name. A different test gives None.
-            column_name = getattr(test, "column", None)
+    def test_one(name: str) -> list[TestResult]:
+        """Test one Trouve on the connection of this thread."""
+        return _run_trouve_tests(name, dag, pool.acquire(), use_sample, query_addresses)
 
-            assert trouve.compiled is not None
-            physical_address = str(trouve.compiled.physical_address)
-            queried_address = query_addresses.get(name, physical_address)
+    try:
+        with ThreadPoolExecutor(max_workers=threads, thread_name_prefix="clair-test") as executor:
+            # map() keeps the order of selected, thus the output does not change
+            # with the thread count.
+            per_trouve_results = list(executor.map(test_one, selected))
+    finally:
+        pool.close()
 
-            # Skip each test that needs the complete table.
-            if use_sample and not test.is_run_with_sample:
-                logger.info(
-                    "test.skipped_for_sample",
-                    trouve=physical_address,
-                    test_type=test.label,
-                    reason="is_run_with_sample=False",
-                )
-                continue
-
-            try:
-                sql = test.to_sql(queried_address)
-
-                if use_sample:
-                    # sample() gives the physical address of the Trouve. Point it
-                    # at the object that the test examines.
-                    sample_subquery = trouve.sample().replace(physical_address, queried_address)
-                    pattern = re.compile(re.escape(f"FROM {queried_address}"), re.IGNORECASE)
-                    sql = pattern.sub(f"FROM {sample_subquery}", sql)
-
-                query_result = adapter.execute(sql)
-
-                if not query_result.success:
-                    logger.warning("test.query_error", trouve=name, test_type=test.label, column=column_name, error=query_result.error, query_id=query_result.query_id)
-                    results.append(
-                        TestResult(
-                            physical_address=physical_address,
-                            test_index=test_index,
-                            test_type=test.label,
-                            column_name=column_name,
-                            passed=False,
-                            failing_row_count=0,
-                            query_id=query_result.query_id,
-                            query_url=query_result.query_url,
-                            error=query_result.error,
-                        )
-                    )
-                else:
-                    passed = query_result.row_count == 0
-                    logger.info("test.result", trouve=physical_address, test_type=test.label, column=column_name, passed=passed, failing_rows=query_result.row_count, query_id=query_result.query_id)
-                    results.append(
-                        TestResult(
-                            physical_address=physical_address,
-                            test_index=test_index,
-                            test_type=test.label,
-                            column_name=column_name,
-                            passed=passed,
-                            failing_row_count=query_result.row_count,
-                            query_id=query_result.query_id,
-                            query_url=query_result.query_url,
-                        )
-                    )
-            except Exception as e:  # noqa: BLE001 — one test that fails must not stop the complete run
-                logger.warning("test.exception", trouve=physical_address, test_type=test.label, column=column_name, error=str(e))
-                results.append(
-                    TestResult(
-                        physical_address=physical_address,
-                        test_index=test_index,
-                        test_type=test.label,
-                        column_name=column_name,
-                        passed=False,
-                        failing_row_count=0,
-                        error=str(e),
-                    )
-                )
-
-    return results
+    return [result for trouve_results in per_trouve_results for result in trouve_results]
 
 
 def format_test_output(results: list[TestResult]) -> TestSummary:

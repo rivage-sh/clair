@@ -132,41 +132,68 @@ gets its addresses from the same step, thus a test reads the tables that its Tro
 Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/staging.py`][staging-py]
 { .source-link }
 
-clair runs the Trouves in topological order. Each Trouve writes to a staging address, the
-tests run against the staging data, and clair promotes the data to the physical address
-after the tests pass. A failed test stops the promotion, thus the physical address keeps
-its previous data. See [Staging](staging.md).
+clair starts a Trouve when each Trouve of the run that is upstream of it completed. The
+thread count decides how many Trouves run at one time. Each thread holds a private
+Snowflake connection, because a connection holds the role and the warehouse of the
+session. See [Environments](environments.md).
 
-The four parts below tell you how the engine does this.
+Each Trouve writes to a staging address, the tests run against the staging data, and clair
+promotes the data to the physical address after the tests pass. A failed test stops the
+promotion, thus the physical address keeps its previous data. See [Staging](staging.md).
 
-### The order, and one node at a time
+The five parts below tell you how the engine does this.
 
-`get_executable_nodes()` sorts the DAG topologically and removes each SOURCE. clair then
-keeps the Trouves of step 5, in that order, and executes them one after the other on one
-Snowflake session.
+### The schedule
 
-Source: [`core/dag.py`][dag-py] — `get_execution_order()`
+`get_executable_nodes()` sorts the DAG topologically and removes each SOURCE. clair keeps
+the Trouves of step 5 from that list, and then it counts the upstream Trouves of each one.
+A Trouve with a count of zero is ready.
+
+Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/dag.py`][dag-py] — `get_execution_order()`
 { .source-link }
 
-clair starts no second node before the current node reaches its physical address. This
-gives you three properties:
+clair submits each ready Trouve to a `ThreadPoolExecutor`, up to the thread count. Then it
+waits for the first Trouve that completes. That Trouve decrements the count of each Trouve
+downstream of it, a count that reaches zero makes a new ready Trouve, and clair fills the
+free thread immediately. The DAG thus stays as full as its own shape and the thread count
+permit. No step waits for a complete "level" of the graph.
 
-| The property | Why the sequence gives it |
-|---|---|
-| A Trouve reads the newest data of its upstream | clair promotes each node before the next node starts. The dependent thus reads the address that its own SQL names, and never a staging name. |
-| One error message, at one time | The node that failed is the last node that ran. The log does not mix the messages of parallel branches. |
-| One warehouse, one queue | Snowflake makes each query parallel inside the warehouse. Two clair nodes never compete for the same compute. |
+The selector does not break this. With `A -> B -> C`, and `B` outside the selection, clair
+still makes `C` wait for `A`. A failure of `A` still skips `C`.
 
-The cost is the wall clock time of a wide DAG: two independent branches wait for each
-other. clair executes no node at the same time as another node today.
+`--threads` gives the count for one run. The `threads` key of the environment gives the
+default, and `clair init` asks you for it. The default is 4.
 
-Before each node clair sends `CREATE DATABASE IF NOT EXISTS` and `CREATE SCHEMA IF NOT
-EXISTS` for the physical address. A new developer database thus needs no manual step. If
-the Trouve config gives a `warehouse` or a `role`, clair sets that session context first,
-and only for that node.
+```bash
+clair run --env prod --threads 8
+```
 
-`clair run` prints each result immediately, because `run_project()` is a generator. You
-read the status of node 3 while node 4 runs.
+### One connection for each thread
+
+A Snowflake session holds the role and the warehouse, and a `USE ROLE` changes them for
+each later query on that session. Two threads on one connection would thus change the
+context of each other. `AdapterPool` prevents this: each thread takes one connection and
+keeps it until the run ends.
+
+Source: [`adapters/pool.py`][pool-py] — `AdapterPool`
+{ .source-link }
+
+The pool opens each connection when the run starts, and not at the first query of a
+thread. SSO authentication opens a browser window, thus a lazy connection would ask you to
+authenticate in the middle of a run.
+
+clair makes each database and each schema of the run one time, before the threads start.
+Many Trouves write to one schema, and concurrent `CREATE SCHEMA IF NOT EXISTS` statements
+against one schema can collide in the warehouse.
+
+Two consequences for the reader of the output:
+
+- The results come in **completion order**, and not in topological order. A quick Trouve
+  can report before a slow Trouve that started first. Sort against
+  `get_execution_order(dag)` if you need the DAG order.
+- A high thread count needs a warehouse that can hold the queries. Snowflake queues the
+  queries that do not fit, thus a count above the capacity of the warehouse gives you no
+  more speed.
 
 ### The steps for one node
 
@@ -182,6 +209,10 @@ Each node does the same steps. The run mode decides only if the clone is necessa
 
 Source: [`core/staging.py`][staging-py], and [`trouves/trouve.py`][trouve-py] — `build_sql()`
 { .source-link }
+
+clair promotes a node before it releases the Trouves downstream of it. A dependent thus
+starts only after its upstream reaches its physical address, and it reads the address that
+its own SQL names. You never write a staging name in a Trouve file.
 
 Step 1 and step 4 are zero-copy clones. Snowflake makes a clone in the metadata, thus the
 time is constant for a table of any size. An incremental Trouve therefore gets a full copy
@@ -216,6 +247,8 @@ examine, and no clutter that you did not ask for. See [Incrementality](increment
 
 A node fails if a statement fails, if a test fails, or if the promotion fails. clair marks
 each node **downstream** of it as SKIPPED, and then it continues with the other branches.
+The Trouves that already run on the other threads complete. clair starts no new Trouve that
+waits for the node that failed.
 
 Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/test_runner.py`][test-runner-py] — `run_tests()`
 { .source-link }
@@ -278,3 +311,4 @@ address, a collision, and an address that you type as text.
 [compiler-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/compiler.py
 [trouve-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/trouves/trouve.py
 [test-runner-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/test_runner.py
+[pool-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/adapters/pool.py

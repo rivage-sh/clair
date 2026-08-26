@@ -42,6 +42,19 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
+    def new_connection(self) -> WarehouseAdapter:
+        """Make a second adapter with the same profile, and open its connection.
+
+        A parallel run gives one connection to each thread. Two threads that
+        share one connection change the session context of each other, because
+        `USE WAREHOUSE` and `USE ROLE` apply to the full session.
+
+        Raises:
+            RuntimeError: If this adapter has no open connection.
+        """
+        ...
+
+    @abstractmethod
     def execute(self, sql: str) -> QueryResult:
         """Execute one SQL statement and give the result."""
         ...

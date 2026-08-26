@@ -21,6 +21,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         self._conn: snowflake.connector.SnowflakeConnection | None = None
         self._region: str = ""
         self._account_locator: str = ""
+        self._profile: dict[str, Any] | None = None
 
     def connect(self, profile: dict[str, Any]) -> None:
         """Connect to Snowflake with the credentials from the profile.
@@ -32,6 +33,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         """
         self._region = profile.get("region", "")
         self._account_locator = profile.get("account_locator", "")
+        self._profile = dict(profile)
 
         connect_args: dict[str, Any] = {
             "account": profile["account"],
@@ -41,6 +43,12 @@ class SnowflakeAdapter(WarehouseAdapter):
         # The authentication method.
         if "authenticator" in profile:
             connect_args["authenticator"] = profile["authenticator"]
+            if profile["authenticator"] == "externalbrowser":
+                # A parallel run opens one connection for each thread. Without
+                # this cache, SSO opens one browser window for each connection.
+                # The connector keeps the token in the credential store of the
+                # operating system, and the second connection reads it.
+                connect_args["client_store_temporary_credential"] = True
         elif "private_key_pem" in profile:
             pem_content = profile["private_key_pem"]
             passphrase = profile.get("private_key_passphrase")
@@ -72,6 +80,14 @@ class SnowflakeAdapter(WarehouseAdapter):
                 connect_args[key] = profile[key]
 
         self._conn = snowflake.connector.connect(**connect_args)
+
+    def new_connection(self) -> SnowflakeAdapter:
+        """Make a second SnowflakeAdapter with the same profile, and connect it."""
+        if self._profile is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+        adapter = SnowflakeAdapter()
+        adapter.connect(self._profile)
+        return adapter
 
     def execute(self, sql: str) -> QueryResult:
         """Execute the SQL and give a QueryResult with the query ID and the URL."""

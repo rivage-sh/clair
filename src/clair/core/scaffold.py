@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from clair.environments.project_routing import ROUTING_FILE_NAME
 
@@ -69,6 +70,7 @@ dev:
   user: your@email.com
   authenticator: externalbrowser   # SSO authentication in a browser
   warehouse: your_warehouse
+  threads: 4                       # Trouves that run at one time
   # region: us-east-1              # necessary for the query URLs
   # account_locator: abc12345      # necessary for the query URLs
 
@@ -79,6 +81,7 @@ dev:
 #   private_key_path: ~/.clair/snowflake_key.p8
 #   # private_key_passphrase: your-passphrase   # only if the key is encrypted
 #   warehouse: your_warehouse
+#   threads: 8
 #   region: us-east-1
 #   account_locator: abc12345
 '''
@@ -148,7 +151,7 @@ def scaffold_project(
 
 
 def write_environments_yml(
-    env_data: dict[str, str],
+    env_data: dict[str, Any],
     env_name: str = "dev",
     *,
     home_dir: Path | None = None,
