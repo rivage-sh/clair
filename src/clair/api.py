@@ -193,6 +193,7 @@ def run(
     run_mode: RunMode = RunMode.FULL_REFRESH,
     test: bool = True,
     sample: bool = False,
+    threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> RunSummary:
     """Run the Trouves of a project on the warehouse, and test them.
@@ -212,8 +213,11 @@ def run(
         test: If True, clair runs the data quality tests of a Trouve after it
             builds that Trouve.
         sample: If True, clair runs the tests on a sample of each Trouve.
+        threads: The number of Trouves that run at one time. None takes the
+            thread count of the environment.
         adapter: A connected warehouse adapter. The default makes a
-            SnowflakeAdapter, connects it, and closes it at the end.
+            SnowflakeAdapter, connects it, and closes it at the end. A parallel
+            run opens one more connection for each other thread.
 
     Returns:
         A RunSummary with one RunResult for each Trouve. Each result holds the
@@ -235,6 +239,8 @@ def run(
         )
 
     env_name, environment = load_environment(env)
+    # The caller replaces the thread count of the environment.
+    thread_count = threads if threads is not None else environment.threads
     profile_defaults = {"warehouse": environment.warehouse, "role": environment.role}
     routing = _resolve_routing(project_root, env_name)
     discovered = discover_project(
@@ -277,16 +283,28 @@ def run(
 
     test_results_of_node: dict[str, list[TestResult]] = defaultdict(list)
 
-    def on_node_success(node_name: str, query_address: str) -> bool:
+    def on_node_success(
+        node_name: str, query_address: str, node_adapter: WarehouseAdapter
+    ) -> bool:
+        # node_adapter is the connection of the thread that ran the node. A
+        # parallel run must not send these test queries on a different
+        # connection, because that connection holds a different context.
         node_test_results = run_tests(
             dag,
             [node_name],
-            warehouse_adapter,
+            node_adapter,
             use_sample=sample,
             query_addresses={node_name: query_address},
         )
+        # list.extend is atomic, thus the threads need no lock here. Each thread
+        # writes to the entry of its own node.
         test_results_of_node[node_name].extend(node_test_results)
         return all(test_result.passed for test_result in node_test_results)
+
+    # A connection that no Trouve uses gives nothing. A connection costs one
+    # login, not credits: Snowflake bills the warehouse per second while it
+    # runs, and an idle session starts no warehouse.
+    thread_count = min(thread_count, len(selected))
 
     try:
         logger.info(
@@ -297,6 +315,7 @@ def run(
             trouves=len(selected),
             run_mode=run_mode.value,
             use_staging=use_staging,
+            threads=thread_count,
         )
         results: list[RunResult] = []
         for result in run_project(
@@ -307,6 +326,7 @@ def run(
             run_id=run_id,
             after_node_success=on_node_success if test else None,
             use_staging=use_staging,
+            threads=thread_count,
         ):
             results.append(
                 result.model_copy(
@@ -341,6 +361,7 @@ def test(
     exclude: Selectors = None,
     env: str | None = None,
     sample: bool = False,
+    threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> TestSummary:
     """Run the data quality tests of a project on the warehouse.
@@ -352,8 +373,11 @@ def test(
         env: The environment name from ~/.clair/environments.yml.
         sample: If True, clair runs the tests on a sample of each Trouve, and
             runs no row count test.
+        threads: The number of Trouves that clair tests at one time. None takes
+            the thread count of the environment.
         adapter: A connected warehouse adapter. The default makes a
-            SnowflakeAdapter, connects it, and closes it at the end.
+            SnowflakeAdapter, connects it, and closes it at the end. A parallel
+            test run opens one more connection for each other thread.
 
     Returns:
         A TestSummary with one TestResult for each test.
@@ -364,6 +388,8 @@ def test(
     project_root = Path(project_dir).expanduser().resolve()
 
     env_name, environment = load_environment(env)
+    # The caller replaces the thread count of the environment.
+    thread_count = threads if threads is not None else environment.threads
     profile_defaults = {"warehouse": environment.warehouse, "role": environment.role}
     routing = _resolve_routing(project_root, env_name)
     discovered = discover_project(
@@ -383,10 +409,21 @@ def test(
         warehouse_adapter = SnowflakeAdapter()
         warehouse_adapter.connect(environment.to_connection_dict())
 
+    # A connection that no Trouve uses gives nothing, and it costs one login.
+    thread_count = min(thread_count, len(selected))
+
     try:
-        logger.info("test.start", env=env_name, project=str(project_root), trouves=len(selected))
+        logger.info(
+            "test.start",
+            env=env_name,
+            project=str(project_root),
+            trouves=len(selected),
+            threads=thread_count,
+        )
         summary = TestSummary(
-            results=run_tests(dag, selected, warehouse_adapter, use_sample=sample)
+            results=run_tests(
+                dag, selected, warehouse_adapter, use_sample=sample, threads=thread_count
+            )
         )
     finally:
         if owns_adapter:

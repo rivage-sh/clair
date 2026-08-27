@@ -35,6 +35,7 @@ def run(
     run_mode: RunMode = RunMode.FULL_REFRESH,
     test: bool = True,
     sample: bool = False,
+    threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> RunSummary
 ```
@@ -44,8 +45,14 @@ run-scoped staging address, runs the tests there, and promotes the object after
 the tests pass. See [Staging](../topics/staging.md). The tests give that
 guarantee, so `test=False` also stops the staging step.
 
+`threads` gives the number of Trouves that run at one time. None takes the
+thread count of the environment. See
+[Environments](../topics/environments.md).
+
 Give `adapter` to keep one connection open for many calls. Clair then closes no
 connection. The default makes a `SnowflakeAdapter`, connects it, and closes it.
+A parallel run opens one more connection for each other thread, and it closes
+each of those.
 
 ```python
 import clair
@@ -164,6 +171,7 @@ def test(
     exclude: Sequence[str] | None = None,
     env: str | None = None,
     sample: bool = False,
+    threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> TestSummary
 ```

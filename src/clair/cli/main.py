@@ -8,6 +8,7 @@ import shutil
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import click
 import structlog
@@ -19,6 +20,7 @@ from clair.core.dag_render import render_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.core.text_references import find_text_references
+from clair.environments.environments import DEFAULT_THREADS
 from clair.environments.project_routing import (
     ProjectRouting,
     describe_unnamed_environment,
@@ -167,7 +169,7 @@ def _prompt_and_write_environment() -> None:
     click.echo("  3. SSO (externalbrowser)")
     auth_choice = click.prompt("Enter choice", default="1", type=str)
 
-    env_data: dict[str, str] = {
+    env_data: dict[str, Any] = {
         "account": account,
         "user": user,
     }
@@ -206,6 +208,14 @@ def _prompt_and_write_environment() -> None:
     _hint("current_account() as account_locator")
     account_locator = _require("Account locator (e.g. abc12345)")
     env_data["account_locator"] = account_locator
+
+    click.echo("")
+    threads = click.prompt(
+        "Trouves that run at one time (threads)",
+        default=DEFAULT_THREADS,
+        type=click.IntRange(min=1),
+    )
+    env_data["threads"] = threads
 
     click.echo("")
     write_environments_yml(env_data, env_name=env_name)
@@ -453,7 +463,13 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     default=False,
     help="Run the tests on a sample of each Trouve. Clair does not run the row count tests.",
 )
-def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool) -> None:
+@click.option(
+    "--threads",
+    type=click.IntRange(min=1),
+    default=None,
+    help="The number of Trouves that run at one time. The default comes from the environment.",
+)
+def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool, threads: int | None) -> None:
     """Run the Trouves on Snowflake. Then run the data quality tests."""
     try:
         summary = clair_api.run(
@@ -464,6 +480,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
             run_mode=RunMode(run_mode),
             test=not no_test,
             sample=sample,
+            threads=threads,
         )
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
         logger.error("run.routing_error", error=str(e))
@@ -510,13 +527,24 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
     default=False,
     help="Run the tests on a sample of each Trouve. Clair does not run the row count tests.",
 )
+@click.option(
+    "--threads",
+    type=click.IntRange(min=1),
+    default=None,
+    help="The number of Trouves that clair tests at one time. The default comes from the environment.",
+)
 def test(
-    select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, sample: bool
+    select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, sample: bool, threads: int | None
 ) -> None:
     """Run the data quality tests on Snowflake."""
     try:
         summary = clair_api.test(
-            project, select=select, exclude=exclude, env=env, sample=sample
+            project,
+            select=select,
+            exclude=exclude,
+            env=env,
+            sample=sample,
+            threads=threads,
         )
     except ClairError as e:
         logger.error("test.error", error=str(e))

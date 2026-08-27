@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from clair.exceptions import (
     EnvironmentNotFoundError,
@@ -16,6 +16,10 @@ from clair.exceptions import (
 )
 
 DEFAULT_ENVIRONMENTS_PATH = Path.home() / ".clair" / "environments.yml"
+
+# The number of Trouves that clair runs at one time, if the environment and
+# the command line give no other value.
+DEFAULT_THREADS = 4
 
 
 def _first_error_message(exc: ValidationError) -> str:
@@ -61,6 +65,11 @@ class Environment(BaseModel):
     role: str | None = None
     region: str | None = None
     account_locator: str | None = None
+
+    # The number of Trouves that clair runs at one time. Each thread holds a
+    # private warehouse connection, so this is also the connection count.
+    # `clair run --threads` and `clair test --threads` replace this value.
+    threads: int = Field(default=DEFAULT_THREADS, ge=1)
 
     def to_connection_dict(self) -> dict[str, Any]:
         """Give the connection dict that SnowflakeAdapter.connect() needs."""

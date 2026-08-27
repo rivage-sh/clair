@@ -105,10 +105,18 @@ gets its addresses from the same step, thus a test reads the tables that its Tro
 
 ## 7. Execute
 
-clair runs the Trouves in topological order. Each Trouve writes to a staging address, the
-tests run against the staging data, and clair promotes the data to the physical address
-after the tests pass. A failed test stops the promotion, thus the physical address keeps
-its previous data. See [Staging](staging.md).
+clair starts a Trouve when each Trouve of the run that is upstream of it completed. The
+thread count decides how many Trouves run at one time. Each thread holds a private
+Snowflake connection, because a connection holds the role and the warehouse of the
+session. See [Environments](environments.md).
+
+Each Trouve writes to a staging address, the tests run against the staging data, and clair
+promotes the data to the physical address after the tests pass. A failed test stops the
+promotion, thus the physical address keeps its previous data. See [Staging](staging.md).
+
+A Trouve that fails stops each Trouve downstream of it. clair reports those as skipped, and
+it continues with the other branches. The log lines come in completion order, thus a quick
+Trouve can report before a slow Trouve that started first.
 
 `clair run` logs both addresses for each node:
 
