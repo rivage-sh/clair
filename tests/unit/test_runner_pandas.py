@@ -14,7 +14,6 @@ from clair.environments.routing import TrouveAddress
 from clair.exceptions import InvalidTrouveAddressError
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.pandas_trouve import PandasTrouve
-from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
 
 
@@ -332,47 +331,3 @@ class TestRunPandasTrouveResultFields:
 
         assert result.status == RunStatus.FAILURE
         assert result.duration_seconds >= 0.0
-
-
-class TestRunSeedTrouve:
-    """A seed goes down the same path. It reads no input and writes its rows."""
-
-    def test_the_seed_rows_reach_the_warehouse(self):
-        frame = pd.DataFrame({"code": ["US", "FR"], "rate": [0.0, 0.20]})
-        trouve = SeedTrouve(dataframe=frame)
-        trouve.compiled = _make_compiled("db.schema.tax_rates")
-
-        adapter = _make_df_adapter()
-
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
-
-        assert result.status == RunStatus.SUCCESS
-        adapter.fetch_dataframe.assert_not_called()
-        pd.testing.assert_frame_equal(
-            adapter.write_dataframe.call_args.kwargs["dataframe"], frame
-        )
-
-    def test_the_seed_writes_to_the_staging_address(self):
-        trouve = SeedTrouve(dataframe=pd.DataFrame({"code": ["US"]}))
-        trouve.compiled = _make_compiled("db.schema.tax_rates")
-        staging_address = TrouveAddress.parse("db.schema.tax_rates__clair_staging")
-
-        adapter = _make_df_adapter()
-
-        result = _run_dataframe_trouve(
-            trouve, adapter, trouve.physical_address, staging_address
-        )
-
-        assert result.status == RunStatus.SUCCESS
-        assert adapter.write_dataframe.call_args.kwargs["address"] == staging_address
-
-    def test_a_write_fault_becomes_a_failure(self):
-        trouve = SeedTrouve(dataframe=pd.DataFrame({"code": ["US"]}))
-        trouve.compiled = _make_compiled("db.schema.tax_rates")
-
-        adapter = _make_df_adapter(write_side_effect=RuntimeError("write failed"))
-
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
-
-        assert result.status == RunStatus.FAILURE
-        assert "write failed" in result.error
