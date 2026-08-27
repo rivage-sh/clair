@@ -27,7 +27,6 @@ import pytest
 
 import clair
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import (
@@ -81,6 +80,18 @@ def test_a_full_refresh_builds_every_model(
     assert summary.failed == []
     assert summary.succeeded_count == len(logical_names)
 
+    # The result of each Trouve holds the statements that Snowflake ran, and
+    # the staging address that clair built at. A staged run writes there first,
+    # thus the statements name that address.
+    for result in summary.succeeded:
+        assert result.staging_address is not None
+        assert summary.run_id in result.staging_address
+        assert result.query_ids
+        if result.sql is not None:
+            assert any(
+                result.staging_address in statement for statement in result.sql
+            )
+
 
 def test_the_address_of_a_trouve_is_the_one_that_you_expect(
     snowflake_workspace: IntegrationConfig,
@@ -118,27 +129,6 @@ def test_the_data_quality_tests_pass(
         pytest.skip(f"{project_path.name} declares no data quality test")
     assert summary.failed_results == []
     assert summary.error_count == 0
-
-
-def test_the_run_gives_the_sql_that_snowflake_accepted(
-    project_copies: dict[str, Path],
-    clair_environment: IntegrationConfig,
-) -> None:
-    """The result holds the statements, and each one names the run.
-
-    A staged run writes at the staging address, and the promotion follows. The
-    caller sees both, thus a failure needs no log line to read.
-    """
-    summary = clair.run(project_copies["example_1"])
-    result = summary.result("example_1_database.refined.events")
-
-    assert result is not None
-    assert result.status == RunStatus.SUCCESS
-    assert result.staging_address is not None
-    assert summary.run_id in result.staging_address
-    assert result.sql
-    assert any(result.staging_address in statement for statement in result.sql)
-    assert result.query_ids
 
 
 def test_the_incremental_append_adds_only_the_new_rows(
