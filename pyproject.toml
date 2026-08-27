@@ -46,6 +46,10 @@ markers = [
 ]
 filterwarnings = [
     "ignore::pytest.PytestCollectionWarning",
+    # The Snowflake connector calls deprecated functions. clair cannot correct
+    # this code. Remove each line when the connector corrects it.
+    "ignore:codecs.open\\(\\) is deprecated:DeprecationWarning",
+    "ignore:is_datetime64tz_dtype is deprecated:DeprecationWarning",
 ]
 
 [dependency-groups]

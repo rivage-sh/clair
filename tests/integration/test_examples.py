@@ -125,8 +125,10 @@ def test_the_data_quality_tests_pass(
 
     summary = clair.test(copy_path)
 
-    if not summary.results:
-        pytest.skip(f"{project_path.name} declares no data quality test")
+    # Each example project must declare a minimum of one data quality test. An
+    # example with no test gives this test nothing to do, and the run stays
+    # green with no proof.
+    assert summary.results, f"{project_path.name} declares no data quality test"
     assert summary.failed_results == []
     assert summary.error_count == 0
 
