@@ -5,9 +5,7 @@ exists. Read it when you must know which table a Trouve reads in a partial run.
 
 ## The seven steps
 
-Each row below moves you to its section. Each section links to its source code.
-
-<div class="clickable-rows" markdown>
+Each step below links to its source code.
 
 | # | Step | Result |
 |---|---|---|
@@ -19,12 +17,9 @@ Each row below moves you to its section. Each section links to its source code.
 | 6 | [Resolve the addresses](#6-resolve-the-addresses) | The table that each Trouve reads |
 | 7 | [Execute](#7-execute) | One Snowflake object for each Trouve |
 
-</div>
-
 ## 1. Load the environment
 
-Source: [`environments/environments.py`][environments-py] — `load_environment()`
-{ .source-link }
+*Source: [`environments/environments.py`][environments-py] — `load_environment()`*
 
 `clair run --env dev` reads the `dev` profile from `~/.clair/environments.yml`. The profile
 gives the account, the warehouse, the role, and the credentials. It also gives the
@@ -32,8 +27,7 @@ environment name, which step 2 needs. See [Environments](environments.md).
 
 ## 2. Find the routing entry
 
-Source: [`environments/project_routing.py`][project-routing-py] — `load_project_routing()`, and [`environments/routing.py`][routing-py] — `route()`
-{ .source-link }
+*Source: [`environments/project_routing.py`][project-routing-py] — `load_project_routing()`, and [`environments/routing.py`][routing-py] — `route()`*
 
 clair loads `__routing__.py` and finds the entry with the environment name of step 1. An
 environment with no entry gets `None`, which means passthrough: each physical address is
@@ -41,8 +35,7 @@ the logical address. See [Routing](routing.md).
 
 ## 3. Discover the project
 
-Source: [`core/discovery.py`][discovery-py] — `discover_project()`, [`trouves/_refs.py`][refs-py], and [`core/text_references.py`][text-references-py]
-{ .source-link }
+*Source: [`core/discovery.py`][discovery-py] — `discover_project()`, [`trouves/_refs.py`][refs-py], and [`core/text_references.py`][text-references-py]*
 
 clair walks the project directory and imports each Python file that holds a `trouve`
 object. Each file gets three addresses.
@@ -70,8 +63,7 @@ address of each input, in the parameter order of the transform.
 
 ## 4. Build the DAG
 
-Source: [`core/dag.py`][dag-py] — `build_dag()`
-{ .source-link }
+*Source: [`core/dag.py`][dag-py] — `build_dag()`*
 
 Each DAG node holds the physical address of a Trouve, because that address is unique in
 the warehouse. The compiled `imports` hold logical addresses, thus clair maps one to the
@@ -79,8 +71,7 @@ other to make each edge. See [DAG](dag.md).
 
 ## 5. Apply the selection
 
-Source: [`core/selector.py`][selector-py] — `expand_selectors()`
-{ .source-link }
+*Source: [`core/selector.py`][selector-py] — `expand_selectors()`*
 
 `--select` expands its globs and its `+` operators against the **logical** addresses.
 clair then removes each SOURCE, because clair never builds a SOURCE, and it subtracts
@@ -88,8 +79,7 @@ clair then removes each SOURCE, because clair never builds a SOURCE, and it subt
 
 ## 6. Resolve the addresses
 
-Source: [`core/discovery.py`][discovery-py] — `recompile_for_selection()`
-{ .source-link }
+*Source: [`core/discovery.py`][discovery-py] — `recompile_for_selection()`*
 
 This step decides which table each Trouve reads. clair renders the SQL a second time, from
 the tokens of step 3, and the selection now decides each address.
@@ -129,8 +119,7 @@ gets its addresses from the same step, thus a test reads the tables that its Tro
 
 ## 7. Execute
 
-Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/staging.py`][staging-py]
-{ .source-link }
+*Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/staging.py`][staging-py]*
 
 clair starts a Trouve when each Trouve of the run that is upstream of it completed. The
 thread count decides how many Trouves run at one time. Each thread holds a private
@@ -149,8 +138,7 @@ The five parts below tell you how the engine does this.
 the Trouves of step 5 from that list, and then it counts the upstream Trouves of each one.
 A Trouve with a count of zero is ready.
 
-Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/dag.py`][dag-py] — `get_execution_order()`
-{ .source-link }
+*Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/dag.py`][dag-py] — `get_execution_order()`*
 
 clair submits each ready Trouve to a `ThreadPoolExecutor`, up to the thread count. Then it
 waits for the first Trouve that completes. That Trouve decrements the count of each Trouve
@@ -175,8 +163,7 @@ each later query on that session. Two threads on one connection would thus chang
 context of each other. `AdapterPool` prevents this: each thread takes one connection and
 keeps it until the run ends.
 
-Source: [`adapters/pool.py`][pool-py] — `AdapterPool`
-{ .source-link }
+*Source: [`adapters/pool.py`][pool-py] — `AdapterPool`*
 
 The pool opens each connection when the run starts, and not at the first query of a
 thread. SSO authentication opens a browser window, thus a lazy connection would ask you to
@@ -207,8 +194,7 @@ Each node does the same steps. The run mode decides only if the clone is necessa
 | 4 | Promote after each test passes | `CREATE OR REPLACE TABLE <physical> CLONE <staging> COPY GRANTS` | The same statement |
 | 5 | Drop the staging object | Yes, after the promotion only | Yes, after the promotion only |
 
-Source: [`core/staging.py`][staging-py], and [`trouves/trouve.py`][trouve-py] — `build_sql()`
-{ .source-link }
+*Source: [`core/staging.py`][staging-py], and [`trouves/trouve.py`][trouve-py] — `build_sql()`*
 
 clair promotes a node before it releases the Trouves downstream of it. A dependent thus
 starts only after its upstream reaches its physical address, and it reads the address that
@@ -229,8 +215,7 @@ object and not to the name, thus a `SWAP` moves the production grants to the sta
 each of three conditions is true: the Trouve is a TABLE, its `RunConfig` asks for the
 incremental mode, and the command line asks for the incremental mode.
 
-Source: [`core/runner.py`][runner-py] — `resolve_effective_mode()`
-{ .source-link }
+*Source: [`core/runner.py`][runner-py] — `resolve_effective_mode()`*
 
 The runner adds a fourth condition, because it has a connection: it asks Snowflake if the
 physical table exists. A table that does not exist yet cannot get an `INSERT` or a `MERGE`,
@@ -250,8 +235,7 @@ each node **downstream** of it as SKIPPED, and then it continues with the other 
 The Trouves that already run on the other threads complete. clair starts no new Trouve that
 waits for the node that failed.
 
-Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/test_runner.py`][test-runner-py] — `run_tests()`
-{ .source-link }
+*Source: [`core/runner.py`][runner-py] — `run_project()`, and [`core/test_runner.py`][test-runner-py] — `run_tests()`*
 
 | The condition | The physical object | The result of the node | The other branches |
 |---|---|---|---|
@@ -286,8 +270,7 @@ left.
 
 ## The related commands
 
-Source: [`cli/main.py`][cli-main-py], and [`core/compiler.py`][compiler-py] — `write_compile_output()`
-{ .source-link }
+*Source: [`cli/main.py`][cli-main-py], and [`core/compiler.py`][compiler-py] — `write_compile_output()`*
 
 `clair compile` does steps 1 to 6, and it writes the SQL to `target/`. It does not connect
 to Snowflake. Run it to read the SQL that a run executes.
