@@ -8,7 +8,7 @@ from pathlib import Path
 from clair import __version__
 from clair.core.dag import ClairDag
 from clair.trouves.trouve import TrouveType
-from clair.webui.columns import infer_columns
+from clair.web_ui.columns import infer_columns
 
 
 def build_catalog(dag: ClairDag, project_root: Path) -> dict:

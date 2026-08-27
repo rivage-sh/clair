@@ -46,8 +46,8 @@ from clair.environments.routing import RoutingEntry
 from clair.exceptions import EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import TrouveAbc, TrouveType
-from clair.webui.catalog import build_catalog
-from clair.webui.server import serve
+from clair.web_ui.catalog import build_catalog
+from clair.web_ui.server import serve
 
 logger = structlog.get_logger()
 
