@@ -15,7 +15,7 @@ from clair import (
 ```
 
 - **[Python API](python-api.md)** — the operations: `clair.run()`, `clair.compile()`, `clair.test()`, `clair.docs()` and `clair.catalog()`
-- **[Trouve](trouve-api.md)** — the core classes: `TrouveAbc`, `Trouve` for SQL, and `PandasTrouve` for pandas
+- **[Trouve](trouve-api.md)** — the core classes: `TrouveAbc`, `Trouve` for SQL, `PandasTrouve` for pandas, and `SeedTrouve` for a table that holds its rows in the file
 - **[Column](column-api.md)** — column definitions
 - **[RunConfig](run-config-api.md)** — incremental materialization config
 - **[Tests](tests-api.md)** — data quality test classes

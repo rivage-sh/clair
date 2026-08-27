@@ -79,6 +79,7 @@ nav:
     - Staging: topics/staging.md
     - Incrementality: topics/incrementality.md
     - Pandas-Native Transformations: topics/pandas-native.md
+    - Seeds: topics/seeds.md
     - Routing: topics/routing.md
     - Per-Database & Schema Config: topics/per-database-schema-config.md
   - CLI:

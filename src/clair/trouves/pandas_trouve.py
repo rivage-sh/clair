@@ -12,13 +12,14 @@ from collections.abc import Callable
 import pandas as pd
 from pydantic import Field, model_validator
 
+from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, TrouveAbc, TrouveType
+from clair.trouves.trouve import TrouveAbc, TrouveType
 
 _VARIADIC_KINDS = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
 
 
-class PandasTrouve(TrouveAbc):
+class PandasTrouve(DataframeTrouve):
     """A Trouve that a pandas function materializes.
 
     Clair binds ``inputs`` to the parameters of ``transform`` by position. Thus
@@ -41,13 +42,13 @@ class PandasTrouve(TrouveAbc):
     transform: Callable[..., pd.DataFrame] = Field(exclude=True)
     inputs: list[TrouveAbc] = Field(default_factory=list, exclude=True)
 
-    @property
-    def execution_type(self) -> ExecutionType:
-        return ExecutionType.PANDAS
-
     def upstream_trouves(self) -> list[TrouveAbc]:
         """Give the upstream Trouves, in the parameter order of the transform."""
         return list(self.inputs)
+
+    def build_dataframe(self, *input_dataframes: pd.DataFrame) -> pd.DataFrame:
+        """Call the transform. Clair binds each input DataFrame by position."""
+        return self.transform(*input_dataframes)
 
     def parameter_names(self) -> list[str]:
         """Give the parameter names of the transform, in order.
@@ -56,6 +57,21 @@ class PandasTrouve(TrouveAbc):
         binds the inputs by position, thus a name has no effect on the DAG.
         """
         return list(inspect.signature(self.transform).parameters)
+
+    def source_text(self) -> str:
+        """Give the source text of the transform function."""
+        try:
+            return inspect.getsource(self.transform)
+        except (OSError, TypeError):
+            # A lambda, a built-in, or a compiled extension has no source text.
+            return repr(self.transform)
+
+    def source_file(self) -> str | None:
+        """Give the file that holds the transform function."""
+        try:
+            return inspect.getfile(self.transform)
+        except (OSError, TypeError):
+            return None
 
     @model_validator(mode="after")
     def _validate_transform(self) -> PandasTrouve:
@@ -81,4 +97,3 @@ class PandasTrouve(TrouveAbc):
                 f"Parameters: {parameter_names}"
             )
         return self
-

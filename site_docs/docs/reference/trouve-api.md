@@ -1,18 +1,20 @@
 # Trouve API
 
 ```python
-from clair import PandasTrouve, Trouve, TrouveAbc, TrouveType
+from clair import PandasTrouve, SeedTrouve, Trouve, TrouveAbc, TrouveType
 ```
 
 Clair has one Trouve class for each backend. `TrouveAbc` is the abstract base
-that they share. `Trouve` runs SQL in Snowflake. `PandasTrouve` runs a Python
-function on the machine executing clair.
+that they share. `Trouve` runs SQL in Snowflake. `PandasTrouve` and `SeedTrouve`
+both give a DataFrame, which clair writes to Snowflake.
 
 | Class | Backend | Declares dependencies with |
 |-------|---------|----------------------------|
 | `TrouveAbc` | none — abstract base | — |
 | `Trouve` | Snowflake SQL | f-string references in `sql` |
+| `DataframeTrouve` | none — abstract base | — |
 | `PandasTrouve` | pandas | the `inputs` list |
+| `SeedTrouve` | pandas | none — a seed reads no Trouve |
 
 ## `TrouveType`
 
@@ -101,12 +103,30 @@ Discovery sets these attributes on `Trouve.compiled`. They are available after `
 | `imports` | `list[str]` | The logical addresses of the upstream Trouves |
 | `execution_type` | `ExecutionType` | SNOWFLAKE or PANDAS |
 
+## `DataframeTrouve`
+
+The abstract base of each backend that clair writes from a DataFrame. Clair
+reads each upstream Trouve into a DataFrame, calls `build_dataframe`, and writes
+the result. Its `execution_type` is always `PANDAS`.
+
+```python
+class DataframeTrouve(TrouveAbc, ABC):
+    def build_dataframe(self, *input_dataframes: pd.DataFrame) -> pd.DataFrame: ...
+
+    def parameter_names(self) -> list[str]: ...  # a name for each input
+    def source_text(self) -> str: ...            # what `clair compile` writes
+    def source_file(self) -> str | None: ...     # the file of the import section
+```
+
+Write `isinstance(obj, DataframeTrouve)` to accept a `PandasTrouve` or a
+`SeedTrouve`.
+
 ## `PandasTrouve`
 
 The pandas backend. A Python function materializes it.
 
 ```python
-class PandasTrouve(TrouveAbc):
+class PandasTrouve(DataframeTrouve):
     transform: Callable[..., pd.DataFrame]
     inputs:    list[TrouveAbc] = []
 ```
@@ -180,6 +200,76 @@ trouve = PandasTrouve(
 ```
 
 See the [Pandas-Native Transformations](../topics/pandas-native.md) for a full example.
+
+## `SeedTrouve`
+
+A table that holds its rows in the Python file.
+
+```python
+class SeedTrouve(DataframeTrouve):
+    dataframe: pd.DataFrame
+```
+
+```python
+from clair import SeedTrouve
+```
+
+### Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `dataframe` | `pd.DataFrame` | required | The rows that clair writes. Clair reads it when it imports the file. |
+
+`TrouveAbc` holds the other fields: `columns`, `tests`, `docs`, `run_config`.
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `upstream_trouves()` | `list[TrouveAbc]` | Always empty. A seed reads no other Trouve. |
+| `build_dataframe()` | `pd.DataFrame` | The `dataframe` field. |
+| `source_text()` | `str` | The dtypes and the rows, for the compile artifact. |
+
+### Behaviour
+
+| Aspect | Detail |
+|--------|--------|
+| Dependencies | None. A seed is always a root of the DAG. |
+| Materialization | Always `TABLE`. clair creates or replaces the table each run. |
+| Incremental | Not available. Full-refresh only. |
+| Column types | The dtype of each column gives the Snowflake type. `columns` stays documentation. |
+| Command | None. `clair run` builds a seed with every other Trouve. |
+
+### Constraints
+
+- A `SeedTrouve` must be `TrouveType.TABLE`. A VIEW or a SOURCE raises `ValueError`.
+- A `SeedTrouve` does not support incremental run modes.
+- Each column name of the DataFrame must be a string, and the names must be unique.
+- The DataFrame needs one column minimum. A seed with no row is valid.
+
+### Example
+
+```python
+import pandas as pd
+
+from clair import Column, ColumnType, SeedTrouve
+
+frame = pd.DataFrame(
+    {"country_code": ["US", "FR"], "tax_rate": [0.0, 0.20]}
+)
+frame["country_code"] = frame["country_code"].astype("string")
+
+trouve = SeedTrouve(
+    dataframe=frame,
+    docs="The tax rate of each country.",
+    columns=[
+        Column(name="country_code", type=ColumnType.STRING),
+        Column(name="tax_rate",     type=ColumnType.FLOAT),
+    ],
+)
+```
+
+See the [Seeds](../topics/seeds.md) page for a full example.
 
 ## The f-string pattern
 

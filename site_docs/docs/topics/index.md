@@ -13,6 +13,7 @@ five pages before you use clair. Read the others when you need the behaviour.
 - **[Staging](staging.md)** — clair publishes a Trouve only after its tests pass.
 - **[Incrementality](incrementality.md)** — APPEND and UPSERT strategies for large tables.
 - **[Pandas-Native Transformations](pandas-native.md)** — write pipeline steps as Python functions with pandas.
+- **[Seeds](seeds.md)** — a small table that holds its rows in the Python file.
 - **[Routing](routing.md)** — remap the Snowflake target of each environment.
 - **[Per-Database & Schema Config](per-database-schema-config.md)** — warehouse and role overrides per directory.
 

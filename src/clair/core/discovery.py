@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import os
 import re
 import sys
@@ -28,7 +27,7 @@ from clair.exceptions import DiscoveryError
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
-from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveAbc, TrouveType
@@ -338,8 +337,8 @@ def discover_project(
         collision_check[str(logical_address).upper()] = physical_address
 
     # Make a map from an id to a logical address, for the pandas dependencies.
-    # With this map, clair finds the logical address of each Trouve that a PandasTrouve
-    # names in its inputs.
+    # With this map, clair finds the logical address of each Trouve that a
+    # DataframeTrouve names in its inputs.
     id_to_logical_address: dict[int, TrouveAddress] = {
         id(trouve_obj): logical_addresses[id(trouve_obj)]
         for trouve_obj, _, _, _ in collected
@@ -355,7 +354,7 @@ def discover_project(
         physical = physical_addresses[id(trouve_obj)]
 
         if trouve_obj.execution_type == ExecutionType.PANDAS:
-            assert isinstance(trouve_obj, PandasTrouve)
+            assert isinstance(trouve_obj, DataframeTrouve)
             transform_imports: list[str] = []
             # The address that each input reads, in the parameter order of the
             # transform. This list is the counterpart of the addresses in the
@@ -379,10 +378,7 @@ def discover_project(
                 if str(dependency) not in transform_imports:
                     transform_imports.append(str(dependency))
 
-            try:
-                resolved_transform = inspect.getsource(trouve_obj.transform)
-            except OSError:
-                resolved_transform = repr(trouve_obj.transform)
+            resolved_transform = trouve_obj.source_text()
 
             trouve_obj.compiled = CompiledAttributes(
                 physical_address=physical,
@@ -491,7 +487,7 @@ def recompile_for_selection(
 
     This function changes each Trouve in place. It writes three places: the
     resolved_sql of a SQL Trouve, the resolved_sql of each TestSql, and the
-    input_addresses of a pandas Trouve. It changes nothing for a Trouve outside
+    input_addresses of a DataFrame Trouve. It changes nothing for a Trouve outside
     the selection, because this run does not execute that Trouve.
 
     Args:
@@ -522,8 +518,8 @@ def recompile_for_selection(
                     )
                 }
             )
-        elif isinstance(trouve, PandasTrouve):
-            # A pandas Trouve names each input in a list, and not in SQL.
+        elif isinstance(trouve, DataframeTrouve):
+            # A DataFrame Trouve names each input in a list, and not in SQL.
             trouve.compiled = trouve.compiled.model_copy(
                 update={
                     "input_addresses": [

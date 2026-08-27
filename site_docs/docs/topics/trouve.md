@@ -145,6 +145,24 @@ All the other behaviour is the same: the DAG, the `--select` flag, the data qual
 
 See the [Pandas-Native Transformations](pandas-native.md) for a full example.
 
+## A table of static data (`SeedTrouve`)
+
+For a small table that a person maintains by hand, use a `SeedTrouve`. It holds its rows in the Python file, and it reads no other Trouve.
+
+```python
+# reference/tax_rates.py
+import pandas as pd
+
+from clair import SeedTrouve
+
+rates = pd.DataFrame({"country_code": ["US", "FR"], "tax_rate": [0.0, 0.20]})
+rates["country_code"] = rates["country_code"].astype("string")
+
+trouve = SeedTrouve(dataframe=rates)
+```
+
+`clair run` builds a seed with every other Trouve, in topological order. There is no separate command. See the [Seeds](seeds.md) page.
+
 ## After discovery
 
 After clair discovers a Trouve, it sets the `compiled` attributes. Two properties become available:
