@@ -7,7 +7,6 @@ makes them, and that file is in the repository.
 
 from __future__ import annotations
 
-import getpass
 import os
 import re
 from dataclasses import dataclass
@@ -104,26 +103,17 @@ def normalise_schema_name(name: str) -> str:
     return candidate
 
 
-def default_schema_name() -> str:
-    """Give the schema name for a run that names none.
-
-    The workflow sets the name. On a workstation the name holds the user name
-    only: each run of that user drops the schema first, thus the account does
-    not collect a schema for each run.
-    """
-    try:
-        user_name = getpass.getuser()
-    except (OSError, KeyError):
-        user_name = "unknown"
-    cleaned = re.sub(r"[^A-Za-z0-9]", "", user_name).lower() or "unknown"
-    return f"local_{cleaned}"
-
-
-def load_config() -> IntegrationConfig:
+def load_config(schema_name: str | None = None) -> IntegrationConfig:
     """Read the settings from the environment.
 
+    Args:
+        schema_name: The schema of the run. This argument wins against
+            `CLAIR_PR_TESTING_SCHEMA_NAME`. The cleanup command gives the name
+            of a schema that it must drop, thus it needs no variable.
+
     Raises:
-        IntegrationConfigError: If the account or the credentials are absent.
+        IntegrationConfigError: If the account, the credentials, or the schema
+            name is absent.
     """
     account = os.environ.get("CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT", "").strip()
     if not account:
@@ -144,7 +134,19 @@ def load_config() -> IntegrationConfig:
             f"The private key file {private_key_path} does not exist."
         )
 
-    schema_name = os.environ.get("CLAIR_PR_TESTING_SCHEMA_NAME", "").strip()
+    selected_schema_name = (
+        schema_name
+        if schema_name is not None
+        else os.environ.get("CLAIR_PR_TESTING_SCHEMA_NAME", "")
+    ).strip()
+    if not selected_schema_name:
+        raise IntegrationConfigError(
+            "CLAIR_PR_TESTING_SCHEMA_NAME is empty. Each run needs its own schema, "
+            "because the run drops that schema before it starts. Two runs that "
+            "share one name delete the tables of each other. "
+            "See tests/integration/README.md."
+        )
+
     return IntegrationConfig(
         account=account,
         user=os.environ.get("CLAIR_PR_TESTING_SNOWFLAKE_USER", DEFAULT_USER).strip(),
@@ -152,7 +154,7 @@ def load_config() -> IntegrationConfig:
         warehouse=os.environ.get(
             "CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE", DEFAULT_WAREHOUSE
         ).strip(),
-        schema_name=normalise_schema_name(schema_name or default_schema_name()),
+        schema_name=normalise_schema_name(selected_schema_name),
         private_key_path=private_key_path or None,
         private_key_passphrase=os.environ.get(
             "CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"

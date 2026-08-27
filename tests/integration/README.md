@@ -40,7 +40,7 @@ Everything goes to one schema of the `clair_pr_testing` database:
 |---|---|
 | A pull request | `pr_<number>` |
 | A manual start | `run_<run_id>` |
-| Your machine | `local_<user>` |
+| Your machine | The name that you give in `CLAIR_PR_TESTING_SCHEMA_NAME` |
 
 The routing entry in `projects.py` sends **every** Trouve, a SOURCE too, to
 `clair_pr_testing.<schema>.<database>__<schema>__<table>`. The logical Trouve
@@ -117,8 +117,14 @@ uv run python -m tests.integration.clean_up --schema-name pr_42
 ```bash
 export CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT=...
 export CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PATH=/path/to/clair_pr_testing_f.p8
+export CLAIR_PR_TESTING_SCHEMA_NAME=local_<you>_<branch>
 uv run pytest tests/integration -m integration -v
 ```
+
+`CLAIR_PR_TESTING_SCHEMA_NAME` is mandatory, and it has no default. The run
+drops that schema before it starts, thus two runs that share one name delete the
+tables of each other. Give a different name to each run that you start at one
+time: two worktrees, or two agents, need two names.
 
 | Variable | Mandatory | Meaning |
 |---|---|---|
@@ -129,7 +135,7 @@ uv run pytest tests/integration -m integration -v
 | `CLAIR_PR_TESTING_SNOWFLAKE_USER` | No | The default is `clair_pr_testing_user`. |
 | `CLAIR_PR_TESTING_SNOWFLAKE_ROLE` | No | The default is `clair_pr_testing_f`. |
 | `CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE` | No | The default is `clair_pr_testing_wh`. |
-| `CLAIR_PR_TESTING_SCHEMA_NAME` | No | The default is `local_<user>`. |
+| `CLAIR_PR_TESTING_SCHEMA_NAME` | Yes | The schema of the run. It has no default. |
 
 The user, the role and the warehouse are names inside the account, and
 `tests/integration/scripts/clair_pr_testing_setup.sql` makes them. They are not secrets.
