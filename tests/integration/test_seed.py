@@ -284,7 +284,21 @@ class TestTheDtypeGivesTheSnowflakeType:
     def test_a_datetime_dtype_gives_a_timestamp_column(
         self, adapter: SnowflakeAdapter, seed_table: TrouveAddress
     ) -> None:
+        """Without USE_LOGICAL_TYPE, Snowflake reads the integer of the Parquet
+        file, and this column becomes NUMBER."""
         assert column_types(adapter, seed_table)["valid_from"].startswith("TIMESTAMP")
+
+    def test_a_datetime_keeps_its_day(
+        self, adapter: SnowflakeAdapter, seed_table: TrouveAddress
+    ) -> None:
+        """The value must not move by a time zone offset."""
+        rows = query_rows(
+            adapter,
+            f"SELECT TO_VARCHAR(valid_from, 'YYYY-MM-DD') FROM {seed_table} "
+            "WHERE code = 'JP'",
+        )
+
+        assert rows == [("2025-04-01",)]
 
     def test_an_integer_keeps_no_decimal_part(
         self, adapter: SnowflakeAdapter, seed_table: TrouveAddress

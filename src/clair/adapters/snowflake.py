@@ -181,6 +181,11 @@ class SnowflakeAdapter(WarehouseAdapter):
             auto_create_table=True,
             overwrite=True,
             quote_identifiers=False,
+            # write_pandas sends the rows as a Parquet file, and Snowflake reads
+            # the type of each column from that file. Parquet holds a timestamp
+            # as an integer plus a logical type. Without this option Snowflake
+            # reads the integer only, and a datetime column becomes NUMBER.
+            use_logical_type=True,
         )
         # query_id and query_url stay empty. Internally write_dataframe sends
         # CREATE TEMP STAGE and PUT, not one SQL statement that you can look up.

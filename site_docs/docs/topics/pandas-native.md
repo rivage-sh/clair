@@ -90,6 +90,16 @@ If your function returns a different type than `DataFrame`, the run fails with a
 !!! note
     clair reads the data into the memory of the machine that runs clair. For large upstream tables this is slow, and it uses much memory. Chunked reads are not available.
 
+## The dtype gives the Snowflake type
+
+The write step sends the rows as a Parquet file, and Snowflake reads the type of each column from that file. Therefore the dtype of each column of your output DataFrame gives the Snowflake type, and `columns` stays documentation. To control a type, set the dtype in your transform:
+
+```python
+result["region_id"] = result["region_id"].astype("Int64")
+```
+
+The [Seeds](seeds.md) page describes the same behaviour, with each rule that applies here too.
+
 ## Validation
 
 Clair examines the `transform` signature when Python loads your file. Thus a mistake stops the run immediately, and it names the fault:
