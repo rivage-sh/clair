@@ -20,6 +20,7 @@ Examples:
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatch
 
@@ -186,7 +187,7 @@ def expand_selector(dag: nx.DiGraph, pattern: str) -> set[str]:
     return matched | extra
 
 
-def expand_selectors(dag: nx.DiGraph, patterns: tuple[str, ...] | None) -> list[str]:
+def expand_selectors(dag: nx.DiGraph, patterns: Sequence[str] | None) -> list[str]:
     """Apply many selector patterns to the DAG and join the results.
 
     A pattern can be a plain glob or contain a + operator. If the patterns

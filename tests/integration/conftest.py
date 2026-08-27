@@ -1,5 +1,15 @@
 """Fixtures for the integration tests.
 
+The tests call the Python API of clair in this process: `clair.run()`,
+`clair.test()` and `clair.compile()`. The result object then tells a test what
+happened -- the statements, the addresses, the effective run mode, the test
+results -- and a test reads no log line to learn it.
+
+Clair still reads the environment variables of the process. The
+`clair_environment` fixture sets them for the session: a private HOME that holds
+`environments.yml`, the environment name, and the schema name that the test
+routing entry reads.
+
 Without the Snowflake settings the tests skip on a workstation, and they fail in
 GitHub Actions. A run with no credentials in CI would otherwise report success
 after it ran nothing.
@@ -7,10 +17,7 @@ after it ran nothing.
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -26,8 +33,6 @@ from tests.integration.config import (
 )
 from tests.integration.setup import prepare
 from tests.integration.warehouse import connect
-
-COMMAND_TIMEOUT_SECONDS = 900
 
 
 @pytest.fixture(scope="session")
@@ -66,7 +71,11 @@ def snowflake_workspace(integration_config: IntegrationConfig) -> IntegrationCon
 
 @pytest.fixture(scope="session")
 def adapter(snowflake_workspace: IntegrationConfig) -> Iterator[SnowflakeAdapter]:
-    """Give one open connection for the assertions."""
+    """Give one open connection for the assertions.
+
+    This connection belongs to the tests. Each `clair.run()` call opens its own
+    connection, exactly as a run on a workstation does.
+    """
     connection = connect(snowflake_workspace)
     yield connection
     connection.close()
@@ -86,72 +95,24 @@ def clair_home(
     return home
 
 
-def clair_environment(config: IntegrationConfig, home: Path) -> dict[str, str]:
-    """Give the environment variables for one clair command."""
-    environment = dict(os.environ)
-    environment["HOME"] = str(home)
-    environment["USERPROFILE"] = str(home)
-    environment["CLAIR_ENV"] = ENVIRONMENT_NAME
-    environment["CLAIR_LOG_FORMAT"] = "json"
-    environment["CLAIR_PR_TESTING_SCHEMA_NAME"] = config.schema_name
-    environment["CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE"] = config.warehouse
-    environment["CLAIR_PR_TESTING_SNOWFLAKE_ROLE"] = config.role
-    return environment
+@pytest.fixture(scope="session")
+def clair_environment(
+    snowflake_workspace: IntegrationConfig, clair_home: Path
+) -> Iterator[IntegrationConfig]:
+    """Point clair at the private HOME and at the schema of the run.
 
-
-def run_clair(
-    arguments: list[str], environment: dict[str, str], expect_success: bool = True
-) -> subprocess.CompletedProcess[str]:
-    """Run the clair CLI as a subprocess."""
-    completed = subprocess.run(
-        [sys.executable, "-m", "clair.cli.main", *arguments],
-        capture_output=True,
-        text=True,
-        env=environment,
-        timeout=COMMAND_TIMEOUT_SECONDS,
-        check=False,
+    A test that calls the Python API asks for this fixture first. `clair.run()`
+    then finds `environments.yml` under HOME, and the routing entry of the
+    project copy reads CLAIR_PR_TESTING_SCHEMA_NAME.
+    """
+    variables = pytest.MonkeyPatch()
+    variables.setenv("HOME", str(clair_home))
+    variables.setenv("USERPROFILE", str(clair_home))
+    variables.setenv("CLAIR_ENV", ENVIRONMENT_NAME)
+    variables.setenv("CLAIR_PR_TESTING_SCHEMA_NAME", snowflake_workspace.schema_name)
+    variables.setenv(
+        "CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE", snowflake_workspace.warehouse
     )
-    if expect_success and completed.returncode != 0:
-        raise AssertionError(
-            f"clair {' '.join(arguments)} gave {completed.returncode}.\n"
-            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
-        )
-    return completed
-
-
-def log_events(completed: subprocess.CompletedProcess[str]) -> list[dict[str, object]]:
-    """Give each structured log event of one command.
-
-    CLAIR_LOG_FORMAT=json makes one JSON object for each line. A test reads the
-    fields, thus a change of the human text breaks no test.
-    """
-    events: list[dict[str, object]] = []
-    for line in completed.stdout.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("{"):
-            continue
-        try:
-            events.append(json.loads(stripped))
-        except json.JSONDecodeError:
-            continue
-    return events
-
-
-def events_named(
-    completed: subprocess.CompletedProcess[str], event_name: str
-) -> list[dict[str, object]]:
-    """Give each event with one name."""
-    return [event for event in log_events(completed) if event.get("event") == event_name]
-
-
-def run_id_of(completed: subprocess.CompletedProcess[str]) -> str:
-    """Read the run_id out of the run.start event.
-
-    The run_id gives the suffix of each staging address of that run, thus a
-    test can name the object that clair made.
-    """
-    starts = events_named(completed, "run.start")
-    assert starts, "clair logged no run.start event"
-    run_id = starts[0].get("run_id")
-    assert isinstance(run_id, str)
-    return run_id
+    variables.setenv("CLAIR_PR_TESTING_SNOWFLAKE_ROLE", snowflake_workspace.role)
+    yield snowflake_workspace
+    variables.undo()

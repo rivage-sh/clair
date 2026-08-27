@@ -6,38 +6,24 @@ import os
 import re
 import shutil
 import sys
-from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import click
 import structlog
-import uuid6
 
+from clair import api as clair_api
 from clair._logging import configure_logging
-from clair.adapters.base import WarehouseAdapter
-from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.compiler import CompiledNodeInfo, write_compile_output
 from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
-from clair.core.discovery import (
-    ARTIFACTS_DIR_NAME,
-    discover_project,
-    find_routing_collisions,
-    recompile_for_selection,
-)
-from clair.core.runner import RunStatus, run_project
+from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
-from clair.core.selector import expand_selectors
-from clair.core.test_runner import format_test_output, run_tests
 from clair.core.text_references import find_text_references
-from clair.docs.catalog import build_catalog
-from clair.docs.server import serve
-from clair.environments.environments import DEFAULT_THREADS, load_environment
+from clair.environments.environments import DEFAULT_THREADS
 from clair.environments.project_routing import (
-    ROUTING_FILE_NAME,
     ProjectRouting,
+    describe_unnamed_environment,
     load_project_routing,
 )
 from clair.environments.routing import (
@@ -48,14 +34,12 @@ from clair.environments.routing import (
 )
 from clair.exceptions import (
     ClairError,
-    CompileError,
-    EnvironmentsFileNotFoundError,
     InvalidRoutingConfigError,
     InvalidTrouveAddressError,
 )
 from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, TrouveType
+from clair.trouves.trouve import TrouveType
 
 logger = structlog.get_logger()
 
@@ -148,48 +132,10 @@ def _resolve_project_routing(project_root: Path, env_name: str) -> ProjectRoutin
     tells the user before any SQL runs.
     """
     project_routing = load_project_routing(project_root, env_name)
-
-    if project_routing.is_unnamed_environment:
-        click.echo(
-            click.style(
-                f"\nWarning: {ROUTING_FILE_NAME} does not name the environment "
-                f"'{env_name}'.",
-                fg="yellow",
-                bold=True,
-            )
-        )
-        click.echo(
-            f"  Trouves write to their logical (production) addresses.\n"
-            f"  The file names: {', '.join(project_routing.environment_names) or 'nothing'}\n"
-        )
-
+    warning = describe_unnamed_environment(project_routing, env_name)
+    if warning:
+        click.echo(click.style(f"\nWarning: {warning}\n", fg="yellow", bold=True))
     return project_routing
-
-
-def _print_routing_collision_warnings(trouves: list, env_name: str, routing) -> None:
-    """Show a clear warning about each routing collision, before the SQL starts."""
-    collisions = find_routing_collisions(trouves)
-    if not collisions:
-        return
-
-    n = len(collisions)
-    header = "1 routing collision" if n == 1 else f"{n} routing collisions"
-    if routing is not None:
-        header += f" (env: {env_name}, entry: {describe_routing(routing)})"
-    else:
-        header += f" (env: {env_name})"
-
-    click.echo(click.style(f"\nWarning: Clair found {header}", fg="yellow", bold=True))
-
-    for physical_address, logical_sources in collisions:
-        click.echo(f"\n  {physical_address}")
-        for source in logical_sources:
-            click.echo(f"    ↳ {source}")
-
-    click.echo(
-        f"\n  Fix: give one Trouve a different name, change the routing entry in "
-        f"{ROUTING_FILE_NAME},\n  or use --select to remove one Trouve from this run.\n"
-    )
 
 
 def _prompt_and_write_environment() -> None:
@@ -305,60 +251,14 @@ def _prompt_and_write_environment() -> None:
 )
 def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str) -> None:
     """Compile the project and show the new SQL. This needs no Snowflake connection."""
-    project_root = Path(project).resolve()
-    run_mode_enum = RunMode(run_mode)
-    run_id = uuid6.uuid7().hex
-
-    environment = None
-    env_name = env or "dev"
     try:
-        env_name, environment = load_environment(env)
-    except EnvironmentsFileNotFoundError:
-        logger.warning("compile.no_environments_file", detail="Clair compiles without an environment. Run `clair init` to make environments.yml.")
-    except ClairError as e:
-        logger.error("compile.error", error=str(e))
-        sys.exit(1)
-
-    try:
-        routing = _resolve_project_routing(project_root, env_name).entry
-    except ClairError as e:
-        logger.error("compile.error", error=str(e))
-        sys.exit(1)
-
-    try:
-        discovered = discover_project(project_root, routing=routing, environment=environment, run_mode=run_mode_enum)
-        _print_routing_collision_warnings(discovered, env_name, routing)
-        dag = build_dag(discovered)
-
-        expanded = expand_selectors(dag, select if select else None)
-        selected = [n for n in expanded if dag.get_trouve(n).type != TrouveType.SOURCE]
-        if exclude:
-            excluded_set = set(expand_selectors(dag, exclude))
-            selected = [n for n in selected if n not in excluded_set]
-        recompile_for_selection(discovered, set(selected))
-
-        source_count = sum(1 for n in dag.nodes if dag.get_trouve(n).type == TrouveType.SOURCE)
-        trouve_count = len(dag.nodes) - source_count
-
-        logger.info("compile.start", run_id=run_id, project=str(project_root), trouves=trouve_count, sources=source_count, run_mode=run_mode)
-
-        artifacts_dir = project_root / ARTIFACTS_DIR_NAME / run_id
-
-        def _on_node_compiled(node_info: CompiledNodeInfo) -> None:
-            parts = node_info.name.split(".")
-            extension = None
-            if node_info.execution_type == ExecutionType.PANDAS:
-                extension = ".py"
-            elif node_info.execution_type == ExecutionType.SNOWFLAKE:
-                extension = ".sql"
-            else:
-                raise CompileError(f"Unknown execution_type '{node_info.execution_type}' for {node_info.name}")
-            artifact_file = artifacts_dir / "/".join(parts[:-1]) / f"{parts[-1]}{extension}"
-            logger.info("compile.node", trouve=node_info.name, dependencies=node_info.dependencies, artifact_file=str(artifact_file))
-
-        write_compile_output(dag, selected, project_root, on_node_compiled=_on_node_compiled, run_mode=run_mode_enum, run_id=run_id, use_staging=True)
-        logger.info("compile.complete", run_id=run_id, artifacts_dir=str(artifacts_dir))
-
+        clair_api.compile(
+            project,
+            select=select,
+            exclude=exclude,
+            env=env,
+            run_mode=RunMode(run_mode),
+        )
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
         logger.error("compile.routing_error", error=str(e))
         click.echo("\n  Run `clair validate` to see every routing problem.\n", err=True)
@@ -510,23 +410,10 @@ def dag(select: tuple[str, ...], project: str) -> None:
 )
 def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     """Start a local web UI. It shows the project documentation and the lineage."""
-    project_root = Path(project).resolve()
-
     try:
-        discovered = discover_project(project_root)
-        dag = build_dag(discovered)
-
-        catalog = build_catalog(dag, project_root)
-
-        source_count = sum(1 for t in dag.trouves if t.type == TrouveType.SOURCE)
-        trouve_count = len(dag.nodes) - source_count
-
-        logger.info("docs.start", project=str(project_root), trouves=trouve_count, sources=source_count)
-
-        serve(catalog, host=host, port=port, open_browser=not no_browser)
-
+        clair_api.docs(project, host=host, port=port, open_browser=not no_browser)
     except OSError as e:
-        if "Address already in use" in str(e) or "address already in use" in str(e):
+        if "address already in use" in str(e).lower():
             logger.error("docs.port_in_use", port=port, detail=f"Port {port} is in use. Use --port with a different number.")
         else:
             logger.error("docs.error", error=str(e))
@@ -584,111 +471,31 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
 )
 def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool, threads: int | None) -> None:
     """Run the Trouves on Snowflake. Then run the data quality tests."""
-    project_root = Path(project).resolve()
-    run_mode_enum = RunMode(run_mode)
-    run_id = uuid6.uuid7().hex
-
-    # Clair always writes through a staging address: build there, test there, and
-    # promote after the tests pass. The tests give the guarantee, so --no-test
-    # stops the staging step. Nothing then decides the promotion, and a staging
-    # address gives only cost.
-    use_staging = not no_test
-    if no_test:
-        logger.warning(
-            "run.staging_disabled",
-            reason="--no-test skips the tests that decide the promotion, so clair writes to each physical address directly",
-        )
-
     try:
-        # Load the environment.
-        env_name, environment = load_environment(env)
-
-        # The command line replaces the thread count of the environment.
-        thread_count = threads if threads is not None else environment.threads
-
-        # Find the Trouves and make the DAG.
-        profile_defaults = {
-            "warehouse": environment.warehouse,
-            "role": environment.role,
-        }
-        routing = _resolve_project_routing(project_root, env_name).entry
-        discovered = discover_project(project_root, profile_defaults, routing=routing, environment=environment, run_mode=run_mode_enum)
-        _print_routing_collision_warnings(discovered, env_name, routing)
-        dag = build_dag(discovered)
-
-        # Keep only the Trouves that the selector gives.
-        expanded = expand_selectors(dag, select if select else None)
-        selected = [n for n in expanded if dag.get_trouve(n).type != TrouveType.SOURCE]
-        if exclude:
-            excluded_set = set(expand_selectors(dag, exclude))
-            selected = [n for n in selected if n not in excluded_set]
-
-        if not selected:
-            click.echo("Clair found no Trouves to run.")
-            return
-
-        recompile_for_selection(discovered, set(selected))
-        write_compile_output(dag, selected, project_root, run_mode=run_mode_enum, run_id=run_id, use_staging=use_staging)
-
-        # If account_locator is absent, tell the user. The query URLs stay empty.
-        if not environment.account_locator:
-            logger.warning("run.no_account_locator", env=env_name, detail="Clair cannot show the query URLs.")
-
-        # Connect and run. Show the result of each node immediately.
-        adapter = SnowflakeAdapter()
-        adapter.connect(environment.to_connection_dict())
-
-        test_failures: list[str] = []
-
-        def on_node_success(
-            node_name: str, query_address: str, node_adapter: WarehouseAdapter
-        ) -> bool:
-            # node_adapter is the connection of the thread that ran the node.
-            # A parallel run must not send these test queries on a different
-            # connection, because that connection holds a different context.
-            node_test_results = run_tests(
-                dag, [node_name], node_adapter,
-                use_sample=sample,
-                query_addresses={node_name: query_address},
-            )
-            passed = all(r.passed for r in node_test_results)
-            if not passed:
-                # list.append is atomic, thus the threads need no lock here.
-                test_failures.append(node_name)
-            return passed
-
-        try:
-            total = len(selected)
-            # A connection that no Trouve uses gives nothing. A connection
-            # costs one login, not credits: Snowflake bills the warehouse per
-            # second while it runs, and an idle session starts no warehouse.
-            thread_count = min(thread_count, total)
-            logger.info("run.start", run_id=run_id, env=env_name, project=str(project_root), trouves=total, run_mode=run_mode, use_staging=use_staging, threads=thread_count)
-
-            results = list(run_project(
-                dag, selected, adapter,
-                run_mode=run_mode_enum,
-                run_id=run_id,
-                after_node_success=on_node_success if not no_test else None,
-                use_staging=use_staging,
-                threads=thread_count,
-            ))
-
-            counts = Counter(r.status for r in results)
-            logger.info("run.complete", run_id=run_id, succeeded=counts[RunStatus.SUCCESS], failed=counts[RunStatus.FAILURE], skipped=counts[RunStatus.SKIPPED])
-
-            if counts[RunStatus.FAILURE] or test_failures:
-                sys.exit(1)
-
-        finally:
-            adapter.close()
-
+        summary = clair_api.run(
+            project,
+            select=select,
+            exclude=exclude,
+            env=env,
+            run_mode=RunMode(run_mode),
+            test=not no_test,
+            sample=sample,
+            threads=threads,
+        )
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
         logger.error("run.routing_error", error=str(e))
         click.echo("\n  Run `clair validate` to see every routing problem.\n", err=True)
         sys.exit(1)
     except ClairError as e:
         logger.error("run.error", error=str(e))
+        sys.exit(1)
+
+    if not summary.results:
+        click.echo("Clair found no Trouves to run.")
+        return
+
+    failed_tests = [t for t in summary.test_results if not t.passed]
+    if summary.failed_count or failed_tests:
         sys.exit(1)
 
 
@@ -730,61 +537,20 @@ def test(
     select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, sample: bool, threads: int | None
 ) -> None:
     """Run the data quality tests on Snowflake."""
-    project_root = Path(project).resolve()
-
     try:
-        # Load the environment.
-        env_name, environment = load_environment(env)
-
-        # The command line replaces the thread count of the environment.
-        thread_count = threads if threads is not None else environment.threads
-
-        # Find the Trouves and make the DAG.
-        profile_defaults = {
-            "warehouse": environment.warehouse,
-            "role": environment.role,
-        }
-        routing = _resolve_project_routing(project_root, env_name).entry
-        discovered = discover_project(project_root, profile_defaults, routing=routing, environment=environment)
-        dag = build_dag(discovered)
-
-        # Keep the Trouves that the selector gives. Keep each SOURCE too, so
-        # that the selector can match a SOURCE. run_tests skips each SOURCE.
-        selected = expand_selectors(dag, select if select else None)
-        if exclude:
-            excluded_set = set(expand_selectors(dag, exclude))
-            selected = [n for n in selected if n not in excluded_set]
-
-        if not selected:
-            logger.info("test.no_trouves_selected")
-            return
-
-        # Connect and run the tests.
-        adapter = SnowflakeAdapter()
-        adapter.connect(environment.to_connection_dict())
-
-        try:
-            # A connection that no Trouve uses gives nothing. A connection
-            # costs one login, not credits.
-            thread_count = min(thread_count, len(selected))
-            logger.info("test.start", project=str(project_root), trouves=len(selected), threads=thread_count)
-            results = run_tests(dag, selected, adapter, use_sample=sample, threads=thread_count)
-
-            if not results:
-                logger.info("test.no_tests_found")
-                return
-
-            output = format_test_output(results)
-            logger.info("test.complete", passed=output.passed_count, failed=output.failed_count, errors=output.error_count)
-
-            # If one test failed, or one test caused an error, stop with an error.
-            if any(not r.passed for r in results):
-                sys.exit(1)
-        finally:
-            adapter.close()
-
+        summary = clair_api.test(
+            project,
+            select=select,
+            exclude=exclude,
+            env=env,
+            sample=sample,
+            threads=threads,
+        )
     except ClairError as e:
         logger.error("test.error", error=str(e))
+        sys.exit(1)
+
+    if any(not test_result.passed for test_result in summary.results):
         sys.exit(1)
 
 

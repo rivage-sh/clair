@@ -4,6 +4,10 @@ The projects in `examples/projects/` are the fixtures. A change that breaks an
 example therefore breaks the build, and the documentation stays correct. A new
 project in that directory joins these tests with no change here.
 
+Each test calls `clair.run()` or `clair.test()` and reads the summary that the
+call gives. The summary names each Trouve, its status, its statements and its
+test results, thus a test asks the run what happened.
+
 The test routing entry puts every Trouve, a SOURCE too, in one schema. For pull
 request 32 the mapping is:
 
@@ -21,9 +25,10 @@ from pathlib import Path
 
 import pytest
 
+import clair
 from clair.adapters.snowflake import SnowflakeAdapter
+from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
-from tests.integration.conftest import clair_environment, events_named, run_clair
 from tests.integration.projects import (
     copy_with_ci_routing,
     example_project_paths,
@@ -53,16 +58,14 @@ def project_copies(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
 def test_a_full_refresh_builds_every_model(
     project_path: Path,
     project_copies: dict[str, Path],
-    snowflake_workspace: IntegrationConfig,
+    clair_environment: IntegrationConfig,
     adapter: SnowflakeAdapter,
-    clair_home: Path,
 ) -> None:
     """Each Trouve that clair builds exists in the schema of the run."""
     copy_path = project_copies[project_path.name]
-    environment = clair_environment(snowflake_workspace, clair_home)
-    schema_name = snowflake_workspace.schema_name
+    schema_name = clair_environment.schema_name
 
-    completed = run_clair(["run", "--project", str(copy_path)], environment)
+    summary = clair.run(copy_path)
 
     logical_names = model_logical_names(trouves_of(project_path))
     assert logical_names, f"{project_path.name} builds no Trouve"
@@ -74,8 +77,20 @@ def test_a_full_refresh_builds_every_model(
     ]
     assert absent == []
 
-    successes = events_named(completed, "run.node.success")
-    assert len(successes) == len(logical_names)
+    assert summary.failed == []
+    assert summary.succeeded_count == len(logical_names)
+
+    # The result of each Trouve holds the statements that Snowflake ran, and
+    # the staging address that clair built at. A staged run writes there first,
+    # thus the statements name that address.
+    for result in summary.succeeded:
+        assert result.staging_address is not None
+        assert summary.run_id in result.staging_address
+        assert result.query_ids
+        if result.sql is not None:
+            assert any(
+                result.staging_address in statement for statement in result.sql
+            )
 
 
 def test_the_address_of_a_trouve_is_the_one_that_you_expect(
@@ -103,27 +118,23 @@ def test_the_address_of_a_trouve_is_the_one_that_you_expect(
 def test_the_data_quality_tests_pass(
     project_path: Path,
     project_copies: dict[str, Path],
-    snowflake_workspace: IntegrationConfig,
-    clair_home: Path,
+    clair_environment: IntegrationConfig,
 ) -> None:
-    """`clair test` reports no failure and no error."""
+    """`clair.test()` reports no failure and no error."""
     copy_path = project_copies[project_path.name]
-    environment = clair_environment(snowflake_workspace, clair_home)
 
-    completed = run_clair(["test", "--project", str(copy_path)], environment)
+    summary = clair.test(copy_path)
 
-    results = events_named(completed, "test.result")
-    if not results:
+    if not summary.results:
         pytest.skip(f"{project_path.name} declares no data quality test")
-    failed = [result for result in results if not result.get("passed")]
-    assert failed == []
+    assert summary.failed_results == []
+    assert summary.error_count == 0
 
 
 def test_the_incremental_append_adds_only_the_new_rows(
     project_copies: dict[str, Path],
-    snowflake_workspace: IntegrationConfig,
+    clair_environment: IntegrationConfig,
     adapter: SnowflakeAdapter,
-    clair_home: Path,
 ) -> None:
     """example_3 appends the orders of the last 3 days.
 
@@ -132,17 +143,13 @@ def test_the_incremental_append_adds_only_the_new_rows(
     appends the 2 orders that this test inserts.
     """
     copy_path = project_copies["example_3"]
-    environment = clair_environment(snowflake_workspace, clair_home)
-    schema_name = snowflake_workspace.schema_name
+    schema_name = clair_environment.schema_name
     recent_orders = physical_address(
         "example_3_database.derived.recent_orders", schema_name
     )
     source_orders = physical_address("example_3_database.source.orders", schema_name)
 
-    # clair_pr_testing.<schema>.example_3_database__derived__recent_orders
-    run_clair(
-        ["run", "--project", str(copy_path), "--run-mode", "full_refresh"], environment
-    )
+    clair.run(copy_path, run_mode=RunMode.FULL_REFRESH)
     assert row_count(adapter, recent_orders) == 6
 
     adapter.execute(f"""
@@ -153,35 +160,34 @@ def test_the_incremental_append_adds_only_the_new_rows(
             ('ord_008', 'cust_d', 'placed', 310.00, current_timestamp(), current_timestamp())
     """)
 
-    run_clair(
-        ["run", "--project", str(copy_path), "--run-mode", "incremental"], environment
-    )
+    summary = clair.run(copy_path, run_mode=RunMode.INCREMENTAL)
     assert row_count(adapter, recent_orders) == 8
+
+    # The mode of the result is the mode that clair used, after the RunConfig of
+    # the Trouve and the fallback of a table that does not exist yet.
+    result = summary.result("example_3_database.derived.recent_orders")
+    assert result is not None
+    assert result.effective_run_mode == RunMode.INCREMENTAL
 
 
 def test_select_builds_one_part_of_the_dag(
     project_copies: dict[str, Path],
-    snowflake_workspace: IntegrationConfig,
-    clair_home: Path,
+    clair_environment: IntegrationConfig,
 ) -> None:
-    """`--select` builds the named Trouve only.
+    """`select` builds the named Trouve only.
 
     A selector matches the physical address, thus the pattern is
     `clair_pr_testing.<schema>.example_1_database__refined__events`, not the
     logical name `example_1_database.refined.events`.
     """
     copy_path = project_copies["example_1"]
-    environment = clair_environment(snowflake_workspace, clair_home)
     selector = str(
         physical_address(
-            "example_1_database.refined.events", snowflake_workspace.schema_name
+            "example_1_database.refined.events", clair_environment.schema_name
         )
     )
 
-    completed = run_clair(
-        ["run", "--project", str(copy_path), "--select", selector], environment
-    )
+    summary = clair.run(copy_path, select=[selector])
 
-    successes = events_named(completed, "run.node.success")
-    assert len(successes) == 1
-    assert successes[0].get("logical") == "example_1_database.refined.events"
+    assert summary.succeeded_count == 1
+    assert summary.results[0].logical_address == "example_1_database.refined.events"

@@ -93,6 +93,7 @@ nav:
     - clair clean: cli/clean.md
   - Reference:
     - reference/index.md
+    - Python API: reference/python-api.md
     - Trouve: reference/trouve-api.md
     - Column: reference/column-api.md
     - RunConfig: reference/run-config-api.md

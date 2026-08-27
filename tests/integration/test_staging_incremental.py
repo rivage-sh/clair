@@ -12,25 +12,22 @@ An incremental run adds two objects that a full refresh does not have:
 The order of the statements therefore is: clone, make the merge source, MERGE,
 drop the merge source, test, promote, drop the staging table. The tests below
 run each of those paths, and each one that fails.
+
+Each test calls `clair.run()`. The `RunSummary` gives the statements of the run
+and the index of the statement that failed, thus a test names the step that
+Snowflake refused.
 """
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
-
 import pytest
 
+import clair
 from clair.adapters.snowflake import SnowflakeAdapter
+from clair.core.runner import RunStatus, RunSummary
 from clair.core.staging import make_staging_address
-from clair.trouves.run_config import IncrementalMode
+from clair.trouves.run_config import IncrementalMode, RunMode
 from tests.integration.config import IntegrationConfig
-from tests.integration.conftest import (
-    clair_environment,
-    events_named,
-    run_clair,
-    run_id_of,
-)
 from tests.integration.staging_project import (
     checked_address,
     insert_source_row,
@@ -72,19 +69,17 @@ class TestAnUpsertRunThatPasses:
     @pytest.fixture(scope="class")
     def runs(
         self,
-        snowflake_workspace: IntegrationConfig,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
-        clair_home: Path,
         tmp_path_factory: pytest.TempPathFactory,
-    ) -> tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str]]:
+    ) -> tuple[RunSummary, RunSummary]:
         """Build the table, then merge a change and a new row into it.
 
         The first run finds no physical table, so clair changes to the full
         refresh mode. The second run merges: it changes id_001 and it adds
         id_003.
         """
-        schema_name = snowflake_workspace.schema_name
-        environment = clair_environment(snowflake_workspace, clair_home)
+        schema_name = clair_environment.schema_name
         project_path = write_probe_project(
             tmp_path_factory.mktemp("staging_upsert_pass"),
             self.DATABASE_NAME,
@@ -93,10 +88,7 @@ class TestAnUpsertRunThatPasses:
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
-        first = run_clair(
-            ["run", "--project", str(project_path), "--run-mode", "incremental"],
-            environment,
-        )
+        first = clair.run(project_path, run_mode=RunMode.INCREMENTAL)
 
         make_source_rows(
             adapter,
@@ -104,31 +96,41 @@ class TestAnUpsertRunThatPasses:
             schema_name,
             {"id_000": 1, "id_001": 99, "id_002": 1, "id_003": 1},
         )
-        second = run_clair(
-            ["run", "--project", str(project_path), "--run-mode", "incremental"],
-            environment,
-        )
+        second = clair.run(project_path, run_mode=RunMode.INCREMENTAL)
         return first, second
 
     def test_the_first_run_changes_to_the_full_refresh_mode(
-        self,
-        runs: tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str]],
+        self, runs: tuple[RunSummary, RunSummary]
     ) -> None:
         """No physical table exists yet, so clair makes no clone."""
         first, _ = runs
-        fallbacks = events_named(first, "run.node.incremental_fallback")
-        assert [event.get("logical") for event in fallbacks] == [
-            f"{self.DATABASE_NAME}.refined.checked"
-        ]
+        result = first.result(f"{self.DATABASE_NAME}.refined.checked")
+
+        assert result is not None
+        assert result.effective_run_mode == RunMode.FULL_REFRESH
+
+    def test_the_second_run_stays_incremental(
+        self, runs: tuple[RunSummary, RunSummary]
+    ) -> None:
+        """The table exists now, thus the incremental statements run."""
+        _, second = runs
+        result = second.result(f"{self.DATABASE_NAME}.refined.checked")
+
+        assert result is not None
+        assert result.effective_run_mode == RunMode.INCREMENTAL
+        assert result.sql is not None
+        # The clone seeds the staging table, and the MERGE follows it.
+        assert "clone" in result.sql[0].lower()
+        assert any("merge into" in statement.lower() for statement in result.sql)
 
     def test_the_merge_updates_a_row_and_inserts_a_row(
         self,
-        runs: tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str]],
-        snowflake_workspace: IntegrationConfig,
+        runs: tuple[RunSummary, RunSummary],
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The clone seeds the staging table, so the old rows stay."""
-        schema_name = snowflake_workspace.schema_name
+        schema_name = clair_environment.schema_name
         checked = checked_address(self.DATABASE_NAME, schema_name)
 
         assert row_count(adapter, checked) == 4
@@ -137,19 +139,18 @@ class TestAnUpsertRunThatPasses:
 
     def test_clair_drops_the_staging_table_and_the_merge_source(
         self,
-        runs: tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str]],
-        snowflake_workspace: IntegrationConfig,
+        runs: tuple[RunSummary, RunSummary],
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
         """An UPSERT makes two objects. A run that passed keeps neither."""
         _, second = runs
-        schema_name = snowflake_workspace.schema_name
-        run_id = run_id_of(second)
+        schema_name = clair_environment.schema_name
         checked = checked_address(self.DATABASE_NAME, schema_name)
 
-        assert not table_exists(adapter, make_staging_address(checked, run_id))
+        assert not table_exists(adapter, make_staging_address(checked, second.run_id))
         assert not table_exists(
-            adapter, merge_source_address(checked, run_id, schema_name)
+            adapter, merge_source_address(checked, second.run_id, schema_name)
         )
         assert staging_objects(adapter, schema_name, self.DATABASE_NAME) == []
 
@@ -162,14 +163,12 @@ class TestAnUpsertRunWhoseTestFails:
     @pytest.fixture(scope="class")
     def failed_run(
         self,
-        snowflake_workspace: IntegrationConfig,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
-        clair_home: Path,
         tmp_path_factory: pytest.TempPathFactory,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> RunSummary:
         """Build 3 rows, then merge a 4th row that the test rejects."""
-        schema_name = snowflake_workspace.schema_name
-        environment = clair_environment(snowflake_workspace, clair_home)
+        schema_name = clair_environment.schema_name
         destination = tmp_path_factory.mktemp("staging_upsert_fail")
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
@@ -179,10 +178,7 @@ class TestAnUpsertRunWhoseTestFails:
             minimum_rows=PASSING_LIMIT,
             incremental_mode=IncrementalMode.UPSERT,
         )
-        run_clair(
-            ["run", "--project", str(good_project), "--run-mode", "incremental"],
-            environment,
-        )
+        clair.run(good_project, run_mode=RunMode.INCREMENTAL)
 
         insert_source_row(adapter, self.DATABASE_NAME, schema_name, "id_003", 1)
         bad_project = write_probe_project(
@@ -191,51 +187,48 @@ class TestAnUpsertRunWhoseTestFails:
             minimum_rows=FAILING_LIMIT,
             incremental_mode=IncrementalMode.UPSERT,
         )
-        return run_clair(
-            ["run", "--project", str(bad_project), "--run-mode", "incremental"],
-            environment,
-            expect_success=False,
-        )
+        return clair.run(bad_project, run_mode=RunMode.INCREMENTAL)
 
     def test_the_physical_table_keeps_the_rows_of_the_run_that_passed(
         self,
-        failed_run: subprocess.CompletedProcess[str],
-        snowflake_workspace: IntegrationConfig,
+        failed_run: RunSummary,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The MERGE ran on the clone, so it never touched this table."""
-        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
-        assert failed_run.returncode == 1
+        checked = checked_address(self.DATABASE_NAME, clair_environment.schema_name)
+        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
+
+        assert result is not None
+        assert result.status == RunStatus.FAILURE
+        assert [test.passed for test in result.test_results] == [False]
         assert row_count(adapter, checked) == 3
 
     def test_the_rejected_candidate_holds_the_merged_rows(
         self,
-        failed_run: subprocess.CompletedProcess[str],
-        snowflake_workspace: IntegrationConfig,
+        failed_run: RunSummary,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
         """You can query the exact rows that the test rejected."""
-        schema_name = snowflake_workspace.schema_name
-        run_id = run_id_of(failed_run)
-        checked = checked_address(self.DATABASE_NAME, schema_name)
+        checked = checked_address(self.DATABASE_NAME, clair_environment.schema_name)
+        staging = make_staging_address(checked, failed_run.run_id)
 
-        staging = make_staging_address(checked, run_id)
         assert table_exists(adapter, staging)
         assert row_count(adapter, staging) == 4
 
     def test_the_merge_source_table_goes_away(
         self,
-        failed_run: subprocess.CompletedProcess[str],
-        snowflake_workspace: IntegrationConfig,
+        failed_run: RunSummary,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The MERGE passed, thus its own drop statement ran before the test."""
-        schema_name = snowflake_workspace.schema_name
-        run_id = run_id_of(failed_run)
+        schema_name = clair_environment.schema_name
         checked = checked_address(self.DATABASE_NAME, schema_name)
 
         assert not table_exists(
-            adapter, merge_source_address(checked, run_id, schema_name)
+            adapter, merge_source_address(checked, failed_run.run_id, schema_name)
         )
 
 
@@ -252,18 +245,16 @@ class TestAMergeThatFails:
     @pytest.fixture(scope="class")
     def failed_run(
         self,
-        snowflake_workspace: IntegrationConfig,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
-        clair_home: Path,
         tmp_path_factory: pytest.TempPathFactory,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> RunSummary:
         """Give the SOURCE two rows with one id, thus the MERGE fails.
 
         Snowflake refuses a MERGE when two source rows match one target row.
         The message is "Duplicate row detected during DML action".
         """
-        schema_name = snowflake_workspace.schema_name
-        environment = clair_environment(snowflake_workspace, clair_home)
+        schema_name = clair_environment.schema_name
         project_path = write_probe_project(
             tmp_path_factory.mktemp("staging_merge_error"),
             self.DATABASE_NAME,
@@ -272,57 +263,61 @@ class TestAMergeThatFails:
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
-        run_clair(
-            ["run", "--project", str(project_path), "--run-mode", "incremental"],
-            environment,
-        )
+        clair.run(project_path, run_mode=RunMode.INCREMENTAL)
 
         insert_source_row(adapter, self.DATABASE_NAME, schema_name, "id_000", 42)
-        return run_clair(
-            ["run", "--project", str(project_path), "--run-mode", "incremental"],
-            environment,
-            expect_success=False,
-        )
+        return clair.run(project_path, run_mode=RunMode.INCREMENTAL)
 
     def test_the_merge_is_the_statement_that_failed(
-        self, failed_run: subprocess.CompletedProcess[str]
+        self, failed_run: RunSummary
     ) -> None:
-        """The error must name the duplicate row, and no other fault.
+        """The MERGE must be the statement that stopped, and no other one.
 
         The next test asks if clair dropped the merge source table. That
         question means nothing when the run stopped before the MERGE, because
-        clair makes the merge source table one statement earlier. This test
-        therefore reads the message of Snowflake.
+        clair makes the merge source table one statement earlier. The result
+        names the statement, thus this test reads the SQL of that step.
         """
-        failures = events_named(failed_run, "run.node.failure")
-        assert failed_run.returncode == 1
-        assert [event.get("logical") for event in failures] == [
-            f"{self.DATABASE_NAME}.refined.checked"
-        ]
-        assert "duplicate row" in str(failures[0].get("error")).lower()
+        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
+
+        assert result is not None
+        assert result.status == RunStatus.FAILURE
+        assert failed_run.failed_count == 1
+        assert result.sql is not None
+        assert result.failed_statement_index is not None
+
+        failed_statement = result.sql[result.failed_statement_index]
+        assert "merge into" in failed_statement.lower()
+        assert "duplicate row" in result.error.lower()
+
+    def test_the_run_ran_no_data_quality_test(self, failed_run: RunSummary) -> None:
+        """A build that fails never reaches the test step."""
+        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
+
+        assert result is not None
+        assert result.test_results == []
 
     def test_clair_drops_the_merge_source_table(
         self,
-        failed_run: subprocess.CompletedProcess[str],
-        snowflake_workspace: IntegrationConfig,
+        failed_run: RunSummary,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
         """This is the cleanup that the index from the end makes correct."""
-        schema_name = snowflake_workspace.schema_name
-        run_id = run_id_of(failed_run)
+        schema_name = clair_environment.schema_name
         checked = checked_address(self.DATABASE_NAME, schema_name)
 
         assert not table_exists(
-            adapter, merge_source_address(checked, run_id, schema_name)
+            adapter, merge_source_address(checked, failed_run.run_id, schema_name)
         )
 
     def test_the_physical_table_keeps_its_rows(
         self,
-        failed_run: subprocess.CompletedProcess[str],
-        snowflake_workspace: IntegrationConfig,
+        failed_run: RunSummary,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
-        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        checked = checked_address(self.DATABASE_NAME, clair_environment.schema_name)
         assert row_count(adapter, checked) == 3
 
 
@@ -334,14 +329,12 @@ class TestAnAppendRun:
     @pytest.fixture(scope="class")
     def second_run(
         self,
-        snowflake_workspace: IntegrationConfig,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
-        clair_home: Path,
         tmp_path_factory: pytest.TempPathFactory,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> RunSummary:
         """Build 3 rows, then append the same 3 rows again."""
-        schema_name = snowflake_workspace.schema_name
-        environment = clair_environment(snowflake_workspace, clair_home)
+        schema_name = clair_environment.schema_name
         project_path = write_probe_project(
             tmp_path_factory.mktemp("staging_append"),
             self.DATABASE_NAME,
@@ -350,19 +343,13 @@ class TestAnAppendRun:
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
-        run_clair(
-            ["run", "--project", str(project_path), "--run-mode", "incremental"],
-            environment,
-        )
-        return run_clair(
-            ["run", "--project", str(project_path), "--run-mode", "incremental"],
-            environment,
-        )
+        clair.run(project_path, run_mode=RunMode.INCREMENTAL)
+        return clair.run(project_path, run_mode=RunMode.INCREMENTAL)
 
     def test_the_clone_seeds_the_staging_table(
         self,
-        second_run: subprocess.CompletedProcess[str],
-        snowflake_workspace: IntegrationConfig,
+        second_run: RunSummary,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
         """3 rows of the first run, plus the 3 rows that the INSERT adds.
@@ -370,21 +357,24 @@ class TestAnAppendRun:
         Without the clone the staging table would start empty, and the
         promotion would then give the physical table 3 rows.
         """
-        checked = checked_address(self.DATABASE_NAME, snowflake_workspace.schema_name)
+        checked = checked_address(self.DATABASE_NAME, clair_environment.schema_name)
         assert row_count(adapter, checked) == 6
 
     def test_clair_makes_no_merge_source_table(
         self,
-        second_run: subprocess.CompletedProcess[str],
-        snowflake_workspace: IntegrationConfig,
+        second_run: RunSummary,
+        clair_environment: IntegrationConfig,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The MERGE belongs to the UPSERT mode only."""
-        schema_name = snowflake_workspace.schema_name
-        run_id = run_id_of(second_run)
+        schema_name = clair_environment.schema_name
         checked = checked_address(self.DATABASE_NAME, schema_name)
+        result = second_run.result(f"{self.DATABASE_NAME}.refined.checked")
 
+        assert result is not None
+        assert result.sql is not None
+        assert not any("merge into" in statement.lower() for statement in result.sql)
         assert not table_exists(
-            adapter, merge_source_address(checked, run_id, schema_name)
+            adapter, merge_source_address(checked, second_run.run_id, schema_name)
         )
         assert staging_objects(adapter, schema_name, self.DATABASE_NAME) == []

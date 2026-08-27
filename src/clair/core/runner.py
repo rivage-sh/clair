@@ -7,6 +7,7 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import StrEnum
+from pathlib import Path
 from typing import NamedTuple
 
 import networkx as nx
@@ -16,13 +17,14 @@ from pydantic import BaseModel, model_validator
 
 from clair.adapters.base import WarehouseAdapter
 from clair.adapters.pool import AdapterPool
-from clair.core.dag import ClairDag, get_executable_nodes
+from clair.core.dag import ClairDag, get_executable_nodes, logical_address_of
 from clair.core.staging import (
     build_clone_statement,
     build_drop_staging_statement,
     build_promote_statement,
     make_staging_address,
 )
+from clair.core.test_runner import TestResult
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError, RunError
 from clair.trouves.pandas_trouve import PandasTrouve
@@ -47,9 +49,17 @@ class RunResult(BaseModel):
         status: The result of the attempt.
         query_ids: The warehouse query ID of each statement.
         query_urls: The URL of each statement in the Snowflake console.
+        staging_address: The run-scoped address that clair built at. It is None
+            when clair wrote to the physical address directly.
+        effective_run_mode: The run mode that clair used, after the RunConfig of
+            the Trouve and the fallback to a full refresh.
         error: The error message if the query failed.
-        sql: The complete DDL. Clair sets it only for a FAILURE.
+        sql: The statements, in the order that clair executed them.
+        failed_statement_index: The index in *sql* of the statement that failed.
+            Clair sets it only for a FAILURE that a statement caused.
         duration_seconds: The clock time of the query.
+        row_count: The number of rows that the last build statement changed.
+        test_results: The data quality test results of this Trouve.
         skipped_by: The physical_address of the upstream Trouve that caused the skip.
             Clair sets it only for a SKIPPED result.
     """
@@ -59,9 +69,14 @@ class RunResult(BaseModel):
     status: RunStatus
     query_ids: list[str] = []
     query_urls: list[str] = []
+    staging_address: str | None = None
+    effective_run_mode: RunMode | None = None
     error: str = ""
     sql: list[str] | None = None
+    failed_statement_index: int | None = None
     duration_seconds: float = 0.0
+    row_count: int = 0
+    test_results: list[TestResult] = []
     skipped_by: str | None = None
 
     @model_validator(mode='after')
@@ -85,6 +100,21 @@ class RunSummary(BaseModel):
 
     results: list[RunResult]
     env_name: str
+    run_id: str = ""
+    project_root: Path | None = None
+    run_mode: RunMode = RunMode.FULL_REFRESH
+
+    def result(self, address: str) -> RunResult | None:
+        """Find one result by its logical address or its physical address."""
+        for run_result in self.results:
+            if address in (run_result.logical_address, run_result.physical_address):
+                return run_result
+        return None
+
+    @property
+    def test_results(self) -> list[TestResult]:
+        """Each data quality test result of the run, in the run order."""
+        return [t for r in self.results for t in r.test_results]
 
     @property
     def succeeded_count(self) -> int:
@@ -367,17 +397,6 @@ def _promote_or_keep(
     return query_ids, query_urls, ""
 
 
-def _logical_address_of(dag: ClairDag, physical_address: str) -> str:
-    """Give the logical address of the DAG node that *physical_address* keys.
-
-    Give the physical address back if the node holds no compiled attributes.
-    """
-    trouve = dag.get_trouve(physical_address)
-    if trouve.compiled is None:
-        return physical_address
-    return str(trouve.compiled.logical_address)
-
-
 class _NodeOutcome(NamedTuple):
     """The report of one node to the scheduler.
 
@@ -453,7 +472,7 @@ def _run_node(
     # Each DAG node has the physical address as its key. The logs and the
     # results show both names, thus the reader sees the file that made the
     # Trouve, and the object that clair writes.
-    logical_address = _logical_address_of(dag, name)
+    logical_address = logical_address_of(dag, name)
     trouve = dag.get_trouve(name)
     assert trouve.compiled is not None
 
@@ -501,6 +520,12 @@ def _run_node(
         assert isinstance(trouve, PandasTrouve)
         logger.info("run.node.start", logical=logical_address, physical=name, effective_mode="full_refresh")
         result = _run_pandas_trouve(trouve, adapter, physical_address, staging_address)
+        result = result.model_copy(
+            update={
+                "staging_address": str(staging_address) if staging_address else None,
+                "effective_run_mode": RunMode.FULL_REFRESH,
+            }
+        )
 
         downstream_ok = True
 
@@ -621,7 +646,11 @@ def _run_node(
                 status=RunStatus.SUCCESS,
                 query_ids=query_ids,
                 query_urls=query_urls,
+                staging_address=str(staging_address) if staging_address else None,
+                effective_run_mode=effective_mode,
+                sql=statements,
                 duration_seconds=duration,
+                row_count=last_result.row_count if last_result else 0,
             ),
             downstream_ok,
         )
@@ -644,8 +673,11 @@ def _run_node(
             status=RunStatus.FAILURE,
             query_ids=query_ids,
             query_urls=query_urls,
+            staging_address=str(staging_address) if staging_address else None,
+            effective_run_mode=effective_mode,
             error=error_message,
             sql=statements,
+            failed_statement_index=failed_at,
             duration_seconds=duration,
         ),
         downstream_ok=False,
@@ -764,7 +796,7 @@ def run_project(
                     name = ready.popleft()
 
                     if name in skip_reasons:
-                        logical_address = _logical_address_of(dag, name)
+                        logical_address = logical_address_of(dag, name)
                         logger.info("run.node.skipped", logical=logical_address, physical=name, skipped_by=skip_reasons[name])
                         yield RunResult(
                             logical_address=logical_address,
@@ -793,7 +825,7 @@ def run_project(
                         logger.warning("run.node.failure", physical=name, error=str(node_error))
                         outcome = _NodeOutcome(
                             RunResult(
-                                logical_address=_logical_address_of(dag, name),
+                                logical_address=logical_address_of(dag, name),
                                 physical_address=name,
                                 status=RunStatus.FAILURE,
                                 error=str(node_error),
@@ -811,16 +843,3 @@ def run_project(
                     release(name)
     finally:
         pool.close()
-
-
-def format_run_output(results: list[RunResult], env_name: str) -> RunSummary:
-    """Make a RunSummary from the run results.
-
-    Args:
-        results: A list of RunResult objects.
-        env_name: The name of the active environment.
-
-    Returns:
-        A RunSummary. It holds the data and supplies a .render() method.
-    """
-    return RunSummary(results=results, env_name=env_name)

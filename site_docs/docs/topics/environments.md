@@ -87,7 +87,8 @@ prod:
 `threads` gives the number of Trouves that clair runs at one time. Each thread
 holds a private Snowflake connection, thus the value is also the number of
 sessions that clair opens. `clair run --threads` and `clair test --threads`
-replace the value for one command.
+replace the value for one command, and so does the `threads` argument of
+[`clair.run()` and `clair.test()`](../reference/python-api.md).
 
 The value belongs to the environment, because the correct number comes from the
 warehouse. The default is 4, which is also the dbt default.

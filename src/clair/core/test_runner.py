@@ -295,15 +295,3 @@ def run_tests(
         pool.close()
 
     return [result for trouve_results in per_trouve_results for result in trouve_results]
-
-
-def format_test_output(results: list[TestResult]) -> TestSummary:
-    """Make a TestSummary from the test results.
-
-    Args:
-        results: A list of TestResult objects.
-
-    Returns:
-        A TestSummary. It holds the data and supplies a .render() method.
-    """
-    return TestSummary(results=results)

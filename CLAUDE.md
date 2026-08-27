@@ -29,8 +29,8 @@ Packages inside `src/clair/`:
 | `core/` | The pipeline: `discovery.py`, `dag.py`, `compiler.py`, `runner.py`, `test_runner.py`, `dag_render.py`, `selector.py`, `scaffold.py`. |
 | `adapters/` | `base.py` holds the `WarehouseAdapter` ABC. `snowflake.py` is the only implementation. |
 | `environments/` | `environments.py` reads `~/.clair/environments.yml`. `routing.py` remaps targets. |
-| `docs/` | `clair docs` server: `catalog.py`, `columns.py`, `server.py`, bundled SPA in `static/`. |
-| (top level) | `__init__.py` is the public API surface. Also `lineage.py`, `exceptions.py`, `_logging.py`. |
+| `webui/` | `clair docs` server: `catalog.py`, `columns.py`, `server.py`, bundled SPA in `static/`. |
+| (top level) | `api.py` holds the operations: `run`, `compile`, `test`, `docs`, `catalog`. The CLI calls them. `__init__.py` is the public API surface. Also `lineage.py`, `exceptions.py`, `_logging.py`. |
 
 ## Tooling: uv and worktrees
 

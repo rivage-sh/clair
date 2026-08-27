@@ -1,15 +1,26 @@
 # Integration tests
 
-These tests run the clair CLI as a subprocess against a real Snowflake account.
-They prove what the unit tests cannot prove: that the compiled SQL is valid
-Snowflake SQL, and that the routing entry sends each write to the target that
-you expect.
+These tests call the Python API of clair -- `clair.run()`, `clair.test()` --
+against a real Snowflake account, in the process of the test. They prove what
+the unit tests cannot prove: that the compiled SQL is valid Snowflake SQL, and
+that the routing entry sends each write to the target that you expect.
+
+The call gives a `RunSummary`. A test therefore asks the run what happened: the
+statements that Snowflake ran, the staging address of each Trouve, the effective
+run mode, the index of the statement that failed, and each data quality test
+result. An earlier version ran the CLI as a subprocess and read the JSON log
+lines. A test could then see the exit code only, and an assertion about one step
+of the run was not possible.
+
+`tests/unit/test_cli_commands.py` covers the CLI itself: the arguments that each
+command gives to the API, and the status code that it gives back to the shell.
 
 The fixtures are the projects in `examples/projects/`. A change that breaks an
 example therefore breaks the build.
 
 | File | Holds |
 |---|---|
+| `conftest.py` | The schema of the run, the connection, and the environment variables that clair reads. |
 | `config.py` | The connection settings, and the schema name rules. |
 | `warehouse.py` | The Snowflake helpers: connect, execute, count. |
 | `projects.py` | The example projects, and the test routing entry. |
@@ -122,6 +133,10 @@ uv run pytest tests/integration -m integration -v
 
 The user, the role and the warehouse are names inside the account, and
 `tests/integration/scripts/clair_pr_testing_setup.sql` makes them. They are not secrets.
+
+The `clair_environment` fixture sets HOME, `CLAIR_ENV` and
+`CLAIR_PR_TESTING_SCHEMA_NAME` for the session. Clair reads them in this
+process, thus a test that calls the API asks for that fixture first.
 
 Without the account and the credentials, the tests **skip**. The integration
 workflow sets `CLAIR_PR_TESTING_REQUIRE_SNOWFLAKE=1`, and the tests then **fail**

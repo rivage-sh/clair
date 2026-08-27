@@ -1,9 +1,9 @@
-"""The tests of clair.docs.columns. That module reads the columns from the SQL."""
+"""The tests of clair.webui.columns. That module reads the columns from the SQL."""
 
 from __future__ import annotations
 
-from clair.docs.columns import ColumnStatus, infer_columns
 from clair.trouves.column import Column, ColumnType
+from clair.webui.columns import ColumnStatus, infer_columns
 
 
 class TestInferColumnsWithDeclaredColumns:
@@ -197,7 +197,7 @@ class TestBuildCatalogColumnInference:
     def test_catalog_includes_column_inference(self, simple_project):
         from clair.core.dag import build_dag
         from clair.core.discovery import discover_project
-        from clair.docs.catalog import build_catalog
+        from clair.webui.catalog import build_catalog
 
         discovered = discover_project(simple_project)
         dag = build_dag(discovered)
@@ -216,7 +216,7 @@ class TestBuildCatalogColumnInference:
         """The source and the table in simple_project both have declared columns."""
         from clair.core.dag import build_dag
         from clair.core.discovery import discover_project
-        from clair.docs.catalog import build_catalog
+        from clair.webui.catalog import build_catalog
 
         discovered = discover_project(simple_project)
         dag = build_dag(discovered)

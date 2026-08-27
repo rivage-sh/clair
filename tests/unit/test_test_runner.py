@@ -12,7 +12,7 @@ from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.dag import build_dag
 from clair.core.test_runner import (
     TestResult,
-    format_test_output,
+    TestSummary,
     run_tests,
 )
 from clair.trouves._refs import THIS_PLACEHOLDER
@@ -187,7 +187,7 @@ class TestFormatTestOutput:
             ),
         ]
 
-        output = format_test_output(results)
+        output = TestSummary(results=results)
 
         assert output.passed_count == 1
         assert output.failed_count == 1
@@ -195,7 +195,7 @@ class TestFormatTestOutput:
         assert len(output.results) == 2
 
     def test_format_empty_results(self):
-        output = format_test_output([])
+        output = TestSummary(results=[])
         assert output.passed_count == 0
         assert output.failed_count == 0
         assert output.error_count == 0
@@ -214,7 +214,7 @@ class TestFormatTestOutput:
                 query_id="qid-2", query_url="https://sf/#/qid-2",
             ),
         ]
-        output = format_test_output(results)
+        output = TestSummary(results=results)
         assert output.passed_count == 2
         assert output.failed_count == 0
         assert output.error_count == 0
@@ -227,7 +227,7 @@ class TestFormatTestOutput:
                 query_id="qid-1", query_url="https://sf/#/qid-1",
             ),
         ]
-        output = format_test_output(results)
+        output = TestSummary(results=results)
         assert output.passed_count == 0
         assert output.failed_count == 1
         assert output.error_count == 0
@@ -240,7 +240,7 @@ class TestFormatTestOutput:
                 error="Query execution failed",
             ),
         ]
-        output = format_test_output(results)
+        output = TestSummary(results=results)
         assert output.passed_count == 0
         assert output.failed_count == 0
         assert output.error_count == 1
@@ -263,7 +263,7 @@ class TestFormatTestOutput:
                 error="Syntax error",
             ),
         ]
-        output = format_test_output(results)
+        output = TestSummary(results=results)
         assert output.passed_count == 1
         assert output.failed_count == 1
         assert output.error_count == 1
@@ -286,7 +286,7 @@ class TestFormatTestOutput:
                 error="Syntax error",
             ),
         ]
-        output = format_test_output(results)
+        output = TestSummary(results=results)
         assert len(output.passed_results) == 1
         assert output.passed_results[0].test_type == "unique"
         assert len(output.failed_results) == 1
@@ -297,7 +297,7 @@ class TestFormatTestOutput:
     def test_is_test_summary_instance(self):
         from clair.core.test_runner import TestSummary
 
-        output = format_test_output([])
+        output = TestSummary(results=[])
         assert isinstance(output, TestSummary)
 
 

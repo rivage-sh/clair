@@ -11,7 +11,7 @@ from structlog.testing import capture_logs
 from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
-from clair.core.runner import RunResult, RunStatus, format_run_output, run_project
+from clair.core.runner import RunResult, RunStatus, RunSummary, run_project
 from clair.trouves.run_config import RunMode
 from tests.helpers import DatabaseOverrideRouting
 
@@ -121,14 +121,14 @@ class TestRunner:
         assert "CREATE OR REPLACE TABLE" in call_args
         assert "analytics.revenue.daily_orders" in call_args
 
-    def test_format_run_output_success(self, simple_project: Path):
+    def test_the_summary_of_a_run_that_succeeds(self, simple_project: Path):
         discovered = discover_project(simple_project)
         dag = build_dag(discovered)
         selected = get_executable_nodes(dag)
 
         adapter = _make_mock_adapter()
         results = list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
-        output = format_run_output(results, "default")
+        output = RunSummary(results=results, env_name="default")
 
         assert output.succeeded_count == 1
         assert output.failed_count == 0
@@ -182,7 +182,7 @@ class TestRunnerFailureHandling:
         assert mart_result.status == RunStatus.SKIPPED
         assert mart_result.skipped_by == "db.s.staging"
 
-    def test_format_run_output_with_failure(self):
+    def test_the_summary_of_a_run_that_fails(self):
         results = [
             RunResult(
                 physical_address="db.s.staging",
@@ -200,7 +200,7 @@ class TestRunnerFailureHandling:
             ),
         ]
 
-        output = format_run_output(results, "default")
+        output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 0
         assert output.failed_count == 1
         assert output.skipped_count == 1
@@ -210,19 +210,19 @@ class TestRunSummaryProperties:
     """The tests of the RunSummary properties."""
 
     def test_empty_results_all_counts_zero(self):
-        output = format_run_output([], "test_env")
+        output = RunSummary(results=[], env_name="test_env")
         assert output.succeeded_count == 0
         assert output.failed_count == 0
         assert output.skipped_count == 0
 
     def test_empty_results_list_properties_empty(self):
-        output = format_run_output([], "test_env")
+        output = RunSummary(results=[], env_name="test_env")
         assert output.succeeded == []
         assert output.failed == []
         assert output.skipped == []
 
     def test_env_name_preserved(self):
-        output = format_run_output([], "my_env")
+        output = RunSummary(results=[], env_name="my_env")
         assert output.env_name == "my_env"
 
     def test_all_succeeded(self):
@@ -230,7 +230,7 @@ class TestRunSummaryProperties:
             RunResult(physical_address="db.s.a", status=RunStatus.SUCCESS, query_ids=["q1"], duration_seconds=1.0),
             RunResult(physical_address="db.s.b", status=RunStatus.SUCCESS, query_ids=["q2"], duration_seconds=2.0),
         ]
-        output = format_run_output(results, "default")
+        output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 2
         assert output.failed_count == 0
         assert output.skipped_count == 0
@@ -243,7 +243,7 @@ class TestRunSummaryProperties:
             RunResult(physical_address="db.s.a", status=RunStatus.FAILURE, error="err1"),
             RunResult(physical_address="db.s.b", status=RunStatus.FAILURE, error="err2"),
         ]
-        output = format_run_output(results, "default")
+        output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 0
         assert output.failed_count == 2
         assert output.skipped_count == 0
@@ -253,7 +253,7 @@ class TestRunSummaryProperties:
             RunResult(physical_address="db.s.a", status=RunStatus.SKIPPED, skipped_by="db.s.upstream"),
             RunResult(physical_address="db.s.b", status=RunStatus.SKIPPED, skipped_by="db.s.upstream"),
         ]
-        output = format_run_output(results, "default")
+        output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 0
         assert output.failed_count == 0
         assert output.skipped_count == 2
@@ -265,7 +265,7 @@ class TestRunSummaryProperties:
             RunResult(physical_address="db.s.fail", status=RunStatus.FAILURE, error="broke"),
             RunResult(physical_address="db.s.skip", status=RunStatus.SKIPPED, skipped_by="db.s.fail"),
         ]
-        output = format_run_output(results, "default")
+        output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 1
         assert output.failed_count == 1
         assert output.skipped_count == 1
@@ -277,12 +277,12 @@ class TestRunSummaryProperties:
         results = [
             RunResult(physical_address="db.s.a", status=RunStatus.SUCCESS, query_ids=["q1"]),
         ]
-        output = format_run_output(results, "default")
+        output = RunSummary(results=results, env_name="default")
         assert len(output.results) == 1
         assert output.results[0].physical_address == "db.s.a"
 
     def test_is_run_summary_instance(self):
         from clair.core.runner import RunSummary
 
-        output = format_run_output([], "default")
+        output = RunSummary(results=[], env_name="default")
         assert isinstance(output, RunSummary)
