@@ -219,6 +219,18 @@ class TestRun:
         assert summary.results == []
         assert summary.succeeded_count == 0
 
+    def test_more_than_one_thread_opens_more_connections(
+        self, project: Path, fake_environment
+    ):
+        """A parallel run gives each thread a private connection."""
+        adapter = _make_adapter()
+        summary = clair.run(project, adapter=adapter, test=False, threads=2)
+
+        assert summary.succeeded_count == 1
+        # One Trouve runs, thus clair limits the pool to one connection, and it
+        # opens no second connection.
+        adapter.new_connection.assert_not_called()
+
     def test_it_does_not_close_an_adapter_that_the_caller_gave(
         self, project: Path, fake_environment
     ):

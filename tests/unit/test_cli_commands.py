@@ -173,6 +173,7 @@ class TestRunCommand:
                 "--run-mode", "incremental",
                 "--no-test",
                 "--sample",
+                "--threads", "3",
             ],
         )
 
@@ -183,6 +184,7 @@ class TestRunCommand:
         assert calls["run_mode"] == RunMode.INCREMENTAL
         assert calls["test"] is False
         assert calls["sample"] is True
+        assert calls["threads"] == 3
 
 
 class TestTestCommand:
@@ -227,11 +229,18 @@ class TestTestCommand:
 
         CliRunner().invoke(
             cli,
-            ["test", "--project", str(tmp_path), "--select", "mydb.*", "--sample"],
+            [
+                "test",
+                "--project", str(tmp_path),
+                "--select", "mydb.*",
+                "--sample",
+                "--threads", "2",
+            ],
         )
 
         assert calls["select"] == ("mydb.*",)
         assert calls["sample"] is True
+        assert calls["threads"] == 2
 
 
 class TestCompileCommand:
