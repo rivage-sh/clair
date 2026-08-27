@@ -1,6 +1,6 @@
 from example_3_database.source.orders import trouve as source_orders
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, TestNotNull, TestUnique, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
@@ -26,5 +26,9 @@ trouve = Trouve(
         Column(name="updated_at", type=ColumnType.TIMESTAMP_NTZ),
         Column(name="created_date", type=ColumnType.DATE),
         Column(name="updated_date", type=ColumnType.DATE),
+    ],
+    tests=[
+        TestUnique(column="order_id"),
+        TestNotNull(column="customer_id"),
     ],
 )
