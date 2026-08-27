@@ -72,7 +72,6 @@ nav:
     - Trouve: topics/trouve.md
     - Project Layout: topics/project-layout.md
     - DAG: topics/dag.md
-    - The Anatomy of a Run: topics/anatomy-of-a-run.md
     - Environments: topics/environments.md
     - Selectors: topics/selectors.md
     - Data Quality Tests: topics/data-quality-tests.md
@@ -81,6 +80,7 @@ nav:
     - Pandas-Native Transformations: topics/pandas-native.md
     - Routing: topics/routing.md
     - Per-Database & Schema Config: topics/per-database-schema-config.md
+    - The Anatomy of a Run: topics/anatomy-of-a-run.md
   - CLI:
     - cli/overview.md
     - clair init: cli/init.md
