@@ -34,12 +34,13 @@ def drop_schema(adapter: SnowflakeAdapter, schema_name: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--schema-name", help="The schema to drop. The default comes from the environment."
+        "--schema-name",
+        help="The schema to drop. The default is CLAIR_PR_TESTING_SCHEMA_NAME.",
     )
     arguments = parser.parse_args()
 
-    config = load_config()
-    schema_name = arguments.schema_name or config.schema_name
+    config = load_config(arguments.schema_name)
+    schema_name = config.schema_name
 
     adapter = connect(config)
     try:
