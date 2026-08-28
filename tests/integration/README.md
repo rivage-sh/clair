@@ -169,7 +169,7 @@ workflow therefore cannot read the Snowflake key by accident.
 | A person with write access steals the credentials. | Write access to the repository **is** access to the credentials: the job runs the code of the branch, thus a new test can print a secret. Put required reviewers on the `snowflake-integration` environment when a second person gets write access. |
 | A test drops the wrong schema. | `normalise_schema_name` refuses `public`, `information_schema` and each golden schema, and it refuses a name with an unusual character. |
 | The credentials reach another database. | `clair_pr_testing_f` has a grant on the `clair_pr_testing` database only. |
-| A workflow uses too many credits. | `clair_pr_testing_monitor` suspends the warehouse at 5 credits each month, and the warehouse suspends after 20 seconds. |
+| A workflow uses too many credits. | `clair_pr_testing_monitor` suspends the warehouse at 10 credits each month, and it sends an email at 8 credits. The warehouse suspends after 60 seconds. A draft pull request starts no run. |
 | The private key stays on the runner. | The workflow writes it to `RUNNER_TEMP` with mode 600, and it removes the file in the last step. |
 | A leaked key. | `alter user clair_pr_testing_user unset rsa_public_key;`, then make a new key pair. The user reaches one database. |
 

@@ -28,19 +28,33 @@ USE ROLE ACCOUNTADMIN;
 -- The warehouse, with a credit limit
 -- ---------------------------------------------------------------------------
 
+-- Snowflake bills 60 seconds minimum each time the warehouse resumes. An
+-- AUTO_SUSPEND below 60 seconds thus costs money and saves none: a gap in the
+-- test suite suspends the warehouse, and the next statement pays a full minute
+-- again. Keep AUTO_SUSPEND at 60 seconds.
 CREATE WAREHOUSE IF NOT EXISTS CLAIR_PR_TESTING_WH
     WAREHOUSE_SIZE = 'XSMALL'
-    AUTO_SUSPEND = 20
+    AUTO_SUSPEND = 60
     AUTO_RESUME = TRUE
     INITIALLY_SUSPENDED = TRUE;
 
 -- The repository is public. The limit protects the account if a workflow runs
 -- more often than you expect.
+--
+-- An X-Small warehouse uses 1 credit for each hour. On AWS us-east-1 the
+-- Standard edition asks 2 dollars for each credit, thus 10 credits is a limit
+-- of 20 dollars for each month. The Enterprise edition asks 3 dollars, thus
+-- use 6 credits there.
+--
+-- DO NOTIFY sends an email to each ACCOUNTADMIN user that has a verified
+-- email address and that enabled the notifications in the profile. Without
+-- both steps the trigger sends nothing.
 CREATE RESOURCE MONITOR IF NOT EXISTS CLAIR_PR_TESTING_MONITOR
-    WITH CREDIT_QUOTA = 5
+    WITH CREDIT_QUOTA = 10
     FREQUENCY = MONTHLY
     START_TIMESTAMP = IMMEDIATELY
-    TRIGGERS ON 100 PERCENT DO SUSPEND
+    TRIGGERS ON 80 PERCENT DO NOTIFY
+             ON 100 PERCENT DO SUSPEND
              ON 110 PERCENT DO SUSPEND_IMMEDIATE;
 
 ALTER WAREHOUSE CLAIR_PR_TESTING_WH SET RESOURCE_MONITOR = CLAIR_PR_TESTING_MONITOR;
