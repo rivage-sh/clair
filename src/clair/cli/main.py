@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import os
-import re
-import shutil
 import sys
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,31 +11,18 @@ import structlog
 
 from clair import api as clair_api
 from clair._logging import configure_logging
+from clair.core.artifacts import InvalidBeforeSpecError
 from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
-from clair.core.text_references import find_text_references
 from clair.environments.environments import DEFAULT_THREADS
-from clair.environments.project_routing import (
-    ProjectRouting,
-    describe_unnamed_environment,
-    load_project_routing,
-)
-from clair.environments.routing import (
-    collect_routing_problems,
-    describe_routing,
-    detect_routing_collisions,
-    route,
-)
 from clair.exceptions import (
     ClairError,
     InvalidRoutingConfigError,
     InvalidTrouveAddressError,
 )
-from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import TrouveType
 
 logger = structlog.get_logger()
 
@@ -122,20 +105,6 @@ def init(project: str | None) -> None:
     click.echo(f"  1. clair compile --project {project_dir}")
     click.echo(f"  2. clair run    --project {project_dir}")
     click.echo("")
-
-
-def _resolve_project_routing(project_root: Path, env_name: str) -> ProjectRouting:
-    """Load the project routing entry and warn about an absent entry.
-
-    A routing file that does not name the active environment is almost always a
-    typo. Passthrough routing then writes to the production names, so clair
-    tells the user before any SQL runs.
-    """
-    project_routing = load_project_routing(project_root, env_name)
-    warning = describe_unnamed_environment(project_routing, env_name)
-    if warning:
-        click.echo(click.style(f"\nWarning: {warning}\n", fg="yellow", bold=True))
-    return project_routing
 
 
 def _prompt_and_write_environment() -> None:
@@ -284,76 +253,16 @@ def validate(project: str, env: str | None) -> None:
 
     This command needs no Snowflake credentials, so CI runs it on every change.
     """
-    project_root = Path(project).resolve()
-    env_name = env or os.environ.get("CLAIR_ENV") or "dev"
-
     try:
-        project_routing = _resolve_project_routing(project_root, env_name)
-        # Find the Trouves with routing off. A bad entry then reports as a
-        # routing problem, and does not stop discovery at the first Trouve.
-        discovered = discover_project(project_root, routing=None)
+        report = clair_api.validate(project, env=env)
     except ClairError as e:
         logger.error("validate.error", error=str(e))
         sys.exit(1)
 
-    routing = project_routing.entry
-    # Keep the (logical address, type) pair, and not the Trouve. The address is
-    # the only part that the collision report needs, and here it is never None.
-    routable: list[tuple[TrouveAddress, TrouveType]] = [
-        (trouve.compiled.logical_address, trouve.type)
-        for trouve in discovered
-        if trouve.compiled is not None
-    ]
-
-    click.echo(f"\n  environment: {env_name}")
-    click.echo(f"  routing file: {project_routing.file_path or 'none'}")
-    click.echo(f"  entry: {describe_routing(routing)}")
-    click.echo(f"  Trouves to route: {len(routable)}\n")
-
-    problems = collect_routing_problems(discovered, routing)
-    for logical_address, problem in problems:
-        click.echo(click.style(f"  ✗ {logical_address}", fg="red", bold=True))
-        click.echo(f"    {problem}\n")
-
-    collisions: list[tuple[str, list[str]]] = []
-    if not problems:
-        logical_to_physical = {
-            str(logical_address): str(route(logical_address, trouve_type, routing))
-            for logical_address, trouve_type in routable
-        }
-        collisions = detect_routing_collisions(logical_to_physical)
-        for physical_address, logical_sources in collisions:
-            click.echo(click.style(f"  ✗ {physical_address}", fg="red", bold=True))
-            click.echo("    Two or more Trouves route to this one target:")
-            for source in logical_sources:
-                click.echo(f"      ↳ {source}")
-            click.echo("")
-
-    # An address that an author writes as text makes no DAG edge, and routing
-    # does not move it. Both faults are silent at run time.
-    text_references = find_text_references(discovered)
-    for reference in text_references:
-        click.echo(click.style(f"  ✗ {reference.logical_address}", fg="red", bold=True))
-        click.echo(
-            f"    The {reference.location} names '{reference.text_address}' as text."
-        )
-        click.echo(
-            "    Import that Trouve and put it in an f-string. Clair then makes a DAG\n"
-            "    edge, and the routing entry moves the address.\n"
-        )
-
-    problem_count = len(problems) + len(collisions) + len(text_references)
-    if problem_count:
-        label = "problem" if problem_count == 1 else "problems"
-        click.echo(click.style(f"  {problem_count} {label} found.\n", fg="red", bold=True))
+    colour = "green" if report.is_valid else "red"
+    click.echo(click.style(report.render(), fg=colour))
+    if not report.is_valid:
         sys.exit(1)
-
-    click.echo(
-        click.style(
-            "  ✓ Every physical address is valid. No collisions. Each reference is a Trouve.\n",
-            fg="green",
-        )
-    )
 
 
 @cli.command()
@@ -554,58 +463,6 @@ def test(
         sys.exit(1)
 
 
-def _parse_before_spec(spec: str) -> datetime:
-    """Read a --before age and give the equivalent UTC limit.
-
-    The function accepts these forms:
-        - Usual words: 'today', 'yesterday', 'last_week'
-        - A time span: '7d', '24h', '30m'
-        - An ISO date or time: '2026-03-01', '2026-03-01T12:00:00'
-    """
-    now = datetime.now(tz=UTC)
-    # A calendar limit starts at local midnight. The code then changes the time
-    # to UTC. Thus "today" is today in the time zone of the user, not in UTC.
-    local_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
-
-    if spec == "today":
-        return local_today
-    if spec == "yesterday":
-        return local_today - timedelta(days=1)
-    if spec == "last_week":
-        # The Monday of the week before, in local time, changed to UTC.
-        this_monday = local_today - timedelta(days=local_today.astimezone().weekday())
-        return this_monday - timedelta(weeks=1)
-
-    m = re.match(r"^(\d+)([dhm])$", spec)
-    if m:
-        n, unit = int(m.group(1)), m.group(2)
-        delta = {"d": timedelta(days=n), "h": timedelta(hours=n), "m": timedelta(minutes=n)}[unit]
-        return now - delta
-    try:
-        dt = datetime.fromisoformat(spec)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt
-    except ValueError:
-        raise click.BadParameter(
-            f"Clair cannot read '{spec}'. Use 'today', 'yesterday', 'last_week', a duration such as '7d' or '24h', or an ISO date such as '2026-03-01'.",
-            param_hint="--before",
-        )
-
-
-def _run_id_to_time(run_id: str) -> datetime | None:
-    """Read the UTC creation time from a UUIDv7 hex run_id.
-
-    A UUIDv7 holds the Unix time in milliseconds in the first 48 bits. Those
-    bits are the first 12 hex characters. The function gives None if the run_id
-    is not a hex string of 32 characters.
-    """
-    if len(run_id) != 32 or not all(c in "0123456789abcdef" for c in run_id):
-        return None
-    ts_ms = int(run_id[:12], 16)
-    return datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
-
-
 @cli.command()
 @click.option(
     "--project",
@@ -631,48 +488,43 @@ def _run_id_to_time(run_id: str) -> datetime | None:
 )
 def clean(project: str, before: str | None, dry_run: bool, yes: bool) -> None:
     """Delete the compiled artifacts in _clairtifacts/."""
-    project_root = Path(project).resolve()
-    artifacts_root = project_root / ARTIFACTS_DIR_NAME
+    try:
+        # A dry run first. The user confirms, and clair then removes the runs.
+        plan = clair_api.clean(project, before=before, dry_run=True)
+    except InvalidBeforeSpecError as error:
+        raise click.BadParameter(str(error), param_hint="--before") from None
+    except ClairError as error:
+        logger.error("clean.error", error=str(error))
+        sys.exit(1)
 
-    if not artifacts_root.exists():
-        click.echo(f"Clair found no {ARTIFACTS_DIR_NAME}/ directory. There is nothing to remove.")
+    if not plan.artifacts_dir_exists:
+        click.echo(
+            f"Clair found no {ARTIFACTS_DIR_NAME}/ directory. There is nothing to remove."
+        )
         return
 
-    cutoff: datetime | None = None
-    if before is not None:
-        cutoff = _parse_before_spec(before)
-
-    # Collect the run directories to delete.
-    to_remove: list[Path] = []
-    for entry in sorted(artifacts_root.iterdir()):
-        if not entry.is_dir():
-            continue
-        if cutoff is not None:
-            created = _run_id_to_time(entry.name)
-            if created is None or created >= cutoff:
-                continue
-        to_remove.append(entry)
-
-    if not to_remove:
+    if not plan.runs:
         click.echo("There is nothing to remove.")
         return
 
-    click.echo(f"{'Clair will remove' if dry_run else 'Clair removes'} {len(to_remove)} artifact run(s):")
-    for path in to_remove:
-        ts = _run_id_to_time(path.name)
-        ts_str = ts.strftime("%Y-%m-%d %H:%M:%S UTC") if ts else "unknown time"
-        click.echo(f"  {path.name}  ({ts_str})")
+    verb = "Clair will remove" if dry_run else "Clair removes"
+    click.echo(f"{verb} {plan.run_count} artifact run(s):")
+    for run in plan.runs:
+        time_text = (
+            run.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+            if run.created_at
+            else "unknown time"
+        )
+        click.echo(f"  {run.run_id}  ({time_text})")
 
     if dry_run:
         return
 
     if not yes:
-        click.confirm(f"\nRemove {len(to_remove)} run(s)?", abort=True)
+        click.confirm(f"\nRemove {plan.run_count} run(s)?", abort=True)
 
-    for path in to_remove:
-        shutil.rmtree(path)
-
-    click.echo(f"Clair removed {len(to_remove)} run(s).")
+    clair_api.clean(project, before=before)
+    click.echo(f"Clair removed {plan.run_count} run(s).")
 
 
 if __name__ == "__main__":

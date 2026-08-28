@@ -16,6 +16,8 @@ does the same work with no `subprocess` call.
 | `clair.run()` | `clair run` |
 | `clair.compile()` | `clair compile` |
 | `clair.test()` | `clair test` |
+| `clair.validate()` | `clair validate` |
+| `clair.clean()` | `clair clean` |
 | `clair.docs()` | `clair docs` |
 | `clair.catalog()` | the data behind `clair docs` |
 
@@ -186,6 +188,61 @@ Run the data quality tests on the warehouse. See
 summary = clair.test("~/projects/analytics", sample=True)
 for result in summary.failed_results:
     print(result.physical_address, result.test_type, result.failing_row_count)
+```
+
+## `clair.validate()`
+
+```python
+def validate(
+    project_dir: str | Path = ".",
+    *,
+    env: str | None = None,
+) -> ValidationReport
+```
+
+Apply the project routing entries to each Trouve. This function needs no
+connection. See [`clair validate`](../cli/validate.md).
+
+`ValidationReport` holds `env_name`, `routing_file`, `routing_description`,
+`routable_count`, `address_problems`, `collisions`, `text_references` and
+`unnamed_environment_warning`. It gives `problem_count`, `is_valid` and
+`render()`.
+
+Each problem is an object, thus a caller reads the Trouve that holds it:
+
+```python
+report = clair.validate("~/projects/analytics")
+for collision in report.collisions:
+    print(collision.physical_address, collision.logical_addresses)
+for problem in report.address_problems:
+    print(problem.logical_address, problem.detail)
+```
+
+## `clair.clean()`
+
+```python
+def clean(
+    project_dir: str | Path = ".",
+    *,
+    before: str | None = None,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> CleanOutput
+```
+
+Remove the compiled artifacts of the old runs. This function needs no
+connection. See [`clair clean`](../cli/clean.md).
+
+`before` accepts `today`, `yesterday`, `last_week`, a duration such as `7d`,
+`24h` or `30m`, or an ISO date such as `2026-03-01`. `None` removes each run.
+`now` gives the current time for that value, thus a test needs no clock.
+
+`CleanOutput` holds `artifacts_dir`, `artifacts_dir_exists`, `cutoff`, `runs`
+and `dry_run`. It gives `run_count` and `run_ids`.
+
+```python
+plan = clair.clean("~/projects/analytics", before="7d", dry_run=True)
+print(plan.run_count, plan.run_ids)
 ```
 
 ## `clair.docs()` and `clair.catalog()`

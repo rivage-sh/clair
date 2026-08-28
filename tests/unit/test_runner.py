@@ -1,52 +1,16 @@
-"""The tests of the runner. They use a false adapter."""
+"""The tests of the runner. They use RecordingAdapter, a complete in-memory adapter."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
-from unittest.mock import MagicMock
 
 from structlog.testing import capture_logs
 
-from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
 from clair.core.runner import RunResult, RunStatus, RunSummary, run_project
 from clair.trouves.run_config import RunMode
-from tests.helpers import DatabaseOverrideRouting
-
-
-def _make_mock_adapter(fail_on: set[str] | None = None) -> WarehouseAdapter:
-    """Make a false adapter. By default it succeeds, but it can fail on some Trouves."""
-    fail_on = fail_on or set()
-    adapter = MagicMock(spec=WarehouseAdapter)
-
-    call_count = 0
-
-    def mock_execute(sql: str) -> QueryResult:
-        nonlocal call_count
-        call_count += 1
-        query_id = f"test-qid-{call_count:04d}"
-
-        # Look for a fail_on name in the SQL.
-        for name in fail_on:
-            if name in sql:
-                return QueryResult(
-                    query_id=query_id,
-                    query_url=f"https://test.snowflake.com/#/query/{query_id}",
-                    success=False,
-                    error=f"Simulated failure for {name}",
-                )
-
-        return QueryResult(
-            query_id=query_id,
-            query_url=f"https://test.snowflake.com/#/query/{query_id}",
-            success=True,
-        )
-
-    adapter.execute.side_effect = mock_execute
-    adapter.table_exists.return_value = True
-    return adapter
+from tests.helpers import DatabaseOverrideRouting, RecordingAdapter
 
 
 class TestRunLogNames:
@@ -58,7 +22,7 @@ class TestRunLogNames:
         dag = build_dag(discovered)
         selected = get_executable_nodes(dag)
 
-        adapter = _make_mock_adapter()
+        adapter = RecordingAdapter()
         with capture_logs() as log_entries:
             results = list(
                 run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test")
@@ -81,7 +45,7 @@ class TestRunLogNames:
         dag = build_dag(discovered)
         selected = get_executable_nodes(dag)
 
-        adapter = _make_mock_adapter()
+        adapter = RecordingAdapter()
         with capture_logs() as log_entries:
             results = list(
                 run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test")
@@ -100,7 +64,7 @@ class TestRunner:
         dag = build_dag(discovered)
         selected = get_executable_nodes(dag)
 
-        adapter = _make_mock_adapter()
+        adapter = RecordingAdapter()
         results = list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
 
         assert len(results) == 1  # The TABLE only, not the SOURCE.
@@ -113,11 +77,11 @@ class TestRunner:
         dag = build_dag(discovered)
         selected = get_executable_nodes(dag)
 
-        adapter = _make_mock_adapter()
+        adapter = RecordingAdapter()
         list(run_project(dag, selected, adapter))
 
         # Examine the SQL that the code gave to execute.
-        call_args = cast(Any, adapter.execute).call_args[0][0]
+        call_args = adapter.record.statements[-1]
         assert "CREATE OR REPLACE TABLE" in call_args
         assert "analytics.revenue.daily_orders" in call_args
 
@@ -126,7 +90,7 @@ class TestRunner:
         dag = build_dag(discovered)
         selected = get_executable_nodes(dag)
 
-        adapter = _make_mock_adapter()
+        adapter = RecordingAdapter()
         results = list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
         output = RunSummary(results=results, env_name="default")
 
@@ -171,7 +135,7 @@ class TestRunnerFailureHandling:
         selected = get_executable_nodes(dag)
 
         # Make staging fail.
-        adapter = _make_mock_adapter(fail_on={"db.s.staging"})
+        adapter = RecordingAdapter(fail_on=["db.s.staging"])
         results = list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
 
         staging_result = next(r for r in results if r.physical_address == "db.s.staging")

@@ -29,6 +29,58 @@ from clair.trouves.run_config import SOURCE, TARGET, IncrementalMode, RunConfig,
 from clair.trouves.test import AnyTest
 
 
+class UpsertPlan(BaseModel):
+    """The decisions that the MERGE of an UPSERT run needs.
+
+    The plan holds columns and names, and it holds no SQL text. The properties
+    make the clauses, thus the semantics and the format stay apart.
+
+    Attributes:
+        merge_source_address: The table that holds the new rows of this run.
+        join_sql: The join condition that the author wrote, or None.
+        join_key_columns: The key columns that make the join, when the author
+            wrote no join_sql.
+        update_column_names: The columns that a row that matches receives.
+        insert_column_names: The columns that a row that does not match gets.
+    """
+
+    merge_source_address: str
+    join_sql: str | None
+    join_key_columns: list[str]
+    update_column_names: list[str]
+    insert_column_names: list[str]
+
+    @property
+    def join_condition(self) -> str:
+        """Give the ON condition of the MERGE."""
+        if self.join_sql:
+            return self.join_sql
+        return " AND ".join(
+            f"{TARGET}.{column_name} = {SOURCE}.{column_name}"
+            for column_name in self.join_key_columns
+        )
+
+    @property
+    def update_clause(self) -> str:
+        """Give the SET list of the UPDATE."""
+        return ", ".join(
+            f"{column_name} = {SOURCE}.{column_name}"
+            for column_name in self.update_column_names
+        )
+
+    @property
+    def insert_clause(self) -> str:
+        """Give the column list of the INSERT."""
+        return ", ".join(self.insert_column_names)
+
+    @property
+    def insert_values_clause(self) -> str:
+        """Give the VALUES list of the INSERT."""
+        return ", ".join(
+            f"{SOURCE}.{column_name}" for column_name in self.insert_column_names
+        )
+
+
 class TrouveType(StrEnum):
     SOURCE = "source"
     TABLE = "table"
@@ -230,51 +282,76 @@ class Trouve(TrouveAbc):
                 f"INSERT INTO {address}\nSELECT * FROM (\n{resolved_sql}\n)"
             ]
 
-        # The UPSERT mode.
-        if not self.columns:
-            raise ValueError(
-                "the upsert mode needs columns on the Trouve"
-            )
-
-        # The MERGE needs a source table. It is not the staging address: it holds
-        # the new rows only, and the MERGE reads it. The name comes from the
-        # physical address, thus the two suffixes do not go on top of each other.
-        merge_source = f"{self.physical_address}{MERGE_SUFFIX}{run_id}"
-        all_col_names = [c.name for c in self.columns]
-        unique_keys = set(self.run_config.primary_key_columns or [])
-
-        upsert_config = self.run_config.upsert_config
-
-        if self.run_config.join_sql:
-            join_condition = self.run_config.join_sql
-            update_cols = upsert_config.update_columns if upsert_config and upsert_config.update_columns is not None else all_col_names
-        else:
-            join_condition = " AND ".join(
-                f"{TARGET}.{col} = {SOURCE}.{col}" for col in (self.run_config.primary_key_columns or [])
-            )
-            update_cols = upsert_config.update_columns if upsert_config and upsert_config.update_columns is not None else [c for c in all_col_names if c not in unique_keys]
-
-        insert_col_names = upsert_config.insert_columns if upsert_config and upsert_config.insert_columns is not None else all_col_names
-
-        update_clause = ", ".join(f"{c} = {SOURCE}.{c}" for c in update_cols)
-        all_columns = ", ".join(insert_col_names)
-        all_source_columns = ", ".join(f"{SOURCE}.{c}" for c in insert_col_names)
-
-        stmt_1 = (
+        plan = self.upsert_plan(run_id)
+        create_merge_source = (
             f"-- [1/3] create the merge source table\n"
-            f"CREATE OR REPLACE TABLE {merge_source} AS (\n{resolved_sql}\n)"
+            f"CREATE OR REPLACE TABLE {plan.merge_source_address} AS "
+            f"(\n{resolved_sql}\n)"
         )
-        stmt_2 = (
+        merge = (
             f"-- [2/3] merge the source table into the target table\n"
             f"MERGE INTO {address} AS {TARGET}\n"
-            f"USING {merge_source} AS {SOURCE}\n"
-            f"ON {join_condition}\n"
-            f"WHEN MATCHED THEN UPDATE SET {update_clause}\n"
-            f"WHEN NOT MATCHED THEN INSERT ({all_columns}) VALUES ({all_source_columns})"
+            f"USING {plan.merge_source_address} AS {SOURCE}\n"
+            f"ON {plan.join_condition}\n"
+            f"WHEN MATCHED THEN UPDATE SET {plan.update_clause}\n"
+            f"WHEN NOT MATCHED THEN INSERT ({plan.insert_clause}) "
+            f"VALUES ({plan.insert_values_clause})"
         )
-        stmt_3 = (
+        drop_merge_source = (
             f"-- [3/3] drop the merge source table\n"
-            f"DROP TABLE IF EXISTS {merge_source}"
+            f"DROP TABLE IF EXISTS {plan.merge_source_address}"
         )
+        return [create_merge_source, merge, drop_merge_source]
 
-        return [stmt_1, stmt_2, stmt_3]
+    def upsert_plan(self, run_id: str) -> UpsertPlan:
+        """Give the decisions that the MERGE of an UPSERT run needs.
+
+        The plan holds the columns and the join, and it holds no SQL text. Thus
+        a caller reads which column clair updates, and it parses no statement.
+
+        Args:
+            run_id: The unique identifier of this clair run. It makes the name
+                of the merge source table.
+
+        Returns:
+            The plan of the MERGE.
+
+        Raises:
+            ValueError: If the Trouve has no column.
+        """
+        if not self.columns:
+            raise ValueError("the upsert mode needs columns on the Trouve")
+
+        all_column_names = [column.name for column in self.columns]
+        primary_key_columns = list(self.run_config.primary_key_columns or [])
+        upsert_config = self.run_config.upsert_config
+
+        if upsert_config and upsert_config.update_columns is not None:
+            update_column_names = list(upsert_config.update_columns)
+        elif self.run_config.join_sql:
+            # A join of the author names no key column, thus clair cannot
+            # remove one. Each column stays in the UPDATE.
+            update_column_names = all_column_names
+        else:
+            update_column_names = [
+                column_name
+                for column_name in all_column_names
+                if column_name not in set(primary_key_columns)
+            ]
+
+        if upsert_config and upsert_config.insert_columns is not None:
+            insert_column_names = list(upsert_config.insert_columns)
+        else:
+            insert_column_names = all_column_names
+
+        # The MERGE needs a source table. It is not the staging address: it
+        # holds the new rows only, and the MERGE reads it. The name comes from
+        # the physical address, thus the two suffixes do not go on top of each
+        # other.
+        return UpsertPlan(
+            merge_source_address=f"{self.physical_address}{MERGE_SUFFIX}{run_id}",
+            join_sql=self.run_config.join_sql,
+            join_key_columns=primary_key_columns,
+            update_column_names=update_column_names,
+            insert_column_names=insert_column_names,
+        )

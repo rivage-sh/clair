@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
-from unittest.mock import MagicMock
 
 import pytest
 
-from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.dag import build_dag
 from clair.core.test_runner import (
     TestResult,
@@ -27,6 +24,7 @@ from clair.trouves.test import (
     TestUniqueColumns,
 )
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
+from tests.helpers import RecordingAdapter
 
 
 def _make_trouve_with_tests(
@@ -52,27 +50,6 @@ def _make_trouve_with_tests(
     return t
 
 
-def _make_mock_adapter(row_count: int = 0, success: bool = True) -> WarehouseAdapter:
-    """Make a false adapter that always gives the same row_count."""
-    adapter = MagicMock(spec=WarehouseAdapter)
-    call_counter = 0
-
-    def mock_execute(sql: str) -> QueryResult:
-        nonlocal call_counter
-        call_counter += 1
-        query_id = f"test-qid-{call_counter:04d}"
-        return QueryResult(
-            query_id=query_id,
-            query_url=f"https://test.snowflake.com/#/query/{query_id}",
-            success=success,
-            row_count=row_count,
-            error=None if success else "Simulated query failure",
-        )
-
-    adapter.execute.side_effect = mock_execute
-    return adapter
-
-
 
 class TestRunTests:
     def test_passing_test_row_count_zero(self):
@@ -83,7 +60,7 @@ class TestRunTests:
             [TestUnique(column="id")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -100,7 +77,7 @@ class TestRunTests:
             [TestUnique(column="id")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=3)
+        adapter = RecordingAdapter(select_row_count=3)
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -116,12 +93,12 @@ class TestRunTests:
             [TestNotNull(column="id")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.raw_orders"], adapter)
 
         assert len(results) == 0
-        cast(Any, adapter.execute).assert_not_called()
+        assert adapter.record.statements == []
 
     def test_multiple_tests_on_one_trouve(self):
         """Clair executes each test on one Trouve."""
@@ -135,7 +112,7 @@ class TestRunTests:
             ],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -153,7 +130,7 @@ class TestRunTests:
             [TestUnique(column="id")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0, success=False)
+        adapter = RecordingAdapter(fail_on=[""])
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -305,12 +282,12 @@ class TestRunTestsEdgeCases:
     def test_trouve_with_no_tests_produces_no_results(self):
         dt = _make_trouve_with_tests("db.s.orders", TrouveType.TABLE, [])
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
         assert len(results) == 0
-        cast(Any, adapter.execute).assert_not_called()
+        assert adapter.record.statements == []
 
     def test_nonexistent_trouve_in_selected_raises(self):
         dt = _make_trouve_with_tests(
@@ -318,7 +295,7 @@ class TestRunTestsEdgeCases:
             [TestUnique(column="id")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         with pytest.raises(KeyError):
             run_tests(dag, ["db.s.nonexistent"], adapter)
@@ -329,7 +306,7 @@ class TestRunTestsEdgeCases:
             [TestUnique(column="id")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -346,7 +323,7 @@ class TestRunTestsEdgeCases:
             [TestNotNull(column="email")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter)
         assert results[0].test_type == "not_null"
@@ -360,7 +337,7 @@ class TestRunTestsRowCount:
             [TestRowCount(min_rows=1)],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -376,7 +353,7 @@ class TestRunTestsRowCount:
             [TestRowCount(min_rows=1)],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=1)
+        adapter = RecordingAdapter(select_row_count=1)
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -392,7 +369,7 @@ class TestRunTestsUniqueColumns:
             [TestUniqueColumns(columns=["a", "b"])],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -407,7 +384,7 @@ class TestRunTestsUniqueColumns:
             [TestUniqueColumns(columns=["a", "b"])],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=2)
+        adapter = RecordingAdapter(select_row_count=2)
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -424,12 +401,12 @@ class TestUseSample:
             [TestRowCount(min_rows=1)],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
 
         assert len(results) == 0
-        cast(Any, adapter.execute).assert_not_called()
+        assert adapter.record.statements == []
 
     def test_non_row_count_tests_run_with_use_sample(self):
         """A test that is not a row count test runs when use_sample is True."""
@@ -439,7 +416,7 @@ class TestUseSample:
             [TestUnique(column="id")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
 
@@ -454,11 +431,11 @@ class TestUseSample:
             [TestUnique(column="id")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
 
-        executed_sql = cast(Any, adapter.execute).call_args[0][0]
+        executed_sql = adapter.record.statements[-1]
         assert "SELECT TOP 1000" in executed_sql
 
     def test_mixed_tests_use_sample_skips_row_count(self):
@@ -473,7 +450,7 @@ class TestUseSample:
             ],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
 
@@ -489,12 +466,12 @@ class TestUseSample:
             [TestRowCount(min_rows=1)],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
         assert len(results) == 1
-        executed_sql = cast(Any, adapter.execute).call_args[0][0]
+        executed_sql = adapter.record.statements[-1]
         assert "TOP" not in executed_sql
 
 
@@ -524,7 +501,7 @@ class TestTestSql:
             [TestSql(sql="SELECT * FROM db.s.orders WHERE amount < 0", resolved_sql="SELECT * FROM db.s.orders WHERE amount < 0")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -540,7 +517,7 @@ class TestTestSql:
             [TestSql(sql="SELECT * FROM db.s.orders WHERE amount < 0", resolved_sql="SELECT * FROM db.s.orders WHERE amount < 0")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=4)
+        adapter = RecordingAdapter(select_row_count=4)
 
         results = run_tests(dag, ["db.s.orders"], adapter)
 
@@ -557,11 +534,11 @@ class TestTestSql:
             [TestSql(sql=pre_resolved, resolved_sql=pre_resolved)],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         run_tests(dag, ["db.s.orders"], adapter)
 
-        executed_sql = cast(Any, adapter.execute).call_args[0][0]
+        executed_sql = adapter.record.statements[-1]
         assert executed_sql == pre_resolved
 
     def test_skipped_for_source_trouve(self):
@@ -571,12 +548,12 @@ class TestTestSql:
             [TestSql(sql="SELECT * FROM db.s.raw WHERE 1=0", resolved_sql="SELECT * FROM db.s.raw WHERE 1=0")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.raw"], adapter)
 
         assert len(results) == 0
-        cast(Any, adapter.execute).assert_not_called()
+        assert adapter.record.statements == []
 
     def test_skipped_when_use_sample(self):
         """Clair skips a TestSql when use_sample is True, because is_run_with_sample is False."""
@@ -586,9 +563,9 @@ class TestTestSql:
             [TestSql(sql="SELECT * FROM db.s.orders WHERE amount < 0", resolved_sql="SELECT * FROM db.s.orders WHERE amount < 0")],
         )
         dag = build_dag([dt])
-        adapter = _make_mock_adapter(row_count=0)
+        adapter = RecordingAdapter()
 
         results = run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
 
         assert len(results) == 0
-        cast(Any, adapter.execute).assert_not_called()
+        assert adapter.record.statements == []
