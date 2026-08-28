@@ -5,22 +5,34 @@ name: Integration
 # See tests/integration/README.md.
 
 on:
+  # `ready_for_review` is not a default type. Without it a draft pull request
+  # that becomes ready starts no run, and the job stays absent until the next
+  # push.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push makes the run of the push before it useless, thus cancel it and
+# keep the credits. `integration-clean-up.yml` drops the schema of the pull
+# request when the pull request closes, thus a cancelled run leaves no schema
+# behind for long.
 concurrency:
   group: integration-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   snowflake:
     name: Snowflake
+    # A draft pull request runs no integration test, because the suite uses
+    # Snowflake credits. Mark the pull request ready for review to run it, or
+    # start the workflow by hand with workflow_dispatch.
     if: >-
       github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: snowflake-integration
