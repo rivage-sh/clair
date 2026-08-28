@@ -90,6 +90,10 @@ behaviour that a guide or a concept page describes. The example code in `site_do
 must stay identical to the equivalent code in `examples/projects/`. Change one, change the
 other.
 
+`examples/` is documentation that CI does not execute, thus it rots without a sign. Find
+the example that your change makes stale — a project, or a notebook — and correct it in
+the same PR. `.claude/memory/conventions.md` holds the rules for the notebooks.
+
 ## Simplified Technical English
 
 Write every text in Simplified Technical English (ASD-STE100): code comments and

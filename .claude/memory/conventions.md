@@ -49,6 +49,34 @@ a `PandasTrouve` class that nobody built, while the API reference correctly docu
 - When you change behaviour, change the matching page in the same PR. Do not add a note
   here that repeats a page.
 
+### `examples/` rots in the same way, and CI does not execute it
+
+`examples/projects/` and `examples/notebooks/` are documentation that happens to be code.
+Nothing runs the notebooks, and only the integration tests run some of the projects. Thus
+they hold a stale API until a person reads them. `examples/notebooks/` once held one
+notebook that read the DAG only, and a `requirements.txt` that named a package that does
+not exist, months after the Python API arrived.
+
+Apply the documentation rule to this directory:
+
+- When you add a public name, a field, or an operation, look for the example that must
+  show it, and change it in the same PR. A feature with no example is a feature that
+  nobody finds.
+- When you change a public name or a signature, `grep examples/` for the old name before
+  you finish. The compiler does not read a notebook, and `ty` skips
+  `examples/notebooks/`.
+- The example code in `site_docs/docs/` must stay identical to the equivalent code in
+  `examples/projects/`. Change one, change the other.
+- Execute a notebook that you change, and commit the outputs:
+  `uv run jupyter nbconvert --to notebook --execute --inplace <notebook>`. An output that
+  a person wrote by hand is a lie that CI cannot find.
+- A notebook must run on a machine with no Snowflake account: no connection, no
+  `~/.clair/environments.yml`, and no write to the home directory of the reader. Give
+  `clair.run()` an adapter that holds its tables in memory, and write a temporary
+  environments file for the operations that need one.
+- Read `examples/` one time each release, in the same way that you read
+  `site_docs/docs/`. Drift here is silent.
+
 ---
 
 ## The quality bar

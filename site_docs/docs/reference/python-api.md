@@ -275,3 +275,25 @@ from clair._logging import configure_logging
 
 configure_logging()
 ```
+
+A notebook that wants fewer messages raises the level in place of that call:
+
+```python
+import logging
+
+import structlog
+
+structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))
+```
+
+## Notebooks
+
+`examples/notebooks/` holds four notebooks that run each operation above. None of
+them opens a warehouse connection:
+
+| Notebook | Shows |
+|----------|-------|
+| `01_python_api_tour.ipynb` | `compile()`, `validate()`, `catalog()` and `clean()`, with the selectors and the run modes |
+| `02_lineage_and_impact.ipynb` | the DAG as a networkx graph: the blast radius of a source, the build order, and the parallel groups |
+| `03_run_without_snowflake.ipynb` | `run()` against a `WarehouseAdapter` that holds its tables in memory |
+| `04_author_trouves.ipynb` | a `PandasTrouve` transform under test, a `SeedTrouve`, and a project that the notebook writes |
