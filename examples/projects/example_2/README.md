@@ -1,19 +1,21 @@
 # Clair Example Project — E-Commerce
 
-A complex Clair project with 50 Trouves modelling an Amazon-style e-commerce platform, intended for integration testing against a real Snowflake account.
+A complex Clair project with 52 Trouves modelling an Amazon-style e-commerce platform, intended for integration testing against a real Snowflake account.
 
 ## What it does
 
-This project defines a four-layer analytics pipeline:
+This project defines a five-layer analytics pipeline:
 
 | Layer | Tables | Description |
 |---|---|---|
 | **source** (10) | users, products, orders, order_items, events, reviews, sellers, inventory, promotions, returns | Pre-existing operational tables |
+| **reference** (1) | country_regions | A seed. It holds its rows in the Python file, and a person maintains them by hand |
 | **refined** (10) | *(one per source)* | Flatten VARIANT columns, add convenience fields, cast types |
 | **derived** (20) | daily/monthly order summaries, user stats, product sales, seller performance, funnel, returns, inventory alerts, … | Aggregations and joins across refined tables |
-| **reports** (10) | top/bottom customers, top/bottom products, top sellers, churned users, high-return customers, best-reviewed products, trending categories, at-risk inventory | Business intelligence slices |
+| **reports** (11) | top/bottom customers, top/bottom products, top sellers, churned users, high-return customers, best-reviewed products, trending categories, at-risk inventory | Business intelligence slices |
 
-Lineage: `source.*` → `refined.*` → `derived.*` → `reports.*`
+Lineage: `source.*` → `refined.*` → `derived.*` → `reports.*`. The `reference.*` seed is a
+root, and `derived.geographic_sales` reads it.
 
 ## Prerequisites
 
@@ -251,4 +253,5 @@ select * from example_2_database.reports.churned_users;
 select * from example_2_database.reports.inventory_alerts;  -- prod_002 low stock, prod_004 out of stock
 select * from example_2_database.reports.high_return_customers;
 select * from example_2_database.reports.trending_categories;
+select * from example_2_database.reports.regional_sales;
 ```

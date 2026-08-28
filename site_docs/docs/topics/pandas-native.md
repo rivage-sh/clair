@@ -112,13 +112,19 @@ Clair examines the `transform` signature when Python loads your file. Thus a mis
 Dependencies come from `inputs`. No extra configuration is necessary. `clair dag` marks these nodes with a `[PANDAS]` tag, in place of the `[TABLE]` or `[VIEW]` tag:
 
 ```
-=== Clair DAG: 3 models, 1 source ===
+=== Clair DAG: 4 models, 1 source ===
+
+example_4_database.reference.event_type_labels  [SEED]
+└── example_4_database.derived.top_event_types  [TABLE]
 
 example_4_database.source.events  [SOURCE]
 └── example_4_database.refined.events  [TABLE]
     └── example_4_database.derived.daily_event_counts  [PANDAS]
-        └── example_4_database.derived.top_event_types  [TABLE]
+        └── example_4_database.derived.top_event_types  [TABLE]  (^)
 ```
+
+A seed also executes in pandas, and it shows a `[SEED]` tag. The [Seeds](seeds.md) page
+describes it.
 
 A SQL `Trouve` can depend on the output of a `PandasTrouve`, and a `PandasTrouve` can depend on other `PandasTrouve` nodes. The tree above shows both: a pandas node reads a SQL table, and a SQL table reads the pandas output.
 

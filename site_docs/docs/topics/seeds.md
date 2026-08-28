@@ -64,6 +64,27 @@ trouve = Trouve(
 
 `examples/projects/example_4/` holds the complete project.
 
+## DAG integration
+
+`clair dag` marks a seed with a `[SEED]` tag, in place of the `[TABLE]` tag. A seed reads
+no other Trouve, thus it is always a root:
+
+```
+=== Clair DAG: 4 models, 1 source ===
+
+example_4_database.reference.event_type_labels  [SEED]
+└── example_4_database.derived.top_event_types  [TABLE]
+
+example_4_database.source.events  [SOURCE]
+└── example_4_database.refined.events  [TABLE]
+    └── example_4_database.derived.daily_event_counts  [PANDAS]
+        └── example_4_database.derived.top_event_types  [TABLE]  (^)
+```
+
+A seed executes in pandas, the same as a `PandasTrouve`. The tag is different, because the
+rows of a seed come from the file, and the rows of a `PandasTrouve` come from your
+function.
+
 ## The dtype gives the Snowflake type
 
 clair writes the DataFrame with the pandas write path of the Snowflake connector. That path

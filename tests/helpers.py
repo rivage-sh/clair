@@ -22,6 +22,7 @@ from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.dag import ClairDag
 from clair.environments.routing import RoutingEntry, TrouveAddress
 from clair.trouves.config import ResolvedConfig
+from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.trouve import (
     CompiledAttributes,
     ExecutionType,
@@ -105,6 +106,23 @@ def make_compiled_trouve(
         imports=imports or [],
         config=ResolvedConfig(),
         execution_type=execution_type,
+    )
+    return trouve
+
+
+def make_compiled_seed_trouve(physical_address: str) -> SeedTrouve:
+    """Make one compiled SeedTrouve, with no file on the disk."""
+    trouve = SeedTrouve(dataframe=pd.DataFrame({"code": ["US", "FR"]}))
+    address = TrouveAddress.parse(physical_address)
+    trouve.compiled = CompiledAttributes(
+        physical_address=address,
+        logical_address=address,
+        resolved_sql="",
+        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
+        module_name=physical_address,
+        imports=[],
+        config=ResolvedConfig(),
+        execution_type=ExecutionType.PANDAS,
     )
     return trouve
 
