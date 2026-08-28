@@ -12,7 +12,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from clair.adapters.base import QueryResult, WarehouseAdapter
+from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
@@ -78,7 +78,7 @@ class RecordingAdapter(WarehouseAdapter):
     def new_connection(self) -> RecordingAdapter:
         return RecordingAdapter(self.recorder, self.node_names)
 
-    def execute(self, sql: str) -> QueryResult:
+    def execute(self, sql: str) -> Statement:
         self.recorder.record(self.adapter_id, sql)
 
         # Find the node that this statement materializes. The target of the
@@ -93,7 +93,7 @@ class RecordingAdapter(WarehouseAdapter):
             node_name = match.group(1)
 
         if node_name is None:
-            return QueryResult(query_id="qid", query_url="url", success=True)
+            return Statement(sql=sql, status=StatementStatus.SUCCESS, query_id="qid", query_url="url")
 
         self.recorder.enter_node(node_name)
         try:
@@ -102,14 +102,15 @@ class RecordingAdapter(WarehouseAdapter):
 
             for failing_name in self.recorder.fail_on:
                 if failing_name in sql:
-                    return QueryResult(
+                    return Statement(
+                        sql=sql,
+                        status=StatementStatus.FAILURE,
                         query_id="qid",
                         query_url="url",
-                        success=False,
                         error=f"Simulated failure for {failing_name}",
                     )
 
-            return QueryResult(query_id="qid", query_url="url", success=True)
+            return Statement(sql=sql, status=StatementStatus.SUCCESS, query_id="qid", query_url="url")
         finally:
             self.recorder.leave_node(node_name)
 
@@ -132,8 +133,8 @@ class RecordingAdapter(WarehouseAdapter):
 
     def write_dataframe(
         self, dataframe: pd.DataFrame, address: TrouveAddress
-    ) -> QueryResult:
-        return QueryResult(query_id="qid", query_url="url", success=True)
+    ) -> Statement:
+        return Statement(status=StatementStatus.SUCCESS, query_id="qid", query_url="url")
 
 
 def _write(path: Path, content: str) -> None:
@@ -304,7 +305,7 @@ class TestParallelRun:
         recorder = CallRecorder(fail_on={"db.marts.left"})
         adapter = RecordingAdapter(recorder, selected)
 
-        results = {r.physical_address: r for r in run_project(dag, selected, adapter, threads=4)}
+        results = {str(r.addresses.physical): r for r in run_project(dag, selected, adapter, threads=4)}
 
         assert results["db.marts.left"].status == RunStatus.FAILURE
         # right is on the other branch, thus the failure does not stop it.
@@ -335,7 +336,7 @@ class TestParallelRun:
         recorder = CallRecorder(fail_on={"db.marts.first"})
         adapter = RecordingAdapter(recorder, selected)
 
-        results = {r.physical_address: r for r in run_project(dag, selected, adapter, threads=4)}
+        results = {str(r.addresses.physical): r for r in run_project(dag, selected, adapter, threads=4)}
 
         assert results["db.marts.first"].status == RunStatus.FAILURE
         assert results["db.marts.last"].status == RunStatus.SKIPPED
@@ -506,8 +507,8 @@ class TestParallelTests:
         sequential = run_tests(dag, selected, adapter, threads=1)
         parallel = run_tests(dag, selected, adapter, threads=3)
 
-        assert [r.physical_address for r in sequential] == [
-            r.physical_address for r in parallel
+        assert [str(r.address) for r in sequential] == [
+            str(r.address) for r in parallel
         ]
         assert len(parallel) == 3
 

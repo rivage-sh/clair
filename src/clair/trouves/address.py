@@ -109,3 +109,32 @@ class TrouveAddress(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.database_name}.{self.schema_name}.{self.table_name}"
+
+
+class NodeAddresses(BaseModel):
+    """The three addresses of one node of a run.
+
+    The docstring of this module tells you what each address means. Each result
+    object of clair holds one NodeAddresses, thus the three names stay together
+    and keep their type.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    logical: TrouveAddress
+    physical: TrouveAddress
+    # A staged run builds here first. It is None when clair writes to the
+    # physical address directly.
+    staging: TrouveAddress | None = None
+
+    @property
+    def target(self) -> TrouveAddress:
+        """Give the address that clair writes to: the staging one if it exists."""
+        return self.staging or self.physical
+
+    def matches(self, address: str) -> bool:
+        """Tell you if *address* is the logical name or the physical name."""
+        return address in (str(self.logical), str(self.physical))
+
+    def __str__(self) -> str:
+        return str(self.physical)

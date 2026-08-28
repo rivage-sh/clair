@@ -13,7 +13,7 @@ from enum import StrEnum
 from fnmatch import fnmatch
 
 import networkx as nx
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from clair.core.dag import ClairDag
 from clair.exceptions import ClairError
@@ -98,8 +98,13 @@ class DagRenderOutput(BaseModel):
     visible_nodes: list[str]
     matched_nodes: list[str]
     selector: str | None
-    no_match: bool
     roots: list[DagTreeNode]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def no_match(self) -> bool:
+        """True if a selector removed each Trouve of the project."""
+        return self.selector is not None and not self.visible_nodes
 
     def walk(self) -> Iterator[tuple[int, DagTreeNode]]:
         """Give each node of each root, with its depth."""
@@ -155,7 +160,6 @@ def render_dag(dag: ClairDag, selected: list[str] | None = None) -> DagRenderOut
             visible_nodes=[],
             matched_nodes=[],
             selector=pattern,
-            no_match=True,
             roots=[],
         )
 
@@ -180,7 +184,6 @@ def render_dag(dag: ClairDag, selected: list[str] | None = None) -> DagRenderOut
         visible_nodes=sorted(visible),
         matched_nodes=sorted(matched),
         selector=pattern,
-        no_match=False,
         roots=roots,
     )
 

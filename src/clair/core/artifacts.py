@@ -11,7 +11,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from clair.exceptions import ClairError
 
@@ -53,17 +53,21 @@ class CleanOutput(BaseModel):
 
     Attributes:
         artifacts_dir: The `_clairtifacts/` directory of the project.
-        artifacts_dir_exists: False if the project holds no artifacts directory.
         cutoff: The limit that --before gave, or None for each run.
         runs: The runs that clair removed, or that a dry run names.
         dry_run: True if clair removed nothing.
     """
 
     artifacts_dir: Path
-    artifacts_dir_exists: bool
     cutoff: datetime | None
     runs: list[ArtifactRun]
     dry_run: bool
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def artifacts_dir_exists(self) -> bool:
+        """False if the project holds no artifacts directory."""
+        return self.artifacts_dir.exists()
 
     @property
     def run_count(self) -> int:

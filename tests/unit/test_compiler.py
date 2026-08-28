@@ -7,6 +7,7 @@ from pathlib import Path
 from clair.core.compiler import write_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
+from clair.trouves.trouve import TrouveType
 
 FAKE_RUN_ID = "0" * 32
 
@@ -25,7 +26,7 @@ class TestWriteCompileOutput:
         selected = get_executable_nodes(dag)
         output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
-        node_names = [n.name for n in output.compiled_nodes]
+        node_names = [str(n.addresses.physical) for n in output.compiled_nodes]
         assert "analytics.revenue.daily_orders" in node_names
 
     def test_compiled_node_has_sql_referencing_source(self, simple_project: Path, tmp_path: Path):
@@ -34,7 +35,7 @@ class TestWriteCompileOutput:
         output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
         daily_orders_node = next(
-            n for n in output.compiled_nodes if n.name == "analytics.revenue.daily_orders"
+            n for n in output.compiled_nodes if n.addresses.matches("analytics.revenue.daily_orders")
         )
         assert any("source.raw.orders" in s for s in daily_orders_node.sql)
 
@@ -68,9 +69,9 @@ class TestWriteCompileOutput:
         output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
         daily_orders_node = next(
-            n for n in output.compiled_nodes if n.name == "analytics.revenue.daily_orders"
+            n for n in output.compiled_nodes if n.addresses.matches("analytics.revenue.daily_orders")
         )
-        assert daily_orders_node.type == "TABLE"
+        assert daily_orders_node.type == TrouveType.TABLE
 
     def test_compiled_node_has_dependencies(self, simple_project: Path, tmp_path: Path):
         dag = build_dag(discover_project(simple_project))
@@ -78,7 +79,7 @@ class TestWriteCompileOutput:
         output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
         daily_orders_node = next(
-            n for n in output.compiled_nodes if n.name == "analytics.revenue.daily_orders"
+            n for n in output.compiled_nodes if n.addresses.matches("analytics.revenue.daily_orders")
         )
         assert "source.raw.orders" in daily_orders_node.dependencies
 

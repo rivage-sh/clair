@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from clair.core.dag import ClairDag
+from clair.core.dag import ClairDag, addresses_of
 from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.core.runner import resolve_effective_mode
 from clair.core.staging import (
@@ -18,6 +18,7 @@ from clair.core.staging import (
     make_staging_address,
 )
 from clair.exceptions import CompileError
+from clair.trouves.address import NodeAddresses
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
@@ -27,12 +28,9 @@ class CompiledNodeInfo(BaseModel):
     """The data of one compiled node.
 
     Attributes:
-        name: The physical address, as the DAG keys the node.
-        logical_address: The name that the file path gives.
-        physical_address: The name that clair writes to. A routing entry makes
-            it from the logical address.
-        staging_address: The run-scoped address that a staged plan builds at. It
-            is None when the plan writes to the physical address directly.
+        addresses: The logical address, the physical address, and the staging
+            address of the node. The staging address is None when the plan
+            writes to the physical address directly.
         type: TABLE, VIEW or SOURCE.
         execution_type: SNOWFLAKE or PANDAS.
         effective_run_mode: The run mode after clair applied the RunConfig of
@@ -43,11 +41,8 @@ class CompiledNodeInfo(BaseModel):
         artifact_path: The file that holds the compiled text.
     """
 
-    name: str
-    logical_address: str = ""
-    physical_address: str = ""
-    staging_address: str | None = None
-    type: str
+    addresses: NodeAddresses
+    type: TrouveType
     execution_type: ExecutionType
     effective_run_mode: RunMode = RunMode.FULL_REFRESH
     dependencies: list[str]
@@ -82,7 +77,7 @@ class CompileOutput(BaseModel):
     def node(self, address: str) -> CompiledNodeInfo | None:
         """Find one compiled node by its logical address or its physical address."""
         for node_info in self.compiled_nodes:
-            if address in (node_info.name, node_info.logical_address, node_info.physical_address):
+            if node_info.addresses.matches(address):
                 return node_info
         return None
 
@@ -102,7 +97,7 @@ class CompileOutput(BaseModel):
         if compiled_nodes:
             lines.append("Execution order:")
             for i, node in enumerate(compiled_nodes, 1):
-                lines.append(f"  {i}. {node.name} ({node.type})")
+                lines.append(f"  {i}. {node.addresses.physical} ({node.type.value.upper()})")
             lines.append("")
 
         return "\n".join(lines)
@@ -111,7 +106,7 @@ class CompileOutput(BaseModel):
     def render_node(node: CompiledNodeInfo) -> str:
         """Make the output text of one compiled node."""
         lines: list[str] = []
-        lines.append(f"--- {node.name} ---")
+        lines.append(f"--- {node.addresses.physical} ---")
         deps_str = ", ".join(node.dependencies) if node.dependencies else "(none)"
         lines.append(f"Dependencies: {deps_str}")
         lines.append("SQL:")
@@ -232,8 +227,10 @@ def write_compile_output(
             / physical_address.database_name
             / physical_address.schema_name
         )
-        staging_address = (
-            str(make_staging_address(physical_address, run_id)) if use_staging else None
+        addresses = addresses_of(
+            dag,
+            name,
+            make_staging_address(physical_address, run_id) if use_staging else None,
         )
 
         node_info = None
@@ -274,11 +271,8 @@ def write_compile_output(
             artifact_path = artifact_directory / f"{physical_address.table_name}.py"
 
             node_info = CompiledNodeInfo(
-                name=name,
-                logical_address=str(trouve.compiled.logical_address),
-                physical_address=str(physical_address),
-                staging_address=staging_address,
-                type=trouve.type.value.upper(),
+                addresses=addresses,
+                type=trouve.type,
                 execution_type=ExecutionType.PANDAS,
                 effective_run_mode=RunMode.FULL_REFRESH,
                 dependencies=deps,
@@ -298,11 +292,8 @@ def write_compile_output(
             sql_file = artifact_directory / f"{physical_address.table_name}.sql"
 
             node_info = CompiledNodeInfo(
-                name=name,
-                logical_address=str(trouve.compiled.logical_address),
-                physical_address=str(physical_address),
-                staging_address=staging_address,
-                type=trouve.type.value.upper(),
+                addresses=addresses,
+                type=trouve.type,
                 execution_type=ExecutionType.SNOWFLAKE,
                 effective_run_mode=resolve_effective_mode(trouve, run_mode),
                 dependencies=deps,

@@ -10,7 +10,7 @@ import snowflake.connector
 from cryptography.hazmat.primitives import serialization
 from snowflake.connector.pandas_tools import write_pandas
 
-from clair.adapters.base import QueryResult, WarehouseAdapter
+from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter
 from clair.trouves.address import TrouveAddress
 
 
@@ -89,8 +89,8 @@ class SnowflakeAdapter(WarehouseAdapter):
         adapter.connect(self._profile)
         return adapter
 
-    def execute(self, sql: str) -> QueryResult:
-        """Execute the SQL and give a QueryResult with the query ID and the URL."""
+    def execute(self, sql: str) -> Statement:
+        """Execute the SQL and give a Statement with the query ID and the URL."""
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
@@ -98,18 +98,20 @@ class SnowflakeAdapter(WarehouseAdapter):
         try:
             cursor.execute(sql)
             query_id = cursor.sfqid or "unknown"
-            return QueryResult(
+            return Statement(
+                sql=sql,
+                status=StatementStatus.SUCCESS,
                 query_id=query_id,
                 query_url=self._build_query_url(query_id),
-                success=True,
                 row_count=cursor.rowcount or 0,
             )
-        except Exception as e:  # noqa: BLE001 — each driver error becomes a QueryResult that failed
+        except Exception as e:  # noqa: BLE001 — each driver error becomes a Statement that failed
             query_id = getattr(cursor, "sfqid", None) or "unknown"
-            return QueryResult(
+            return Statement(
+                sql=sql,
+                status=StatementStatus.FAILURE,
                 query_id=query_id,
                 query_url=self._build_query_url(query_id),
-                success=False,
                 error=str(e),
             )
         finally:
@@ -167,7 +169,7 @@ class SnowflakeAdapter(WarehouseAdapter):
 
     def write_dataframe(
         self, dataframe: pd.DataFrame, address: TrouveAddress
-    ) -> QueryResult:
+    ) -> Statement:
         """Write a DataFrame to Snowflake. This makes or replaces the table."""
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
@@ -187,12 +189,12 @@ class SnowflakeAdapter(WarehouseAdapter):
             # reads the integer only, and a datetime column becomes NUMBER.
             use_logical_type=True,
         )
-        # query_id and query_url stay empty. Internally write_dataframe sends
-        # CREATE TEMP STAGE and PUT, not one SQL statement that you can look up.
-        return QueryResult(
-            query_id="",
-            query_url="",
-            success=success,
+        # The Statement holds no SQL, no query ID and no URL. Internally
+        # write_dataframe sends CREATE TEMP STAGE and PUT, not one SQL
+        # statement that you can look up.
+        return Statement(
+            status=StatementStatus.SUCCESS if success else StatementStatus.FAILURE,
+            error="" if success else f"Clair cannot write the DataFrame to {address}",
             row_count=num_rows,
         )
 

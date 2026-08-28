@@ -118,10 +118,9 @@ class TestAnUpsertRunThatPasses:
 
         assert result is not None
         assert result.effective_run_mode == RunMode.INCREMENTAL
-        assert result.sql is not None
         # The clone seeds the staging table, and the MERGE follows it.
-        assert "clone" in result.sql[0].lower()
-        assert any("merge into" in statement.lower() for statement in result.sql)
+        assert "clone" in result.statements[0].sql.lower()
+        assert any("merge into" in s.sql.lower() for s in result.statements)
 
     def test_the_merge_updates_a_row_and_inserts_a_row(
         self,
@@ -283,11 +282,8 @@ class TestAMergeThatFails:
         assert result is not None
         assert result.status == RunStatus.FAILURE
         assert failed_run.failed_count == 1
-        assert result.sql is not None
-        assert result.failed_statement_index is not None
-
-        failed_statement = result.sql[result.failed_statement_index]
-        assert "merge into" in failed_statement.lower()
+        assert result.failed_statement is not None
+        assert "merge into" in result.failed_statement.sql.lower()
         assert "duplicate row" in result.error.lower()
 
     def test_the_run_ran_no_data_quality_test(self, failed_run: RunSummary) -> None:
@@ -372,8 +368,7 @@ class TestAnAppendRun:
         result = second_run.result(f"{self.DATABASE_NAME}.refined.checked")
 
         assert result is not None
-        assert result.sql is not None
-        assert not any("merge into" in statement.lower() for statement in result.sql)
+        assert not any("merge into" in s.sql.lower() for s in result.statements)
         assert not table_exists(
             adapter, merge_source_address(checked, second_run.run_id, schema_name)
         )

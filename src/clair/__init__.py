@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from clair.environments.environments import Environment
 
 from clair.environments.routing import RoutingEntry, RoutingTable
-from clair.trouves.address import TrouveAddress
+from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
 from clair.trouves.dataframe_trouve import DataframeTrouve
@@ -103,6 +103,7 @@ __all__ = [
     "DatabaseDefaults",
     "DataframeTrouve",
     "IncrementalMode",
+    "NodeAddresses",
     "PandasTrouve",
     "RoutingEntry",
     "RoutingTable",

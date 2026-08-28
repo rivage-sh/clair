@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import networkx as nx
 
 from clair.exceptions import CyclicDependencyError
+from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.trouve import TrouveAbc, TrouveType
 
 
@@ -132,12 +133,15 @@ def get_executable_nodes(dag: ClairDag) -> list[str]:
     ]
 
 
-def logical_address_of(dag: ClairDag, physical_address: str) -> str:
-    """Give the logical address of the DAG node that *physical_address* keys.
+def addresses_of(
+    dag: ClairDag, physical_address: str, staging_address: TrouveAddress | None = None
+) -> NodeAddresses:
+    """Give the addresses of the DAG node that *physical_address* keys.
 
-    Give the physical address back if the node holds no compiled attributes.
+    The logical address is the physical address if the node holds no compiled
+    attributes.
     """
     trouve = dag.get_trouve(physical_address)
-    if trouve.compiled is None:
-        return physical_address
-    return str(trouve.compiled.logical_address)
+    physical = TrouveAddress.parse(physical_address)
+    logical = physical if trouve.compiled is None else trouve.compiled.logical_address
+    return NodeAddresses(logical=logical, physical=physical, staging=staging_address)

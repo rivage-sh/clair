@@ -8,7 +8,7 @@ from pathlib import Path
 from clair.core.compiler import write_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
-from clair.trouves.trouve import ExecutionType
+from clair.trouves.trouve import ExecutionType, TrouveType
 
 FAKE_RUN_ID = "0" * 32
 
@@ -163,7 +163,7 @@ class TestPandasTrouveCompiledNodeInfo:
         selected = get_executable_nodes(dag)
         output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
-        pandas_node = next(n for n in output.compiled_nodes if n.name == "mydb.derived.summary")
+        pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
         assert pandas_node.execution_type == ExecutionType.PANDAS
 
     def test_compiled_node_has_empty_sql(self, tmp_path: Path):
@@ -172,7 +172,7 @@ class TestPandasTrouveCompiledNodeInfo:
         selected = get_executable_nodes(dag)
         output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
-        pandas_node = next(n for n in output.compiled_nodes if n.name == "mydb.derived.summary")
+        pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
         assert pandas_node.sql == []
 
     def test_compiled_node_has_dependencies(self, tmp_path: Path):
@@ -181,7 +181,7 @@ class TestPandasTrouveCompiledNodeInfo:
         selected = get_executable_nodes(dag)
         output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
-        pandas_node = next(n for n in output.compiled_nodes if n.name == "mydb.derived.summary")
+        pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
         assert "mydb.source.events" in pandas_node.dependencies
 
 
@@ -202,8 +202,8 @@ class TestSqlTrouveRegression:
         selected = get_executable_nodes(dag)
         output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
-        sql_node = next(n for n in output.compiled_nodes if n.name == "mydb.refined.events")
-        assert sql_node.type == "TABLE"
+        sql_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.refined.events"))
+        assert sql_node.type == TrouveType.TABLE
 
     def test_mixed_project_both_nodes_compiled(self, tmp_path: Path):
         project = _make_mixed_project(tmp_path)
@@ -211,6 +211,6 @@ class TestSqlTrouveRegression:
         selected = get_executable_nodes(dag)
         output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
 
-        node_names = {n.name for n in output.compiled_nodes}
+        node_names = {str(n.addresses.physical) for n in output.compiled_nodes}
         assert "mydb.refined.events" in node_names
         assert "mydb.derived.summary" in node_names

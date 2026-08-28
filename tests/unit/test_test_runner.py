@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from clair.adapters.base import StatementStatus
 from clair.core.dag import build_dag
 from clair.core.test_runner import (
-    TestResult,
     TestSummary,
     run_tests,
 )
@@ -24,7 +24,7 @@ from clair.trouves.test import (
     TestUniqueColumns,
 )
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
-from tests.helpers import RecordingAdapter
+from tests.helpers import RecordingAdapter, make_test_result
 
 
 def _make_trouve_with_tests(
@@ -67,7 +67,7 @@ class TestRunTests:
         assert len(results) == 1
         assert results[0].passed is True
         assert results[0].failing_row_count == 0
-        assert results[0].query_id is not None
+        assert results[0].statement.query_id is not None
 
     def test_failing_test_row_count_positive(self):
         """A test fails when the query gives one row or more."""
@@ -142,23 +142,20 @@ class TestRunTests:
 class TestFormatTestOutput:
     def test_format_includes_structured_counts(self):
         results = [
-            TestResult(
-                physical_address="db.s.t",
-                test_index=0,
+            make_test_result(
+                "db.s.t",
                 test_type="unique",
                 column_name="id",
-                passed=True,
-                failing_row_count=0,
+                test_index=0,
                 query_id="qid-1",
                 query_url="https://sf/#/qid-1",
             ),
-            TestResult(
-                physical_address="db.s.t",
-                test_index=1,
+            make_test_result(
+                "db.s.t",
                 test_type="not_null",
                 column_name="email",
-                passed=False,
-                failing_row_count=5,
+                test_index=1,
+                row_count=5,
                 query_id="qid-2",
                 query_url="https://sf/#/qid-2",
             ),
@@ -180,15 +177,21 @@ class TestFormatTestOutput:
 
     def test_format_all_passed(self):
         results = [
-            TestResult(
-                physical_address="db.s.t", test_index=0, test_type="unique",
-                column_name="id", passed=True, failing_row_count=0,
-                query_id="qid-1", query_url="https://sf/#/qid-1",
+            make_test_result(
+                "db.s.t",
+                test_type="unique",
+                column_name="id",
+                test_index=0,
+                query_id="qid-1",
+                query_url="https://sf/#/qid-1",
             ),
-            TestResult(
-                physical_address="db.s.t", test_index=1, test_type="not_null",
-                column_name="email", passed=True, failing_row_count=0,
-                query_id="qid-2", query_url="https://sf/#/qid-2",
+            make_test_result(
+                "db.s.t",
+                test_type="not_null",
+                column_name="email",
+                test_index=1,
+                query_id="qid-2",
+                query_url="https://sf/#/qid-2",
             ),
         ]
         output = TestSummary(results=results)
@@ -198,10 +201,14 @@ class TestFormatTestOutput:
 
     def test_format_all_failed(self):
         results = [
-            TestResult(
-                physical_address="db.s.t", test_index=0, test_type="unique",
-                column_name="id", passed=False, failing_row_count=5,
-                query_id="qid-1", query_url="https://sf/#/qid-1",
+            make_test_result(
+                "db.s.t",
+                test_type="unique",
+                column_name="id",
+                test_index=0,
+                row_count=5,
+                query_id="qid-1",
+                query_url="https://sf/#/qid-1",
             ),
         ]
         output = TestSummary(results=results)
@@ -211,9 +218,12 @@ class TestFormatTestOutput:
 
     def test_format_with_errors(self):
         results = [
-            TestResult(
-                physical_address="db.s.t", test_index=0, test_type="unique",
-                column_name="id", passed=False, failing_row_count=0,
+            make_test_result(
+                "db.s.t",
+                test_type="unique",
+                column_name="id",
+                test_index=0,
+                status=StatementStatus.FAILURE,
                 error="Query execution failed",
             ),
         ]
@@ -224,19 +234,29 @@ class TestFormatTestOutput:
 
     def test_format_mixed_pass_fail_error(self):
         results = [
-            TestResult(
-                physical_address="db.s.t", test_index=0, test_type="unique",
-                column_name="id", passed=True, failing_row_count=0,
-                query_id="qid-1", query_url="https://sf/#/qid-1",
+            make_test_result(
+                "db.s.t",
+                test_type="unique",
+                column_name="id",
+                test_index=0,
+                query_id="qid-1",
+                query_url="https://sf/#/qid-1",
             ),
-            TestResult(
-                physical_address="db.s.t", test_index=1, test_type="not_null",
-                column_name="email", passed=False, failing_row_count=3,
-                query_id="qid-2", query_url="https://sf/#/qid-2",
+            make_test_result(
+                "db.s.t",
+                test_type="not_null",
+                column_name="email",
+                test_index=1,
+                row_count=3,
+                query_id="qid-2",
+                query_url="https://sf/#/qid-2",
             ),
-            TestResult(
-                physical_address="db.s.t", test_index=2, test_type="sql",
-                column_name=None, passed=False, failing_row_count=0,
+            make_test_result(
+                "db.s.t",
+                test_type="sql",
+                column_name=None,
+                test_index=2,
+                status=StatementStatus.FAILURE,
                 error="Syntax error",
             ),
         ]
@@ -247,19 +267,29 @@ class TestFormatTestOutput:
 
     def test_format_list_properties(self):
         results = [
-            TestResult(
-                physical_address="db.s.t", test_index=0, test_type="unique",
-                column_name="id", passed=True, failing_row_count=0,
-                query_id="qid-1", query_url="https://sf/#/qid-1",
+            make_test_result(
+                "db.s.t",
+                test_type="unique",
+                column_name="id",
+                test_index=0,
+                query_id="qid-1",
+                query_url="https://sf/#/qid-1",
             ),
-            TestResult(
-                physical_address="db.s.t", test_index=1, test_type="not_null",
-                column_name="email", passed=False, failing_row_count=3,
-                query_id="qid-2", query_url="https://sf/#/qid-2",
+            make_test_result(
+                "db.s.t",
+                test_type="not_null",
+                column_name="email",
+                test_index=1,
+                row_count=3,
+                query_id="qid-2",
+                query_url="https://sf/#/qid-2",
             ),
-            TestResult(
-                physical_address="db.s.t", test_index=2, test_type="sql",
-                column_name=None, passed=False, failing_row_count=0,
+            make_test_result(
+                "db.s.t",
+                test_type="sql",
+                column_name=None,
+                test_index=2,
+                status=StatementStatus.FAILURE,
                 error="Syntax error",
             ),
         ]
@@ -311,11 +341,11 @@ class TestRunTestsEdgeCases:
         results = run_tests(dag, ["db.s.orders"], adapter)
 
         r = results[0]
-        assert r.physical_address == "db.s.orders"
+        assert str(r.address) == "db.s.orders"
         assert r.test_index == 0
         assert r.test_type == "unique"
         assert r.column_name == "id"
-        assert r.error is None
+        assert r.error == ""
 
     def test_not_null_test_type_label(self):
         dt = _make_trouve_with_tests(

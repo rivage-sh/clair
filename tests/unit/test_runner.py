@@ -6,11 +6,17 @@ from pathlib import Path
 
 from structlog.testing import capture_logs
 
+from clair.adapters.base import StatementStatus
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
-from clair.core.runner import RunResult, RunStatus, RunSummary, run_project
+from clair.core.runner import RunStatus, RunSummary, run_project
 from clair.trouves.run_config import RunMode
-from tests.helpers import DatabaseOverrideRouting, RecordingAdapter
+from tests.helpers import (
+    DatabaseOverrideRouting,
+    RecordingAdapter,
+    make_run_result,
+    make_statement,
+)
 
 
 class TestRunLogNames:
@@ -37,8 +43,8 @@ class TestRunLogNames:
         # The result carries both names too, thus the caller does not look
         # them up again.
         assert len(results) == 1
-        assert results[0].logical_address == "analytics.revenue.daily_orders"
-        assert results[0].physical_address == "dev_db.revenue.daily_orders"
+        assert str(results[0].addresses.logical) == "analytics.revenue.daily_orders"
+        assert str(results[0].addresses.physical) == "dev_db.revenue.daily_orders"
 
     def test_the_two_names_are_equal_without_routing(self, simple_project: Path):
         discovered = discover_project(simple_project)
@@ -55,7 +61,7 @@ class TestRunLogNames:
         assert len(start_events) == 1
         assert start_events[0]["logical"] == "analytics.revenue.daily_orders"
         assert start_events[0]["physical"] == "analytics.revenue.daily_orders"
-        assert results[0].logical_address == results[0].physical_address
+        assert results[0].addresses.logical == results[0].addresses.physical
 
 
 class TestRunner:
@@ -68,9 +74,9 @@ class TestRunner:
         results = list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
 
         assert len(results) == 1  # The TABLE only, not the SOURCE.
-        assert results[0].physical_address == "analytics.revenue.daily_orders"
+        assert str(results[0].addresses.physical) == "analytics.revenue.daily_orders"
         assert results[0].status == RunStatus.SUCCESS
-        assert len(results[0].query_ids) > 0
+        assert [s for s in results[0].statements if s.query_id]
 
     def test_run_executes_create_or_replace(self, simple_project: Path):
         discovered = discover_project(simple_project)
@@ -138,8 +144,8 @@ class TestRunnerFailureHandling:
         adapter = RecordingAdapter(fail_on=["db.s.staging"])
         results = list(run_project(dag, selected, adapter, run_mode=RunMode.FULL_REFRESH, run_id="test"))
 
-        staging_result = next(r for r in results if r.physical_address == "db.s.staging")
-        mart_result = next(r for r in results if r.physical_address == "db.s.mart")
+        staging_result = next(r for r in results if r.addresses.matches("db.s.staging"))
+        mart_result = next(r for r in results if r.addresses.matches("db.s.mart"))
 
         assert staging_result.status == RunStatus.FAILURE
         assert staging_result.error
@@ -148,20 +154,21 @@ class TestRunnerFailureHandling:
 
     def test_the_summary_of_a_run_that_fails(self):
         results = [
-            RunResult(
-                physical_address="db.s.staging",
-                status=RunStatus.FAILURE,
-                query_ids=["qid-001"],
-                query_urls=["https://test/#/query/qid-001"],
+            make_run_result(
+                "db.s.staging",
+                statements=[
+                    make_statement(
+                        "CREATE OR REPLACE TABLE db.s.staging AS (select 1)",
+                        status=StatementStatus.FAILURE,
+                        query_id="qid-001",
+                        query_url="https://test/#/query/qid-001",
+                        error="Object does not exist",
+                    )
+                ],
                 error="Object does not exist",
-                sql=["CREATE OR REPLACE TABLE db.s.staging AS (select 1)"],
                 duration_seconds=0.5,
             ),
-            RunResult(
-                physical_address="db.s.mart",
-                status=RunStatus.SKIPPED,
-                skipped_by="db.s.staging",
-            ),
+            make_run_result("db.s.mart", skipped_by="db.s.staging"),
         ]
 
         output = RunSummary(results=results, env_name="default")
@@ -191,8 +198,8 @@ class TestRunSummaryProperties:
 
     def test_all_succeeded(self):
         results = [
-            RunResult(physical_address="db.s.a", status=RunStatus.SUCCESS, query_ids=["q1"], duration_seconds=1.0),
-            RunResult(physical_address="db.s.b", status=RunStatus.SUCCESS, query_ids=["q2"], duration_seconds=2.0),
+            make_run_result("db.s.a", statements=[make_statement(query_id="q1")], duration_seconds=1.0),
+            make_run_result("db.s.b", statements=[make_statement(query_id="q2")], duration_seconds=2.0),
         ]
         output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 2
@@ -204,8 +211,8 @@ class TestRunSummaryProperties:
 
     def test_all_failed(self):
         results = [
-            RunResult(physical_address="db.s.a", status=RunStatus.FAILURE, error="err1"),
-            RunResult(physical_address="db.s.b", status=RunStatus.FAILURE, error="err2"),
+            make_run_result("db.s.a", error="err1"),
+            make_run_result("db.s.b", error="err2"),
         ]
         output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 0
@@ -214,8 +221,8 @@ class TestRunSummaryProperties:
 
     def test_all_skipped(self):
         results = [
-            RunResult(physical_address="db.s.a", status=RunStatus.SKIPPED, skipped_by="db.s.upstream"),
-            RunResult(physical_address="db.s.b", status=RunStatus.SKIPPED, skipped_by="db.s.upstream"),
+            make_run_result("db.s.a", skipped_by="db.s.upstream"),
+            make_run_result("db.s.b", skipped_by="db.s.upstream"),
         ]
         output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 0
@@ -225,25 +232,25 @@ class TestRunSummaryProperties:
 
     def test_mixed_results(self):
         results = [
-            RunResult(physical_address="db.s.ok", status=RunStatus.SUCCESS, query_ids=["q1"], duration_seconds=1.0),
-            RunResult(physical_address="db.s.fail", status=RunStatus.FAILURE, error="broke"),
-            RunResult(physical_address="db.s.skip", status=RunStatus.SKIPPED, skipped_by="db.s.fail"),
+            make_run_result("db.s.ok", statements=[make_statement(query_id="q1")], duration_seconds=1.0),
+            make_run_result("db.s.fail", error="broke"),
+            make_run_result("db.s.skip", skipped_by="db.s.fail"),
         ]
         output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 1
         assert output.failed_count == 1
         assert output.skipped_count == 1
-        assert output.succeeded[0].physical_address == "db.s.ok"
-        assert output.failed[0].physical_address == "db.s.fail"
-        assert output.skipped[0].physical_address == "db.s.skip"
+        assert str(output.succeeded[0].addresses.physical) == "db.s.ok"
+        assert str(output.failed[0].addresses.physical) == "db.s.fail"
+        assert str(output.skipped[0].addresses.physical) == "db.s.skip"
 
     def test_results_list_preserved_in_summary(self):
         results = [
-            RunResult(physical_address="db.s.a", status=RunStatus.SUCCESS, query_ids=["q1"]),
+            make_run_result("db.s.a", statements=[make_statement(query_id="q1")]),
         ]
         output = RunSummary(results=results, env_name="default")
         assert len(output.results) == 1
-        assert output.results[0].physical_address == "db.s.a"
+        assert str(output.results[0].addresses.physical) == "db.s.a"
 
     def test_is_run_summary_instance(self):
         from clair.core.runner import RunSummary

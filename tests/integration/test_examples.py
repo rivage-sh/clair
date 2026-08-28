@@ -84,12 +84,12 @@ def test_a_full_refresh_builds_every_model(
     # the staging address that clair built at. A staged run writes there first,
     # thus the statements name that address.
     for result in summary.succeeded:
-        assert result.staging_address is not None
-        assert summary.run_id in result.staging_address
-        assert result.query_ids
-        if result.sql is not None:
+        assert result.addresses.staging is not None
+        assert summary.run_id in str(result.addresses.staging)
+        assert [s for s in result.statements if s.query_id]
+        if result.statements:
             assert any(
-                result.staging_address in statement for statement in result.sql
+                str(result.addresses.staging) in s.sql for s in result.statements
             )
 
 
@@ -192,4 +192,4 @@ def test_select_builds_one_part_of_the_dag(
     summary = clair.run(copy_path, select=[selector])
 
     assert summary.succeeded_count == 1
-    assert summary.results[0].logical_address == "example_1_database.refined.events"
+    assert str(summary.results[0].addresses.logical) == "example_1_database.refined.events"

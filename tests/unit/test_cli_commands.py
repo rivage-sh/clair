@@ -20,9 +20,10 @@ from click.testing import CliRunner
 
 from clair.cli.main import cli
 from clair.core.runner import RunResult, RunStatus, RunSummary
-from clair.core.test_runner import TestResult, TestSummary
+from clair.core.test_runner import TestSummary
 from clair.exceptions import ClairError
 from clair.trouves.run_config import RunMode
+from tests.helpers import make_run_result, make_test_result
 
 
 @pytest.fixture(autouse=True)
@@ -41,19 +42,16 @@ def _run_result(
     status: RunStatus = RunStatus.SUCCESS, tests_passed: bool = True
 ) -> RunResult:
     """Make one result of a run, with one data quality test result."""
-    return RunResult(
-        logical_address="mydb.analytics.orders",
-        physical_address="mydb.analytics.orders",
-        status=status,
+    return make_run_result(
+        "mydb.analytics.orders",
+        error="the statement failed" if status == RunStatus.FAILURE else "",
         skipped_by="mydb.analytics.upstream" if status == RunStatus.SKIPPED else None,
         test_results=[
-            TestResult(
-                physical_address="mydb.analytics.orders",
-                test_index=0,
+            make_test_result(
+                "mydb.analytics.orders",
                 test_type="not_null",
                 column_name="id",
-                passed=tests_passed,
-                failing_row_count=0 if tests_passed else 3,
+                row_count=0 if tests_passed else 3,
             )
         ],
     )
@@ -197,13 +195,11 @@ class TestTestCommand:
             "test",
             TestSummary(
                 results=[
-                    TestResult(
-                        physical_address="mydb.analytics.orders",
-                        test_index=0,
+                    make_test_result(
+                        "mydb.analytics.orders",
                         test_type="unique",
                         column_name="id",
-                        passed=False,
-                        failing_row_count=2,
+                        row_count=2,
                     )
                 ]
             ),

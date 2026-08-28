@@ -73,7 +73,7 @@ class TestExclude:
 
         summary = clair.run(project_copy, exclude=[excluded])
 
-        built = [result.logical_address for result in summary.succeeded]
+        built = [str(result.addresses.logical) for result in summary.succeeded]
         assert LEAF_LOGICAL_NAME not in built
         assert summary.failed == []
 
@@ -153,8 +153,8 @@ class TestThreads:
         one_thread = clair.run(project_copy, threads=1)
         four_threads = clair.run(project_copy, threads=4)
 
-        assert sorted(result.logical_address for result in one_thread.succeeded) == (
-            sorted(result.logical_address for result in four_threads.succeeded)
+        assert sorted(str(r.addresses.logical) for r in one_thread.succeeded) == (
+            sorted(str(r.addresses.logical) for r in four_threads.succeeded)
         )
 
 

@@ -68,11 +68,8 @@ def _staging_address_of(summary: RunSummary, logical_address: str) -> TrouveAddr
     """
     result = summary.result(logical_address)
     assert result is not None, f"{logical_address} is not in the run"
-    assert result.staging_address is not None, f"{logical_address} used no staging"
-    database_name, schema_name, table_name = result.staging_address.split(".")
-    return TrouveAddress(
-        database_name=database_name, schema_name=schema_name, table_name=table_name
-    )
+    assert result.addresses.staging is not None, f"{logical_address} used no staging"
+    return result.addresses.staging
 
 
 class TestASuccessfulRun:
@@ -211,8 +208,8 @@ class TestAFailedDataQualityTest:
         assert result is not None
         assert [test.passed for test in result.test_results] == [False]
         assert result.test_results[0].test_type == "row_count"
-        assert result.test_results[0].physical_address == str(checked)
-        assert result.test_results[0].query_id
+        assert result.test_results[0].address == checked
+        assert result.test_results[0].statement.query_id
 
     def test_the_physical_address_keeps_the_data_of_the_run_that_passed(
         self,
@@ -255,7 +252,7 @@ class TestAFailedDataQualityTest:
         )
         checked = checked_address(self.DATABASE_NAME, clair_environment.schema_name)
 
-        assert [result.logical_address for result in failed_run.skipped] == [
+        assert [str(result.addresses.logical) for result in failed_run.skipped] == [
             f"{self.DATABASE_NAME}.derived.downstream"
         ]
         assert failed_run.skipped[0].skipped_by == str(checked)
@@ -468,7 +465,7 @@ class TestTheTestFalseFlag:
         # not run it, and it did not decide the promotion.
         assert summary.failed == []
         assert result.test_results == []
-        assert result.staging_address is None
+        assert result.addresses.staging is None
         assert row_count(adapter, checked) == 3
         assert staging_objects(adapter, schema_name, self.DATABASE_NAME) == []
 

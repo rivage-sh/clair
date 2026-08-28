@@ -13,11 +13,11 @@ from typing import NamedTuple
 import networkx as nx
 import pandas as pd
 import structlog
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, computed_field
 
-from clair.adapters.base import WarehouseAdapter
+from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter
 from clair.adapters.pool import AdapterPool
-from clair.core.dag import ClairDag, get_executable_nodes, logical_address_of
+from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.staging import (
     build_clone_statement,
     build_drop_staging_statement,
@@ -25,8 +25,8 @@ from clair.core.staging import (
     make_staging_address,
 )
 from clair.core.test_runner import TestResult
-from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError, RunError
+from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
@@ -41,58 +41,65 @@ class RunStatus(StrEnum):
 class RunResult(BaseModel):
     """The result after clair materializes one Trouve in the warehouse.
 
+    The status is not an attribute: *error* and *skipped_by* give it. Thus a
+    result cannot hold a status that disagrees with the cause.
+
     Attributes:
-        logical_address: The name that the file path gives. The DAG edges, the
-            selectors and the Trouve files use it.
-        physical_address: The name that clair writes to. A routing entry makes it
-            from the logical address. The two are equal without an entry.
-        status: The result of the attempt.
-        query_ids: The warehouse query ID of each statement.
-        query_urls: The URL of each statement in the Snowflake console.
-        staging_address: The run-scoped address that clair built at. It is None
-            when clair wrote to the physical address directly.
+        addresses: The logical address, the physical address, and the staging
+            address of the node.
+        statements: Each statement of the node, in the order that clair made
+            them. Each one holds its text, its query ID, its URL and its status.
+            A statement after the one that failed has the NOT_RUN status.
         effective_run_mode: The run mode that clair used, after the RunConfig of
             the Trouve and the fallback to a full refresh.
-        error: The error message if the query failed.
-        sql: The statements, in the order that clair executed them.
-        failed_statement_index: The index in *sql* of the statement that failed.
-            Clair sets it only for a FAILURE that a statement caused.
-        duration_seconds: The clock time of the query.
+        error: The cause of a failure. It is empty for a result that succeeded.
+        duration_seconds: The clock time of the statements.
         row_count: The number of rows that the last build statement changed.
         test_results: The data quality test results of this Trouve.
-        skipped_by: The physical_address of the upstream Trouve that caused the skip.
-            Clair sets it only for a SKIPPED result.
+        skipped_by: The physical address of the upstream Trouve that failed and
+            thus caused the skip.
     """
 
-    logical_address: str = ""
-    physical_address: str
-    status: RunStatus
-    query_ids: list[str] = []
-    query_urls: list[str] = []
-    staging_address: str | None = None
+    addresses: NodeAddresses
+    statements: list[Statement] = []
     effective_run_mode: RunMode | None = None
     error: str = ""
-    sql: list[str] | None = None
-    failed_statement_index: int | None = None
     duration_seconds: float = 0.0
     row_count: int = 0
     test_results: list[TestResult] = []
     skipped_by: str | None = None
 
-    @model_validator(mode='after')
-    def _check_skipped_has_cause(self) -> RunResult:
-        if self.status == RunStatus.SKIPPED and not self.skipped_by:
-            raise ValueError("a SKIPPED result must have skipped_by")
-        return self
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def status(self) -> RunStatus:
+        """Give the status of the node: an upstream failure comes first."""
+        if self.skipped_by:
+            return RunStatus.SKIPPED
+        return RunStatus.FAILURE if self.error else RunStatus.SUCCESS
+
+    @property
+    def failed_statement(self) -> Statement | None:
+        """Give the statement that failed, or None."""
+        for statement in self.statements:
+            if statement.status == StatementStatus.FAILURE:
+                return statement
+        return None
 
 
-def _append_query_urls(lines: list[str], query_ids: list[str], query_urls: list[str]) -> None:
-    """Add a query ID line and a URL line. Add an [i/n] label if there are 2 or more statements."""
-    n = len(query_ids)
-    for i, (qid, url) in enumerate(zip(query_ids, query_urls), 1):
-        prefix = f" [{i}/{n}]" if n > 1 else ""
-        lines.append(f"      Query ID{prefix}: {qid}")
-        lines.append(f"      URL{prefix}: {url}")
+def _render_statements(result: RunResult) -> list[str]:
+    """Make a query ID line and a URL line for each statement that has an ID.
+
+    Add an [i/n] label if the node has 2 statements or more.
+    """
+    lines: list[str] = []
+    identified = [statement for statement in result.statements if statement.query_id]
+    total = len(identified)
+    for index, statement in enumerate(identified, 1):
+        label = f" [{index}/{total}]" if total > 1 else ""
+        lines.append(f"      Query ID{label}: {statement.query_id}")
+        if statement.query_url:
+            lines.append(f"      URL{label}: {statement.query_url}")
+    return lines
 
 
 class RunSummary(BaseModel):
@@ -107,9 +114,13 @@ class RunSummary(BaseModel):
     def result(self, address: str) -> RunResult | None:
         """Find one result by its logical address or its physical address."""
         for run_result in self.results:
-            if address in (run_result.logical_address, run_result.physical_address):
+            if run_result.addresses.matches(address):
                 return run_result
         return None
+
+    def with_status(self, status: RunStatus) -> list[RunResult]:
+        """Give each result with this status, in the run order."""
+        return [r for r in self.results if r.status == status]
 
     @property
     def test_results(self) -> list[TestResult]:
@@ -117,28 +128,28 @@ class RunSummary(BaseModel):
         return [t for r in self.results for t in r.test_results]
 
     @property
-    def succeeded_count(self) -> int:
-        return sum(1 for r in self.results if r.status == RunStatus.SUCCESS)
-
-    @property
-    def failed_count(self) -> int:
-        return sum(1 for r in self.results if r.status == RunStatus.FAILURE)
-
-    @property
-    def skipped_count(self) -> int:
-        return sum(1 for r in self.results if r.status == RunStatus.SKIPPED)
-
-    @property
     def succeeded(self) -> list[RunResult]:
-        return [r for r in self.results if r.status == RunStatus.SUCCESS]
+        return self.with_status(RunStatus.SUCCESS)
 
     @property
     def failed(self) -> list[RunResult]:
-        return [r for r in self.results if r.status == RunStatus.FAILURE]
+        return self.with_status(RunStatus.FAILURE)
 
     @property
     def skipped(self) -> list[RunResult]:
-        return [r for r in self.results if r.status == RunStatus.SKIPPED]
+        return self.with_status(RunStatus.SKIPPED)
+
+    @property
+    def succeeded_count(self) -> int:
+        return len(self.succeeded)
+
+    @property
+    def failed_count(self) -> int:
+        return len(self.failed)
+
+    @property
+    def skipped_count(self) -> int:
+        return len(self.skipped)
 
     @staticmethod
     def render_header(total: int, env_name: str) -> str:
@@ -153,29 +164,28 @@ class RunSummary(BaseModel):
     def render_node(result: RunResult, index: int, total: int) -> str:
         """Make the output lines of one node that completed."""
         lines: list[str] = []
+        name = str(result.addresses.physical)
 
         if result.status == RunStatus.SKIPPED:
-            lines.append(f"[{index}/{total}] {result.physical_address} ... SKIPPED")
+            lines.append(f"[{index}/{total}] {name} ... SKIPPED")
             lines.append(f"      Reason: the upstream dependency {result.skipped_by} failed")
         elif result.status == RunStatus.SUCCESS:
             lines.append(
-                f"[{index}/{total}] {result.physical_address} ... OK ({result.duration_seconds:.1f}s)"
+                f"[{index}/{total}] {name} ... OK ({result.duration_seconds:.1f}s)"
             )
-            _append_query_urls(lines, result.query_ids, result.query_urls)
-        elif result.status == RunStatus.FAILURE:
+            lines.extend(_render_statements(result))
+        else:
             lines.append(
-                f"[{index}/{total}] {result.physical_address} ... FAILED ({result.duration_seconds:.1f}s)"
+                f"[{index}/{total}] {name} ... FAILED ({result.duration_seconds:.1f}s)"
             )
-            _append_query_urls(lines, result.query_ids, result.query_urls)
+            lines.extend(_render_statements(result))
             lines.append(f"      Error: {result.error}")
-            if result.sql:
+            if result.statements:
                 lines.append("      SQL:")
-                for stmt in result.sql:
-                    for sql_line in stmt.strip().splitlines():
+                for statement in result.statements:
+                    for sql_line in statement.sql.strip().splitlines():
                         lines.append(f"        {sql_line}")
                     lines.append("")
-        else:
-            raise NotImplementedError()
 
         lines.append("")
         return "\n".join(lines)
@@ -222,21 +232,32 @@ def resolve_effective_mode(trouve: Trouve, cli_run_mode: RunMode) -> RunMode:
 def _run_dataframe_trouve(
     trouve: DataframeTrouve,
     adapter: WarehouseAdapter,
-    physical_address: TrouveAddress,
-    staging_address: TrouveAddress | None = None,
+    addresses: NodeAddresses,
+    effective_run_mode: RunMode,
 ) -> RunResult:
     """Execute a DataframeTrouve. Read the inputs, build the DataFrame, write it.
+
+    Clair writes the DataFrame to ``addresses.target``: the staging address of a
+    staged run, or the physical address.
 
     Args:
         trouve: The Trouve to execute.
         adapter: A warehouse adapter with an open connection.
-        physical_address: The address of the Trouve in the warehouse.
-        staging_address: The staging address, if the run has a staging step.
-            The DataFrame goes there, and not to the physical address.
+        addresses: The addresses of the node.
+        effective_run_mode: The run mode of the result.
 
     Returns a RunResult with the SUCCESS status or the FAILURE status.
     """
     start = time.monotonic()
+
+    def failure(message: str) -> RunResult:
+        """Make the result of a DataframeTrouve that did not write its table."""
+        return RunResult(
+            addresses=addresses,
+            effective_run_mode=effective_run_mode,
+            error=message,
+            duration_seconds=time.monotonic() - start,
+        )
 
     # 1. Read each input DataFrame. Clair keeps the order of the inputs.
     input_dataframes: list[pd.DataFrame] = []
@@ -254,117 +275,76 @@ def _run_dataframe_trouve(
                 adapter.fetch_dataframe(TrouveAddress.parse(input_address))
             )
         except Exception as fetch_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
-            duration = time.monotonic() - start
-            return RunResult(
-                physical_address=str(trouve.physical_address),
-                status=RunStatus.FAILURE,
-                error=f"Clair cannot read the input '{parameter_name}' ({input_address}): {fetch_error}",
-                duration_seconds=duration,
+            return failure(
+                f"Clair cannot read the input '{parameter_name}' ({input_address}): {fetch_error}"
             )
 
     # 2. Build the DataFrame. Clair binds each input by position.
     try:
         result_dataframe = trouve.build_dataframe(*input_dataframes)
     except Exception as transform_error:  # noqa: BLE001 — the user code is unknown
-        duration = time.monotonic() - start
-        return RunResult(
-            physical_address=str(trouve.physical_address),
-            status=RunStatus.FAILURE,
-            error=f"Clair cannot build the DataFrame: {transform_error}",
-            duration_seconds=duration,
-        )
+        return failure(f"Clair cannot build the DataFrame: {transform_error}")
 
     # 3. Make sure that the result is a DataFrame.
     if not isinstance(result_dataframe, pd.DataFrame):
-        duration = time.monotonic() - start
-        return RunResult(
-            physical_address=str(trouve.physical_address),
-            status=RunStatus.FAILURE,
-            error=(
-                f"The Trouve must give a pandas DataFrame, "
-                f"but it gave {type(result_dataframe).__name__}"
-            ),
-            duration_seconds=duration,
+        return failure(
+            f"The Trouve must give a pandas DataFrame, "
+            f"but it gave {type(result_dataframe).__name__}"
         )
 
     # 4. Write the result to Snowflake. A TrouveAddress is valid when it exists,
     # so the three names need no test here.
-    address = staging_address or physical_address
+    address = addresses.target
 
     try:
-        query_result = adapter.write_dataframe(dataframe=result_dataframe, address=address)
+        statement = adapter.write_dataframe(dataframe=result_dataframe, address=address)
     except Exception as write_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
-        duration = time.monotonic() - start
-        return RunResult(
-            physical_address=str(physical_address),
-            status=RunStatus.FAILURE,
-            error=f"Clair cannot write the DataFrame to {address}: {write_error}",
-            duration_seconds=duration,
-        )
+        return failure(f"Clair cannot write the DataFrame to {address}: {write_error}")
 
-    duration = time.monotonic() - start
-
-    if not query_result.success:
-        return RunResult(
-            physical_address=str(physical_address),
-            status=RunStatus.FAILURE,
-            error=query_result.error or "write_dataframe returned success=False",
-            duration_seconds=duration,
-        )
+    if not statement.success:
+        return failure(statement.error or f"Clair cannot write the DataFrame to {address}")
 
     return RunResult(
-        physical_address=str(physical_address),
-        status=RunStatus.SUCCESS,
-        query_ids=[query_result.query_id] if query_result.query_id else [],
-        query_urls=[query_result.query_url] if query_result.query_url else [],
-        duration_seconds=duration,
+        addresses=addresses,
+        statements=[statement],
+        effective_run_mode=effective_run_mode,
+        duration_seconds=time.monotonic() - start,
+        row_count=statement.row_count,
     )
 
 
 def _promote_or_keep(
     trouve: Trouve | DataframeTrouve,
     adapter: WarehouseAdapter,
-    staging_address: TrouveAddress,
-    physical_address: TrouveAddress,
+    addresses: NodeAddresses,
     tests_passed: bool,
-) -> tuple[list[str], list[str], str]:
+) -> tuple[list[Statement], str]:
     """Complete a node: promote the staging object, or keep it for an examination.
 
     Args:
         trouve: The Trouve that clair materialized at the staging address.
         adapter: A warehouse adapter with an open connection.
-        staging_address: The address that holds the candidate data.
-        physical_address: The address that the data must reach.
+        addresses: The addresses of the node. The staging address holds the
+            candidate data, and the physical address must receive it.
         tests_passed: The result of the data quality tests on the staging object.
 
     Returns:
-        The query IDs, the query URLs, and an error message. The error message is
-        empty when the physical address holds the tested data.
+        The statements that clair executed, and an error message. The error
+        message is empty when the physical address holds the tested data.
     """
-    query_ids: list[str] = []
-    query_urls: list[str] = []
-
-    def execute(statement: str) -> str:
-        """Execute one statement. Give the error message, or an empty string."""
-        query_result = adapter.execute(statement)
-        if query_result.query_id:
-            query_ids.append(query_result.query_id)
-        if query_result.query_url:
-            query_urls.append(query_result.query_url)
-        return "" if query_result.success else (query_result.error or "unknown error")
+    staging_address = addresses.staging
+    assert staging_address is not None
+    physical_address = addresses.physical
+    statements: list[Statement] = []
 
     if not tests_passed:
-        return (
-            query_ids,
-            query_urls,
-            (
-                f"the tests failed. {physical_address} keeps its data. "
-                f"The rejected candidate stays at {staging_address}"
-            ),
+        return statements, (
+            f"the tests failed. {physical_address} keeps its data. "
+            f"The rejected candidate stays at {staging_address}"
         )
 
     assert trouve.compiled is not None
-    promote_error = execute(
+    promotion = adapter.execute(
         build_promote_statement(
             trouve.type,
             staging_address=staging_address,
@@ -372,29 +352,28 @@ def _promote_or_keep(
             resolved_sql=trouve.compiled.resolved_sql,
         )
     )
-    if promote_error:
-        return (
-            query_ids,
-            query_urls,
-            (
-                f"the tests passed, but the promotion failed: {promote_error}. "
-                f"The candidate stays at {staging_address}"
-            ),
+    statements.append(promotion)
+    if not promotion.success:
+        return statements, (
+            f"the tests passed, but the promotion failed: "
+            f"{promotion.error or 'unknown error'}. "
+            f"The candidate stays at {staging_address}"
         )
 
     # The physical address now holds the tested data, so the staging copy has no
     # more use. A fault here makes clutter, not a wrong table, thus the node
     # keeps the SUCCESS status.
-    drop_result = adapter.execute(build_drop_staging_statement(trouve.type, staging_address))
-    if not drop_result.success:
+    drop = adapter.execute(build_drop_staging_statement(trouve.type, staging_address))
+    statements.append(drop)
+    if not drop.success:
         logger.warning(
             "run.node.staging_drop_failed",
             trouve=str(physical_address),
             staging=str(staging_address),
-            error=drop_result.error,
+            error=drop.error,
         )
 
-    return query_ids, query_urls, ""
+    return statements, ""
 
 
 class _NodeOutcome(NamedTuple):
@@ -472,7 +451,8 @@ def _run_node(
     # Each DAG node has the physical address as its key. The logs and the
     # results show both names, thus the reader sees the file that made the
     # Trouve, and the object that clair writes.
-    logical_address = logical_address_of(dag, name)
+    addresses = addresses_of(dag, name)
+    logical_address = str(addresses.logical)
     trouve = dag.get_trouve(name)
     assert trouve.compiled is not None
 
@@ -485,61 +465,47 @@ def _run_node(
             logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=context_warehouse, role=context_role, error=str(e))
             return _NodeOutcome(
                 RunResult(
-                    logical_address=logical_address,
-                    physical_address=name,
-                    status=RunStatus.FAILURE,
+                    addresses=addresses,
                     error=f"Clair cannot set the session context: {e}",
                 ),
                 downstream_ok=False,
             )
 
-    physical_address = trouve.compiled.physical_address
-
     # A staged run materializes the Trouve at a run-scoped address beside the
     # physical one. Clair writes the physical address only after the tests on
     # that object pass.
-    staging_address = None
     if use_staging:
         try:
-            staging_address = make_staging_address(physical_address, run_id)
+            addresses = addresses_of(
+                dag, name, make_staging_address(addresses.physical, run_id)
+            )
         except ClairError as naming_error:
             logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(naming_error))
             return _NodeOutcome(
-                RunResult(
-                    logical_address=logical_address,
-                    physical_address=name,
-                    status=RunStatus.FAILURE,
-                    error=str(naming_error),
-                ),
+                RunResult(addresses=addresses, error=str(naming_error)),
                 downstream_ok=False,
             )
+
+    staging_address = addresses.staging
 
     # A DataframeTrouve is different. Clair reads the data, builds a DataFrame
     # and writes it. Clair does not execute SQL.
     if trouve.execution_type == ExecutionType.PANDAS:
         assert isinstance(trouve, DataframeTrouve)
         logger.info("run.node.start", logical=logical_address, physical=name, effective_mode="full_refresh")
-        result = _run_dataframe_trouve(trouve, adapter, physical_address, staging_address)
-        result = result.model_copy(
-            update={
-                "staging_address": str(staging_address) if staging_address else None,
-                "effective_run_mode": RunMode.FULL_REFRESH,
-            }
-        )
+        result = _run_dataframe_trouve(trouve, adapter, addresses, RunMode.FULL_REFRESH)
 
         downstream_ok = True
 
         if result.status == RunStatus.SUCCESS and staging_address is not None:
             assert after_node_success is not None
             tests_passed = after_node_success(name, str(staging_address), adapter)
-            promote_ids, promote_urls, staging_error = _promote_or_keep(
-                trouve, adapter, staging_address, physical_address, tests_passed
+            promote_statements, staging_error = _promote_or_keep(
+                trouve, adapter, addresses, tests_passed
             )
             result = result.model_copy(
                 update={
-                    "query_ids": result.query_ids + promote_ids,
-                    "query_urls": result.query_urls + promote_urls,
-                    "status": RunStatus.FAILURE if staging_error else result.status,
+                    "statements": result.statements + promote_statements,
                     "error": staging_error or result.error,
                 }
             )
@@ -553,13 +519,11 @@ def _run_node(
                 }
             )
 
-        result = result.model_copy(update={"logical_address": logical_address})
-
         if result.status == RunStatus.SUCCESS:
             logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3))
             # Without staging the tests run after clair wrote the physical object.
             if staging_address is None and after_node_success is not None:
-                downstream_ok = after_node_success(name, str(physical_address), adapter)
+                downstream_ok = after_node_success(name, str(addresses.physical), adapter)
         else:
             logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3), error=result.error)
             downstream_ok = False
@@ -571,86 +535,77 @@ def _run_node(
     # If the target table does not exist yet, change to the full refresh mode.
     if effective_mode == RunMode.INCREMENTAL:
         table_exists = adapter.table_exists(
-            physical_address.database_name,
-            physical_address.schema_name,
-            physical_address.table_name,
+            addresses.physical.database_name,
+            addresses.physical.schema_name,
+            addresses.physical.table_name,
         )
         if not table_exists:
             logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="table_not_found")
             effective_mode = RunMode.FULL_REFRESH
 
     logger.info("run.node.start", logical=logical_address, physical=name, effective_mode=effective_mode.value)
-    statements = trouve.build_sql(effective_mode, run_id, staging_address=staging_address)
+    plan = trouve.build_sql(effective_mode, run_id, staging_address=staging_address)
 
     # An incremental run changes data that already exists, so the staging
     # table needs that data first. A zero-copy clone gives it in constant time.
     if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
-        statements = [build_clone_statement(physical_address, staging_address)] + statements
+        plan = [build_clone_statement(addresses.physical, staging_address)] + plan
 
-    if not statements:
+    if not plan:
         return _NodeOutcome(None, downstream_ok=True)
 
     start = time.monotonic()
-    last_result = None
-    all_succeeded = True
+    statements: list[Statement] = []
     failed_at = None
-    query_ids: list[str] = []
-    query_urls: list[str] = []
 
-    for stmt_idx, stmt in enumerate(statements):
-        query_result = adapter.execute(stmt)
-        last_result = query_result
-        if query_result.query_id:
-            query_ids.append(query_result.query_id)
-        if query_result.query_url:
-            query_urls.append(query_result.query_url)
-        if not query_result.success:
-            all_succeeded = False
-            failed_at = stmt_idx
+    for statement_index, sql in enumerate(plan):
+        statements.append(adapter.execute(sql))
+        if not statements[-1].success:
+            failed_at = statement_index
             break
 
     duration = time.monotonic() - start
+    row_count = statements[-1].row_count
+
+    # The result holds each statement of the plan, thus the reader sees the
+    # complete plan and the point where clair stopped.
+    statements.extend(Statement(sql=sql) for sql in plan[len(statements):])
 
     # UPSERT cleanup. The UPSERT mode always ends with these three statements:
     # make the merge table, merge it, drop it. If the merge failed, drop the
     # merge table anyway. The index comes from the end of the list, because a
     # staged incremental run puts a clone in front of the three.
-    if not all_succeeded and len(statements) >= 3:
-        merge_index = len(statements) - 2
-        drop_index = len(statements) - 1
+    if failed_at is not None and len(plan) >= 3:
+        merge_index = len(plan) - 2
+        drop_index = len(plan) - 1
         if failed_at == merge_index:
-            adapter.execute(statements[drop_index])
+            adapter.execute(plan[drop_index])
 
     # A staged run tests the staging object, then promotes it or keeps it.
     staging_error = ""
-    if all_succeeded and staging_address is not None:
+    if failed_at is None and staging_address is not None:
         assert after_node_success is not None
         tests_passed = after_node_success(name, str(staging_address), adapter)
-        promote_ids, promote_urls, staging_error = _promote_or_keep(
-            trouve, adapter, staging_address, physical_address, tests_passed
+        promote_statements, staging_error = _promote_or_keep(
+            trouve, adapter, addresses, tests_passed
         )
-        query_ids.extend(promote_ids)
-        query_urls.extend(promote_urls)
-        all_succeeded = not staging_error
+        statements.extend(promote_statements)
 
-    if all_succeeded:
+    query_ids = [statement.query_id for statement in statements if statement.query_id]
+
+    if failed_at is None and not staging_error:
         logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(duration, 3), query_ids=query_ids)
         downstream_ok = True
         # Without staging the tests run after clair wrote the physical object.
         if staging_address is None and after_node_success is not None:
-            downstream_ok = after_node_success(name, str(physical_address), adapter)
+            downstream_ok = after_node_success(name, str(addresses.physical), adapter)
         return _NodeOutcome(
             RunResult(
-                logical_address=logical_address,
-                physical_address=name,
-                status=RunStatus.SUCCESS,
-                query_ids=query_ids,
-                query_urls=query_urls,
-                staging_address=str(staging_address) if staging_address else None,
+                addresses=addresses,
+                statements=statements,
                 effective_run_mode=effective_mode,
-                sql=statements,
                 duration_seconds=duration,
-                row_count=last_result.row_count if last_result else 0,
+                row_count=row_count,
             ),
             downstream_ok,
         )
@@ -658,8 +613,8 @@ def _run_node(
     if staging_error:
         error_message = staging_error
     else:
-        assert last_result is not None
-        error_message = last_result.error or ""
+        assert failed_at is not None
+        error_message = statements[failed_at].error or "unknown error"
         if staging_address is not None:
             error_message = (
                 f"{error_message}. Clair keeps the staging object at "
@@ -668,21 +623,15 @@ def _run_node(
     logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(duration, 3), error=error_message, query_ids=query_ids)
     return _NodeOutcome(
         RunResult(
-            logical_address=logical_address,
-            physical_address=name,
-            status=RunStatus.FAILURE,
-            query_ids=query_ids,
-            query_urls=query_urls,
-            staging_address=str(staging_address) if staging_address else None,
+            addresses=addresses,
+            statements=statements,
             effective_run_mode=effective_mode,
             error=error_message,
-            sql=statements,
-            failed_statement_index=failed_at,
             duration_seconds=duration,
+            row_count=row_count,
         ),
         downstream_ok=False,
     )
-
 
 def run_project(
     dag: ClairDag,
@@ -796,12 +745,10 @@ def run_project(
                     name = ready.popleft()
 
                     if name in skip_reasons:
-                        logical_address = logical_address_of(dag, name)
-                        logger.info("run.node.skipped", logical=logical_address, physical=name, skipped_by=skip_reasons[name])
+                        addresses = addresses_of(dag, name)
+                        logger.info("run.node.skipped", logical=str(addresses.logical), physical=name, skipped_by=skip_reasons[name])
                         yield RunResult(
-                            logical_address=logical_address,
-                            physical_address=name,
-                            status=RunStatus.SKIPPED,
+                            addresses=addresses,
                             skipped_by=skip_reasons[name],
                         )
                         release(name)
@@ -825,9 +772,7 @@ def run_project(
                         logger.warning("run.node.failure", physical=name, error=str(node_error))
                         outcome = _NodeOutcome(
                             RunResult(
-                                logical_address=logical_address_of(dag, name),
-                                physical_address=name,
-                                status=RunStatus.FAILURE,
+                                addresses=addresses_of(dag, name),
                                 error=str(node_error),
                             ),
                             downstream_ok=False,

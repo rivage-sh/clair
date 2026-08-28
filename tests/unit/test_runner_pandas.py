@@ -12,8 +12,9 @@ from clair.environments.routing import TrouveAddress
 from clair.exceptions import InvalidTrouveAddressError
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
-from tests.helpers import RecordingAdapter
+from tests.helpers import RecordingAdapter, addresses_of_text
 
 
 def _make_compiled(physical_address: str = "db.schema.table") -> CompiledAttributes:
@@ -63,10 +64,12 @@ class TestRunPandasTrouveHappyPath:
 
         adapter = RecordingAdapter(dataframes={"db.schema.events": input_df})
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.SUCCESS
-        assert result.physical_address == "db.schema.summary"
+        assert str(result.addresses.physical) == "db.schema.summary"
         assert len(adapter.written_addresses) == 1
         written = adapter.dataframes[adapter.written_addresses[0]]
         pd.testing.assert_frame_equal(written, result_df)
@@ -87,7 +90,9 @@ class TestRunPandasTrouveHappyPath:
             dataframes={"db.schema.a": df_a, "db.schema.b": df_b}
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.SUCCESS
         assert len(adapter.fetched_addresses) == 2
@@ -105,7 +110,9 @@ class TestRunPandasTrouveHappyPath:
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(dataframes={"db.schema.events": input_df})
-        _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert "events" in received_kwargs
         pd.testing.assert_frame_equal(received_kwargs["events"], input_df)
@@ -125,7 +132,9 @@ class TestRunPandasTrouveAddress:
             dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.SUCCESS
         assert adapter.written_addresses == ["mydb.myschema.mytable"]
@@ -150,7 +159,9 @@ class TestRunPandasTrouveTransformErrors:
             dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.FAILURE
         assert "Clair cannot build the DataFrame" in result.error
@@ -169,7 +180,9 @@ class TestRunPandasTrouveTransformErrors:
             dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.FAILURE
         assert "must give a pandas DataFrame" in result.error
@@ -188,7 +201,9 @@ class TestRunPandasTrouveTransformErrors:
             dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.FAILURE
         assert "must give a pandas DataFrame" in result.error
@@ -208,7 +223,9 @@ class TestRunPandasTrouveFetchErrors:
             fetch_error=RuntimeError("Snowflake connection lost")
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.FAILURE
         assert "cannot read the input" in result.error
@@ -230,7 +247,9 @@ class TestRunPandasTrouveWriteErrors:
             write_error=RuntimeError("Write failed"),
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.FAILURE
         assert "cannot write the DataFrame" in result.error
@@ -249,7 +268,9 @@ class TestRunPandasTrouveWriteErrors:
             fail_on=["-- write_dataframe"],
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.FAILURE
         assert result.error
@@ -270,7 +291,9 @@ class TestRunPandasTrouveResultFields:
             dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.SUCCESS
         assert result.duration_seconds >= 0.0
@@ -288,7 +311,9 @@ class TestRunPandasTrouveResultFields:
             fetch_error=RuntimeError("fetch failed")
         )
 
-        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(
+            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+        )
 
         assert result.status == RunStatus.FAILURE
         assert result.duration_seconds >= 0.0

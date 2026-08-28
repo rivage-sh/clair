@@ -184,7 +184,7 @@ class TestSeedTrouveCompiler:
 
         seed_node = next(
             node for node in output.compiled_nodes
-            if node.physical_address.lower().endswith("tax_rates")
+            if node.addresses.physical.table_name.lower() == "tax_rates"
         )
         assert seed_node.execution_type == ExecutionType.PANDAS
         assert seed_node.sql == []
