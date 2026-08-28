@@ -34,9 +34,11 @@ The `examples` extra adds jupyter, matplotlib and pyvis. clair itself needs none
 
 ## The documentation
 
-`site_docs/docs/` is the source of truth for the behaviour of clair:
+`site_docs/docs/` is the source of truth for the behaviour of clair. CI publishes it at
+[rivage-sh.github.io/clair](https://rivage-sh.github.io/clair/), and each link below goes
+to that site:
 
-- [The Python API reference](../../site_docs/docs/reference/python-api.md)
-- [The Trouve reference](../../site_docs/docs/reference/trouve-api.md)
-- [The topics](../../site_docs/docs/topics/index.md): the DAG, the routing, the staging,
+- [The Python API reference](https://rivage-sh.github.io/clair/reference/python-api/)
+- [The Trouve](https://rivage-sh.github.io/clair/topics/trouve/)
+- [The topics](https://rivage-sh.github.io/clair/topics/): the DAG, the routing, the staging,
   the seeds, the incrementality, and the pandas Trouves
