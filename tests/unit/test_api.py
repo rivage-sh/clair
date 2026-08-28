@@ -1,18 +1,17 @@
-"""The tests of the Python API. They use a false adapter and a false environment."""
+"""The tests of the Python API. They use RecordingAdapter and a false environment."""
 
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
 import clair
-from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.runner import RunStatus
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
+from tests.helpers import RecordingAdapter
 
 DAILY_ORDERS = "analytics.revenue.daily_orders"
 
@@ -53,40 +52,6 @@ def fake_environment(monkeypatch: pytest.MonkeyPatch) -> Environment:
         "clair.api.load_environment", lambda env_name=None: ("dev", environment)
     )
     return environment
-
-
-def _make_adapter(fail_on: set[str] | None = None) -> MagicMock:
-    """Make a false adapter. It fails on a statement that names a fail_on value."""
-    fail_on = fail_on or set()
-    adapter = MagicMock(spec=WarehouseAdapter)
-    call_count = 0
-
-    def execute(sql: str) -> QueryResult:
-        nonlocal call_count
-        call_count += 1
-        query_id = f"qid-{call_count:04d}"
-        for name in fail_on:
-            if name in sql:
-                return QueryResult(
-                    query_id=query_id,
-                    query_url=f"https://test.snowflake.com/#/query/{query_id}",
-                    success=False,
-                    error=f"Simulated failure for {name}",
-                )
-        # A test query gives the rows that disobey the test. Zero rows is a
-        # test that passes. A build statement gives the rows that it wrote.
-        is_test_query = sql.lstrip().upper().startswith("SELECT")
-        return QueryResult(
-            query_id=query_id,
-            query_url=f"https://test.snowflake.com/#/query/{query_id}",
-            success=True,
-            row_count=0 if is_test_query else 42,
-        )
-
-    adapter.execute.side_effect = execute
-    adapter.table_exists.return_value = True
-    adapter.fetch_dataframe.return_value = None
-    return adapter
 
 
 class TestTheModuleGivesTheOperations:
@@ -148,7 +113,7 @@ class TestCompile:
 
 class TestRun:
     def test_it_gives_the_result_of_each_trouve(self, project: Path, fake_environment):
-        summary = clair.run(project, adapter=_make_adapter(), test=False)
+        summary = clair.run(project, adapter=RecordingAdapter(), test=False)
 
         assert summary.succeeded_count == 1
         assert summary.failed_count == 0
@@ -166,7 +131,7 @@ class TestRun:
         self, project: Path, fake_environment
     ):
         """A caller reads the statements, and parses no log line."""
-        result = clair.run(project, adapter=_make_adapter(), test=False).result(DAILY_ORDERS)
+        result = clair.run(project, adapter=RecordingAdapter(), test=False).result(DAILY_ORDERS)
 
         assert result is not None
         assert result.sql
@@ -175,7 +140,7 @@ class TestRun:
     def test_a_run_without_the_tests_writes_to_the_physical_address(
         self, project: Path, fake_environment
     ):
-        result = clair.run(project, adapter=_make_adapter(), test=False).result(DAILY_ORDERS)
+        result = clair.run(project, adapter=RecordingAdapter(), test=False).result(DAILY_ORDERS)
 
         assert result is not None
         assert result.staging_address is None
@@ -184,7 +149,7 @@ class TestRun:
     def test_a_run_with_the_tests_writes_to_a_staging_address(
         self, project: Path, fake_environment
     ):
-        summary = clair.run(project, adapter=_make_adapter())
+        summary = clair.run(project, adapter=RecordingAdapter())
         result = summary.result(DAILY_ORDERS)
 
         assert result is not None
@@ -193,7 +158,7 @@ class TestRun:
         assert summary.run_id[:8] in result.staging_address
 
     def test_the_result_holds_the_test_results(self, project: Path, fake_environment):
-        summary = clair.run(project, adapter=_make_adapter())
+        summary = clair.run(project, adapter=RecordingAdapter())
         result = summary.result(DAILY_ORDERS)
 
         assert result is not None
@@ -203,7 +168,7 @@ class TestRun:
 
     def test_a_failure_gives_the_error_and_the_sql(self, project: Path, fake_environment):
         summary = clair.run(
-            project, adapter=_make_adapter(fail_on={"daily_orders"}), test=False
+            project, adapter=RecordingAdapter(fail_on=["daily_orders"]), test=False
         )
 
         assert summary.failed_count == 1
@@ -214,7 +179,7 @@ class TestRun:
     def test_a_selection_that_matches_nothing_gives_an_empty_summary(
         self, project: Path, fake_environment
     ):
-        summary = clair.run(project, select=["no.such.trouve"], adapter=_make_adapter())
+        summary = clair.run(project, select=["no.such.trouve"], adapter=RecordingAdapter())
 
         assert summary.results == []
         assert summary.succeeded_count == 0
@@ -223,27 +188,27 @@ class TestRun:
         self, project: Path, fake_environment
     ):
         """A parallel run gives each thread a private connection."""
-        adapter = _make_adapter()
+        adapter = RecordingAdapter()
         summary = clair.run(project, adapter=adapter, test=False, threads=2)
 
         assert summary.succeeded_count == 1
         # One Trouve runs, thus clair limits the pool to one connection, and it
         # opens no second connection.
-        adapter.new_connection.assert_not_called()
+        assert adapter.record.adapter_count == 1
 
     def test_it_does_not_close_an_adapter_that_the_caller_gave(
         self, project: Path, fake_environment
     ):
         """A notebook keeps one connection open for many calls."""
-        adapter = _make_adapter()
+        adapter = RecordingAdapter()
         clair.run(project, adapter=adapter, test=False)
 
-        adapter.close.assert_not_called()
+        assert adapter.is_open is True
 
 
 class TestTest:
     def test_it_gives_one_result_for_each_test(self, project: Path, fake_environment):
-        summary = clair.test(project, adapter=_make_adapter())
+        summary = clair.test(project, adapter=RecordingAdapter())
 
         assert summary.results
         assert summary.failed_count == 0
@@ -252,7 +217,7 @@ class TestTest:
     def test_a_selection_that_matches_nothing_gives_an_empty_summary(
         self, project: Path, fake_environment
     ):
-        summary = clair.test(project, select=["no.such.trouve"], adapter=_make_adapter())
+        summary = clair.test(project, select=["no.such.trouve"], adapter=RecordingAdapter())
 
         assert summary.results == []
 

@@ -237,11 +237,20 @@ fourth Trouve builder into a fifth test file.
 
 ## The existing code is not the standard
 
-This file describes where clair goes, not where each file is today. The survey of
-2026-08-23 found one `parametrize` in 21 test files against 909 assertions, approximately
-100 string-membership assertions, `test_dag_render.py` at 1019 lines of one repeated
-build-render-assert triple, tests that import private functions, and short names in
-`dag.py`, `discovery.py`, and `trouve.py`.
+This file describes where clair goes, not where each file is today.
+
+The survey of 2026-08-23 found one `parametrize` in 21 test files against 909 assertions,
+approximately 100 string-membership assertions, `test_dag_render.py` at 1019 lines of one
+repeated build-render-assert triple, tests that import private functions, and short names
+in `dag.py`, `discovery.py`, and `trouve.py`.
+
+The test refactor of 2026-08-28 corrected a part of that. The suite now holds no
+`unittest.mock`: `tests/helpers.py` gives `RecordingAdapter`, a complete
+`WarehouseAdapter` that holds its tables in memory. A test that needs the warehouse goes
+in `tests/integration/`, and it calls `clair.run()` against Snowflake. `render_dag`,
+`clair.validate()`, `clair.clean()` and `Trouve.upsert_plan()` give the data, and a
+separate function makes the text. Short names stay in `dag.py` and `discovery.py`, and
+`test_trouves.py` and `test_discovery.py` still hold string-membership assertions.
 
 So do not copy the style of the file that you edit when that style breaks this document.
 Write new code to this bar, correct the code that you touch, and leave the rest — a mass

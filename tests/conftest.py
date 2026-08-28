@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import structlog
 
 
 @pytest.fixture
@@ -88,3 +89,17 @@ def routing_project(tmp_path: Path) -> Path:
     project_dir = tmp_path / "routing_project"
     project_dir.mkdir()
     return project_dir
+
+
+@pytest.fixture(autouse=True)
+def reset_structlog():
+    """Give each test the default structlog configuration.
+
+    `configure_logging` binds the logger to `sys.stderr` at the time of the
+    call. A test that runs the CLI with CliRunner leaves the logger bound to the
+    stream that CliRunner then closes, and each later test fails with "I/O
+    operation on closed file". The reset keeps the tests independent of order.
+    """
+    structlog.reset_defaults()
+    yield
+    structlog.reset_defaults()

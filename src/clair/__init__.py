@@ -122,18 +122,22 @@ __all__ = [
     "TrouveType",
     "UpsertConfig",
     "catalog",
+    "clean",
     "compile",
     "docs",
     "run",
     "test",
+    "validate",
 ]
 
 
 # The operations of the Python API: clair.run(), clair.compile(), clair.test(),
-# clair.docs() and clair.catalog(). The import is late, because clair.api
+# clair.validate(), clair.clean(), clair.docs() and clair.catalog(). The import is late, because clair.api
 # imports the packages that read a project, and each of those packages imports
 # this module.
-_API_NAMES = frozenset({"catalog", "compile", "docs", "run", "test"})
+_API_NAMES = frozenset(
+    {"catalog", "clean", "compile", "docs", "run", "test", "validate"}
+)
 
 
 def __getattr__(name: str) -> Any:

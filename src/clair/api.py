@@ -18,8 +18,11 @@ function writes to stdout, and no function stops the process. A fault raises a
 
 from __future__ import annotations
 
+import os
+import shutil
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -27,9 +30,16 @@ import uuid6
 
 from clair.adapters.base import WarehouseAdapter
 from clair.adapters.snowflake import SnowflakeAdapter
+from clair.core.artifacts import (
+    CleanOutput,
+    find_artifact_runs,
+    parse_before_spec,
+    select_runs_to_remove,
+)
 from clair.core.compiler import CompileOutput, write_compile_output
 from clair.core.dag import ClairDag, build_dag
 from clair.core.discovery import (
+    ARTIFACTS_DIR_NAME,
     discover_project,
     find_routing_collisions,
     recompile_for_selection,
@@ -37,6 +47,7 @@ from clair.core.discovery import (
 from clair.core.runner import RunResult, RunSummary, run_project
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import TestResult, TestSummary, run_tests
+from clair.core.validation import ValidationReport, validate_project
 from clair.environments.environments import Environment, load_environment
 from clair.environments.project_routing import (
     describe_unnamed_environment,
@@ -442,6 +453,87 @@ def test(
     return summary
 
 
+def validate(
+    project_dir: str | Path = ".",
+    *,
+    env: str | None = None,
+) -> ValidationReport:
+    """Apply the project routing entries to each Trouve. This needs no connection.
+
+    The report tells you the physical address problems, the collisions, and each
+    address that an author wrote as text. A caller reads the lists, and it
+    parses no text::
+
+        report = clair.validate("~/projects/analytics")
+        for collision in report.collisions:
+            print(collision.physical_address, collision.logical_addresses)
+
+    Args:
+        project_dir: The root directory of the project.
+        env: The environment name that selects the routing entry. None takes
+            CLAIR_ENV, then "dev".
+
+    Returns:
+        A ValidationReport. Read ``is_valid`` for the result of the command.
+
+    Raises:
+        ClairError: If clair cannot read the project or the routing file.
+    """
+    project_root = Path(project_dir).expanduser().resolve()
+    env_name = env or os.environ.get("CLAIR_ENV") or "dev"
+    return validate_project(project_root, env_name)
+
+
+def clean(
+    project_dir: str | Path = ".",
+    *,
+    before: str | None = None,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> CleanOutput:
+    """Remove the compiled artifacts of the old runs. This needs no connection.
+
+    Args:
+        project_dir: The root directory of the project.
+        before: Remove each run before this time: 'today', 'yesterday',
+            'last_week', a duration such as '7d', or an ISO date. None removes
+            each run.
+        dry_run: If True, clair names the runs and it removes nothing.
+        now: The current time, for the *before* value. None takes the clock.
+
+    Returns:
+        A CleanOutput that names each run that clair removed.
+
+    Raises:
+        InvalidBeforeSpecError: If clair cannot read *before*.
+    """
+    project_root = Path(project_dir).expanduser().resolve()
+    artifacts_dir = project_root / ARTIFACTS_DIR_NAME
+
+    cutoff: datetime | None = None
+    if before is not None:
+        cutoff = parse_before_spec(before, now or datetime.now(tz=UTC))
+
+    runs = select_runs_to_remove(find_artifact_runs(artifacts_dir), cutoff)
+    if not dry_run:
+        for run in runs:
+            shutil.rmtree(run.path)
+
+    logger.info(
+        "clean.complete",
+        artifacts_dir=str(artifacts_dir),
+        runs=len(runs),
+        dry_run=dry_run,
+    )
+    return CleanOutput(
+        artifacts_dir=artifacts_dir,
+        artifacts_dir_exists=artifacts_dir.exists(),
+        cutoff=cutoff,
+        runs=runs,
+        dry_run=dry_run,
+    )
+
+
 def catalog(project_dir: str | Path = ".") -> dict:
     """Make the documentation catalog of a project. This needs no connection.
 
@@ -488,4 +580,4 @@ def docs(
     serve(project_catalog, host=host, port=port, open_browser=open_browser)
 
 
-__all__ = ["catalog", "compile", "docs", "run", "test"]
+__all__ = ["catalog", "clean", "compile", "docs", "run", "test", "validate"]

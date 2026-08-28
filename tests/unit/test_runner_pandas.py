@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
 
-from clair.adapters.base import QueryResult, WarehouseAdapter
 from clair.core.runner import RunStatus, _run_dataframe_trouve
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import InvalidTrouveAddressError
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
+from tests.helpers import RecordingAdapter
 
 
 def _make_compiled(physical_address: str = "db.schema.table") -> CompiledAttributes:
@@ -50,40 +49,6 @@ def _make_source(physical_address: str = "db.schema.source") -> Trouve:
     return source
 
 
-def _make_df_adapter(
-    fetch_dataframes: dict[str, pd.DataFrame] | None = None,
-    write_success: bool = True,
-    fetch_side_effect: Exception | None = None,
-    write_side_effect: Exception | None = None,
-) -> MagicMock:
-    """Make a false adapter that obeys the DataFrameCapableAdapter protocol."""
-    adapter = MagicMock(spec=WarehouseAdapter)
-
-    # Add the DataFrame methods. Thus isinstance() accepts the Protocol.
-    adapter.fetch_dataframe = MagicMock()
-    adapter.write_dataframe = MagicMock()
-
-    if fetch_side_effect:
-        adapter.fetch_dataframe.side_effect = fetch_side_effect
-    elif fetch_dataframes is not None:
-        def _fetch(address: TrouveAddress) -> pd.DataFrame:
-            return fetch_dataframes[str(address)]
-        adapter.fetch_dataframe.side_effect = _fetch
-    else:
-        adapter.fetch_dataframe.return_value = pd.DataFrame({"col": [1, 2, 3]})
-
-    if write_side_effect:
-        adapter.write_dataframe.side_effect = write_side_effect
-    else:
-        adapter.write_dataframe.return_value = QueryResult(
-            query_id="write-qid-001",
-            query_url="https://test/#/query/write-qid-001",
-            success=write_success,
-        )
-
-    return adapter
-
-
 class TestRunPandasTrouveHappyPath:
     def test_transform_called_and_result_written(self):
         source = _make_source("db.schema.events")
@@ -96,15 +61,15 @@ class TestRunPandasTrouveHappyPath:
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(fetch_dataframes={"db.schema.events": input_df})
+        adapter = RecordingAdapter(dataframes={"db.schema.events": input_df})
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
         assert result.physical_address == "db.schema.summary"
-        adapter.write_dataframe.assert_called_once()
-        call_kwargs = adapter.write_dataframe.call_args
-        pd.testing.assert_frame_equal(call_kwargs.kwargs["dataframe"], result_df)
+        assert len(adapter.written_addresses) == 1
+        written = adapter.dataframes[adapter.written_addresses[0]]
+        pd.testing.assert_frame_equal(written, result_df)
 
     def test_fetch_called_for_each_input(self):
         source_a = _make_source("db.schema.a")
@@ -118,14 +83,14 @@ class TestRunPandasTrouveHappyPath:
         trouve = PandasTrouve(transform=my_fn, inputs=[source_a, source_b])
         _compile_pandas(trouve, "db.schema.output")
 
-        adapter = _make_df_adapter(
-            fetch_dataframes={"db.schema.a": df_a, "db.schema.b": df_b}
+        adapter = RecordingAdapter(
+            dataframes={"db.schema.a": df_a, "db.schema.b": df_b}
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
-        assert adapter.fetch_dataframe.call_count == 2
+        assert len(adapter.fetched_addresses) == 2
 
     def test_transform_receives_the_fetched_dataframe(self):
         source = _make_source("db.schema.events")
@@ -139,7 +104,7 @@ class TestRunPandasTrouveHappyPath:
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(fetch_dataframes={"db.schema.events": input_df})
+        adapter = RecordingAdapter(dataframes={"db.schema.events": input_df})
         _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert "events" in received_kwargs
@@ -156,18 +121,14 @@ class TestRunPandasTrouveAddress:
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "mydb.myschema.mytable")
 
-        adapter = _make_df_adapter(
-            fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
+        adapter = RecordingAdapter(
+            dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
-        address = adapter.write_dataframe.call_args.kwargs["address"]
-        assert address.database_name == "mydb"
-        assert address.schema_name == "myschema"
-        assert address.table_name == "mytable"
-        assert str(address) == "mydb.myschema.mytable"
+        assert adapter.written_addresses == ["mydb.myschema.mytable"]
 
     def test_a_name_that_is_not_three_parts_never_reaches_the_write(self):
         """TrouveAddress rejects the name, so the write path holds no test for it."""
@@ -185,8 +146,8 @@ class TestRunPandasTrouveTransformErrors:
         trouve = PandasTrouve(transform=bad_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(
-            fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
+        adapter = RecordingAdapter(
+            dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
@@ -204,8 +165,8 @@ class TestRunPandasTrouveTransformErrors:
         trouve = PandasTrouve(transform=bad_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(
-            fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
+        adapter = RecordingAdapter(
+            dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
@@ -223,8 +184,8 @@ class TestRunPandasTrouveTransformErrors:
         trouve = PandasTrouve(transform=bad_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(
-            fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
+        adapter = RecordingAdapter(
+            dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
@@ -243,8 +204,8 @@ class TestRunPandasTrouveFetchErrors:
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(
-            fetch_side_effect=RuntimeError("Snowflake connection lost")
+        adapter = RecordingAdapter(
+            fetch_error=RuntimeError("Snowflake connection lost")
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
@@ -264,9 +225,9 @@ class TestRunPandasTrouveWriteErrors:
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(
-            fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})},
-            write_side_effect=RuntimeError("Write failed"),
+        adapter = RecordingAdapter(
+            dataframes={"db.schema.events": pd.DataFrame({"col": [1]})},
+            write_error=RuntimeError("Write failed"),
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
@@ -283,9 +244,9 @@ class TestRunPandasTrouveWriteErrors:
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(
-            fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})},
-            write_success=False,
+        adapter = RecordingAdapter(
+            dataframes={"db.schema.events": pd.DataFrame({"col": [1]})},
+            fail_on=["-- write_dataframe"],
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
@@ -305,8 +266,8 @@ class TestRunPandasTrouveResultFields:
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(
-            fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
+        adapter = RecordingAdapter(
+            dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
@@ -323,8 +284,8 @@ class TestRunPandasTrouveResultFields:
         trouve = PandasTrouve(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
-        adapter = _make_df_adapter(
-            fetch_side_effect=RuntimeError("fetch failed")
+        adapter = RecordingAdapter(
+            fetch_error=RuntimeError("fetch failed")
         )
 
         result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
