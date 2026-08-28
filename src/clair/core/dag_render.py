@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from clair.core.dag import ClairDag
 from clair.exceptions import ClairError
+from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.trouve import ExecutionType, TrouveType
 
 # The text that marks a node that the tree already showed below another parent.
@@ -29,7 +30,8 @@ MATCH_MARKER = "*"
 class DagNodeTag(StrEnum):
     """The tag in the square brackets after a node.
 
-    A Trouve that Python executes shows PANDAS. Each other Trouve shows the
+    A seed shows SEED, because its rows come from the Python file. Each other
+    Trouve that Python executes shows PANDAS. Each other Trouve shows the
     Trouve type, because the type tells the reader what the SQL makes.
     """
 
@@ -37,10 +39,15 @@ class DagNodeTag(StrEnum):
     TABLE = "TABLE"
     VIEW = "VIEW"
     PANDAS = "PANDAS"
+    SEED = "SEED"
 
 
-def node_tag(trouve_type: TrouveType, execution_type: ExecutionType) -> DagNodeTag:
+def node_tag(
+    trouve_type: TrouveType, execution_type: ExecutionType, is_seed: bool = False
+) -> DagNodeTag:
     """Give the tag of one Trouve."""
+    if is_seed:
+        return DagNodeTag.SEED
     if execution_type == ExecutionType.PANDAS:
         return DagNodeTag.PANDAS
     if execution_type != ExecutionType.SNOWFLAKE:
@@ -67,6 +74,7 @@ class DagTreeNode(BaseModel):
     physical_address: str
     trouve_type: TrouveType
     execution_type: ExecutionType
+    is_seed: bool = False
     is_matched: bool
     is_repeat: bool
     children: list[DagTreeNode]
@@ -74,7 +82,7 @@ class DagTreeNode(BaseModel):
     @property
     def tag(self) -> DagNodeTag:
         """Give the tag in the square brackets."""
-        return node_tag(self.trouve_type, self.execution_type)
+        return node_tag(self.trouve_type, self.execution_type, self.is_seed)
 
     def walk(self, depth: int = 0) -> Iterator[tuple[int, DagTreeNode]]:
         """Give each node of this subtree, with its depth. The parent comes first."""
@@ -211,6 +219,7 @@ def _build_subtree(
         physical_address=physical_address,
         trouve_type=trouve.type,
         execution_type=trouve.compiled.execution_type,
+        is_seed=isinstance(trouve, SeedTrouve),
         is_matched=physical_address in matched,
         is_repeat=is_repeat,
         children=children,

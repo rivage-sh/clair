@@ -22,7 +22,7 @@ from clair.core.dag_render import (
 )
 from clair.exceptions import ClairError
 from clair.trouves.trouve import ExecutionType, TrouveType
-from tests.helpers import build_dag_of
+from tests.helpers import build_dag_of, make_compiled_seed_trouve
 
 # The shapes that the tests share. A name says what the shape proves.
 CHAIN_NODES = [
@@ -252,6 +252,13 @@ class TestNodeTag:
     def test_each_pair_gives_its_tag(self, trouve_type, execution_type, expected_tag):
         assert node_tag(trouve_type, execution_type) == expected_tag
 
+    def test_a_seed_gives_seed_and_not_pandas(self):
+        """A seed executes in pandas, but SEED tells the reader more."""
+        assert (
+            node_tag(TrouveType.TABLE, ExecutionType.PANDAS, is_seed=True)
+            == DagNodeTag.SEED
+        )
+
     def test_an_unknown_execution_type_raises(self):
         """A new member of the enum must not fall through to a wrong tag.
 
@@ -271,6 +278,18 @@ class TestNodeTag:
         assert node_a is not None
         assert node_a.trouve_type == TrouveType.SOURCE
         assert node_a.tag == DagNodeTag.SOURCE
+        assert node_a.is_seed is False
+
+    def test_the_tree_marks_a_seed(self):
+        """A seed and a PandasTrouve both execute in pandas. The tags differ."""
+        dag = build_dag_of([("db.s.a", TrouveType.TABLE)])
+        dag.add_trouve(make_compiled_seed_trouve("db.s.countries"))
+
+        output = render_dag(dag)
+        seed_node = output.find("db.s.countries")
+        assert seed_node is not None
+        assert seed_node.is_seed is True
+        assert seed_node.tag == DagNodeTag.SEED
 
 
 class TestHeaderText:
