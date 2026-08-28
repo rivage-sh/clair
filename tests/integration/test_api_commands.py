@@ -183,7 +183,9 @@ class TestCompile:
         expected = str(
             physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)
         )
-        assert any(node.physical_address == expected for node in output.compiled_nodes)
+        assert any(
+            str(node.addresses.physical) == expected for node in output.compiled_nodes
+        )
 
 
 class TestClean:
