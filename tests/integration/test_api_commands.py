@@ -30,7 +30,14 @@ pytestmark = pytest.mark.integration
 # One project is enough for these commands. example_1 is the smallest project
 # that holds a SOURCE Trouve and more than one model.
 PROJECT_NAME = "example_1"
-EVENTS_LOGICAL_NAME = "example_1_database.refined.events"
+
+# The exclude tests name a leaf. Clair points a reader of an unselected Trouve
+# at the logical address, because production holds the newest data there. The
+# test account holds no logical database, thus a run that excludes a middle
+# Trouve fails. TestExcludeAMiddleTrouve covers that rule with compile.
+LEAF_LOGICAL_NAME = "example_1_database.derived.top_event_types"
+MIDDLE_LOGICAL_NAME = "example_1_database.refined.events"
+DEPENDENT_LOGICAL_NAME = "example_1_database.derived.daily_event_counts"
 
 
 @pytest.fixture(scope="module")
@@ -61,13 +68,13 @@ class TestExclude:
         clair_environment: IntegrationConfig,
     ) -> None:
         excluded = str(
-            physical_address(EVENTS_LOGICAL_NAME, clair_environment.schema_name)
+            physical_address(LEAF_LOGICAL_NAME, clair_environment.schema_name)
         )
 
         summary = clair.run(project_copy, exclude=[excluded])
 
         built = [result.logical_address for result in summary.succeeded]
-        assert EVENTS_LOGICAL_NAME not in built
+        assert LEAF_LOGICAL_NAME not in built
         assert summary.failed == []
 
     def test_exclude_keeps_each_other_trouve(
@@ -77,13 +84,51 @@ class TestExclude:
         clair_environment: IntegrationConfig,
     ) -> None:
         excluded = str(
-            physical_address(EVENTS_LOGICAL_NAME, clair_environment.schema_name)
+            physical_address(LEAF_LOGICAL_NAME, clair_environment.schema_name)
         )
         model_count = len(model_logical_names(trouves_of(project_source_path)))
 
         summary = clair.run(project_copy, exclude=[excluded])
 
         assert summary.succeeded_count == model_count - 1
+
+
+class TestExcludeAMiddleTrouve:
+    """A reader of an excluded Trouve points at the logical address.
+
+    Clair does not build the excluded Trouve, thus the newest data stays in
+    production. A reader points there. The test reads the compiled SQL, and it
+    starts no run, because the test account holds no logical database.
+    """
+
+    def test_the_dependent_reads_the_logical_address(
+        self,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+    ) -> None:
+        excluded = str(
+            physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)
+        )
+
+        output = clair.compile(project_copy, exclude=[excluded])
+
+        node = output.node(DEPENDENT_LOGICAL_NAME)
+        assert node is not None
+        assert MIDDLE_LOGICAL_NAME in node.sql[0]
+        assert excluded not in node.sql[0]
+
+    def test_compile_leaves_out_the_excluded_trouve(
+        self,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+    ) -> None:
+        excluded = str(
+            physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)
+        )
+
+        output = clair.compile(project_copy, exclude=[excluded])
+
+        assert output.node(MIDDLE_LOGICAL_NAME) is None
 
 
 class TestThreads:
@@ -136,7 +181,7 @@ class TestCompile:
     ) -> None:
         output = clair.compile(project_copy)
         expected = str(
-            physical_address(EVENTS_LOGICAL_NAME, clair_environment.schema_name)
+            physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)
         )
         assert any(node.physical_address == expected for node in output.compiled_nodes)
 
