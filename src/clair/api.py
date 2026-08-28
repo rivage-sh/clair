@@ -9,7 +9,7 @@ another program calls the same functions::
 
     summary = clair.run("~/projects/analytics", select=["+mydb.analytics.orders"])
     print(summary.succeeded_count, summary.failed_count)
-    print(summary.result("mydb.analytics.orders").sql)
+    print(summary.result("mydb.analytics.orders").statements)
 
 Each function gives a result object with the complete data of the operation. No
 function writes to stdout, and no function stops the process. A fault raises a
@@ -182,7 +182,7 @@ def compile(
         project_root,
         on_node_compiled=lambda node_info: logger.info(
             "compile.node",
-            trouve=node_info.name,
+            trouve=str(node_info.addresses.physical),
             dependencies=node_info.dependencies,
             artifact_file=str(node_info.artifact_path),
         ),
@@ -232,8 +232,8 @@ def run(
 
     Returns:
         A RunSummary with one RunResult for each Trouve. Each result holds the
-        statements, the addresses, the effective run mode, the query IDs, the
-        clock time, the row count, and the test results.
+        addresses, the statements, the effective run mode, the clock time, the
+        row count, and the test results.
 
     Raises:
         ClairError: If discovery, routing, or the connection fails. A Trouve
@@ -341,7 +341,7 @@ def run(
         ):
             results.append(
                 result.model_copy(
-                    update={"test_results": test_results_of_node[result.physical_address]}
+                    update={"test_results": test_results_of_node[str(result.addresses.physical)]}
                 )
             )
     finally:
@@ -527,7 +527,6 @@ def clean(
     )
     return CleanOutput(
         artifacts_dir=artifacts_dir,
-        artifacts_dir_exists=artifacts_dir.exists(),
         cutoff=cutoff,
         runs=runs,
         dry_run=dry_run,

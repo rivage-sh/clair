@@ -68,8 +68,8 @@ summary = clair.run(
 )
 
 for result in summary.failed:
-    print(result.physical_address, result.error)
-    print("\n\n".join(result.sql or []))
+    print(result.addresses.physical, result.error)
+    print("\n\n".join(statement.sql for statement in result.statements))
 ```
 
 A Trouve that fails gives a `RunResult` with the `FAILURE` status, and raises no
@@ -99,36 +99,71 @@ class RunSummary(BaseModel):
 
 ```python
 class RunResult(BaseModel):
-    logical_address: str
-    physical_address: str
-    status: RunStatus
-    query_ids: list[str]
-    query_urls: list[str]
-    staging_address: str | None
+    addresses: NodeAddresses
+    statements: list[Statement]
     effective_run_mode: RunMode | None
     error: str
-    sql: list[str] | None
-    failed_statement_index: int | None
     duration_seconds: float
     row_count: int
     test_results: list[TestResult]
     skipped_by: str | None
 ```
 
-| Attribute | Gives |
-|-----------|-------|
-| `logical_address` | The name that the file path gives. |
-| `physical_address` | The name that clair writes to, after routing. |
-| `status` | `RunStatus.SUCCESS`, `RunStatus.FAILURE` or `RunStatus.SKIPPED`. |
-| `query_ids`, `query_urls` | The warehouse query ID and console URL of each statement. |
-| `staging_address` | The run-scoped address that clair built at. `None` without staging. |
+| Member | Gives |
+|--------|-------|
+| `addresses` | The `NodeAddresses` of the node: `logical`, `physical` and `staging`. |
+| `statements` | One `Statement` for each statement of the node, in the order that clair made them. |
+| `status` | `RunStatus.SUCCESS`, `RunStatus.FAILURE` or `RunStatus.SKIPPED`. The other attributes give it, thus you set it never. |
+| `failed_statement` | The `Statement` that failed, or `None`. |
 | `effective_run_mode` | The mode that clair used, after the `RunConfig` of the Trouve and the fallback to a full refresh. See [Incrementality](../topics/incrementality.md). |
-| `sql` | The statements, in the order that clair executed them. |
-| `failed_statement_index` | The index in `sql` of the statement that failed. |
+| `error` | The cause of a failure. It is empty for a result that succeeded. |
 | `duration_seconds` | The clock time of the statements. |
 | `row_count` | The rows that the last build statement changed. |
 | `test_results` | The data quality test results of this Trouve. |
 | `skipped_by` | The physical address of the upstream Trouve that caused the skip. |
+
+## `NodeAddresses`
+
+```python
+class NodeAddresses(BaseModel):
+    logical: TrouveAddress
+    physical: TrouveAddress
+    staging: TrouveAddress | None
+```
+
+| Member | Gives |
+|--------|-------|
+| `logical` | The address that the file path gives. |
+| `physical` | The address that clair writes to, after routing. |
+| `staging` | The run-scoped address that clair built at. `None` without staging. |
+| `target` | The address that clair writes to: `staging` if it exists, else `physical`. |
+| `matches(address)` | True if the text is the logical name or the physical name. |
+
+`str(addresses)` gives the physical address.
+
+## `Statement`
+
+One SQL statement, and what the warehouse answered. A `RunResult` and a
+`TestResult` both hold statements.
+
+```python
+class Statement(BaseModel):
+    sql: str
+    status: StatementStatus
+    query_id: str | None
+    query_url: str | None
+    error: str
+    row_count: int
+```
+
+| Member | Gives |
+|--------|-------|
+| `sql` | The text that clair sent, or made and did not send. |
+| `status` | `StatementStatus.SUCCESS`, `FAILURE`, or `NOT_RUN`. A statement after the one that failed has `NOT_RUN`. |
+| `query_id`, `query_url` | The warehouse query ID and the console URL. |
+| `error` | The error message of a statement that failed. |
+| `row_count` | The rows that the statement returned or changed. |
+| `success` | True if the status is `SUCCESS`. |
 
 ## `clair.compile()`
 
@@ -150,7 +185,7 @@ warehouse connection.
 ```python
 output = clair.compile("~/projects/analytics")
 node = output.node("mydb.analytics.orders")
-print(node.physical_address, node.staging_address)
+print(node.addresses.physical, node.addresses.staging)
 print("\n\n".join(node.sql))
 ```
 
@@ -159,9 +194,9 @@ print("\n\n".join(node.sql))
 `node(address)` finds one `CompiledNodeInfo` by its logical address or its
 physical address.
 
-`CompiledNodeInfo` holds `name`, `logical_address`, `physical_address`,
-`staging_address`, `type`, `execution_type`, `effective_run_mode`,
-`dependencies`, `sql` and `artifact_path`.
+`CompiledNodeInfo` holds `addresses` (a `NodeAddresses`), `type`,
+`execution_type`, `effective_run_mode`, `dependencies`, `sql` and
+`artifact_path`.
 
 ## `clair.test()`
 
@@ -182,13 +217,36 @@ Run the data quality tests on the warehouse. See
 [Data Quality Tests](../topics/data-quality-tests.md).
 
 `TestSummary` holds `results`, and gives `passed_count`, `failed_count`,
-`error_count`, `passed_results`, `failed_results` and `render()`.
+`error_count`, `passed_results`, `failed_results`, `error_results` and
+`render()`.
 
 ```python
 summary = clair.test("~/projects/analytics", sample=True)
 for result in summary.failed_results:
-    print(result.physical_address, result.test_type, result.failing_row_count)
+    print(result.address, result.test_type, result.failing_row_count)
 ```
+
+### `TestResult`
+
+```python
+class TestResult(BaseModel):
+    address: TrouveAddress
+    test_index: int
+    test_type: str
+    column_name: str | None
+    statement: Statement
+```
+
+| Member | Gives |
+|--------|-------|
+| `address` | The address of the Trouve that the test examines. |
+| `test_index` | The index of this test in the test list of the Trouve. |
+| `test_type` | A label for a person to read, such as `unique` or `not_null`. |
+| `column_name` | The column that the test examines, or `None` for a test on the full table. |
+| `statement` | The test query, and what the warehouse answered. |
+| `passed` | True if the test query gave zero rows. Thus the data is correct. |
+| `failing_row_count` | The rows that disobey the test condition. |
+| `error` | The error message if the query itself did not execute. |
 
 ## `clair.validate()`
 

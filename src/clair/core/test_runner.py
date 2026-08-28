@@ -6,11 +6,12 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 
 import structlog
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
-from clair.adapters.base import WarehouseAdapter
+from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag
+from clair.trouves.address import TrouveAddress
 from clair.trouves.trouve import TrouveType
 
 logger = structlog.get_logger()
@@ -20,30 +21,42 @@ logger = structlog.get_logger()
 class TestResult(BaseModel):
     """The result of one data quality test.
 
+    The test query gives the rows that disobey the test condition. Thus the
+    statement holds the count, the query ID and the error, and this object needs
+    no copy of them.
+
     Attributes:
-        physical_address: The full Snowflake object name of the Trouve.
+        address: The address of the Trouve that the test examines.
         test_index: The index of this test in the test list of the Trouve. The
             first index is 0.
         test_type: A label for a person to read, such as "unique", "not_null",
             or "sql".
         column_name: The column that the test examines. It is None for a test
             on the full table.
-        passed: True if the test query gave zero rows. Thus the data is correct.
-        failing_row_count: The number of rows that disobey the test condition.
-        query_id: The warehouse query ID.
-        query_url: The URL of the query in the Snowflake console.
-        error: The error message if the query itself did not execute.
+        statement: The test query, and what the warehouse answered.
     """
 
-    physical_address: str
+    address: TrouveAddress
     test_index: int
     test_type: str
     column_name: str | None
-    passed: bool
-    failing_row_count: int
-    query_id: str | None = None
-    query_url: str | None = None
-    error: str | None = None
+    statement: Statement
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def passed(self) -> bool:
+        """True if the test query gave zero rows. Thus the data is correct."""
+        return self.statement.success and self.statement.row_count == 0
+
+    @property
+    def failing_row_count(self) -> int:
+        """The number of rows that disobey the test condition."""
+        return self.statement.row_count if self.statement.success else 0
+
+    @property
+    def error(self) -> str:
+        """The error message if the query itself did not execute."""
+        return self.statement.error
 
 
 class TestSummary(BaseModel):
@@ -52,28 +65,30 @@ class TestSummary(BaseModel):
     results: list[TestResult]
 
     @property
-    def passed_count(self) -> int:
-        return sum(1 for r in self.results if r.passed and not r.error)
-
-    @property
-    def failed_count(self) -> int:
-        return sum(1 for r in self.results if not r.passed and not r.error)
-
-    @property
-    def error_count(self) -> int:
-        return sum(1 for r in self.results if r.error)
-
-    @property
     def passed_results(self) -> list[TestResult]:
-        return [r for r in self.results if r.passed and not r.error]
+        return [r for r in self.results if r.passed]
 
     @property
     def failed_results(self) -> list[TestResult]:
+        """Each test that the data did not obey. A query that failed is not here."""
         return [r for r in self.results if not r.passed and not r.error]
 
     @property
     def error_results(self) -> list[TestResult]:
+        """Each test whose query did not execute."""
         return [r for r in self.results if r.error]
+
+    @property
+    def passed_count(self) -> int:
+        return len(self.passed_results)
+
+    @property
+    def failed_count(self) -> int:
+        return len(self.failed_results)
+
+    @property
+    def error_count(self) -> int:
+        return len(self.error_results)
 
     def render(self) -> str:
         """Make the complete summary text for stdout."""
@@ -85,41 +100,34 @@ class TestSummary(BaseModel):
             "",
         ]
 
-        passed_count = 0
-        failed_count = 0
-        error_count = 0
-
         for i, r in enumerate(self.results, 1):
-            label = f"{r.physical_address} :: {r.test_type}"
+            label = f"{r.address} :: {r.test_type}"
             if r.column_name:
                 label += f" ({r.column_name})"
 
             if r.error:
-                error_count += 1
                 lines.append(f"[{i}/{total}] {label} ... ERROR")
                 lines.append(f"      Error: {r.error}")
             elif r.passed:
-                passed_count += 1
                 lines.append(f"[{i}/{total}] {label} ... PASS")
             else:
-                failed_count += 1
                 lines.append(
                     f"[{i}/{total}] {label} ... FAIL ({r.failing_row_count} failing row{'s' if r.failing_row_count != 1 else ''})"
                 )
 
-            if r.query_id:
-                lines.append(f"      Query ID: {r.query_id}")
-            if r.query_url:
-                lines.append(f"      URL: {r.query_url}")
+            if r.statement.query_id:
+                lines.append(f"      Query ID: {r.statement.query_id}")
+            if r.statement.query_url:
+                lines.append(f"      URL: {r.statement.query_url}")
 
             lines.append("")
 
         lines.append(
-            f"=== Done: {passed_count} passed, {failed_count} failed, {error_count} errors ==="
+            f"=== Done: {self.passed_count} passed, {self.failed_count} failed, "
+            f"{self.error_count} errors ==="
         )
 
         return "\n".join(lines)
-
 
 def _run_trouve_tests(
     name: str,
@@ -169,6 +177,7 @@ def _run_trouve_tests(
             )
             continue
 
+        sql = ""
         try:
             sql = test.to_sql(queried_address)
 
@@ -179,51 +188,25 @@ def _run_trouve_tests(
                 pattern = re.compile(re.escape(f"FROM {queried_address}"), re.IGNORECASE)
                 sql = pattern.sub(f"FROM {sample_subquery}", sql)
 
-            query_result = adapter.execute(sql)
+            statement = adapter.execute(sql)
 
-            if not query_result.success:
-                logger.warning("test.query_error", trouve=name, test_type=test.label, column=column_name, error=query_result.error, query_id=query_result.query_id)
-                results.append(
-                    TestResult(
-                        physical_address=physical_address,
-                        test_index=test_index,
-                        test_type=test.label,
-                        column_name=column_name,
-                        passed=False,
-                        failing_row_count=0,
-                        query_id=query_result.query_id,
-                        query_url=query_result.query_url,
-                        error=query_result.error,
-                    )
-                )
+            if not statement.success:
+                logger.warning("test.query_error", trouve=name, test_type=test.label, column=column_name, error=statement.error, query_id=statement.query_id)
             else:
-                passed = query_result.row_count == 0
-                logger.info("test.result", trouve=physical_address, test_type=test.label, column=column_name, passed=passed, failing_rows=query_result.row_count, query_id=query_result.query_id)
-                results.append(
-                    TestResult(
-                        physical_address=physical_address,
-                        test_index=test_index,
-                        test_type=test.label,
-                        column_name=column_name,
-                        passed=passed,
-                        failing_row_count=query_result.row_count,
-                        query_id=query_result.query_id,
-                        query_url=query_result.query_url,
-                    )
-                )
+                logger.info("test.result", trouve=physical_address, test_type=test.label, column=column_name, passed=statement.row_count == 0, failing_rows=statement.row_count, query_id=statement.query_id)
         except Exception as e:  # noqa: BLE001 — one test that fails must not stop the complete run
             logger.warning("test.exception", trouve=physical_address, test_type=test.label, column=column_name, error=str(e))
-            results.append(
-                TestResult(
-                    physical_address=physical_address,
-                    test_index=test_index,
-                    test_type=test.label,
-                    column_name=column_name,
-                    passed=False,
-                    failing_row_count=0,
-                    error=str(e),
-                )
+            statement = Statement(sql=sql, status=StatementStatus.FAILURE, error=str(e))
+
+        results.append(
+            TestResult(
+                address=trouve.compiled.physical_address,
+                test_index=test_index,
+                test_type=test.label,
+                column_name=column_name,
+                statement=statement,
             )
+        )
 
     return results
 

@@ -7,6 +7,7 @@ for example BigQuery or Databricks, and keep the runner as it is.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from enum import StrEnum
 from typing import Any
 
 import pandas as pd
@@ -15,22 +16,44 @@ from pydantic import BaseModel
 from clair.trouves.address import TrouveAddress
 
 
-class QueryResult(BaseModel):
-    """The result of one SQL query against the warehouse.
+class StatementStatus(StrEnum):
+    """What happened to one SQL statement."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    # Clair made the statement, but it did not send it. A statement after the
+    # one that failed has this status.
+    NOT_RUN = "not_run"
+
+
+class Statement(BaseModel):
+    """One SQL statement, and what the warehouse answered.
+
+    An adapter gives a Statement for each statement that it executes. A result
+    object of clair holds the list of them, thus the text, the identifier and
+    the answer of one statement stay together.
 
     Attributes:
-        query_id: The identifier that the warehouse gave to the query.
+        sql: The text that clair sent, or made and did not send.
+        status: SUCCESS, FAILURE, or NOT_RUN.
+        query_id: The identifier that the warehouse gave to the query. It is
+            None for a statement that the warehouse did not identify.
         query_url: The URL of the query detail page in the warehouse console.
-        success: True if the query completed with no error.
-        error: The error message if the query failed.
-        row_count: The number of rows that the query returned or changed.
+        error: The error message of a statement that failed.
+        row_count: The number of rows that the statement returned or changed.
     """
 
-    query_id: str
-    query_url: str
-    success: bool
-    error: str | None = None
+    sql: str = ""
+    status: StatementStatus = StatementStatus.NOT_RUN
+    query_id: str | None = None
+    query_url: str | None = None
+    error: str = ""
     row_count: int = 0
+
+    @property
+    def success(self) -> bool:
+        """Tell you if the warehouse executed the statement with no error."""
+        return self.status == StatementStatus.SUCCESS
 
 
 class WarehouseAdapter(ABC):
@@ -55,7 +78,7 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
-    def execute(self, sql: str) -> QueryResult:
+    def execute(self, sql: str) -> Statement:
         """Execute one SQL statement and give the result."""
         ...
 
@@ -87,6 +110,6 @@ class WarehouseAdapter(ABC):
     @abstractmethod
     def write_dataframe(
         self, dataframe: pd.DataFrame, address: TrouveAddress
-    ) -> QueryResult:
+    ) -> Statement:
         """Write a DataFrame to the warehouse. This makes or replaces the table."""
         ...

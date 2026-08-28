@@ -18,9 +18,12 @@ from typing import Any
 
 import pandas as pd
 
-from clair.adapters.base import QueryResult, WarehouseAdapter
+from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter
 from clair.core.dag import ClairDag
+from clair.core.runner import RunResult
+from clair.core.test_runner import TestResult
 from clair.environments.routing import RoutingEntry, TrouveAddress
+from clair.trouves.address import NodeAddresses
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.trouve import (
@@ -141,6 +144,52 @@ def build_dag_of(
 
 
 # ---------------------------------------------------------------------------
+# The result builders.
+#
+# A test that examines a summary needs a result, and it needs no run. These
+# builders make one from an address text.
+# ---------------------------------------------------------------------------
+
+
+def addresses_of_text(physical_address: str, staging_address: str | None = None) -> NodeAddresses:
+    """Make a NodeAddresses where the logical name and the physical name agree."""
+    address = TrouveAddress.parse(physical_address)
+    return NodeAddresses(
+        logical=address,
+        physical=address,
+        staging=None if staging_address is None else TrouveAddress.parse(staging_address),
+    )
+
+
+def make_run_result(physical_address: str, **fields: Any) -> RunResult:
+    """Make a RunResult at one address. Each other attribute takes its default."""
+    return RunResult(addresses=addresses_of_text(physical_address), **fields)
+
+
+def make_statement(sql: str = "select 1", **fields: Any) -> Statement:
+    """Make a Statement that succeeded. Each keyword replaces one attribute."""
+    fields.setdefault("status", StatementStatus.SUCCESS)
+    return Statement(sql=sql, **fields)
+
+
+def make_test_result(
+    physical_address: str = "db.s.t",
+    test_type: str = "unique",
+    column_name: str | None = None,
+    test_index: int = 0,
+    **statement_fields: Any,
+) -> TestResult:
+    """Make a TestResult. The keywords make the Statement of the test query."""
+    return TestResult(
+        address=TrouveAddress.parse(physical_address),
+        test_index=test_index,
+        test_type=test_type,
+        column_name=column_name,
+        statement=make_statement(**statement_fields),
+    )
+
+
+# ---------------------------------------------------------------------------
 # The adapter that the tests share.
 # ---------------------------------------------------------------------------
 
@@ -196,7 +245,7 @@ class RecordingAdapter(WarehouseAdapter):
 
     Args:
         fail_on: A statement that holds one of these texts gives a failed
-            QueryResult. Use the name of a Trouve to fail that Trouve.
+            Statement. Use the name of a Trouve to fail that Trouve.
         existing_tables: The address of each table that the warehouse holds.
             None means that every table exists, which is the common case.
         dataframes: The DataFrame at each address, by the address text.
@@ -285,34 +334,36 @@ class RecordingAdapter(WarehouseAdapter):
 
     # The statements.
 
-    def _next_query_result(self, sql: str) -> QueryResult:
+    def _next_statement(self, sql: str) -> Statement:
         self._query_counter += 1
         query_id = f"qid-{self._query_counter:04d}"
         query_url = f"https://test.snowflake.com/#/query/{query_id}"
 
         for text in self.fail_on:
             if text in sql:
-                return QueryResult(
+                return Statement(
+                    sql=sql,
+                    status=StatementStatus.FAILURE,
                     query_id=query_id,
                     query_url=query_url,
-                    success=False,
                     error=f"Simulated failure for {text}",
                 )
 
         is_select = sql.lstrip().upper().startswith("SELECT")
-        return QueryResult(
+        return Statement(
+            sql=sql,
+            status=StatementStatus.SUCCESS,
             query_id=query_id,
             query_url=query_url,
-            success=True,
             row_count=self.select_row_count if is_select else self.write_row_count,
         )
 
-    def execute(self, sql: str) -> QueryResult:
+    def execute(self, sql: str) -> Statement:
         self.record.enter(sql)
         try:
             if self.delay_seconds:
                 time.sleep(self.delay_seconds)
-            return self._next_query_result(sql)
+            return self._next_statement(sql)
         finally:
             self.record.leave()
 
@@ -335,7 +386,7 @@ class RecordingAdapter(WarehouseAdapter):
 
     def write_dataframe(
         self, dataframe: pd.DataFrame, address: TrouveAddress
-    ) -> QueryResult:
+    ) -> Statement:
         if self.write_error is not None:
             raise self.write_error
         self.dataframes[str(address)] = dataframe

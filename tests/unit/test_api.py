@@ -77,8 +77,8 @@ class TestCompile:
 
         node = output.node(DAILY_ORDERS)
         assert node is not None
-        assert node.physical_address == DAILY_ORDERS
-        assert node.logical_address == DAILY_ORDERS
+        assert str(node.addresses.physical) == DAILY_ORDERS
+        assert str(node.addresses.logical) == DAILY_ORDERS
         assert node.dependencies == ["source.raw.orders"]
         assert any("daily_orders" in statement for statement in node.sql)
 
@@ -87,8 +87,8 @@ class TestCompile:
         node = output.node(DAILY_ORDERS)
 
         assert node is not None
-        assert node.staging_address is not None
-        assert output.run_id[:8] in node.staging_address
+        assert node.addresses.staging is not None
+        assert output.run_id[:8] in str(node.addresses.staging)
 
     def test_use_staging_false_removes_the_staging_address(
         self, project: Path, fake_environment
@@ -96,7 +96,7 @@ class TestCompile:
         node = clair.compile(project, use_staging=False).node(DAILY_ORDERS)
 
         assert node is not None
-        assert node.staging_address is None
+        assert node.addresses.staging is None
 
     def test_it_writes_the_artifact_file(self, project: Path, fake_environment):
         node = clair.compile(project).node(DAILY_ORDERS)
@@ -124,7 +124,7 @@ class TestRun:
         result = summary.result(DAILY_ORDERS)
         assert result is not None
         assert result.status == RunStatus.SUCCESS
-        assert result.query_ids
+        assert [s for s in result.statements if s.query_id]
         assert result.row_count == 42
 
     def test_the_result_holds_the_sql_that_clair_executed(
@@ -134,8 +134,8 @@ class TestRun:
         result = clair.run(project, adapter=RecordingAdapter(), test=False).result(DAILY_ORDERS)
 
         assert result is not None
-        assert result.sql
-        assert any("daily_orders" in statement for statement in result.sql)
+        assert result.statements
+        assert any("daily_orders" in s.sql for s in result.statements)
 
     def test_a_run_without_the_tests_writes_to_the_physical_address(
         self, project: Path, fake_environment
@@ -143,7 +143,7 @@ class TestRun:
         result = clair.run(project, adapter=RecordingAdapter(), test=False).result(DAILY_ORDERS)
 
         assert result is not None
-        assert result.staging_address is None
+        assert result.addresses.staging is None
         assert result.effective_run_mode == RunMode.FULL_REFRESH
 
     def test_a_run_with_the_tests_writes_to_a_staging_address(
@@ -154,8 +154,8 @@ class TestRun:
 
         assert result is not None
         assert result.status == RunStatus.SUCCESS
-        assert result.staging_address is not None
-        assert summary.run_id[:8] in result.staging_address
+        assert result.addresses.staging is not None
+        assert summary.run_id[:8] in str(result.addresses.staging)
 
     def test_the_result_holds_the_test_results(self, project: Path, fake_environment):
         summary = clair.run(project, adapter=RecordingAdapter())
@@ -174,7 +174,8 @@ class TestRun:
         assert summary.failed_count == 1
         result = summary.failed[0]
         assert "Simulated failure" in result.error
-        assert result.sql
+        assert result.statements
+        assert result.failed_statement is not None
 
     def test_a_selection_that_matches_nothing_gives_an_empty_summary(
         self, project: Path, fake_environment

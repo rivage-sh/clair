@@ -21,7 +21,7 @@ def connect(config: IntegrationConfig) -> SnowflakeAdapter:
 def execute(adapter: SnowflakeAdapter, sql: str) -> None:
     """Run one statement, and raise when the warehouse rejects it.
 
-    ``SnowflakeAdapter.execute`` gives a QueryResult and raises nothing. A setup
+    ``SnowflakeAdapter.execute`` gives a Statement and raises nothing. A setup
     step must stop at the first failure.
     """
     result = adapter.execute(sql)
@@ -48,7 +48,7 @@ def row_count(adapter: SnowflakeAdapter, address: TrouveAddress) -> int:
 def query_rows(adapter: SnowflakeAdapter, sql: str) -> list[tuple[object, ...]]:
     """Run one query and give each row back.
 
-    ``SnowflakeAdapter.execute`` gives a QueryResult, and it holds no row. A
+    ``SnowflakeAdapter.execute`` gives a Statement, and it holds no row. A
     ``SHOW GRANTS`` and an INFORMATION_SCHEMA query need the rows, so this
     helper opens a cursor on the connection of the adapter.
     """
