@@ -27,6 +27,7 @@ import pytest
 
 import clair
 from clair.adapters.snowflake import SnowflakeAdapter
+from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import (
@@ -59,13 +60,14 @@ def test_a_full_refresh_builds_every_model(
     project_path: Path,
     project_copies: dict[str, Path],
     clair_environment: IntegrationConfig,
+    environment: Environment,
     adapter: SnowflakeAdapter,
 ) -> None:
     """Each Trouve that clair builds exists in the schema of the run."""
     copy_path = project_copies[project_path.name]
     schema_name = clair_environment.schema_name
 
-    summary = clair.run(copy_path)
+    summary = clair.run(copy_path, env=environment)
 
     logical_names = model_logical_names(trouves_of(project_path))
     assert logical_names, f"{project_path.name} builds no Trouve"
@@ -119,11 +121,12 @@ def test_the_data_quality_tests_pass(
     project_path: Path,
     project_copies: dict[str, Path],
     clair_environment: IntegrationConfig,
+    environment: Environment,
 ) -> None:
     """`clair.test()` reports no failure and no error."""
     copy_path = project_copies[project_path.name]
 
-    summary = clair.test(copy_path)
+    summary = clair.test(copy_path, env=environment)
 
     # Each example project must declare a minimum of one data quality test. An
     # example with no test gives this test nothing to do, and the run stays
@@ -136,6 +139,7 @@ def test_the_data_quality_tests_pass(
 def test_the_incremental_append_adds_only_the_new_rows(
     project_copies: dict[str, Path],
     clair_environment: IntegrationConfig,
+    environment: Environment,
     adapter: SnowflakeAdapter,
 ) -> None:
     """example_3 appends the orders of the last 3 days.
@@ -151,7 +155,7 @@ def test_the_incremental_append_adds_only_the_new_rows(
     )
     source_orders = physical_address("example_3_database.source.orders", schema_name)
 
-    clair.run(copy_path, run_mode=RunMode.FULL_REFRESH)
+    clair.run(copy_path, env=environment, run_mode=RunMode.FULL_REFRESH)
     assert row_count(adapter, recent_orders) == 6
 
     adapter.execute(f"""
@@ -162,7 +166,7 @@ def test_the_incremental_append_adds_only_the_new_rows(
             ('ord_008', 'cust_d', 'placed', 310.00, current_timestamp(), current_timestamp())
     """)
 
-    summary = clair.run(copy_path, run_mode=RunMode.INCREMENTAL)
+    summary = clair.run(copy_path, env=environment, run_mode=RunMode.INCREMENTAL)
     assert row_count(adapter, recent_orders) == 8
 
     # The mode of the result is the mode that clair used, after the RunConfig of
@@ -175,6 +179,7 @@ def test_the_incremental_append_adds_only_the_new_rows(
 def test_select_builds_one_part_of_the_dag(
     project_copies: dict[str, Path],
     clair_environment: IntegrationConfig,
+    environment: Environment,
 ) -> None:
     """`select` builds the named Trouve only.
 
@@ -189,7 +194,7 @@ def test_select_builds_one_part_of_the_dag(
         )
     )
 
-    summary = clair.run(copy_path, select=[selector])
+    summary = clair.run(copy_path, env=environment, select=[selector])
 
     assert summary.succeeded_count == 1
     assert str(summary.results[0].addresses.logical) == "example_1_database.refined.events"

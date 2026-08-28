@@ -92,6 +92,11 @@ class Environment(BaseModel):
         return d
 
 
+def resolve_env_name(env_name: str | None = None) -> str:
+    """Give the environment name: the argument, then CLAIR_ENV, then "dev"."""
+    return env_name or os.environ.get("CLAIR_ENV") or "dev"
+
+
 def load_environment(
     env_name: str | None = None,
     environments_path: Path | None = None,
@@ -116,7 +121,7 @@ def load_environment(
         EnvironmentNotFoundError: If environments.yml has no such environment.
         InvalidEnvironmentError: If the environment block holds an unknown key.
     """
-    resolved_name = env_name or os.environ.get("CLAIR_ENV") or "dev"
+    resolved_name = resolve_env_name(env_name)
     path = environments_path or DEFAULT_ENVIRONMENTS_PATH
 
     if not path.exists():

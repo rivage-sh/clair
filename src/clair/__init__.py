@@ -11,11 +11,25 @@ gives a result object with the complete data of the operation::
 
     import clair
 
-    summary = clair.run("~/projects/analytics")
+    summary = clair.run("~/projects/analytics", env=environment)
     print(summary.succeeded_count, summary.failed_count)
 
 ``clair.run()``, ``clair.compile()``, ``clair.test()``, ``clair.docs()`` and
 ``clair.catalog()`` come from :mod:`clair.api`.
+
+``clair.run()`` and ``clair.test()`` accept an
+:class:`~clair.environments.environments.Environment`, and they read no file. A
+notebook, a test, or a service that holds the settings makes the object::
+
+    from clair import Environment
+
+    environment = Environment(
+        name="dev", account="ab12345", user="analyst", warehouse="compute_wh"
+    )
+    summary = clair.run("~/projects/analytics", env=environment)
+
+The CLI reads ~/.clair/environments.yml, and it gives the same object to these
+functions.
 
 Runtime context
 ---------------
@@ -51,11 +65,9 @@ the project.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from clair.environments.environments import Environment
-
+from clair.environments.environments import Environment
 from clair.environments.routing import RoutingEntry, RoutingTable
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.column import Column, ColumnType
@@ -102,6 +114,7 @@ __all__ = [
     "ColumnType",
     "DatabaseDefaults",
     "DataframeTrouve",
+    "Environment",
     "IncrementalMode",
     "NodeAddresses",
     "PandasTrouve",

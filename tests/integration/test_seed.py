@@ -23,6 +23,7 @@ import clair
 from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunStatus, RunSummary
+from clair.environments.environments import Environment
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import (
     CI_DATABASE_CONFIG_FILE,
@@ -180,12 +181,15 @@ class TestASeedReachesSnowflake:
     def completed_run(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> RunSummary:
         """Run the seed project one time."""
         destination = tmp_path_factory.mktemp(self.DATABASE_NAME)
-        return clair.run(write_seed_project(destination, self.DATABASE_NAME))
+        return clair.run(
+            write_seed_project(destination, self.DATABASE_NAME), env=environment
+        )
 
     def test_the_run_succeeds(self, completed_run: RunSummary) -> None:
         assert completed_run.failed == []
@@ -205,6 +209,7 @@ class TestASeedReachesSnowflake:
         completed_run: RunSummary,
         adapter: SnowflakeAdapter,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         address = seed_address(self.DATABASE_NAME, clair_environment.schema_name)
 
@@ -215,6 +220,7 @@ class TestASeedReachesSnowflake:
         completed_run: RunSummary,
         adapter: SnowflakeAdapter,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         """The SQL Trouve keeps the two rows whose is_active column is true."""
         address = downstream_address(self.DATABASE_NAME, clair_environment.schema_name)
@@ -226,6 +232,7 @@ class TestASeedReachesSnowflake:
         completed_run: RunSummary,
         adapter: SnowflakeAdapter,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         """Clair promotes the staging table of a seed, then drops it."""
         remaining = staging_objects(
@@ -251,12 +258,15 @@ class TestTheDtypeGivesTheSnowflakeType:
     def seed_table(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> TrouveAddress:
         """Run the project, and give the address of the seed table."""
         destination = tmp_path_factory.mktemp(self.DATABASE_NAME)
-        summary = clair.run(write_seed_project(destination, self.DATABASE_NAME))
+        summary = clair.run(
+            write_seed_project(destination, self.DATABASE_NAME), env=environment
+        )
         assert summary.failed == []
         return seed_address(self.DATABASE_NAME, clair_environment.schema_name)
 
@@ -328,6 +338,7 @@ class TestTheFileIsTheData:
     def test_two_runs_give_the_same_row_count(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
@@ -336,10 +347,10 @@ class TestTheFileIsTheData:
         project_path = write_seed_project(destination, self.DATABASE_NAME)
         address = seed_address(self.DATABASE_NAME, clair_environment.schema_name)
 
-        clair.run(project_path)
+        clair.run(project_path, env=environment)
         after_the_first_run = row_count(adapter, address)
 
-        clair.run(project_path)
+        clair.run(project_path, env=environment)
         after_the_second_run = row_count(adapter, address)
 
         assert after_the_first_run == 3
@@ -348,6 +359,7 @@ class TestTheFileIsTheData:
     def test_a_new_row_in_the_file_reaches_the_table(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
@@ -356,11 +368,11 @@ class TestTheFileIsTheData:
         project_path = write_seed_project(destination, database_name)
         address = seed_address(database_name, clair_environment.schema_name)
 
-        clair.run(project_path)
+        clair.run(project_path, env=environment)
         assert row_count(adapter, address) == 3
 
         write_seed_file(project_path, database_name, FOUR_ROWS)
-        clair.run(project_path)
+        clair.run(project_path, env=environment)
 
         assert row_count(adapter, address) == 4
 
@@ -373,6 +385,7 @@ class TestASeedWithNoRow:
     def test_the_table_exists_and_holds_no_row(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
@@ -393,7 +406,7 @@ class TestASeedWithNoRow:
             trouve = SeedTrouve(dataframe=frame)
         """))
 
-        summary = clair.run(project_path)
+        summary = clair.run(project_path, env=environment)
 
         assert summary.failed == []
         address = seed_address(self.DATABASE_NAME, clair_environment.schema_name)

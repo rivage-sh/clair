@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from clair.environments.environments import Environment
+
 DATABASE_NAME = "clair_pr_testing"
 
 DEFAULT_USER = "clair_pr_testing_user"
@@ -64,24 +66,22 @@ class IntegrationConfig:
             connection["password"] = self.password
         return connection
 
-    def to_environments_yaml(self) -> str:
-        """Give the content of a ~/.clair/environments.yml for this run."""
-        lines = [
-            f"{ENVIRONMENT_NAME}:",
-            f"  account: {self.account}",
-            f"  user: {self.user}",
-            f"  role: {self.role}",
-            f"  warehouse: {self.warehouse}",
-        ]
-        if self.private_key_path:
-            lines.append(f"  private_key_path: {self.private_key_path}")
-            if self.private_key_passphrase:
-                lines.append(
-                    f"  private_key_passphrase: {self.private_key_passphrase}"
-                )
-        else:
-            lines.append(f"  password: {self.password}")
-        return "\n".join(lines) + "\n"
+    def to_environment(self) -> Environment:
+        """Give the Environment that the Python API accepts.
+
+        The tests write no environments.yml, and they need no private HOME:
+        `clair.run()` accepts the parsed object.
+        """
+        return Environment(
+            name=ENVIRONMENT_NAME,
+            account=self.account,
+            user=self.user,
+            role=self.role,
+            warehouse=self.warehouse,
+            private_key_path=self.private_key_path,
+            private_key_passphrase=self.private_key_passphrase,
+            password=self.password,
+        )
 
 
 def normalise_schema_name(name: str) -> str:

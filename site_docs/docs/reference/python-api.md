@@ -2,14 +2,53 @@
 
 ```python
 import clair
+from clair import Environment
 
-summary = clair.run("~/projects/analytics")
+environment = Environment(
+    name="dev", account="myorg-myaccount", user="analyst", warehouse="compute_wh"
+)
+summary = clair.run("~/projects/analytics", env=environment)
 print(summary.succeeded_count, summary.failed_count)
 ```
 
 Each operation of the CLI is one function of the package. The CLI parses the
 arguments and calls these functions, so a notebook, a test, or another program
 does the same work with no `subprocess` call.
+
+## The environment
+
+`clair.run()` and `clair.test()` take an `Environment`, and they read no file.
+The CLI parses `~/.clair/environments.yml` and gives the object to these
+functions. A caller that already holds the settings — a notebook, a test, an
+orchestrator, a service that keeps its secrets in a vault — makes the object,
+and writes no YAML file:
+
+```python
+from clair import Environment
+
+environment = Environment(
+    name="prod",
+    account="myorg-myaccount",
+    user="analyst",
+    warehouse="compute_wh",
+    role="transformer",
+    password=os.environ["SNOWFLAKE_PASSWORD"],
+)
+```
+
+The `name` selects the routing entry in `__routing__.py`. See
+[Environments](../topics/environments.md) for each field.
+
+To read the file yourself, call `load_environment()`:
+
+```python
+from clair.environments.environments import load_environment
+
+env_name, environment = load_environment("prod")
+```
+
+`clair.compile()` and `clair.validate()` make no connection. They accept the
+`Environment`, or the environment name alone. `None` gives the name `"dev"`.
 
 | Function | The equivalent command |
 |----------|------------------------|
@@ -31,9 +70,9 @@ function writes to stdout, and no function stops the process: a fault raises a
 def run(
     project_dir: str | Path = ".",
     *,
+    env: Environment,
     select: Sequence[str] | None = None,
     exclude: Sequence[str] | None = None,
-    env: str | None = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     test: bool = True,
     sample: bool = False,
@@ -62,8 +101,8 @@ from clair import RunMode
 
 summary = clair.run(
     "~/projects/analytics",
+    env=environment,
     select=["+mydb.analytics.orders"],
-    env="dev",
     run_mode=RunMode.INCREMENTAL,
 )
 
@@ -173,7 +212,7 @@ def compile(
     *,
     select: Sequence[str] | None = None,
     exclude: Sequence[str] | None = None,
-    env: str | None = None,
+    env: Environment | str | None = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     use_staging: bool = True,
 ) -> CompileOutput
@@ -204,9 +243,9 @@ physical address.
 def test(
     project_dir: str | Path = ".",
     *,
+    env: Environment,
     select: Sequence[str] | None = None,
     exclude: Sequence[str] | None = None,
-    env: str | None = None,
     sample: bool = False,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
@@ -221,7 +260,7 @@ Run the data quality tests on the warehouse. See
 `render()`.
 
 ```python
-summary = clair.test("~/projects/analytics", sample=True)
+summary = clair.test("~/projects/analytics", env=environment, sample=True)
 for result in summary.failed_results:
     print(result.address, result.test_type, result.failing_row_count)
 ```
@@ -254,7 +293,7 @@ class TestResult(BaseModel):
 def validate(
     project_dir: str | Path = ".",
     *,
-    env: str | None = None,
+    env: Environment | str | None = None,
 ) -> ValidationReport
 ```
 
