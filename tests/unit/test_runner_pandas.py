@@ -1,4 +1,4 @@
-"""The tests of _run_pandas_trouve, the pandas path of the runner."""
+"""The tests of _run_dataframe_trouve, the DataFrame path of the runner."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from clair.adapters.base import QueryResult, WarehouseAdapter
-from clair.core.runner import RunStatus, _run_pandas_trouve
+from clair.core.runner import RunStatus, _run_dataframe_trouve
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import InvalidTrouveAddressError
 from clair.trouves.config import ResolvedConfig
@@ -98,7 +98,7 @@ class TestRunPandasTrouveHappyPath:
 
         adapter = _make_df_adapter(fetch_dataframes={"db.schema.events": input_df})
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
         assert result.physical_address == "db.schema.summary"
@@ -122,7 +122,7 @@ class TestRunPandasTrouveHappyPath:
             fetch_dataframes={"db.schema.a": df_a, "db.schema.b": df_b}
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
         assert adapter.fetch_dataframe.call_count == 2
@@ -140,7 +140,7 @@ class TestRunPandasTrouveHappyPath:
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = _make_df_adapter(fetch_dataframes={"db.schema.events": input_df})
-        _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert "events" in received_kwargs
         pd.testing.assert_frame_equal(received_kwargs["events"], input_df)
@@ -160,7 +160,7 @@ class TestRunPandasTrouveAddress:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
         address = adapter.write_dataframe.call_args.kwargs["address"]
@@ -189,10 +189,10 @@ class TestRunPandasTrouveTransformErrors:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
-        assert "The transform function failed" in result.error
+        assert "Clair cannot build the DataFrame" in result.error
         assert "something went wrong" in result.error
 
     def test_transform_returns_non_dataframe_results_in_failure(self):
@@ -208,10 +208,10 @@ class TestRunPandasTrouveTransformErrors:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
-        assert "must return a pandas DataFrame" in result.error
+        assert "must give a pandas DataFrame" in result.error
         assert "dict" in result.error
 
     def test_transform_returns_none_results_in_failure(self):
@@ -227,10 +227,10 @@ class TestRunPandasTrouveTransformErrors:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
-        assert "must return a pandas DataFrame" in result.error
+        assert "must give a pandas DataFrame" in result.error
 
 
 class TestRunPandasTrouveFetchErrors:
@@ -247,7 +247,7 @@ class TestRunPandasTrouveFetchErrors:
             fetch_side_effect=RuntimeError("Snowflake connection lost")
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert "cannot read the input" in result.error
@@ -269,7 +269,7 @@ class TestRunPandasTrouveWriteErrors:
             write_side_effect=RuntimeError("Write failed"),
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert "cannot write the DataFrame" in result.error
@@ -288,7 +288,7 @@ class TestRunPandasTrouveWriteErrors:
             write_success=False,
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert result.error
@@ -309,7 +309,7 @@ class TestRunPandasTrouveResultFields:
             fetch_dataframes={"db.schema.events": pd.DataFrame({"col": [1]})}
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.SUCCESS
         assert result.duration_seconds >= 0.0
@@ -327,7 +327,7 @@ class TestRunPandasTrouveResultFields:
             fetch_side_effect=RuntimeError("fetch failed")
         )
 
-        result = _run_pandas_trouve(trouve, adapter, trouve.physical_address)
+        result = _run_dataframe_trouve(trouve, adapter, trouve.physical_address)
 
         assert result.status == RunStatus.FAILURE
         assert result.duration_seconds >= 0.0

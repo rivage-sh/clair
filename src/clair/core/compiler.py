@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import inspect
 from collections.abc import Callable
 from pathlib import Path
 
@@ -19,7 +18,7 @@ from clair.core.staging import (
     make_staging_address,
 )
 from clair.exceptions import CompileError
-from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
 
@@ -239,28 +238,25 @@ def write_compile_output(
 
         node_info = None
         if trouve.compiled.execution_type == ExecutionType.PANDAS:
-            assert isinstance(trouve, PandasTrouve)
-            try:
-                fn_source = inspect.getsource(trouve.transform)
-            except (OSError, TypeError):
-                # A lambda, a built-in, or a compiled extension has no source text.
-                fn_source = repr(trouve.transform)
+            assert isinstance(trouve, DataframeTrouve)
+            body_source = trouve.source_text()
 
             imports_section = ""
-            try:
-                source_file = inspect.getfile(trouve.transform)
-                source_text = Path(source_file).read_text()
-                tree = ast.parse(source_text)
-                import_lines = [
-                    ast.get_source_segment(source_text, node)
-                    for node in tree.body
-                    if isinstance(node, (ast.Import, ast.ImportFrom))
-                ]
-                import_lines = [line for line in import_lines if line]
-                if import_lines:
-                    imports_section = "\n".join(import_lines) + "\n\n"
-            except (OSError, SyntaxError):
-                pass
+            source_file = trouve.source_file()
+            if source_file is not None:
+                try:
+                    source_text = Path(source_file).read_text()
+                    tree = ast.parse(source_text)
+                    import_lines = [
+                        ast.get_source_segment(source_text, node)
+                        for node in tree.body
+                        if isinstance(node, (ast.Import, ast.ImportFrom))
+                    ]
+                    import_lines = [line for line in import_lines if line]
+                    if import_lines:
+                        imports_section = "\n".join(import_lines) + "\n\n"
+                except (OSError, SyntaxError):
+                    pass
 
             input_lines = [
                 f"#   {parameter_name}  ->  {upstream.physical_address}"
@@ -273,7 +269,7 @@ def write_compile_output(
             if input_lines:
                 header += "# inputs:\n" + "\n".join(input_lines) + "\n"
             header += "\n"
-            artifact_content = header + imports_section + fn_source
+            artifact_content = header + imports_section + body_source
 
             artifact_path = artifact_directory / f"{physical_address.table_name}.py"
 

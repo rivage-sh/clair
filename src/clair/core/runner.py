@@ -27,7 +27,7 @@ from clair.core.staging import (
 from clair.core.test_runner import TestResult
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError, RunError
-from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
 
@@ -219,13 +219,13 @@ def resolve_effective_mode(trouve: Trouve, cli_run_mode: RunMode) -> RunMode:
     return RunMode.INCREMENTAL
 
 
-def _run_pandas_trouve(
-    trouve: PandasTrouve,
+def _run_dataframe_trouve(
+    trouve: DataframeTrouve,
     adapter: WarehouseAdapter,
     physical_address: TrouveAddress,
     staging_address: TrouveAddress | None = None,
 ) -> RunResult:
-    """Execute a PandasTrouve. Read the inputs, transform them, write the output.
+    """Execute a DataframeTrouve. Read the inputs, build the DataFrame, write it.
 
     Args:
         trouve: The Trouve to execute.
@@ -238,14 +238,14 @@ def _run_pandas_trouve(
     """
     start = time.monotonic()
 
-    # 1. Read each input DataFrame. Clair keeps the order of trouve.inputs.
+    # 1. Read each input DataFrame. Clair keeps the order of the inputs.
     input_dataframes: list[pd.DataFrame] = []
-    # compiled.input_addresses holds the address of each input, in the parameter
-    # order of the transform. recompile_for_selection() sets it: the physical
+    # compiled.input_addresses holds the address of each input, in the order
+    # of the inputs. recompile_for_selection() sets it: the physical
     # address of an input that this run builds, and the logical production
     # address of an input that it does not build.
     assert trouve.compiled is not None
-    assert len(trouve.compiled.input_addresses) == len(trouve.inputs)
+    assert len(trouve.compiled.input_addresses) == len(trouve.upstream_trouves())
     for parameter_name, input_address in zip(
         trouve.parameter_names(), trouve.compiled.input_addresses
     ):
@@ -262,15 +262,15 @@ def _run_pandas_trouve(
                 duration_seconds=duration,
             )
 
-    # 2. Call the transform function. Clair binds each input by position.
+    # 2. Build the DataFrame. Clair binds each input by position.
     try:
-        result_dataframe = trouve.transform(*input_dataframes)
-    except Exception as transform_error:  # noqa: BLE001 — the user transform code is unknown
+        result_dataframe = trouve.build_dataframe(*input_dataframes)
+    except Exception as transform_error:  # noqa: BLE001 — the user code is unknown
         duration = time.monotonic() - start
         return RunResult(
             physical_address=str(trouve.physical_address),
             status=RunStatus.FAILURE,
-            error=f"The transform function failed: {transform_error}",
+            error=f"Clair cannot build the DataFrame: {transform_error}",
             duration_seconds=duration,
         )
 
@@ -281,8 +281,8 @@ def _run_pandas_trouve(
             physical_address=str(trouve.physical_address),
             status=RunStatus.FAILURE,
             error=(
-                f"The transform function must return a pandas DataFrame, "
-                f"but it returned {type(result_dataframe).__name__}"
+                f"The Trouve must give a pandas DataFrame, "
+                f"but it gave {type(result_dataframe).__name__}"
             ),
             duration_seconds=duration,
         )
@@ -322,7 +322,7 @@ def _run_pandas_trouve(
 
 
 def _promote_or_keep(
-    trouve: Trouve | PandasTrouve,
+    trouve: Trouve | DataframeTrouve,
     adapter: WarehouseAdapter,
     staging_address: TrouveAddress,
     physical_address: TrouveAddress,
@@ -514,12 +514,12 @@ def _run_node(
                 downstream_ok=False,
             )
 
-    # A PandasTrouve is different. Clair reads the data, transforms it and
-    # writes it. Clair does not execute SQL.
+    # A DataframeTrouve is different. Clair reads the data, builds a DataFrame
+    # and writes it. Clair does not execute SQL.
     if trouve.execution_type == ExecutionType.PANDAS:
-        assert isinstance(trouve, PandasTrouve)
+        assert isinstance(trouve, DataframeTrouve)
         logger.info("run.node.start", logical=logical_address, physical=name, effective_mode="full_refresh")
-        result = _run_pandas_trouve(trouve, adapter, physical_address, staging_address)
+        result = _run_dataframe_trouve(trouve, adapter, physical_address, staging_address)
         result = result.model_copy(
             update={
                 "staging_address": str(staging_address) if staging_address else None,

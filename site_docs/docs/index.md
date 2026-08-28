@@ -30,6 +30,7 @@ Import the upstream Trouve and use it in the f-string. clair does the rest.
 - **clair includes incremental strategies.** Use APPEND and UPSERT modes with no boilerplate. Attach a [`RunConfig`](reference/run-config-api.md) to any [`Trouve`](topics/trouve.md).
 - **Data quality as code.** Tests are Pydantic objects on the Trouve itself, not a separate test file.
 - **Pandas-native transformations.** Use a [`PandasTrouve`](topics/pandas-native.md) to write any step as a Python function. clair reads the upstream tables as DataFrames, runs your code on your machine, then writes the result to Snowflake.
+- **Seeds in Python.** Use a [`SeedTrouve`](topics/seeds.md) for a small table that a person maintains by hand. The rows live in the Python file, and clair builds the table in the same run as every other Trouve.
 
 ## Install
 

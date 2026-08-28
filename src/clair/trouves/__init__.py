@@ -1,6 +1,8 @@
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
+from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.test import (
     AnyTest,
     Test,
@@ -16,8 +18,10 @@ __all__ = [
     "Column",
     "ColumnType",
     "DatabaseDefaults",
+    "DataframeTrouve",
     "PandasTrouve",
     "SchemaDefaults",
+    "SeedTrouve",
     "Test",
     "TestNotNull",
     "TestRowCount",
