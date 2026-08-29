@@ -16,15 +16,46 @@ from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
-from clair.environments.environments import DEFAULT_THREADS
+from clair.environments.environments import (
+    DEFAULT_THREADS,
+    Environment,
+    load_environment,
+    resolve_env_name,
+)
 from clair.exceptions import (
     ClairError,
+    EnvironmentsFileNotFoundError,
     InvalidRoutingConfigError,
     InvalidTrouveAddressError,
 )
 from clair.trouves.run_config import RunMode
 
 logger = structlog.get_logger()
+
+
+def _load_environment(env_name: str | None) -> Environment:
+    """Read ~/.clair/environments.yml, and give the environment of *env_name*.
+
+    The CLI reads the file. The Python API functions accept the Environment
+    object, thus a caller that holds the settings writes no file.
+    """
+    return load_environment(env_name)[1]
+
+
+def _load_environment_or_name(env_name: str | None) -> Environment | str:
+    """Give the Environment, or the name only if environments.yml is absent.
+
+    `clair compile` and `clair validate` make no connection, thus they continue
+    without the file. The name still selects the routing entry.
+    """
+    try:
+        return _load_environment(env_name)
+    except EnvironmentsFileNotFoundError:
+        logger.warning(
+            "cli.no_environments_file",
+            detail="Clair continues without an environment. Run `clair init` to make environments.yml.",
+        )
+        return resolve_env_name(env_name)
 
 
 @click.group()
@@ -225,7 +256,7 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
             project,
             select=select,
             exclude=exclude,
-            env=env,
+            env=_load_environment_or_name(env),
             run_mode=RunMode(run_mode),
         )
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
@@ -254,7 +285,7 @@ def validate(project: str, env: str | None) -> None:
     This command needs no Snowflake credentials, so CI runs it on every change.
     """
     try:
-        report = clair_api.validate(project, env=env)
+        report = clair_api.validate(project, env=_load_environment_or_name(env))
     except ClairError as e:
         logger.error("validate.error", error=str(e))
         sys.exit(1)
@@ -385,7 +416,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
             project,
             select=select,
             exclude=exclude,
-            env=env,
+            env=_load_environment(env),
             run_mode=RunMode(run_mode),
             test=not no_test,
             sample=sample,
@@ -451,7 +482,7 @@ def test(
             project,
             select=select,
             exclude=exclude,
-            env=env,
+            env=_load_environment(env),
             sample=sample,
             threads=threads,
         )

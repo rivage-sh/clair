@@ -5,10 +5,11 @@ The tests call the Python API of clair in this process: `clair.run()`,
 happened -- the statements, the addresses, the effective run mode, the test
 results -- and a test reads no log line to learn it.
 
-Clair still reads the environment variables of the process. The
-`clair_environment` fixture sets them for the session: a private HOME that holds
-`environments.yml`, the environment name, and the schema name that the test
-routing entry reads.
+`clair.run()`, `clair.test()` and `clair.compile()` accept the parsed
+Environment, thus the tests write no `environments.yml`, and they need no
+private HOME. The `environment` fixture makes the object. The
+`clair_environment` fixture sets the variables that the test routing entry
+reads: the schema name, the warehouse and the role.
 
 Without the Snowflake settings the tests skip on a workstation, and they fail in
 GitHub Actions. A run with no credentials in CI would otherwise report success
@@ -19,14 +20,13 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 
 from clair.adapters.snowflake import SnowflakeAdapter
+from clair.environments.environments import Environment
 from tests.integration.clean_up import drop_schema
 from tests.integration.config import (
-    ENVIRONMENT_NAME,
     IntegrationConfig,
     IntegrationConfigError,
     load_config,
@@ -82,33 +82,25 @@ def adapter(snowflake_workspace: IntegrationConfig) -> Iterator[SnowflakeAdapter
 
 
 @pytest.fixture(scope="session")
-def clair_home(
-    snowflake_workspace: IntegrationConfig, tmp_path_factory: pytest.TempPathFactory
-) -> Path:
-    """Write an environments.yml for the run, in a private HOME."""
-    home = tmp_path_factory.mktemp("clair_home")
-    clair_dir = home / ".clair"
-    clair_dir.mkdir()
-    environments_file = clair_dir / "environments.yml"
-    environments_file.write_text(snowflake_workspace.to_environments_yaml())
-    environments_file.chmod(0o600)
-    return home
+def environment(snowflake_workspace: IntegrationConfig) -> Environment:
+    """Give the Environment that each API call takes.
+
+    A test gives this object to `clair.run()`, exactly as a notebook or a
+    service does.
+    """
+    return snowflake_workspace.to_environment()
 
 
 @pytest.fixture(scope="session")
 def clair_environment(
-    snowflake_workspace: IntegrationConfig, clair_home: Path
+    snowflake_workspace: IntegrationConfig,
 ) -> Iterator[IntegrationConfig]:
-    """Point clair at the private HOME and at the schema of the run.
+    """Point the project routing entry at the schema of the run.
 
-    A test that calls the Python API asks for this fixture first. `clair.run()`
-    then finds `environments.yml` under HOME, and the routing entry of the
-    project copy reads CLAIR_PR_TESTING_SCHEMA_NAME.
+    A test that calls the Python API asks for this fixture first. The routing
+    entry of the project copy reads CLAIR_PR_TESTING_SCHEMA_NAME.
     """
     variables = pytest.MonkeyPatch()
-    variables.setenv("HOME", str(clair_home))
-    variables.setenv("USERPROFILE", str(clair_home))
-    variables.setenv("CLAIR_ENV", ENVIRONMENT_NAME)
     variables.setenv("CLAIR_PR_TESTING_SCHEMA_NAME", snowflake_workspace.schema_name)
     variables.setenv(
         "CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE", snowflake_workspace.warehouse

@@ -5,7 +5,7 @@ the index to that directory.
 
 | File | Holds |
 |------|-------|
-| [`memory/conventions.md`](memory/conventions.md) | The seven design invariants; docs give orientation and code gives truth; `examples/` rots in the same way; the quality bar for code; how to write a test; why the existing code is not the standard. |
+| [`memory/conventions.md`](memory/conventions.md) | The seven design invariants; docs give orientation and code gives truth; the quality bar for code; how to write a test; why the existing code is not the standard. |
 
 ## What belongs here
 

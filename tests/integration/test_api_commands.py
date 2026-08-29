@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 import clair
+from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import (
@@ -66,12 +67,13 @@ class TestExclude:
         project_copy: Path,
         project_source_path: Path,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         excluded = str(
             physical_address(LEAF_LOGICAL_NAME, clair_environment.schema_name)
         )
 
-        summary = clair.run(project_copy, exclude=[excluded])
+        summary = clair.run(project_copy, env=environment, exclude=[excluded])
 
         built = [str(result.addresses.logical) for result in summary.succeeded]
         assert LEAF_LOGICAL_NAME not in built
@@ -82,13 +84,14 @@ class TestExclude:
         project_copy: Path,
         project_source_path: Path,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         excluded = str(
             physical_address(LEAF_LOGICAL_NAME, clair_environment.schema_name)
         )
         model_count = len(model_logical_names(trouves_of(project_source_path)))
 
-        summary = clair.run(project_copy, exclude=[excluded])
+        summary = clair.run(project_copy, env=environment, exclude=[excluded])
 
         assert summary.succeeded_count == model_count - 1
 
@@ -105,12 +108,13 @@ class TestExcludeAMiddleTrouve:
         self,
         project_copy: Path,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         excluded = str(
             physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)
         )
 
-        output = clair.compile(project_copy, exclude=[excluded])
+        output = clair.compile(project_copy, env=environment, exclude=[excluded])
 
         node = output.node(DEPENDENT_LOGICAL_NAME)
         assert node is not None
@@ -121,12 +125,13 @@ class TestExcludeAMiddleTrouve:
         self,
         project_copy: Path,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         excluded = str(
             physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)
         )
 
-        output = clair.compile(project_copy, exclude=[excluded])
+        output = clair.compile(project_copy, env=environment, exclude=[excluded])
 
         assert output.node(MIDDLE_LOGICAL_NAME) is None
 
@@ -139,19 +144,23 @@ class TestThreads:
         project_copy: Path,
         project_source_path: Path,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         model_count = len(model_logical_names(trouves_of(project_source_path)))
 
-        summary = clair.run(project_copy, threads=4)
+        summary = clair.run(project_copy, env=environment, threads=4)
 
         assert summary.failed == []
         assert summary.succeeded_count == model_count
 
     def test_a_parallel_run_builds_the_same_trouves_as_one_thread(
-        self, project_copy: Path, clair_environment: IntegrationConfig
+        self,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
-        one_thread = clair.run(project_copy, threads=1)
-        four_threads = clair.run(project_copy, threads=4)
+        one_thread = clair.run(project_copy, env=environment, threads=1)
+        four_threads = clair.run(project_copy, env=environment, threads=4)
 
         assert sorted(str(r.addresses.logical) for r in one_thread.succeeded) == (
             sorted(str(r.addresses.logical) for r in four_threads.succeeded)
@@ -166,10 +175,11 @@ class TestCompile:
         project_copy: Path,
         project_source_path: Path,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         model_count = len(model_logical_names(trouves_of(project_source_path)))
 
-        output = clair.compile(project_copy)
+        output = clair.compile(project_copy, env=environment)
 
         assert len(output.compiled_nodes) == model_count
         for node in output.compiled_nodes:
@@ -177,9 +187,12 @@ class TestCompile:
             assert node.artifact_path.exists()
 
     def test_compile_routes_each_address_to_the_schema_of_the_run(
-        self, project_copy: Path, clair_environment: IntegrationConfig
+        self,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
-        output = clair.compile(project_copy)
+        output = clair.compile(project_copy, env=environment)
         expected = str(
             physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)
         )
@@ -192,7 +205,10 @@ class TestClean:
     """`clair clean` removes the artifacts that the runs wrote."""
 
     def test_clean_removes_each_run_of_a_project(
-        self, tmp_path_factory: pytest.TempPathFactory, clair_environment
+        self,
+        tmp_path_factory: pytest.TempPathFactory,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         """A compile writes one run directory, and clean removes it."""
         destination = tmp_path_factory.mktemp("clean_project")
@@ -201,7 +217,7 @@ class TestClean:
         )
         copy_path = copy_with_ci_routing(project_path, destination)
 
-        clair.compile(copy_path, run_mode=RunMode.FULL_REFRESH)
+        clair.compile(copy_path, env=environment, run_mode=RunMode.FULL_REFRESH)
         plan = clair.clean(copy_path, dry_run=True)
         assert plan.run_count >= 1
 
