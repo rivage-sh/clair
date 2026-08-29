@@ -51,7 +51,9 @@ directory as nested defaults objects. That is worse than the thing it replaces. 
 rejected this design on 2026-08-28. The Python API takes a project directory, and the file
 system stays the authoring mode.
 
-The complete argument is in `site_docs/docs/topics/project-layout.md`.
+This position is for a contributor, and not for a user.
+`site_docs/docs/topics/project-layout.md` gives the rule and the layout, and it makes no
+argument for them. A user who reads that page wants to know where the file goes.
 
 ---
 
