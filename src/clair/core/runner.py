@@ -25,7 +25,7 @@ from clair.core.staging import (
     make_staging_address,
 )
 from clair.core.test_runner import TestResult
-from clair.exceptions import ClairError, RunError
+from clair.exceptions import ClairError, ResultNotFoundError, RunError
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
@@ -111,12 +111,23 @@ class RunSummary(BaseModel):
     project_root: Path | None = None
     run_mode: RunMode = RunMode.FULL_REFRESH
 
-    def result(self, address: str) -> RunResult | None:
-        """Find one result by its logical address or its physical address."""
+    def result(self, address: str) -> RunResult:
+        """Find one result by its logical address or its physical address.
+
+        An address that no result holds is a fault of the caller, thus this
+        method raises. A caller that examines an optional address reads
+        `results` directly.
+        """
         for run_result in self.results:
             if run_result.addresses.matches(address):
                 return run_result
-        return None
+        known_addresses = ", ".join(
+            str(run_result.addresses.logical) for run_result in self.results
+        )
+        raise ResultNotFoundError(
+            f"The run holds no result for '{address}'. "
+            f"The run holds these addresses: {known_addresses or '(none)'}"
+        )
 
     def with_status(self, status: RunStatus) -> list[RunResult]:
         """Give each result with this status, in the run order."""

@@ -10,6 +10,7 @@ import pytest
 import clair
 from clair.core.runner import RunStatus
 from clair.environments.environments import Environment
+from clair.exceptions import ResultNotFoundError
 from clair.trouves.run_config import RunMode
 from tests.helpers import RecordingAdapter
 
@@ -59,10 +60,6 @@ class TestTheModuleGivesTheOperations:
         """A user reaches the operations from the package, and imports no submodule."""
         for name in ("run", "compile", "test", "docs", "catalog"):
             assert callable(getattr(clair, name)), name
-
-    def test_an_unknown_attribute_raises(self):
-        with pytest.raises(AttributeError):
-            clair.no_such_operation  # noqa: B018 -- the attribute access is the test
 
 
 class TestCompile:
@@ -210,6 +207,16 @@ class TestRun:
         assert adapter.is_open is True
 
 
+    def test_an_unknown_address_raises(self, project: Path, environment: Environment):
+        """An address that no result holds is a fault of the caller."""
+        summary = clair.run(
+            project, env=environment, adapter=RecordingAdapter(), test=False
+        )
+
+        with pytest.raises(ResultNotFoundError, match="no result for"):
+            summary.result("no.such.trouve")
+
+
 class TestTest:
     def test_it_gives_one_result_for_each_test(self, project: Path, environment: Environment):
         summary = clair.test(project, env=environment, adapter=RecordingAdapter())
@@ -239,7 +246,7 @@ class TestTheEnvironmentArgument:
     def test_run_needs_the_environment(self, project: Path):
         """A run connects to the warehouse, thus a name is not enough."""
         with pytest.raises(TypeError):
-            clair.run(project, adapter=RecordingAdapter())
+            clair.run(project, adapter=RecordingAdapter())  # ty: ignore[missing-argument]
 
 
 class TestCatalog:

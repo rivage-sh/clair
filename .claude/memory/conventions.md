@@ -139,6 +139,20 @@ one home, nothing repeats, and names say what they mean.
 make one piece and give it a parameter. Two copies that drift apart are worse than one
 function with an argument. `grep` for a helper before you add one.
 
+**Each import is at the top of the module, and each name is a real attribute.** Do not
+write a module-level `__getattr__`, and do not put an import inside a function to break an
+import cycle. Both hide the name from an editor, thus the reader and the language server
+get `Any` instead of a signature. A late import is permitted for one purpose only — a slow
+optional dependency — and the comment must say so.
+
+An import cycle tells you that the code represents an idea badly. Two modules that need
+each other hold one idea between them, and neither module owns it. So find that idea, name
+it, and give it the module that it deserves. The new module makes the concept visible to
+the next reader, and the cycle goes away because the dependencies now point one way. Do not
+cut a cycle mechanically. A file that holds an arbitrary set of names, and exists only to
+sit below two other files, hides the fault instead of a repair. If you cannot name what the
+new module holds, you did not find the idea yet.
+
 **A closed set of values is a `StrEnum`.** When a field, an argument, or a return value
 holds one of a known set of strings, declare a `StrEnum` and use its members. Do not write
 the raw string at the definition site or at the call site. The enum gives one home for the

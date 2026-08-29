@@ -65,8 +65,8 @@ the project.
 
 from __future__ import annotations
 
-from typing import Any
-
+from clair._version import __version__
+from clair.api import catalog, clean, compile, docs, run, test, validate
 from clair.environments.environments import Environment
 from clair.environments.routing import RoutingEntry, RoutingTable
 from clair.trouves.address import NodeAddresses, TrouveAddress
@@ -94,8 +94,6 @@ from clair.trouves.test import (
     TestUniqueColumns,
 )
 from clair.trouves.trouve import Trouve, TrouveAbc, TrouveType
-
-__version__ = "0.1.0"
 
 # discover_project() sets this before it loads the Trouve modules.
 # It stays None outside of a clair discovery run.
@@ -135,6 +133,7 @@ __all__ = [
     "TrouveAddress",
     "TrouveType",
     "UpsertConfig",
+    "__version__",
     "catalog",
     "clean",
     "compile",
@@ -143,20 +142,3 @@ __all__ = [
     "test",
     "validate",
 ]
-
-
-# The operations of the Python API: clair.run(), clair.compile(), clair.test(),
-# clair.validate(), clair.clean(), clair.docs() and clair.catalog(). The import is late, because clair.api
-# imports the packages that read a project, and each of those packages imports
-# this module.
-_API_NAMES = frozenset(
-    {"catalog", "clean", "compile", "docs", "run", "test", "validate"}
-)
-
-
-def __getattr__(name: str) -> Any:
-    if name in _API_NAMES:
-        from clair import api
-
-        return getattr(api, name)
-    raise AttributeError(f"module 'clair' has no attribute '{name}'")
