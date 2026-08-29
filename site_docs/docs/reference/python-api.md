@@ -127,7 +127,7 @@ class RunSummary(BaseModel):
 | Member | Gives |
 |--------|-------|
 | `results` | One `RunResult` for each Trouve, in the run order. |
-| `result(address)` | One `RunResult` by its logical address or its physical address. `None` if the run holds no such Trouve. |
+| `result(address)` | One `RunResult` by its logical address or its physical address. It raises `ResultNotFoundError` if the run holds no such Trouve. |
 | `succeeded`, `failed`, `skipped` | The results with that status. |
 | `succeeded_count`, `failed_count`, `skipped_count` | The number of results with that status. |
 | `test_results` | Each `TestResult` of the run, in the run order. |

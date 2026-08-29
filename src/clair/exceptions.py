@@ -93,3 +93,7 @@ class CompileError(ClairError):
 
 class RunError(ClairError):
     """Clair raises this error for a fatal runner fault, not for a Trouve failure."""
+
+
+class ResultNotFoundError(ClairError):
+    """A run summary holds no result for the address that the caller gave."""
