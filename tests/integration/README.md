@@ -24,7 +24,8 @@ example therefore breaks the build.
 | `config.py` | The connection settings, and the schema name rules. |
 | `warehouse.py` | The Snowflake helpers: connect, execute, count. |
 | `projects.py` | The example projects, and the test routing entry. |
-| `setup.py` | Makes the schema of the run, and loads the source tables. |
+| `setup.py` | Drops the schema of the run, and makes it again, empty. It also holds `load_source_tables`, which the `example_sources` fixture calls. |
+| `routing_rule.py` | The one rule that makes a physical table name. |
 | `clean_up.py` | Drops the schema of one run. |
 | `test_examples.py` | Runs each example project. |
 | `staging_project.py` | Makes a project whose data quality test fails on demand. |
@@ -43,10 +44,39 @@ Everything goes to one schema of the `clair_pr_testing` database:
 | Your machine | The name that you give in `CLAIR_PR_TESTING_SCHEMA_NAME` |
 
 The routing entry in `projects.py` sends **every** Trouve, a SOURCE too, to
-`clair_pr_testing.<schema>.<database>__<schema>__<table>`. The logical Trouve
-`example_1_database.refined.events` therefore becomes
-`clair_pr_testing.pr_42.example_1_database__refined__events`. Two pull requests
-never write one object, and the three logical parts stay visible in the name.
+`clair_pr_testing.<schema>.<prefix>__<database>__<schema>__<table>`. The logical
+Trouve `example_1_database.refined.events` of the class `TestExclude` therefore
+becomes
+`clair_pr_testing.pr_42.testexclude__example_1_database__refined__events`. Two
+pull requests never write one object, and the logical parts stay visible in the
+name.
+
+`tests/integration/routing_rule.py` holds this rule one time. The routing entry
+of a project copy reads that module, and `physical_address` reads it too, thus
+one change moves both.
+
+## The prefix of a workspace
+
+`<prefix>` is the name of the test class, in lower case. The `workspace_prefix`
+fixture in `conftest.py` is autouse, so a new test class gets its own prefix
+with no action from the author.
+
+The prefix makes the tests parallel. Two classes can build the same example
+project. Without the prefix they write one table, and a parallel run makes them
+race. With it each class holds its own tables.
+
+The prefix comes from the class name, and not from a name that a person
+selects. A selected name can repeat; a class name cannot.
+
+The pytest command uses `--dist loadscope`, which sends each class to one
+worker. A class-scoped fixture then runs one time, and the tables of one class
+belong to one process. Without that option xdist splits a class over the
+workers, each worker runs the fixture, and two runs write the same tables.
+
+A test of a project in `examples/projects/` asks for the `example_sources`
+fixture, which clones the golden source tables under the prefix of its class. A
+probe project of the staging tests or the seed tests makes its own rows, thus it
+needs no clone.
 
 The example projects in the repository keep their own `__routing__.py`. A test
 copies the project to a temporary directory and writes the CI entry there.
@@ -97,10 +127,20 @@ row reaches that window. The incremental test inserts its own rows with
 
 ## The schema of a run
 
-The run **starts** with a drop of its own schema, then it makes the schema
-again. A second commit of one pull request reuses the schema name of the first,
-and a Trouve that the commit deleted would otherwise stay behind and give a
-false pass.
+The `Prepare the schema` step of `.github/workflows/integration.yml` drops the
+schema, then it makes the schema again, empty:
+
+```bash
+uv run python -m tests.integration.setup
+```
+
+A second commit of one pull request reuses the schema name of the first, and a
+Trouve that the commit deleted would otherwise stay behind and give a false
+pass.
+
+The drop is a workflow step, and it is not a fixture. Each xdist worker runs the
+session fixtures, thus a drop in a fixture would remove the tables of a worker
+that still runs.
 
 The run does **not** drop the schema at the end. You can therefore read the
 tables of a failed run. `.github/workflows/integration-clean-up.yml` drops the
@@ -118,13 +158,17 @@ uv run python -m tests.integration.clean_up --schema-name pr_42
 export CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT=...
 export CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PATH=/path/to/clair_pr_testing_f.p8
 export CLAIR_PR_TESTING_SCHEMA_NAME=local_<you>_<branch>
-uv run pytest tests/integration -m integration -v
+uv run python -m tests.integration.setup
+uv run pytest tests/integration -m integration -v -n 6
 ```
 
-`CLAIR_PR_TESTING_SCHEMA_NAME` is mandatory, and it has no default. The run
-drops that schema before it starts, thus two runs that share one name delete the
-tables of each other. Give a different name to each run that you start at one
-time: two worktrees, or two agents, need two names.
+`CLAIR_PR_TESTING_SCHEMA_NAME` is mandatory, and it has no default. The setup
+module drops that schema, thus two runs that share one name delete the tables of
+each other. Give a different name to each run that you start at one time: two
+worktrees, or two agents, need two names.
+
+The setup module is a separate command, thus pytest drops nothing. You can run
+pytest again on the same schema, and the tables of the run before it stay.
 
 | Variable | Mandatory | Meaning |
 |---|---|---|

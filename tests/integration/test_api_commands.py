@@ -41,9 +41,15 @@ MIDDLE_LOGICAL_NAME = "example_1_database.refined.events"
 DEPENDENT_LOGICAL_NAME = "example_1_database.derived.daily_event_counts"
 
 
-@pytest.fixture(scope="module")
-def project_copy(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Copy the project once, with the test routing entry."""
+@pytest.fixture(scope="class")
+def project_copy(
+    tmp_path_factory: pytest.TempPathFactory, example_sources: list[str]
+) -> Path:
+    """Copy the project once, with the test routing entry.
+
+    The scope is the class, because `workspace_prefix` is the class. Each class
+    of this module builds example_1, and each one writes its own tables.
+    """
     destination = tmp_path_factory.mktemp("api_commands")
     project_path = next(
         path for path in example_project_paths() if path.name == PROJECT_NAME
@@ -51,7 +57,7 @@ def project_copy(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return copy_with_ci_routing(project_path, destination)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="class")
 def project_source_path() -> Path:
     """Give the project in the repository, which holds the logical names."""
     return next(

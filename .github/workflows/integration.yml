@@ -73,8 +73,17 @@ jobs:
           head -n 1 "$key_path" | grep -q 'BEGIN .*PRIVATE KEY'
           echo "CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
+      # The drop belongs here and not in a fixture. Each xdist worker runs the
+      # session fixtures, thus a drop in a fixture would remove the tables of a
+      # worker that still runs.
+      - name: Prepare the schema
+        run: uv run python -m tests.integration.setup
+
+      # The tests wait for Snowflake, thus 6 workers fit on a 2 core runner.
+      # `pyproject.toml` holds `--dist loadscope`, which keeps each test class
+      # on one worker.
       - name: Run the integration tests
-        run: uv run pytest tests/integration -m integration -v
+        run: uv run pytest tests/integration -m integration -v -n 6
 
       - name: Remove the private key
         if: always()

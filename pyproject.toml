@@ -41,6 +41,12 @@ packages = ["src/clair"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `--dist loadscope` sends each test class to one xdist worker. The integration
+# tests give each class its own table names, and a class-scoped fixture builds
+# them one time. Another scheduler splits a class over the workers, each worker
+# runs the fixture, and two runs write the same tables. pytest reads this option
+# also with no `-n`, and it then changes nothing.
+addopts = ["--dist", "loadscope"]
 markers = [
     "integration: marks tests that require Snowflake connection",
 ]
@@ -56,6 +62,7 @@ filterwarnings = [
 dev = [
     "pytest>=8.0",
     "pytest-mock>=3.0",
+    "pytest-xdist>=3.8.0",
 ]
 docs = [
     "mkdocs>=1.6",

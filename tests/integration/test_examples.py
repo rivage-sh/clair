@@ -12,11 +12,13 @@ The test routing entry puts every Trouve, a SOURCE too, in one schema. For pull
 request 32 the mapping is:
 
     example_1_database.refined.events
-        -> clair_pr_testing.pr_32.example_1_database__refined__events
+        -> clair_pr_testing.pr_32.<prefix>__example_1_database__refined__events
     example_3_database.source.orders
-        -> clair_pr_testing.pr_32.example_3_database__source__orders
+        -> clair_pr_testing.pr_32.<prefix>__example_3_database__source__orders
 
-`physical_address(logical_name, schema_name)` builds that address.
+`physical_address(logical_name, schema_name)` builds that address. `<prefix>`
+comes from the `workspace_prefix` fixture, and it isolates the tests of this
+module from the tests of another module that builds the same project.
 """
 
 from __future__ import annotations
@@ -45,9 +47,15 @@ EXAMPLE_PROJECT_PATHS = example_project_paths()
 EXAMPLE_PROJECT_IDS = [path.name for path in EXAMPLE_PROJECT_PATHS]
 
 
-@pytest.fixture(scope="module")
-def project_copies(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
-    """Copy each example project once, with the test routing entry."""
+@pytest.fixture(scope="class")
+def project_copies(
+    tmp_path_factory: pytest.TempPathFactory, example_sources: list[str]
+) -> dict[str, Path]:
+    """Copy each example project once, with the test routing entry.
+
+    `example_sources` clones the SOURCE table of each project under the prefix
+    of this module. A copy is useless without those tables.
+    """
     destination = tmp_path_factory.mktemp("projects")
     return {
         path.name: copy_with_ci_routing(path, destination)
@@ -97,23 +105,30 @@ def test_a_full_refresh_builds_every_model(
 
 def test_the_address_of_a_trouve_is_the_one_that_you_expect(
     snowflake_workspace: IntegrationConfig,
+    workspace_prefix: str,
 ) -> None:
     """The test routing entry gives this exact address.
 
     The other tests build an address with `physical_address`. This test writes
-    the answer out, thus a reader sees the shape with no indirection.
+    the answer out, thus a reader sees the shape with no indirection. The
+    prefix of the workspace is the first part of each name.
     """
     schema_name = snowflake_workspace.schema_name
 
     assert str(physical_address("example_1_database.refined.events", schema_name)) == (
-        f"clair_pr_testing.{schema_name}.example_1_database__refined__events"
+        f"clair_pr_testing.{schema_name}."
+        f"{workspace_prefix}__example_1_database__refined__events"
     )
     assert str(physical_address("example_3_database.source.orders", schema_name)) == (
-        f"clair_pr_testing.{schema_name}.example_3_database__source__orders"
+        f"clair_pr_testing.{schema_name}."
+        f"{workspace_prefix}__example_3_database__source__orders"
     )
     assert str(
         physical_address("example_2_database.reports.top_customers", schema_name)
-    ) == (f"clair_pr_testing.{schema_name}.example_2_database__reports__top_customers")
+    ) == (
+        f"clair_pr_testing.{schema_name}."
+        f"{workspace_prefix}__example_2_database__reports__top_customers"
+    )
 
 
 @pytest.mark.parametrize("project_path", EXAMPLE_PROJECT_PATHS, ids=EXAMPLE_PROJECT_IDS)
