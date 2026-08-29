@@ -1,5 +1,43 @@
 # Project Layout
 
+## `__clair_project__.py` marks the root
+
+Every clair project holds one `__clair_project__.py` file at its root:
+
+```python
+# my_project/__clair_project__.py
+from clair import ProjectConfig
+
+project = ProjectConfig()
+```
+
+`clair init` writes the file. You edit it only for a project inside a Python
+package — see [A project inside a Python package](#a-project-inside-a-python-package).
+
+The file gives clair three answers.
+
+**Where the project starts.** A clair command walks up from your working directory to the
+first `__clair_project__.py`, in the same way that git finds `.git`. Thus you run
+`clair run` from any directory of the project:
+
+```bash
+cd my_project/refined/orders
+clair run                       # clair finds my_project/
+```
+
+`--project` stays as the override. CI and a script give it an exact path:
+
+```bash
+clair run --project ~/repos/analytics
+```
+
+**Where the project stops.** A directory that holds many projects holds no marker file,
+thus clair raises `ProjectMarkerMissingError` and names the directory. Without the marker,
+clair reads such a directory as one project, and it builds one DAG from every project
+below it.
+
+**How Python names each Trouve module.** See below.
+
 ## Directory → Snowflake name
 
 The directory structure below your project root maps directly to fully-qualified Snowflake names:
@@ -17,6 +55,44 @@ A Trouve file sits three levels below the project root. A Trouve file above that
 no schema directory and no database directory, thus clair cannot make its address. clair
 raises `ProjectDiscoveryError` and names the file. The rule applies to a Trouve file only:
 a Python file that declares no `trouve` object can sit anywhere, and discovery skips it.
+
+## A project inside a Python package
+
+Clair loads each Trouve file as a Python module, and your Trouve files import each other.
+The two importers must agree on the name of each module: Python keys `sys.modules` by
+name, thus two names for one file give two module objects, two `Trouve` objects, and no
+DAG edge between them.
+
+Clair therefore takes the name from `sys.path`. It finds the entry that holds the project
+root, and it makes the module name from that entry. That is the name that your own import
+gives, thus the two importers agree. A project outside every package keeps the behaviour
+that it always had: clair puts the project root on `sys.path`, and `source/orders/raw.py`
+becomes `source.orders.raw`.
+
+One layout needs a value in the marker file: an installed package that `sys.path` does not
+name, for example an editable install that uses an import finder. Give `package` the
+dotted name of the project root:
+
+```python
+# monorepo/clair_projects/analytics/__clair_project__.py
+from clair import ProjectConfig
+
+project = ProjectConfig(package="clair_projects.analytics")
+```
+
+Clair then reads `monorepo/` as the import root, and it names the Trouve files below it
+`clair_projects.analytics.source.orders.raw` — the name that this import writes:
+
+```python
+# monorepo/clair_projects/analytics/refined/orders/daily.py
+from clair_projects.analytics.source.orders.raw import trouve as raw
+
+trouve = Trouve(type=TrouveType.TABLE, sql=f"select * from {raw}")
+```
+
+If clair loads one file two times, discovery stops. A reference token
+(`__CLAIR_TROUVE_...`) then stays in the SQL, and clair never sends such SQL to Snowflake.
+The error names the file, both module names, and this `package` value.
 
 ## A project inside a larger repository
 
@@ -50,6 +126,7 @@ A clair project in production usually has 3 or 4 layers:
 
 ```
 my_project/
+├── __clair_project__.py             # Marks the project root
 ├── __routing__.py                   # The routing entry of each environment
 │
 ├── source/                          # Tables that already exist — TrouveType.SOURCE
@@ -79,6 +156,7 @@ my_project/
 
 | File | Location | Purpose |
 |------|----------|---------|
+| `__clair_project__.py` | project root | Marks the root of the project. `clair init` writes it |
 | `__routing__.py` | project root | The [routing](routing.md) entry of each environment |
 | `__database_config__.py` | database directory | Warehouse/role defaults for all Trouves in that database |
 | `__schema_config__.py` | schema directory | Warehouse/role defaults for all Trouves in that schema |

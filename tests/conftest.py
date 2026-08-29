@@ -8,6 +8,20 @@ from pathlib import Path
 import pytest
 import structlog
 
+from tests.helpers import write_project_marker
+
+
+@pytest.fixture(autouse=True)
+def project_marker(tmp_path: Path) -> Path:
+    """Write __clair_project__.py in tmp_path, thus tmp_path is a project root.
+
+    Discovery needs the marker file. Almost every test that writes a project
+    writes it in tmp_path, thus this fixture holds the marker in one place. A
+    test that needs a project root below tmp_path writes its own marker with
+    ``write_project_marker``.
+    """
+    return write_project_marker(tmp_path)
+
 
 @pytest.fixture
 def simple_project() -> Path:

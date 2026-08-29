@@ -19,6 +19,7 @@ from clair.core.text_references import TextReferenceLocation
 from clair.core.validation import ValidationReport
 from clair.environments.environments import Environment
 from clair.exceptions import ClairError
+from tests.helpers import write_project_marker
 
 # Every routing file in these tests needs an entry class. This prelude gives one.
 _PRELUDE = """\
@@ -103,7 +104,7 @@ def project_with_trouves(tmp_path: Path) -> Path:
     The two TABLE Trouves share the table name `revenue` below two schemas, thus
     an entry that collapses the schema makes a collision.
     """
-    project_dir = tmp_path / "proj"
+    project_dir = write_project_marker(tmp_path / "proj")
     (project_dir / "source" / "raw").mkdir(parents=True)
     (project_dir / "source" / "raw" / "orders.py").write_text(
         "from clair import Trouve, TrouveType\n\n"
@@ -168,8 +169,7 @@ class TestAValidProject:
         assert clair.validate(project_with_trouves).routable_count == 3
 
     def test_an_empty_project_routes_nothing(self, tmp_path: Path):
-        project_dir = tmp_path / "empty"
-        project_dir.mkdir()
+        project_dir = write_project_marker(tmp_path / "empty")
         report = clair.validate(project_dir)
         assert report.routable_count == 0
         assert report.is_valid is True
@@ -380,7 +380,7 @@ class TestBadInput:
 
     def test_a_bad_directory_name_raises(self, tmp_path: Path):
         """A directory that Snowflake cannot use as a name stops validate."""
-        project_dir = tmp_path / "proj"
+        project_dir = write_project_marker(tmp_path / "proj")
         (project_dir / "my-db" / "finance").mkdir(parents=True)
         (project_dir / "my-db" / "finance" / "revenue.py").write_text(
             "from clair import Trouve, TrouveType\n\n"

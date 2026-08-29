@@ -14,7 +14,7 @@ clair validate --project path/to/project
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--project` | `.` | Path to the clair project root. |
+| `--project` | the root search | Path to the clair project root. Without it, clair walks up from the working directory to the first `__clair_project__.py`. |
 | `--env` | `CLAIR_ENV` or `dev` | The environment to route for. It matches an entry in `__routing__.py`. |
 
 ## What it examines

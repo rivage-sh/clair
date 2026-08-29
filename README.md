@@ -93,6 +93,7 @@ Each directory level maps to one part of the Snowflake name: `database_name / sc
 
 ```
 my_project/
+├── __clair_project__.py
 ├── source/
 │   └── products/
 │       ├── catalog.py             # source.products.catalog
@@ -135,9 +136,10 @@ uv add rivage-clair
 
 ### 1. Set up an environment
 
-Run `clair init`. It asks for your Snowflake connection details and writes two files:
+Run `clair init`. It asks for your Snowflake connection details and writes three files:
 
 - `~/.clair/environments.yml` — your connection settings. Do not commit this file.
+- `<project>/__clair_project__.py` — marks the root of the project. Commit this file.
 - `<project>/__routing__.py` — the [routing](https://clair.rivage.sh/topics/routing/) entry of each environment. Commit this file.
 
 ### 2. Create a project
@@ -236,12 +238,18 @@ trouve = Trouve(
 ### 3. Compile and run
 
 ```bash
+cd my_project
+
 # Inspect the generated SQL without touching Snowflake
-clair compile --project=my_project
+clair compile
 
 # Execute against Snowflake
-clair run --project=my_project --env=dev
+clair run --env=dev
 ```
+
+clair walks up from your working directory to the first `__clair_project__.py`, in the same
+way that git finds `.git`. Thus you run a command from any directory of the project.
+`--project` stays as the override: `clair compile --project=my_project`.
 
 ---
 

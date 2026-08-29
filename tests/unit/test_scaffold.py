@@ -58,12 +58,14 @@ class TestScaffoldCreatesAllExpectedFiles:
         scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
 
         assert (project_dir / "__routing__.py").exists()
+        assert (project_dir / "__clair_project__.py").exists()
 
     def test_returns_all_paths_as_created(self, tmp_path: Path) -> None:
         results = _run_scaffold(tmp_path)
 
-        # 1 source Trouve, 1 __routing__.py, and 1 environments.yml file.
-        assert len(results) == 3
+        # 1 source Trouve, 1 __clair_project__.py, 1 __routing__.py, and
+        # 1 environments.yml file.
+        assert len(results) == 4
         assert all(status == "created" for status, _ in results)
 
 

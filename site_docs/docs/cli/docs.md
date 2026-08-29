@@ -10,13 +10,13 @@ clair docs [--project PATH] [--port PORT] [--host HOST] [--no-browser]
 
 ```bash
 # Open in browser (default)
-clair docs --project .
+clair docs
 
 # Custom port
-clair docs --project . --port 9000
+clair docs --port 9000
 
 # Do not open the browser automatically
-clair docs --project . --no-browser
+clair docs --no-browser
 ```
 
 ## What the UI shows
@@ -41,7 +41,7 @@ Press `Ctrl+C` to stop the server.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | `.` | Path to the clair project root |
+| `--project` | the root search | Path to the clair project root. Without it, clair walks up from the working directory to the first `__clair_project__.py` |
 | `--port` | `8741` | Port for the local docs server |
 | `--host` | `127.0.0.1` | Bind address |
 | `--no-browser` | `false` | Do not open the browser automatically |

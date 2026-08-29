@@ -40,7 +40,13 @@ the logical address. See [Routing](routing.md).
 
 *Source: [`core/discovery.py`][discovery-py] — `discover_project()`, [`trouves/_refs.py`][refs-py], and [`core/text_references.py`][text-references-py]*
 
-clair walks the project directory and imports each Python file that holds a `trouve`
+clair reads `__clair_project__.py` at the project root first. The file marks the root, and
+a directory without it is not a project: clair raises `ProjectMarkerMissingError` before it
+reads one Trouve file. The file also decides the import root, thus a Trouve module takes
+the name that your own import gives it. See
+[Project Layout](project-layout.md).
+
+clair then walks the project directory and imports each Python file that holds a `trouve`
 object. Each file gets three addresses.
 
 | Address | Source | Purpose |
@@ -69,6 +75,17 @@ address of each input, in the parameter order of the transform.
 A Trouve file that raises at import time — a name that does not exist, a package that
 nobody installed, two files that import each other — stops discovery. clair raises
 `ProjectDiscoveryError`, and the error names each file and each cause.
+
+### SQL that keeps a reference token stops the run
+
+A reference in an f-string becomes a placeholder token, and step 3 replaces each token with
+an address. A token that stays behind means that clair holds no address for the object that
+you interpolated. Almost every occurrence has one cause: Python loaded one file two times,
+under two module names, thus that file gave two `Trouve` objects.
+
+clair stops, and the error names the file and both module names. It never sends such SQL to
+Snowflake: the warehouse answers with a parse error that names the token and nothing else,
+and the DAG already lost the edge in silence.
 
 clair does not skip the file and continue. A skip removes the Trouve from the DAG, and the
 run then builds fewer tables than the project declares and reports success. The error

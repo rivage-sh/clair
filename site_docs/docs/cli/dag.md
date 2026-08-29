@@ -26,14 +26,14 @@ example_1_database.source.events (SOURCE)
 Select specific Trouves to see a subgraph:
 
 ```bash
-clair dag --project . --select='refined.*.*'
+clair dag --select='refined.*.*'
 ```
 
 ## Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | `.` | Path to the clair project root |
+| `--project` | the root search | Path to the clair project root. Without it, clair walks up from the working directory to the first `__clair_project__.py` |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 
 ## See also

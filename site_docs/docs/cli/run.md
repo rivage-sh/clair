@@ -10,19 +10,19 @@ clair run [--project PATH] [--env NAME] [--select PATTERN]... [--run-mode MODE] 
 
 ```bash
 # Run all Trouves in the project
-clair run --project . --env dev
+clair run --env dev
 
 # Run only the orders schema
-clair run --project . --env dev --select='refined.orders.*'
+clair run --env dev --select='refined.orders.*'
 
 # Force a full refresh (ignore the incremental config)
-clair run --project . --env prod --run-mode full_refresh
+clair run --env prod --run-mode full_refresh
 
 # Skip tests
-clair run --project . --env dev --no-test
+clair run --env dev --no-test
 
 # Run 8 Trouves at one time
-clair run --project . --env dev --threads 8
+clair run --env dev --threads 8
 ```
 
 ## Run order
@@ -73,7 +73,7 @@ The tests decide the publication. They do not report a fault after it reaches pr
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | `.` | Path to the clair project root |
+| `--project` | the root search | Path to the clair project root. Without it, clair walks up from the working directory to the first `__clair_project__.py` |
 | `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides the `run_config` of each Trouve. |
