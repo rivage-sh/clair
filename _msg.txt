@@ -1,0 +1,8 @@
+Merge origin/main, and give the parity test the env argument
+
+Pull request 50 made `env` a keyword argument of `clair.run` with no default.
+The new parity class calls `clair.run` twice, thus each call now takes the
+`environment` fixture.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013rC4SvHaxUy9ZcPALWVSWC

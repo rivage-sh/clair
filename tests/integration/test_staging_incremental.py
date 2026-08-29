@@ -20,14 +20,18 @@ Snowflake refused.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 import clair
+from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunStatus, RunSummary
 from clair.core.staging import make_staging_address
 from clair.environments.environments import Environment
 from clair.trouves.run_config import IncrementalMode, RunMode
+from tests.integration.comparison import tables_are_equal
 from tests.integration.config import IntegrationConfig
 from tests.integration.staging_project import (
     checked_address,
@@ -37,6 +41,7 @@ from tests.integration.staging_project import (
     write_probe_project,
 )
 from tests.integration.warehouse import (
+    execute,
     query_rows,
     row_count,
     staging_objects,
@@ -387,3 +392,208 @@ class TestAnAppendRun:
             adapter, merge_source_address(checked, second_run.run_id, schema_name)
         )
         assert staging_objects(adapter, schema_name, self.DATABASE_NAME) == []
+
+
+class TestTheFallbackGivesTheDataOfAFullRefresh:
+    """The first incremental run and a full refresh give the same table.
+
+    `test_the_first_run_changes_to_the_full_refresh_mode` reads
+    `effective_run_mode`. It thus proves the intent of clair, and it proves
+    nothing about the rows. This class proves the rows.
+
+    Two projects read the same source rows. The first project runs with
+    RunMode.INCREMENTAL against an empty schema, so clair changes to a full
+    refresh. The second project runs with RunMode.FULL_REFRESH, which is the
+    path that the first run must copy. `tables_are_equal` then compares the two
+    tables, column by column, with `id` as the key.
+
+    The candidate holds a FLOAT column, thus the comparison also runs its
+    tolerance path against Snowflake.
+    """
+
+    FALLBACK_DATABASE_NAME = "staging_fallback_database"
+    FULL_REFRESH_DATABASE_NAME = "staging_reference_database"
+
+    # A float that no binary type holds exactly, and a row that repeats a value.
+    PARITY_ROWS: ClassVar[dict[str, int]] = {
+        "id_000": 1,
+        "id_001": 7,
+        "id_002": 100,
+        "id_003": 7,
+    }
+
+    @pytest.fixture(scope="class")
+    def compared_addresses(
+        self,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
+        adapter: SnowflakeAdapter,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> tuple[TrouveAddress, TrouveAddress]:
+        """Build the same data along the two paths, and give the addresses."""
+        schema_name = clair_environment.schema_name
+
+        fallback_path = write_probe_project(
+            tmp_path_factory.mktemp("staging_fallback"),
+            self.FALLBACK_DATABASE_NAME,
+            minimum_rows=PASSING_LIMIT,
+            incremental_mode=IncrementalMode.UPSERT,
+        )
+        reference_path = write_probe_project(
+            tmp_path_factory.mktemp("staging_reference"),
+            self.FULL_REFRESH_DATABASE_NAME,
+            minimum_rows=PASSING_LIMIT,
+            incremental_mode=IncrementalMode.UPSERT,
+        )
+
+        make_source_rows(
+            adapter, self.FALLBACK_DATABASE_NAME, schema_name, self.PARITY_ROWS
+        )
+        make_source_rows(
+            adapter, self.FULL_REFRESH_DATABASE_NAME, schema_name, self.PARITY_ROWS
+        )
+
+        # The schema holds no physical table yet, thus clair falls back.
+        fallback = clair.run(
+            fallback_path, env=environment, run_mode=RunMode.INCREMENTAL
+        )
+        # The reference run asks for the full refresh, and it gets no fallback.
+        reference = clair.run(
+            reference_path, env=environment, run_mode=RunMode.FULL_REFRESH
+        )
+
+        assert fallback.result(
+            f"{self.FALLBACK_DATABASE_NAME}.refined.checked"
+        ).effective_run_mode == RunMode.FULL_REFRESH
+        assert reference.result(
+            f"{self.FULL_REFRESH_DATABASE_NAME}.refined.checked"
+        ).effective_run_mode == RunMode.FULL_REFRESH
+
+        return (
+            checked_address(self.FALLBACK_DATABASE_NAME, schema_name),
+            checked_address(self.FULL_REFRESH_DATABASE_NAME, schema_name),
+        )
+
+    def test_the_two_tables_hold_the_same_rows(
+        self,
+        compared_addresses: tuple[TrouveAddress, TrouveAddress],
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        fallback_address, reference_address = compared_addresses
+
+        comparison = tables_are_equal(
+            adapter, fallback_address, reference_address, primary_key_columns=["id"]
+        )
+
+        assert comparison.is_equal, comparison.report()
+
+    def test_the_comparison_read_each_column(
+        self,
+        compared_addresses: tuple[TrouveAddress, TrouveAddress],
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """An empty column list would make each comparison pass."""
+        fallback_address, reference_address = compared_addresses
+
+        comparison = tables_are_equal(
+            adapter, fallback_address, reference_address, primary_key_columns=["id"]
+        )
+
+        assert comparison.compared_column_names == ["AMOUNT", "ID", "RATIO"]
+        assert comparison.float_column_names == ["RATIO"]
+
+    def test_a_row_that_one_table_alone_holds_is_a_difference(
+        self,
+        compared_addresses: tuple[TrouveAddress, TrouveAddress],
+        adapter: SnowflakeAdapter,
+        clair_environment: IntegrationConfig,
+    ) -> None:
+        """The comparison must fail when it should. A test of the test.
+
+        The row goes into the reference table, and the test removes it again.
+        A FULL OUTER JOIN keeps that row, thus the comparison reports it.
+        """
+        fallback_address, reference_address = compared_addresses
+        execute(
+            adapter,
+            f"insert into {reference_address} (id, amount, ratio) "
+            "values ('id_999', 1, 0.5)",
+        )
+        try:
+            comparison = tables_are_equal(
+                adapter, fallback_address, reference_address, primary_key_columns=["id"]
+            )
+
+            assert not comparison.is_equal
+            assert len(comparison.difference_rows) == 1
+        finally:
+            execute(adapter, f"delete from {reference_address} where id = 'id_999'")
+
+    def test_an_excluded_column_leaves_the_comparison(
+        self,
+        compared_addresses: tuple[TrouveAddress, TrouveAddress],
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """A column that differs is no difference when the caller excludes it."""
+        fallback_address, reference_address = compared_addresses
+        execute(
+            adapter,
+            f"update {reference_address} set ratio = ratio + 1000 where id = 'id_001'",
+        )
+        try:
+            with_ratio = tables_are_equal(
+                adapter, fallback_address, reference_address, primary_key_columns=["id"]
+            )
+            without_ratio = tables_are_equal(
+                adapter,
+                fallback_address,
+                reference_address,
+                primary_key_columns=["id"],
+                exclude_columns=["ratio"],
+            )
+
+            assert not with_ratio.is_equal
+            assert without_ratio.is_equal, without_ratio.report()
+            assert without_ratio.excluded_column_names == ["RATIO"]
+            assert without_ratio.compared_column_names == ["AMOUNT", "ID"]
+        finally:
+            execute(
+                adapter,
+                f"update {reference_address} set ratio = ratio - 1000 "
+                "where id = 'id_001'",
+            )
+
+    def test_a_float_inside_the_tolerance_is_no_difference(
+        self,
+        compared_addresses: tuple[TrouveAddress, TrouveAddress],
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """A last-bit difference of a float must not fail a comparison."""
+        fallback_address, reference_address = compared_addresses
+        execute(
+            adapter,
+            f"update {reference_address} set ratio = ratio + 1e-15 "
+            "where id = 'id_001'",
+        )
+        try:
+            inside = tables_are_equal(
+                adapter, fallback_address, reference_address, primary_key_columns=["id"]
+            )
+            # A bound of zero has no tolerance, thus the same change now fails.
+            outside = tables_are_equal(
+                adapter,
+                fallback_address,
+                reference_address,
+                primary_key_columns=["id"],
+                absolute_tolerance=0.0,
+                relative_tolerance=0.0,
+            )
+
+            assert inside.is_equal, inside.report()
+            assert not outside.is_equal
+        finally:
+            execute(
+                adapter,
+                f"update {reference_address} set ratio = ratio - 1e-15 "
+                "where id = 'id_001'",
+            )

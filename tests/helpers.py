@@ -11,7 +11,6 @@ A test that needs the real warehouse belongs in ``tests/integration/``.
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -254,8 +253,6 @@ class RecordingAdapter(WarehouseAdapter):
         select_row_count: The number of rows that a SELECT gives. A data
             quality test reads this number: zero rows is a test that passes.
         write_row_count: The number of rows that a statement that writes gives.
-        delay_seconds: The time that each statement takes. A parallel test uses
-            this delay to make two statements overlap.
         fetch_error: The exception that a read of a DataFrame raises. This
             covers the error path of a warehouse that loses the connection.
         write_error: The exception that a write of a DataFrame raises.
@@ -271,7 +268,6 @@ class RecordingAdapter(WarehouseAdapter):
         default_dataframe: pd.DataFrame | None = None,
         select_row_count: int = 0,
         write_row_count: int = 42,
-        delay_seconds: float = 0.0,
         fetch_error: Exception | None = None,
         write_error: Exception | None = None,
         record: StatementRecord | None = None,
@@ -282,7 +278,6 @@ class RecordingAdapter(WarehouseAdapter):
         self.default_dataframe = default_dataframe
         self.select_row_count = select_row_count
         self.write_row_count = write_row_count
-        self.delay_seconds = delay_seconds
         self.fetch_error = fetch_error
         self.write_error = write_error
         self.record = record or StatementRecord()
@@ -313,7 +308,6 @@ class RecordingAdapter(WarehouseAdapter):
             default_dataframe=self.default_dataframe,
             select_row_count=self.select_row_count,
             write_row_count=self.write_row_count,
-            delay_seconds=self.delay_seconds,
             fetch_error=self.fetch_error,
             write_error=self.write_error,
             record=self.record,
@@ -361,8 +355,6 @@ class RecordingAdapter(WarehouseAdapter):
     def execute(self, sql: str) -> Statement:
         self.record.enter(sql)
         try:
-            if self.delay_seconds:
-                time.sleep(self.delay_seconds)
             return self._next_statement(sql)
         finally:
             self.record.leave()

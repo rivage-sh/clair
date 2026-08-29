@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import textwrap
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +28,28 @@ class CallRecorder:
         node_starts: The order in which the nodes started.
         node_ends: The order in which the nodes ended.
         max_concurrent: The largest number of nodes that ran at one time.
+        barrier_nodes: Each node that waits at the barrier. A node of this set
+            stops in `enter_node` until each other node of the set arrives.
+            The barrier thus proves the concurrency, and it needs no sleep: the
+            nodes pass together only if the runner runs them together.
+        barrier_broke: True after a wait that reached the timeout. A test that
+            wants a serial run reads this attribute, because one node alone can
+            never complete the barrier.
     """
 
-    def __init__(self, fail_on: set[str] | None = None, delay_seconds: float = 0.0) -> None:
+    def __init__(
+        self,
+        fail_on: set[str] | None = None,
+        barrier_nodes: set[str] | None = None,
+        barrier_timeout_seconds: float = 5.0,
+    ) -> None:
         self.fail_on = fail_on or set()
-        self.delay_seconds = delay_seconds
+        self.barrier_nodes = barrier_nodes or set()
+        self.barrier_timeout_seconds = barrier_timeout_seconds
+        self.barrier = (
+            threading.Barrier(len(self.barrier_nodes)) if self.barrier_nodes else None
+        )
+        self.barrier_broke = False
         self.statements: list[tuple[int, str]] = []
         self.node_starts: list[str] = []
         self.node_ends: list[str] = []
@@ -47,6 +63,15 @@ class CallRecorder:
             self.node_starts.append(name)
             self._concurrent += 1
             self.max_concurrent = max(self.max_concurrent, self._concurrent)
+
+        # The wait stays outside the lock. A node that holds the lock here
+        # stops each other node, and the barrier then never completes.
+        if self.barrier is not None and name in self.barrier_nodes:
+            try:
+                self.barrier.wait(timeout=self.barrier_timeout_seconds)
+            except threading.BrokenBarrierError:
+                with self._lock:
+                    self.barrier_broke = True
 
     def leave_node(self, name: str) -> None:
         with self._lock:
@@ -97,9 +122,6 @@ class RecordingAdapter(WarehouseAdapter):
 
         self.recorder.enter_node(node_name)
         try:
-            if self.recorder.delay_seconds:
-                time.sleep(self.recorder.delay_seconds)
-
             for failing_name in self.recorder.fail_on:
                 if failing_name in sql:
                     return Statement(
@@ -270,7 +292,7 @@ class TestParallelRun:
 
     def test_a_trouve_waits_for_the_trouves_that_it_imports(self, diamond_project: Path):
         dag, selected = _build(diamond_project)
-        recorder = CallRecorder(delay_seconds=0.05)
+        recorder = CallRecorder()
         adapter = RecordingAdapter(recorder, selected)
 
         list(run_project(dag, selected, adapter, threads=4))
@@ -283,21 +305,32 @@ class TestParallelRun:
 
     def test_two_trouves_run_at_one_time(self, diamond_project: Path):
         dag, selected = _build(diamond_project)
-        recorder = CallRecorder(delay_seconds=0.1)
+        # left and right have no dependency between them, thus the run must
+        # hold them at one time. Each one stops at the barrier, and the barrier
+        # completes only when both arrive. A serial run therefore reaches the
+        # timeout, and the test fails with no dependency on a sleep.
+        recorder = CallRecorder(barrier_nodes={"db.marts.left", "db.marts.right"})
         adapter = RecordingAdapter(recorder, selected)
 
         list(run_project(dag, selected, adapter, threads=4))
 
-        # left and right have no dependency between them.
+        assert not recorder.barrier_broke
         assert recorder.max_concurrent == 2
 
     def test_one_thread_runs_one_trouve_at_one_time(self, diamond_project: Path):
         dag, selected = _build(diamond_project)
-        recorder = CallRecorder(delay_seconds=0.05)
+        # One thread must run left and right one after the other. The barrier
+        # asks for two nodes at one time, thus it must break. A short timeout
+        # keeps the test quick, because the break is the correct result.
+        recorder = CallRecorder(
+            barrier_nodes={"db.marts.left", "db.marts.right"},
+            barrier_timeout_seconds=0.25,
+        )
         adapter = RecordingAdapter(recorder, selected)
 
         list(run_project(dag, selected, adapter, threads=1))
 
+        assert recorder.barrier_broke
         assert recorder.max_concurrent == 1
 
     def test_a_failure_skips_each_trouve_downstream(self, diamond_project: Path):
@@ -320,12 +353,18 @@ class TestParallelRun:
         # last still reads the table of first through it, thus last waits.
         dag, all_nodes = _build(chain_project)
         selected = [name for name in all_nodes if name != "db.marts.middle"]
-        recorder = CallRecorder(delay_seconds=0.05)
+        # last reads the table of first through middle, thus the two never
+        # overlap. The barrier must break, and that break proves the order.
+        recorder = CallRecorder(
+            barrier_nodes={"db.marts.first", "db.marts.last"},
+            barrier_timeout_seconds=0.25,
+        )
         adapter = RecordingAdapter(recorder, selected)
 
         list(run_project(dag, selected, adapter, threads=4))
 
         assert recorder.node_starts == ["db.marts.first", "db.marts.last"]
+        assert recorder.barrier_broke
         assert recorder.max_concurrent == 1
 
     def test_a_failure_skips_through_a_trouve_that_the_selector_removed(
@@ -344,7 +383,7 @@ class TestParallelRun:
 
     def test_each_thread_holds_a_private_connection(self, diamond_project: Path):
         dag, selected = _build(diamond_project)
-        recorder = CallRecorder(delay_seconds=0.1)
+        recorder = CallRecorder()
         adapter = RecordingAdapter(recorder, selected)
 
         list(run_project(dag, selected, adapter, threads=3))
