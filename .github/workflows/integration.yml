@@ -79,7 +79,16 @@ jobs:
       - name: Prepare the schema
         run: uv run python -m tests.integration.setup
 
-      # The tests wait for Snowflake, thus 6 workers fit on a 2 core runner.
+      # The worker count is a fixed number, and not `auto`. `auto` counts the
+      # CPUs of the runner, but these tests wait for Snowflake, thus the CPU
+      # count measures nothing here.
+      #
+      # The warehouse is the limit. CLAIR_PR_TESTING_WH is XSMALL, and
+      # MAX_CONCURRENCY_LEVEL gives 8 query slots. A larger warehouse gives no
+      # more slots. Each `clair.run()` also uses 4 threads, thus 6 workers ask
+      # for 24 slots, and Snowflake puts the rest in a queue. A worker still
+      # helps, because it compiles and copies a project while it holds no slot.
+      #
       # `pyproject.toml` holds `--dist loadscope`, which keeps each test class
       # on one worker.
       - name: Run the integration tests
