@@ -15,7 +15,7 @@ All commands share two common flags:
 | Command | Description | Snowflake connection? |
 |---------|-------------|----------------------|
 | [`clair init`](init.md) | Create a new project and configure Snowflake connection | No |
-| [`clair compile`](compile.md) | Resolve DAG and write SQL to `_clairtifacts/` | Optional (for routing) |
+| [`clair compile`](compile.md) | Resolve DAG and write SQL to `_clairtifacts/` | No |
 | [`clair run`](run.md) | Run Trouves against Snowflake in dependency order | **Yes** |
 | [`clair test`](test.md) | Run data quality tests against Snowflake | **Yes** |
 | [`clair validate`](validate.md) | Apply the routing entries to every Trouve | No |
