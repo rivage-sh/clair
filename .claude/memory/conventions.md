@@ -20,13 +20,38 @@ configuration language, full IDE support.
 
 1. No Jinja. SQL is a plain Python f-string.
 2. No YAML for configuration. YAML holds credentials only, in `~/.clair/environments.yml`.
-3. The file path gives `database.schema.table`. Trouve files sit three levels below the
-   project root.
+3. The file path gives `database.schema.table`, and the directory tree gives the
+   configuration. Trouve files sit three levels below the project root.
+   `__database_config__.py` and `__schema_config__.py` apply to each Trouve below them.
 4. `clair compile` makes no connection to Snowflake. It is local only.
 5. Validation is eager. An invalid Trouve raises at construction time, not at run time.
 6. Shared SQL logic is a normal Python function, which you import normally.
 7. All warehouse access goes through the `WarehouseAdapter` ABC in `adapters/base.py`.
    The runner must not import `SnowflakeAdapter` directly.
+
+### Invariant 3 is a correctness rule, and not a convention
+
+The other invariants remove a language: no Jinja, no YAML. Invariant 3 looks smaller, thus
+a later change can trade it away by accident. Do not. It is the reason that clair has no
+`dbt_project.yml`, and it does three things that no Python API gives you for free:
+
+- **A duplicate address is impossible to write.** Two Trouves cannot hold one address,
+  because two files cannot hold one path. `compute_logical_address()` in
+  `core/discovery.py` reads the last three parts of the path, thus the file system is the
+  name table, and clair maintains none.
+- **A reviewer reads the DAG from `tree`.** The shape of the project is the shape of the
+  directory, and a person sees it before they open one file.
+- **The configuration inherits with no configuration language.** `_resolve_config()` moves
+  up the tree and merges the profile defaults, then `__database_config__.py`, then
+  `__schema_config__.py`. A directory is the scope. Nobody writes a scope.
+
+A Python API that constructs a Trouve with no file gives up all three. It must then take
+the address as a field, where a typo makes a collision, and it must re-invent the
+directory as nested defaults objects. That is worse than the thing it replaces. Clair
+rejected this design on 2026-08-28. The Python API takes a project directory, and the file
+system stays the authoring mode.
+
+The complete argument is in `site_docs/docs/topics/project-layout.md`.
 
 ---
 
@@ -239,9 +264,22 @@ A generated file that holds an f-string of its own needs two braces, for example
 
 **Data first, format last.** A function returns a Pydantic object that holds the data; a
 separate `format_*` function or `.render()` method makes the string for the CLI. This
-keeps the semantics testable and the format free to change. It applies to
-`write_compile_output`, `render_dag`, `format_run_output`, `format_test_output`, and each
-future output function.
+keeps the semantics testable and the format free to change. It applies to `render_dag`,
+`format_run_output`, `format_test_output`, and each future output function.
+
+**An operation gives data. The caller decides where the bytes go.** Persistence is the
+same concern as format, at a longer distance. An operation in `api.py` must not find a
+path, open a file, or write a directory in the middle of its work. It gives a result
+object that holds each fact, and a separate writer puts that result on disk. The CLI calls
+the operation, then the writer — in the same way that the CLI reads
+`~/.clair/environments.yml` into an `Environment` and gives the object to the API.
+
+`write_compile_output` breaks this rule today, and the quality bar is not the current
+code. `api.run()` calls it in the middle of the run, and it makes the
+`project_root / _clairtifacts` path by itself. The data is already pure: `RunSummary`
+holds each statement, each query ID, each address, and each status. Only the write is in
+the wrong place. A writer that must fill a directory as the run continues takes an event
+for each node; it does not become a call inside the runner.
 
 ---
 

@@ -13,6 +13,34 @@ The directory structure below your project root maps directly to fully-qualified
 
 A file at `my_project/refined/products/catalog.py` becomes `refined.products.catalog` in Snowflake.
 
+## Why the path is the address
+
+Most tools give a model a name inside the file, or inside a configuration file. clair reads
+the name from the path. This is a rule about correctness, and not a matter of taste.
+
+**A duplicate address is impossible to write.** Two Trouves cannot hold one address,
+because two files cannot hold one path. Your file system is the name table. clair
+maintains none, and it needs no rule to find a collision that you cannot make.
+
+**You read the DAG before you open a file.** `tree` shows the shape of the warehouse. A
+reviewer sees a new layer, a new schema, or a table in the wrong database, in the diff of
+the file names.
+
+**The configuration inherits, and clair has no configuration language.** A directory is
+the scope. `__database_config__.py` applies to each Trouve below it, and
+`__schema_config__.py` replaces it for one schema. See
+[Per-Database & Schema Config](per-database-schema-config.md). This is why clair has no
+`dbt_project.yml`: the tree already says which settings apply where.
+
+**One Trouve has exactly one home.** You look for `refined.orders.daily` at
+`refined/orders/daily.py`. There is no second place to look, and no index to read.
+
+The cost is one constraint: one file holds one Trouve, and the file sits three levels below
+the project root. clair keeps that constraint on purpose. A Python API that builds a Trouve
+with no file must take the address as a field, where a typo makes a collision that nothing
+finds, and it must express the directory defaults again as nested objects. The constraint
+is worth more than the flexibility.
+
 ## Typical layout
 
 A clair project in production usually has 3 or 4 layers:
