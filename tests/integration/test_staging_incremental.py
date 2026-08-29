@@ -426,6 +426,7 @@ class TestTheFallbackGivesTheDataOfAFullRefresh:
     def compared_addresses(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> tuple[TrouveAddress, TrouveAddress]:
@@ -453,9 +454,13 @@ class TestTheFallbackGivesTheDataOfAFullRefresh:
         )
 
         # The schema holds no physical table yet, thus clair falls back.
-        fallback = clair.run(fallback_path, run_mode=RunMode.INCREMENTAL)
+        fallback = clair.run(
+            fallback_path, env=environment, run_mode=RunMode.INCREMENTAL
+        )
         # The reference run asks for the full refresh, and it gets no fallback.
-        reference = clair.run(reference_path, run_mode=RunMode.FULL_REFRESH)
+        reference = clair.run(
+            reference_path, env=environment, run_mode=RunMode.FULL_REFRESH
+        )
 
         assert fallback.result(
             f"{self.FALLBACK_DATABASE_NAME}.refined.checked"
