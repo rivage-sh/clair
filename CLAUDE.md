@@ -12,6 +12,13 @@ runs the DAG in topological order. No Jinja, no YAML configuration.
    design invariants, the quality bar for code, and how to write a test.
 3. Open only the two or three source files that the map below names.
 
+Before a change to `core/`, read `site_docs/docs/topics/anatomy-of-a-run.md`. It is the
+architecture document: it gives the seven steps of a run, from the environment to the
+execution, and it names the module of each step. The pipeline is
+`project_dir -> Sequence[TrouveAbc] -> ClairDag -> operation`. One function reads the file
+system — `discover_project()` in `core/discovery.py` — and each stage after it takes
+objects. Do not add a second reader of the file system to `core/` or to `api.py`.
+
 ## Layout
 
 | Path | Holds |
