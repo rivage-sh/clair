@@ -72,8 +72,8 @@ Apply the documentation rule to this directory:
   a person wrote by hand is a lie that CI cannot find.
 - A notebook must run on a machine with no Snowflake account: no connection, no
   `~/.clair/environments.yml`, and no write to the home directory of the reader. Give
-  `clair.run()` an adapter that holds its tables in memory, and write a temporary
-  environments file for the operations that need one.
+  `clair.run()` an adapter that holds its tables in memory, and an `Environment` that the
+  notebook makes. `clair.compile()` and `clair.validate()` take the environment name.
 - Read `examples/` one time each release, in the same way that you read
   `site_docs/docs/`. Drift here is silent.
 
