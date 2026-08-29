@@ -17,6 +17,7 @@ page, The Anatomy of a Run, at the end: it shows how each subject above operates
 - **[Seeds](seeds.md)** — a small table that holds its rows in the Python file.
 - **[Routing](routing.md)** — remap the Snowflake target of each environment.
 - **[Per-Database & Schema Config](per-database-schema-config.md)** — warehouse and role overrides per directory.
+- **[The Library and the CLI](library-and-cli.md)** — clair is a Python library, and the CLI is a thin caller of it.
 - **[The Anatomy of a Run](anatomy-of-a-run.md)** — the seven steps of `clair run`, and the address that each Trouve reads.
 
 For the field tables of each Python class, read the [Reference](../reference/index.md).

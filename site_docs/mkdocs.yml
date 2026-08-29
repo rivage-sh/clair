@@ -81,6 +81,7 @@ nav:
     - Seeds: topics/seeds.md
     - Routing: topics/routing.md
     - Per-Database & Schema Config: topics/per-database-schema-config.md
+    - The Library and the CLI: topics/library-and-cli.md
     - The Anatomy of a Run: topics/anatomy-of-a-run.md
   - CLI:
     - cli/overview.md

@@ -11,9 +11,8 @@ summary = clair.run("~/projects/analytics", env=environment)
 print(summary.succeeded_count, summary.failed_count)
 ```
 
-Each operation of the CLI is one function of the package. The CLI parses the
-arguments and calls these functions, so a notebook, a test, or another program
-does the same work with no `subprocess` call.
+Each operation of the CLI is one function of the package. For the reason, read
+[The Library and the CLI](../topics/library-and-cli.md).
 
 ## The environment
 

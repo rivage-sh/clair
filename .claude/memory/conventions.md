@@ -43,11 +43,35 @@ a `PandasTrouve` class that nobody built, while the API reference correctly docu
 
 - Search for the field name, not only the class name. The pandas feature was invisible to
   a search for `PandasTrouve`, because the code called it `df_fn`.
-- Map: `concepts/` (Trouve, DAG, layout, environments), `guides/` (routing,
-  incrementality, tests, selectors, pandas, per-database config), `cli/` (one page per
-  subcommand), `reference/` (Trouve, Column, RunConfig, Tests).
 - When you change behaviour, change the matching page in the same PR. Do not add a note
   here that repeats a page.
+
+### One page has one job
+
+`site_docs/docs/` follows the Diataxis division. Four kinds of page serve four different
+readers, and a page that mixes two serves neither. Put each new page in the correct
+directory, and keep the other kinds out of it.
+
+| Directory | Kind | Serves | The test |
+|-----------|------|--------|----------|
+| `index.md`, `installation.md`, `quickstart.md` | Tutorial | A person who never used clair | One path, and it always operates. |
+| `topics/` | Explanation | A person who wants to understand clair | The reader learns *why*, and does no work. |
+| `cli/`, `reference/` | Reference | A person in the middle of a task | Complete, dry, and shaped by the code. |
+| (none today) | How-to | A person with a goal | One goal, one recipe, from start to end. |
+
+- **Reference takes its shape from the code.** One page per class or per command, each
+  field, each flag, each default. A person reads a fragment of it, not the page. When a
+  signature changes, the page changes. A person could generate it from `src/`.
+- **A topic takes its shape from an idea.** It gives the reason, the position, and the
+  comparison against another tool. Nobody can generate it. A rule of thumb: if the reader
+  cannot do the job without the page, the page is reference; if the reader can do the job
+  but does not understand it, the page is a topic.
+- **Move the prose, do not copy it.** A design position inside a reference table is in the
+  wrong place. Put it in `topics/`, and leave a link. `topics/library-and-cli.md` holds
+  the position that clair is a Python library and the CLI is a thin caller of it, because
+  that argument sat as two lines inside `reference/python-api.md`.
+- **The how-to column is empty today.** A task-shaped page — clair in CI, clair in a
+  pytest suite, clair in Airflow — goes in a new `guides/` directory, not in `topics/`.
 
 ### `examples/` rots in the same way, and CI does not execute it
 
