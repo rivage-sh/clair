@@ -26,8 +26,9 @@ The `examples` extra adds jupyter, matplotlib and pyvis. clair itself needs none
 
 ## What the notebooks do to your machine
 
-- They write no file to your home directory. Each notebook that needs an environment makes
-  an `environments.yml` in a temporary directory, and it removes that directory at the end.
+- They write no file to your home directory, and they need no `~/.clair/environments.yml`.
+  `clair.compile()` and `clair.validate()` take the environment name. `clair.run()` takes an
+  `Environment` object, and notebook 03 makes one with no account.
 - They write the compiled SQL to the artifacts directory of the example project, and the
   last cell removes it with `clair.clean()`.
 - Notebook 02 writes `dag.html` in this directory. git does not track that file.
