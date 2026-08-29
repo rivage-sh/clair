@@ -87,6 +87,23 @@ class DiscoveryError(ClairError):
         super().__init__(f"Clair cannot load {file_path}: {reason}")
 
 
+class ProjectDiscoveryError(ClairError):
+    """Clair raises this error when discovery cannot read each Trouve of a project.
+
+    The error holds each fault, because one broken import can hide a second one.
+    A run that continues would build fewer Trouves and report success, thus
+    discovery stops instead.
+    """
+
+    def __init__(self, faults: list[str]) -> None:
+        self.faults = faults
+        count = "1 fault" if len(faults) == 1 else f"{len(faults)} faults"
+        listed = "\n".join(f"  - {fault}" for fault in faults)
+        super().__init__(
+            f"Clair cannot read this project. Discovery found {count}:\n{listed}"
+        )
+
+
 class CompileError(ClairError):
     """Clair raises this error when it cannot compile the SQL."""
 

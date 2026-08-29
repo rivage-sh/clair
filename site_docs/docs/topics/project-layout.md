@@ -13,6 +13,37 @@ The directory structure below your project root maps directly to fully-qualified
 
 A file at `my_project/refined/products/catalog.py` becomes `refined.products.catalog` in Snowflake.
 
+A Trouve file sits three levels below the project root. A Trouve file above that depth has
+no schema directory and no database directory, thus clair cannot make its address. clair
+raises `ProjectDiscoveryError` and names the file. The rule applies to a Trouve file only:
+a Python file that declares no `trouve` object can sit anywhere, and discovery skips it.
+
+## A project inside a larger repository
+
+The three directories are the three **last** parts of the path. A directory above the
+database directory takes no part in the address, thus you can put a clair project below
+other directories:
+
+```
+monorepo/
+└── teams/
+    └── analytics/
+        └── clair_project/          ← the project root
+            └── refined/
+                └── products/
+                    └── catalog.py  →   refined.products.catalog
+```
+
+`__database_config__.py` and `__schema_config__.py` go in the database directory and the
+schema directory of the Trouve, at each depth. The directory that the address names is the
+directory that holds the config.
+
+One rule applies to the name of a database directory. A Trouve imports a different Trouve
+from the project root — `from source.orders.raw import trouve` — so the database directory
+must not share its name with a package that Python can already import in your environment.
+A package that pip installed wins, and the import of the Trouve then fails with
+`No module named 'source.orders'`.
+
 ## Typical layout
 
 A clair project in production usually has 3 or 4 layers:

@@ -13,7 +13,7 @@ from clair.core.dag import (
     get_execution_order,
 )
 from clair.core.discovery import discover_project
-from clair.exceptions import CyclicDependencyError
+from clair.exceptions import CyclicDependencyError, ProjectDiscoveryError
 from clair.trouves.address import TrouveAddress
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
@@ -70,12 +70,18 @@ class TestBuildDag:
 
 
 class TestCycleDetection:
-    def test_cycle_detected_at_import_time(self, cyclic_project: Path, capsys):
-        """Two Trouve files that import each other cause an error at import time."""
-        trouves = discover_project(cyclic_project)
-        assert len(trouves) == 0
-        captured = capsys.readouterr()
-        assert "discovery.load_error" in captured.out
+    def test_cycle_detected_at_import_time(self, cyclic_project: Path):
+        """Two Trouve files that import each other cause an error at import time.
+
+        Python raises the ImportError, and discovery stops. An empty list of
+        Trouves would say that the project holds none, which is a different
+        fault with a different repair.
+        """
+        with pytest.raises(ProjectDiscoveryError) as fault:
+            discover_project(cyclic_project)
+
+        assert len(fault.value.faults) == 2
+        assert "a.py" in str(fault.value)
 
     def test_dag_level_cycle_detection(self):
         """A cycle that the test makes causes a CyclicDependencyError."""

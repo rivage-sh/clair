@@ -6,16 +6,19 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from clair.core.discovery import (
     compute_logical_address,
     discover_project,
     find_routing_collisions,
     recompile_for_selection,
 )
+from clair.exceptions import ProjectDiscoveryError
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import Trouve, TrouveType
+from clair.trouves.trouve import CompiledAttributes, Trouve, TrouveAbc, TrouveType
 from tests.helpers import (
     DatabaseOverrideRouting,
     SchemaIsolationRouting,
@@ -667,3 +670,161 @@ class TestTwoProjectsInOneProcess:
 
         assert str(first.resolve()) not in sys.path
         assert str(second.resolve()) in sys.path
+
+
+TROUVE_FILE = """
+from clair import Trouve, TrouveType
+
+trouve = Trouve(type=TrouveType.TABLE, sql="select 1 as n")
+"""
+
+DATABASE_CONFIG_FILE = """
+from clair import DatabaseDefaults
+
+defaults = DatabaseDefaults(warehouse="database_wh")
+"""
+
+SCHEMA_CONFIG_FILE = """
+from clair import SchemaDefaults
+
+defaults = SchemaDefaults(warehouse="schema_wh")
+"""
+
+
+def _compiled_of(trouve: TrouveAbc) -> CompiledAttributes:
+    """Give the compiled attributes, and fail when discovery wrote none."""
+    assert trouve.compiled is not None
+    return trouve.compiled
+
+
+def _write_trouve(root: Path, relative_path: str) -> Path:
+    """Write one Trouve file at *relative_path* below *root*."""
+    file_path = root / relative_path
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(TROUVE_FILE)
+    return file_path
+
+
+class TestTheDepthOfATrouveFile:
+    """A Trouve file sits three levels below the project root.
+
+    The address comes from the last three parts of the path. A file above that
+    depth would take a part from a directory outside the project, thus the
+    address would change with the location of the project on the disk.
+    """
+
+    def test_a_trouve_three_levels_below_the_root_gives_its_address(
+        self, tmp_path: Path
+    ):
+        _write_trouve(tmp_path, "mydb/myschema/orders.py")
+
+        trouves = discover_project(tmp_path)
+
+        assert [str(_compiled_of(trouve).logical_address) for trouve in trouves] == [
+            "mydb.myschema.orders"
+        ]
+
+    def test_a_trouve_below_other_directories_keeps_its_own_address(
+        self, tmp_path: Path
+    ):
+        """A clair project inside a larger repository names its own database."""
+        _write_trouve(tmp_path, "team/analytics/mydb/myschema/orders.py")
+
+        trouves = discover_project(tmp_path)
+
+        assert [str(_compiled_of(trouve).logical_address) for trouve in trouves] == [
+            "mydb.myschema.orders"
+        ]
+
+    @pytest.mark.parametrize(
+        "relative_path", ["orders.py", "myschema/orders.py"]
+    )
+    def test_a_trouve_too_near_the_root_raises(
+        self, tmp_path: Path, relative_path: str
+    ):
+        _write_trouve(tmp_path, relative_path)
+
+        with pytest.raises(ProjectDiscoveryError) as fault:
+            discover_project(tmp_path)
+
+        assert "3 levels below the project root" in str(fault.value)
+
+    def test_a_python_file_that_holds_no_trouve_may_sit_anywhere(
+        self, tmp_path: Path
+    ):
+        """The depth rule applies to a Trouve, and not to each Python file."""
+        (tmp_path / "helper.py").write_text("VALUE = 1\n")
+        _write_trouve(tmp_path, "mydb/myschema/orders.py")
+
+        trouves = discover_project(tmp_path)
+
+        assert len(trouves) == 1
+
+
+class TestTheConfigOfANestedProject:
+    """The config comes from the directories that the address names."""
+
+    def test_the_database_config_applies_below_other_directories(
+        self, tmp_path: Path
+    ):
+        _write_trouve(tmp_path, "team/analytics/mydb/myschema/orders.py")
+        (tmp_path / "team" / "analytics" / "mydb" / "__database_config__.py").write_text(
+            DATABASE_CONFIG_FILE
+        )
+
+        trouves = discover_project(tmp_path)
+
+        assert _compiled_of(trouves[0]).config.warehouse == "database_wh"
+
+    def test_the_schema_config_replaces_the_database_config(self, tmp_path: Path):
+        _write_trouve(tmp_path, "team/mydb/myschema/orders.py")
+        (tmp_path / "team" / "mydb" / "__database_config__.py").write_text(
+            DATABASE_CONFIG_FILE
+        )
+        (tmp_path / "team" / "mydb" / "myschema" / "__schema_config__.py").write_text(
+            SCHEMA_CONFIG_FILE
+        )
+
+        trouves = discover_project(tmp_path)
+
+        assert _compiled_of(trouves[0]).config.warehouse == "schema_wh"
+
+    def test_a_config_of_a_different_database_does_not_apply(self, tmp_path: Path):
+        """Only the database directory of the Trouve gives the default."""
+        _write_trouve(tmp_path, "mydb/myschema/orders.py")
+        (tmp_path / "otherdb").mkdir()
+        (tmp_path / "otherdb" / "__database_config__.py").write_text(
+            DATABASE_CONFIG_FILE
+        )
+
+        trouves = discover_project(tmp_path)
+
+        assert _compiled_of(trouves[0]).config.warehouse is None
+
+
+class TestAFaultStopsDiscovery:
+    def test_a_file_that_raises_stops_the_run(self, tmp_path: Path):
+        """A silent skip would build fewer tables and report success."""
+        _write_trouve(tmp_path, "mydb/myschema/good.py")
+        (tmp_path / "mydb" / "myschema" / "broken.py").write_text(
+            "raise ValueError('the author made a fault')\n"
+        )
+
+        with pytest.raises(ProjectDiscoveryError) as fault:
+            discover_project(tmp_path)
+
+        assert len(fault.value.faults) == 1
+        assert "broken.py" in str(fault.value)
+
+    def test_the_error_holds_each_fault(self, tmp_path: Path):
+        """One repair at a time is slow. The error names each file."""
+        _write_trouve(tmp_path, "mydb/myschema/good.py")
+        for name in ("first", "second"):
+            (tmp_path / "mydb" / "myschema" / f"{name}.py").write_text(
+                "import a_module_that_nobody_installed\n"
+            )
+
+        with pytest.raises(ProjectDiscoveryError) as fault:
+            discover_project(tmp_path)
+
+        assert len(fault.value.faults) == 2

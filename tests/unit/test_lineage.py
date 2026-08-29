@@ -25,6 +25,7 @@ import networkx as nx
 import pytest
 
 from clair.core.dag import ClairDag
+from clair.exceptions import ProjectDiscoveryError
 from clair.lineage import get_dag
 from clair.trouves.trouve import TrouveType
 
@@ -99,20 +100,16 @@ class TestTheProjectRootArgument:
         assert dag.number_of_nodes() == 0
         assert dag.number_of_edges() == 0
 
-    def test_a_cyclic_project_gives_an_empty_graph(self, cyclic_project: Path):
+    def test_a_cyclic_project_raises_and_makes_no_graph(self, cyclic_project: Path):
         """A cycle between two Trouve files stops at the Python import step.
 
         `a.py` imports `b.py`, and `b.py` imports `a.py`. Python raises an
-        ImportError, thus the discovery step loads no Trouve and it writes a
-        warning. `get_dag` therefore gives an empty graph, and it raises no
-        CyclicDependencyError: `build_dag` sees no node, so it finds no cycle.
-
-        A caller that wants the error must call `clair.validate()`, which reads
-        the discovery errors.
+        ImportError, thus discovery reads neither file and it raises. An empty
+        graph would tell the reader that the project holds no Trouve, and the
+        reader would look for the fault in the wrong place.
         """
-        dag = get_dag(cyclic_project)
-
-        assert dag.number_of_nodes() == 0
+        with pytest.raises(ProjectDiscoveryError):
+            get_dag(cyclic_project)
 
 
 class TestTheNetworkxAlgorithms:
