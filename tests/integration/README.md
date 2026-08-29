@@ -45,11 +45,11 @@ Everything goes to one schema of the `clair_pr_testing` database:
 
 The routing entry in `projects.py` sends **every** Trouve, a SOURCE too, to
 `clair_pr_testing.<schema>.<prefix>__<database>__<schema>__<table>`. The logical
-Trouve `example_1_database.refined.events` of the class `TestExclude` therefore
-becomes
-`clair_pr_testing.pr_42.testexclude__example_1_database__refined__events`. Two
-pull requests never write one object, and the logical parts stay visible in the
-name.
+Trouve `example_1_database.refined.events` of the class `TestExclude`, in
+`test_api_commands.py`, therefore becomes
+`clair_pr_testing.pr_42.test_api_commands__testexclude__example_1_database__refined__events`.
+Two pull requests never write one object, and the logical parts stay visible in
+the name.
 
 `tests/integration/routing_rule.py` holds this rule one time. The routing entry
 of a project copy reads that module, and `physical_address` reads it too, thus
@@ -57,16 +57,25 @@ one change moves both.
 
 ## The prefix of a workspace
 
-`<prefix>` is the name of the test class, in lower case. The `workspace_prefix`
-fixture in `conftest.py` is autouse, so a new test class gets its own prefix
-with no action from the author.
+`<prefix>` is the module name and the class name, in lower case. The
+`workspace_prefix` fixture in `conftest.py` is autouse, so a new test class gets
+its own prefix with no action from the author. A test outside a class takes the
+module name alone.
 
 The prefix makes the tests parallel. Two classes can build the same example
 project. Without the prefix they write one table, and a parallel run makes them
 race. With it each class holds its own tables.
 
-The prefix comes from the class name, and not from a name that a person
-selects. A selected name can repeat; a class name cannot.
+The prefix comes from the code, and not from a name that a person selects. A
+selected name can repeat.
+
+The module is part of the prefix, and the class is not the prefix alone. Two
+modules can hold one class name — `TestASuccessfulRun` is a name that repeats —
+and two classes with one prefix write one table, in silence.
+
+`routing_rule.table_prefix()` raises when the variable is absent. An empty
+prefix gives one name to each class, thus the collision returns and nothing
+tells you. The failure is loud instead.
 
 The pytest command uses `--dist loadscope`, which sends each class to one
 worker. A class-scoped fixture then runs one time, and the tables of one class

@@ -14,7 +14,7 @@ from clair import TrouveAddress
 from clair.core.discovery import discover_project
 from clair.trouves.trouve import TrouveAbc, TrouveType
 from tests.integration.config import DATABASE_NAME
-from tests.integration.routing_rule import physical_table_name as routing_rule_name
+from tests.integration.routing_rule import make_table_name
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE_PROJECTS_DIR = REPOSITORY_ROOT / "examples" / "projects"
@@ -29,12 +29,17 @@ CI_ROUTING_FILE = '''\
 Every Trouve goes to one schema of the test database, and a SOURCE Trouve is not
 an exception. `tests.integration.routing_rule` holds the name rule, and the
 assertions of a test read the same module. Thus one change moves both.
+
+This file is not a project file that a user writes. clair reads it in the pytest
+process, and `tests` is importable there because pytest puts the repository root
+on `sys.path`. A copy of this project outside pytest cannot import the module,
+and it does not need to.
 """
 
 import os
 
 from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
-from tests.integration.routing_rule import physical_table_name
+from tests.integration.routing_rule import make_table_name
 
 DATABASE_NAME = "clair_pr_testing"
 
@@ -50,7 +55,7 @@ class PullRequestTestingRouting(RoutingEntry):
         return TrouveAddress(
             database_name=DATABASE_NAME,
             schema_name=os.environ["CLAIR_PR_TESTING_SCHEMA_NAME"],
-            table_name=physical_table_name(
+            table_name=make_table_name(
                 trouve_address.database_name,
                 trouve_address.schema_name,
                 trouve_address.table_name,
@@ -86,9 +91,11 @@ def example_project_paths() -> list[Path]:
 def physical_table_name(logical_name: str) -> str:
     """Give the routed table name of one logical name.
 
-    `routing_rule` holds the rule, and CI_ROUTING_FILE reads the same module.
+    `routing_rule.make_table_name` holds the rule, and CI_ROUTING_FILE reads the
+    same function. This function takes the three parts as one dotted text,
+    because a test holds a logical name in that shape.
     """
-    return routing_rule_name(*logical_name.split("."))
+    return make_table_name(*logical_name.split("."))
 
 
 def physical_address(logical_name: str, schema_name: str) -> TrouveAddress:

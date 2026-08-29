@@ -30,7 +30,7 @@ from tests.integration.config import (
     IntegrationConfigError,
     load_config,
 )
-from tests.integration.routing_rule import TABLE_PREFIX_VARIABLE
+from tests.integration.routing_rule import TABLE_PREFIX_VARIABLE, workspace_prefix_of
 from tests.integration.setup import create_schema, load_source_tables
 from tests.integration.warehouse import connect
 
@@ -74,24 +74,19 @@ def snowflake_workspace(integration_config: IntegrationConfig) -> IntegrationCon
 def workspace_prefix(request: pytest.FixtureRequest) -> Iterator[str]:
     """Give each test class its own table names inside the schema of the run.
 
-    The name of the test class becomes the prefix of each table that the class
-    builds. Two classes that build the same example project then write two
+    The module name and the class name become the prefix of each table that the
+    class builds. Two classes that build the same example project then write two
     different tables, and they can run at the same time.
 
-    The prefix comes from the class, thus a new test class is isolated with no
-    action from the author. A name that a person selects can repeat; a class
-    name cannot.
+    The prefix comes from the code, thus a new test class is isolated with no
+    action from the author. A name that a person selects can repeat.
 
     `--dist loadscope` sends each class to one worker, thus one class holds one
     prefix in one process.
     """
-    owner = (
-        request.cls.__name__
-        if request.cls is not None
-        else request.module.__name__.rsplit(".", 1)[-1]
-    )
-    prefix = "".join(
-        character for character in owner.lower() if character.isalnum() or character == "_"
+    prefix = workspace_prefix_of(
+        request.module.__name__.rsplit(".", 1)[-1],
+        request.cls.__name__ if request.cls is not None else None,
     )
     variables = pytest.MonkeyPatch()
     variables.setenv(TABLE_PREFIX_VARIABLE, prefix)
