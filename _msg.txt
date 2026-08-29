@@ -1,0 +1,21 @@
+test: give the comparison the pandas bounds, and an exclusion
+
+Two changes to `tables_are_equal`.
+
+The two default bounds are now the defaults of pandas: `absolute_tolerance` is
+1e-08, and `relative_tolerance` is 1e-05. The bounds before this change were
+1e-09 and 1e-09, which no other tool uses. A reader who knows `assert_allclose`
+now knows these bounds.
+
+`exclude_columns` removes a column from each step of the comparison: the flag,
+the two value columns, and the WHERE clause. A column that holds the time of
+the run, or a hash of the run, differs between two correct tables, thus a
+comparison must skip it. An excluded column also leaves the column set test,
+therefore a table that alone holds that column still compares.
+
+A key column cannot be an excluded column, because the join reads each key.
+`read_key_and_excluded_columns` holds that rule, and the two rules beside it. It
+is a pure function, thus a unit test reads it with no connection.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013rC4SvHaxUy9ZcPALWVSWC

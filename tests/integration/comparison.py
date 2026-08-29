@@ -33,10 +33,16 @@ How the comparison works
    one table holds no row at all.
 
 The result holds those rows. No row means that the two tables are equal.
+
+`exclude_columns` removes a column from each step. A column that holds the time
+of the run, or a hash of the run, differs between two correct tables, thus a
+comparison must skip it. An excluded column also leaves the column set test, so
+a table that alone holds that column still compares.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from clair.adapters.snowflake import SnowflakeAdapter
@@ -52,8 +58,11 @@ FLOAT_DATA_TYPES = frozenset({"FLOAT", "FLOAT4", "FLOAT8", "DOUBLE", "DOUBLE PRE
 # value near zero, where a relative bound gives almost nothing. The relative
 # bound holds for a large value. A difference inside one of the two bounds is
 # not a difference.
-DEFAULT_ABSOLUTE_TOLERANCE = 1e-9
-DEFAULT_RELATIVE_TOLERANCE = 1e-9
+#
+# The two defaults are the defaults of pandas: `atol` is 1e-08, and `rtol` is
+# 1e-05. A reader who knows `assert_allclose` thus knows these bounds.
+DEFAULT_ABSOLUTE_TOLERANCE = 1e-08
+DEFAULT_RELATIVE_TOLERANCE = 1e-05
 
 # The largest number of rows that the comparison reads back. A test that fails
 # needs a few rows to name the problem, and it does not need the full table.
@@ -83,6 +92,7 @@ class TableComparison:
         difference_column_names: The name of each column of `difference_rows`.
         compared_column_names: Each column that the comparison read.
         float_column_names: Each column that took the tolerance comparison.
+        excluded_column_names: Each column that `exclude_columns` removed.
         sql: The query that made the result. A failed test prints it, thus a
             reader repeats the comparison by hand.
     """
@@ -92,6 +102,7 @@ class TableComparison:
     difference_column_names: list[str] = field(default_factory=list)
     compared_column_names: list[str] = field(default_factory=list)
     float_column_names: list[str] = field(default_factory=list)
+    excluded_column_names: list[str] = field(default_factory=list)
     sql: str = ""
 
     def __bool__(self) -> bool:
@@ -165,6 +176,34 @@ def _is_equal_expression(
     )
 
 
+def read_key_and_excluded_columns(
+    primary_key_columns: Sequence[str], exclude_columns: Sequence[str]
+) -> tuple[list[str], set[str]]:
+    """Give the key columns and the excluded columns, each one in upper case.
+
+    Snowflake holds each name in upper case in INFORMATION_SCHEMA, thus the
+    comparison reads a name of any case and gives the upper case name back.
+
+    Raises:
+        TableComparisonError: If the caller gives no key column, or if a column
+            is a key column and an excluded column.
+    """
+    if not primary_key_columns:
+        raise TableComparisonError("The comparison needs one primary key column.")
+
+    keys = [name.upper() for name in primary_key_columns]
+    excluded = {name.upper() for name in exclude_columns}
+
+    excluded_keys = sorted(excluded & set(keys))
+    if excluded_keys:
+        raise TableComparisonError(
+            f"{excluded_keys} is a primary key column and an excluded column. "
+            "The join reads each key, thus the comparison cannot skip one."
+        )
+
+    return keys, excluded
+
+
 def build_comparison_sql(
     address_a: TrouveAddress,
     address_b: TrouveAddress,
@@ -173,6 +212,7 @@ def build_comparison_sql(
     absolute_tolerance: float = DEFAULT_ABSOLUTE_TOLERANCE,
     relative_tolerance: float = DEFAULT_RELATIVE_TOLERANCE,
     max_difference_rows: int = DEFAULT_MAX_DIFFERENCE_ROWS,
+    exclude_columns: Sequence[str] = (),
 ) -> tuple[str, list[str]]:
     """Make the query that gives each row that differs.
 
@@ -180,7 +220,10 @@ def build_comparison_sql(
         The SQL, and the name of each column of the result.
     """
     keys = [name.upper() for name in primary_key_columns]
-    value_columns = [name for name in column_types if name not in keys]
+    excluded = {name.upper() for name in exclude_columns}
+    value_columns = [
+        name for name in column_types if name not in keys and name not in excluded
+    ]
     join_condition = " AND ".join(
         f'EQUAL_NULL({_LEFT}."{key}", {_RIGHT}."{key}")' for key in keys
     )
@@ -244,10 +287,11 @@ def tables_are_equal(
     adapter: SnowflakeAdapter,
     address_a: TrouveAddress,
     address_b: TrouveAddress,
-    primary_key_columns: list[str],
+    primary_key_columns: Sequence[str],
     absolute_tolerance: float = DEFAULT_ABSOLUTE_TOLERANCE,
     relative_tolerance: float = DEFAULT_RELATIVE_TOLERANCE,
     max_difference_rows: int = DEFAULT_MAX_DIFFERENCE_ROWS,
+    exclude_columns: Sequence[str] = (),
 ) -> TableComparison:
     """Tell you if two tables in Snowflake hold the same rows.
 
@@ -259,10 +303,15 @@ def tables_are_equal(
             comparison joins the two tables on them with EQUAL_NULL, thus a NULL
             key joins to a NULL key.
         absolute_tolerance: The largest absolute difference of a float column
-            that is not a difference.
+            that is not a difference. The default is the `atol` of pandas.
         relative_tolerance: The largest relative difference of a float column
-            that is not a difference.
+            that is not a difference. The default is the `rtol` of pandas.
         max_difference_rows: The largest number of rows that come back.
+        exclude_columns: Each column that the comparison skips. A column that
+            holds the time of the run differs between two correct tables, thus
+            a comparison must skip it. An excluded column also leaves the
+            column set test, therefore a table that alone holds that column
+            still compares. A key column cannot be an excluded column.
 
     Returns:
         A TableComparison. `is_equal` is True when the two tables match, and
@@ -270,23 +319,28 @@ def tables_are_equal(
 
     Raises:
         TableComparisonError: If a table holds no column, if the two tables hold
-            a different set of columns, or if a key column is absent.
+            a different set of columns that the comparison reads, if a key
+            column is absent, or if a key column is also an excluded column.
     """
-    if not primary_key_columns:
-        raise TableComparisonError("The comparison needs one primary key column.")
+    keys, excluded = read_key_and_excluded_columns(
+        primary_key_columns, exclude_columns
+    )
 
     types_a = column_types_of(adapter, address_a)
     types_b = column_types_of(adapter, address_b)
 
-    if set(types_a) != set(types_b):
-        only_a = sorted(set(types_a) - set(types_b))
-        only_b = sorted(set(types_b) - set(types_a))
+    # An excluded column leaves this test. A table that alone holds a column of
+    # the run, such as a timestamp, thus still compares.
+    read_a = set(types_a) - excluded
+    read_b = set(types_b) - excluded
+    if read_a != read_b:
+        only_a = sorted(read_a - read_b)
+        only_b = sorted(read_b - read_a)
         raise TableComparisonError(
             f"{address_a} and {address_b} hold a different set of columns. "
             f"Only in the first: {only_a}. Only in the second: {only_b}."
         )
 
-    keys = [name.upper() for name in primary_key_columns]
     absent_keys = [key for key in keys if key not in types_a]
     if absent_keys:
         raise TableComparisonError(
@@ -302,6 +356,7 @@ def tables_are_equal(
         absolute_tolerance,
         relative_tolerance,
         max_difference_rows,
+        exclude_columns=sorted(excluded),
     )
     rows = query_rows(adapter, sql)
 
@@ -309,10 +364,14 @@ def tables_are_equal(
         is_equal=len(rows) == 0,
         difference_rows=rows,
         difference_column_names=result_column_names,
-        compared_column_names=sorted(types_a),
+        compared_column_names=sorted(read_a),
         float_column_names=sorted(
-            name for name, type_name in types_a.items()
-            if type_name in FLOAT_DATA_TYPES and name not in keys
+            name
+            for name, type_name in types_a.items()
+            if type_name in FLOAT_DATA_TYPES
+            and name not in keys
+            and name not in excluded
         ),
+        excluded_column_names=sorted(excluded),
         sql=sql,
     )

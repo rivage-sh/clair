@@ -510,6 +510,40 @@ class TestTheFallbackGivesTheDataOfAFullRefresh:
         finally:
             execute(adapter, f"delete from {reference_address} where id = 'id_999'")
 
+    def test_an_excluded_column_leaves_the_comparison(
+        self,
+        compared_addresses: tuple[TrouveAddress, TrouveAddress],
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """A column that differs is no difference when the caller excludes it."""
+        fallback_address, reference_address = compared_addresses
+        execute(
+            adapter,
+            f"update {reference_address} set ratio = ratio + 1000 where id = 'id_001'",
+        )
+        try:
+            with_ratio = tables_are_equal(
+                adapter, fallback_address, reference_address, primary_key_columns=["id"]
+            )
+            without_ratio = tables_are_equal(
+                adapter,
+                fallback_address,
+                reference_address,
+                primary_key_columns=["id"],
+                exclude_columns=["ratio"],
+            )
+
+            assert not with_ratio.is_equal
+            assert without_ratio.is_equal, without_ratio.report()
+            assert without_ratio.excluded_column_names == ["RATIO"]
+            assert without_ratio.compared_column_names == ["AMOUNT", "ID"]
+        finally:
+            execute(
+                adapter,
+                f"update {reference_address} set ratio = ratio - 1000 "
+                "where id = 'id_001'",
+            )
+
     def test_a_float_inside_the_tolerance_is_no_difference(
         self,
         compared_addresses: tuple[TrouveAddress, TrouveAddress],

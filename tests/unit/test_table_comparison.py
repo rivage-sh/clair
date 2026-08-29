@@ -17,8 +17,12 @@ import pytest
 
 from clair.trouves.address import TrouveAddress
 from tests.integration.comparison import (
+    DEFAULT_ABSOLUTE_TOLERANCE,
     DEFAULT_MAX_DIFFERENCE_ROWS,
+    DEFAULT_RELATIVE_TOLERANCE,
+    TableComparisonError,
     build_comparison_sql,
+    read_key_and_excluded_columns,
 )
 
 ADDRESS_A = TrouveAddress(
@@ -41,6 +45,17 @@ def sql_of(column_types=None, keys=None, **kwargs) -> str:
         **kwargs,
     )
     return sql
+
+
+def names_of(column_types=None, keys=None, **kwargs) -> list[str]:
+    _, names = build_comparison_sql(
+        ADDRESS_A,
+        ADDRESS_B,
+        keys or ["ID"],
+        column_types or COLUMN_TYPES,
+        **kwargs,
+    )
+    return names
 
 
 class TestTheJoin:
@@ -181,3 +196,80 @@ class TestTheResultColumns:
 
     def test_the_key_comes_from_the_side_that_holds_the_row(self):
         assert 'COALESCE(table_a."ID", table_b."ID") AS "ID"' in sql_of()
+
+
+class TestTheDefaultTolerances:
+    """The two defaults are the defaults of pandas."""
+
+    def test_the_absolute_default_is_the_atol_of_pandas(self):
+        assert DEFAULT_ABSOLUTE_TOLERANCE == 1e-08
+
+    def test_the_relative_default_is_the_rtol_of_pandas(self):
+        assert DEFAULT_RELATIVE_TOLERANCE == 1e-05
+
+    def test_the_sql_reads_the_two_defaults(self):
+        sql = sql_of()
+
+        assert 'ABS(table_a."RATIO" - table_b."RATIO") <= 1e-08' in sql
+        assert "1e-05 * GREATEST" in sql
+
+
+class TestExcludeColumns:
+    """A column of the run differs between two correct tables, thus it goes."""
+
+    def test_an_excluded_column_gives_no_flag(self):
+        sql = sql_of(exclude_columns=["RATIO"])
+
+        assert "is_equal_ratio" not in sql
+        assert "is_equal_amount" in sql
+
+    def test_an_excluded_column_gives_no_value_column(self):
+        names = names_of(exclude_columns=["RATIO"])
+
+        assert "a_ratio" not in names
+        assert "b_ratio" not in names
+        assert "a_amount" in names
+
+    def test_an_excluded_column_leaves_the_where_clause(self):
+        where_clause = sql_of(exclude_columns=["RATIO"]).split("WHERE ")[1]
+
+        assert "is_equal_ratio" not in where_clause
+
+    def test_the_name_of_an_excluded_column_is_not_case_sensitive(self):
+        assert "is_equal_ratio" not in sql_of(exclude_columns=["ratio"])
+
+    def test_two_excluded_columns_both_go(self):
+        sql = sql_of(exclude_columns=["ratio", "amount"])
+
+        assert "is_equal_ratio" not in sql
+        assert "is_equal_amount" not in sql
+
+    def test_the_join_stays_when_each_value_column_goes(self):
+        """The row markers alone then decide, thus the query still runs."""
+        sql = sql_of(exclude_columns=["ratio", "amount"])
+
+        assert 'EQUAL_NULL(table_a."ID", table_b."ID")' in sql
+        assert "table_a._clair_row_marker IS NULL" in sql
+
+    def test_an_absent_column_name_changes_nothing(self):
+        assert sql_of(exclude_columns=["no_such_column"]) == sql_of()
+
+
+class TestTheArgumentsThatStopTheComparison:
+    """`tables_are_equal` reads the arguments before it opens a query."""
+
+    def test_a_key_that_is_also_an_excluded_column_raises(self):
+        """The join reads each key, thus the comparison cannot skip one."""
+        with pytest.raises(TableComparisonError, match="primary key column"):
+            read_key_and_excluded_columns(["ID"], ["id"])
+
+    def test_no_primary_key_column_raises(self):
+        with pytest.raises(TableComparisonError, match="one primary key column"):
+            read_key_and_excluded_columns([], [])
+
+    def test_each_name_comes_back_in_upper_case(self):
+        """INFORMATION_SCHEMA holds the upper case name of each column."""
+        keys, excluded = read_key_and_excluded_columns(["id", "day"], ["ratio"])
+
+        assert keys == ["ID", "DAY"]
+        assert excluded == {"RATIO"}
