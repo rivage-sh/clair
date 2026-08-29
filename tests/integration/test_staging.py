@@ -24,6 +24,7 @@ from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunStatus, RunSummary
 from clair.core.staging import STAGING_SUFFIX
+from clair.environments.environments import Environment
 from clair.trouves.trouve import ExecutionType
 from tests.integration.config import IntegrationConfig
 from tests.integration.staging_project import (
@@ -81,6 +82,7 @@ class TestASuccessfulRun:
     def completed_run(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> RunSummary:
@@ -92,12 +94,13 @@ class TestASuccessfulRun:
             self.DATABASE_NAME,
             minimum_rows=PASSING_LIMIT,
         )
-        return clair.run(project_path)
+        return clair.run(project_path, env=environment)
 
     def test_the_physical_address_holds_the_rows(
         self,
         completed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The promotion moves the data to the address that the SQL names."""
@@ -109,6 +112,7 @@ class TestASuccessfulRun:
         self,
         completed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """Clair promotes each node before the next node starts."""
@@ -121,6 +125,7 @@ class TestASuccessfulRun:
         self,
         completed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """A run that passed leaves no object beside the physical one."""
@@ -157,6 +162,7 @@ class TestAFailedDataQualityTest:
     def failed_run(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> RunSummary:
@@ -173,13 +179,13 @@ class TestAFailedDataQualityTest:
         good_project = write_probe_project(
             destination / "good", self.DATABASE_NAME, minimum_rows=PASSING_LIMIT
         )
-        clair.run(good_project)
+        clair.run(good_project, env=environment)
 
         _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=5)
         bad_project = write_probe_project(
             destination / "bad", self.DATABASE_NAME, minimum_rows=FAILING_LIMIT
         )
-        return clair.run(bad_project)
+        return clair.run(bad_project, env=environment)
 
     def test_the_run_reports_the_failure_of_the_candidate(
         self, failed_run: RunSummary
@@ -195,6 +201,7 @@ class TestAFailedDataQualityTest:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
     ) -> None:
         """The run says which test failed, and on which Trouve.
 
@@ -215,6 +222,7 @@ class TestAFailedDataQualityTest:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The 5 rejected rows never reach the physical table."""
@@ -225,6 +233,7 @@ class TestAFailedDataQualityTest:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The candidate holds the exact data that failed the test."""
@@ -244,6 +253,7 @@ class TestAFailedDataQualityTest:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """A dependent of a Trouve that failed never runs."""
@@ -274,6 +284,7 @@ class TestAPandasTrouveThatPasses:
     def completed_run(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> RunSummary:
@@ -285,12 +296,13 @@ class TestAPandasTrouveThatPasses:
             minimum_rows=PASSING_LIMIT,
             execution_type=ExecutionType.PANDAS,
         )
-        return clair.run(project_path)
+        return clair.run(project_path, env=environment)
 
     def test_the_physical_address_holds_the_rows(
         self,
         completed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """Snowflake accepts a clone of the table that write_pandas made."""
@@ -302,6 +314,7 @@ class TestAPandasTrouveThatPasses:
         self,
         completed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The downstream Trouve is SQL, and it reads the pandas Trouve."""
@@ -314,6 +327,7 @@ class TestAPandasTrouveThatPasses:
         self,
         completed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         staging = _staging_address_of(
@@ -336,6 +350,7 @@ class TestAPandasTrouveThatFails:
     def failed_run(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> RunSummary:
@@ -350,7 +365,7 @@ class TestAPandasTrouveThatFails:
             minimum_rows=PASSING_LIMIT,
             execution_type=ExecutionType.PANDAS,
         )
-        clair.run(good_project)
+        clair.run(good_project, env=environment)
 
         _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=5)
         bad_project = write_probe_project(
@@ -359,7 +374,7 @@ class TestAPandasTrouveThatFails:
             minimum_rows=FAILING_LIMIT,
             execution_type=ExecutionType.PANDAS,
         )
-        return clair.run(bad_project)
+        return clair.run(bad_project, env=environment)
 
     def test_the_run_reports_the_failure_of_the_candidate(
         self, failed_run: RunSummary
@@ -374,6 +389,7 @@ class TestAPandasTrouveThatFails:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """write_pandas replaces a table, so it must never touch this one."""
@@ -384,6 +400,7 @@ class TestAPandasTrouveThatFails:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         staging = _staging_address_of(
@@ -402,6 +419,7 @@ class TestThePromotionKeepsTheGrants:
     def test_a_grant_on_the_physical_table_survives_the_next_run(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
@@ -427,12 +445,12 @@ class TestThePromotionKeepsTheGrants:
         checked = checked_address(self.DATABASE_NAME, schema_name)
 
         _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=3)
-        clair.run(project_path)
+        clair.run(project_path, env=environment)
 
         execute(adapter, f"grant insert on table {checked} to role {role}")
         assert "INSERT" in _privileges_on(adapter, checked)
 
-        clair.run(project_path)
+        clair.run(project_path, env=environment)
 
         assert "INSERT" in _privileges_on(adapter, checked)
 
@@ -445,6 +463,7 @@ class TestTheTestFalseFlag:
     def test_the_run_writes_to_the_physical_address_and_makes_no_candidate(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
@@ -457,7 +476,7 @@ class TestTheTestFalseFlag:
         checked = checked_address(self.DATABASE_NAME, schema_name)
 
         _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=3)
-        summary = clair.run(project_path, test=False)
+        summary = clair.run(project_path, env=environment, test=False)
 
         result = summary.result(f"{self.DATABASE_NAME}.refined.checked")
         assert result is not None

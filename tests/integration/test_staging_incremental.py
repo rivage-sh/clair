@@ -26,6 +26,7 @@ import clair
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunStatus, RunSummary
 from clair.core.staging import make_staging_address
+from clair.environments.environments import Environment
 from clair.trouves.run_config import IncrementalMode, RunMode
 from tests.integration.config import IntegrationConfig
 from tests.integration.staging_project import (
@@ -70,6 +71,7 @@ class TestAnUpsertRunThatPasses:
     def runs(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> tuple[RunSummary, RunSummary]:
@@ -88,7 +90,7 @@ class TestAnUpsertRunThatPasses:
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
-        first = clair.run(project_path, run_mode=RunMode.INCREMENTAL)
+        first = clair.run(project_path, env=environment, run_mode=RunMode.INCREMENTAL)
 
         make_source_rows(
             adapter,
@@ -96,7 +98,7 @@ class TestAnUpsertRunThatPasses:
             schema_name,
             {"id_000": 1, "id_001": 99, "id_002": 1, "id_003": 1},
         )
-        second = clair.run(project_path, run_mode=RunMode.INCREMENTAL)
+        second = clair.run(project_path, env=environment, run_mode=RunMode.INCREMENTAL)
         return first, second
 
     def test_the_first_run_changes_to_the_full_refresh_mode(
@@ -126,6 +128,7 @@ class TestAnUpsertRunThatPasses:
         self,
         runs: tuple[RunSummary, RunSummary],
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The clone seeds the staging table, so the old rows stay."""
@@ -140,6 +143,7 @@ class TestAnUpsertRunThatPasses:
         self,
         runs: tuple[RunSummary, RunSummary],
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """An UPSERT makes two objects. A run that passed keeps neither."""
@@ -163,6 +167,7 @@ class TestAnUpsertRunWhoseTestFails:
     def failed_run(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> RunSummary:
@@ -177,7 +182,7 @@ class TestAnUpsertRunWhoseTestFails:
             minimum_rows=PASSING_LIMIT,
             incremental_mode=IncrementalMode.UPSERT,
         )
-        clair.run(good_project, run_mode=RunMode.INCREMENTAL)
+        clair.run(good_project, env=environment, run_mode=RunMode.INCREMENTAL)
 
         insert_source_row(adapter, self.DATABASE_NAME, schema_name, "id_003", 1)
         bad_project = write_probe_project(
@@ -186,12 +191,13 @@ class TestAnUpsertRunWhoseTestFails:
             minimum_rows=FAILING_LIMIT,
             incremental_mode=IncrementalMode.UPSERT,
         )
-        return clair.run(bad_project, run_mode=RunMode.INCREMENTAL)
+        return clair.run(bad_project, env=environment, run_mode=RunMode.INCREMENTAL)
 
     def test_the_physical_table_keeps_the_rows_of_the_run_that_passed(
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The MERGE ran on the clone, so it never touched this table."""
@@ -207,6 +213,7 @@ class TestAnUpsertRunWhoseTestFails:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """You can query the exact rows that the test rejected."""
@@ -220,6 +227,7 @@ class TestAnUpsertRunWhoseTestFails:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The MERGE passed, thus its own drop statement ran before the test."""
@@ -245,6 +253,7 @@ class TestAMergeThatFails:
     def failed_run(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> RunSummary:
@@ -262,10 +271,10 @@ class TestAMergeThatFails:
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
-        clair.run(project_path, run_mode=RunMode.INCREMENTAL)
+        clair.run(project_path, env=environment, run_mode=RunMode.INCREMENTAL)
 
         insert_source_row(adapter, self.DATABASE_NAME, schema_name, "id_000", 42)
-        return clair.run(project_path, run_mode=RunMode.INCREMENTAL)
+        return clair.run(project_path, env=environment, run_mode=RunMode.INCREMENTAL)
 
     def test_the_merge_is_the_statement_that_failed(
         self, failed_run: RunSummary
@@ -297,6 +306,7 @@ class TestAMergeThatFails:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """This is the cleanup that the index from the end makes correct."""
@@ -311,6 +321,7 @@ class TestAMergeThatFails:
         self,
         failed_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         checked = checked_address(self.DATABASE_NAME, clair_environment.schema_name)
@@ -326,6 +337,7 @@ class TestAnAppendRun:
     def second_run(
         self,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> RunSummary:
@@ -339,13 +351,14 @@ class TestAnAppendRun:
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
-        clair.run(project_path, run_mode=RunMode.INCREMENTAL)
-        return clair.run(project_path, run_mode=RunMode.INCREMENTAL)
+        clair.run(project_path, env=environment, run_mode=RunMode.INCREMENTAL)
+        return clair.run(project_path, env=environment, run_mode=RunMode.INCREMENTAL)
 
     def test_the_clone_seeds_the_staging_table(
         self,
         second_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """3 rows of the first run, plus the 3 rows that the INSERT adds.
@@ -360,6 +373,7 @@ class TestAnAppendRun:
         self,
         second_run: RunSummary,
         clair_environment: IntegrationConfig,
+        environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
         """The MERGE belongs to the UPSERT mode only."""

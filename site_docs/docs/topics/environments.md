@@ -2,6 +2,8 @@
 
 An environment is a named Snowflake connection profile. clair keeps the environments in `~/.clair/environments.yml`. This file is outside the project directory, thus you do not commit your credentials.
 
+The CLI reads this file. The Python API does not: `clair.run()` and `clair.test()` take an `Environment` object. A notebook, a test, or a service that keeps its secrets in a vault makes the object, and writes no file. See [Python API](../reference/python-api.md).
+
 ## `~/.clair/environments.yml`
 
 ```yaml

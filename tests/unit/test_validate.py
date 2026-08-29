@@ -17,6 +17,7 @@ import clair
 from clair.cli.main import cli
 from clair.core.text_references import TextReferenceLocation
 from clair.core.validation import ValidationReport
+from clair.environments.environments import Environment
 from clair.exceptions import ClairError
 
 # Every routing file in these tests needs an entry class. This prelude gives one.
@@ -316,19 +317,22 @@ class TestTheEnvironment:
         assert report.env_name == "prod"
         assert report.unnamed_environment_warning is None
 
-    def test_the_environment_variable_selects_the_environment(
-        self, project_with_trouves: Path, monkeypatch
+    def test_the_parsed_environment_selects_the_environment(
+        self, project_with_trouves: Path
     ):
-        monkeypatch.setenv("CLAIR_ENV", "staging")
-        write_routing(project_with_trouves, entry_for_environment("staging"))
-        assert clair.validate(project_with_trouves).env_name == "staging"
-
-    def test_the_argument_wins_against_the_environment_variable(
-        self, project_with_trouves: Path, monkeypatch
-    ):
-        monkeypatch.setenv("CLAIR_ENV", "staging")
+        """The function accepts the object that the CLI parses."""
         write_routing(project_with_trouves, entry_for_environment("prod"))
-        assert clair.validate(project_with_trouves, env="prod").env_name == "prod"
+        environment = Environment(
+            name="prod", account="ab12345", user="analyst", warehouse="compute_wh"
+        )
+        assert clair.validate(project_with_trouves, env=environment).env_name == "prod"
+
+    def test_the_environment_variable_changes_nothing(
+        self, project_with_trouves: Path, monkeypatch
+    ):
+        """The function reads no environment variable. The CLI resolves the name."""
+        monkeypatch.setenv("CLAIR_ENV", "staging")
+        assert clair.validate(project_with_trouves).env_name == "dev"
 
     def test_a_file_that_omits_the_environment_warns(self, project_with_trouves: Path):
         """An absent entry is almost always a typo, and clair says so."""
@@ -393,6 +397,14 @@ class TestTheCommand:
         return CliRunner().invoke(
             cli, ["validate", "--project", str(project_dir), *arguments]
         )
+
+    def test_the_environment_variable_selects_the_environment(
+        self, project_with_trouves: Path, monkeypatch
+    ):
+        """The CLI reads CLAIR_ENV, and it gives the name to the function."""
+        monkeypatch.setenv("CLAIR_ENV", "staging")
+        write_routing(project_with_trouves, entry_for_environment("staging"))
+        assert "staging" in self.run_command(project_with_trouves).output
 
     def test_a_valid_project_exits_zero(self, project_with_trouves: Path):
         assert self.run_command(project_with_trouves).exit_code == 0

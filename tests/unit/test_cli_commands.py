@@ -21,7 +21,8 @@ from click.testing import CliRunner
 from clair.cli.main import cli
 from clair.core.runner import RunResult, RunStatus, RunSummary
 from clair.core.test_runner import TestSummary
-from clair.exceptions import ClairError
+from clair.environments.environments import Environment
+from clair.exceptions import ClairError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
 from tests.helpers import make_run_result, make_test_result
 
@@ -55,6 +56,25 @@ def _run_result(
             )
         ],
     )
+
+
+@pytest.fixture(autouse=True)
+def environments_file(monkeypatch: pytest.MonkeyPatch) -> Environment:
+    """Give the CLI one environment, and let it read no file.
+
+    The CLI parses ~/.clair/environments.yml, and it gives the Environment to
+    the API function. These tests replace the parse step only.
+    """
+    environment = Environment(
+        name="dev", account="ab12345", user="analyst", warehouse="compute_wh"
+    )
+
+    def fake_load(env_name: str | None = None) -> tuple[str, Environment]:
+        name = env_name or "dev"
+        return name, environment.model_copy(update={"name": name})
+
+    monkeypatch.setattr("clair.cli.main.load_environment", fake_load)
+    return environment
 
 
 @pytest.fixture
@@ -178,7 +198,8 @@ class TestRunCommand:
         assert calls["project_dir"] == str(tmp_path)
         assert calls["select"] == ("+mydb.analytics.orders",)
         assert calls["exclude"] == ("mydb.reports.*",)
-        assert calls["env"] == "prod"
+        assert isinstance(calls["env"], Environment)
+        assert calls["env"].name == "prod"
         assert calls["run_mode"] == RunMode.INCREMENTAL
         assert calls["test"] is False
         assert calls["sample"] is True
@@ -260,6 +281,34 @@ class TestCompileCommand:
 
         assert result.exit_code == 0
         assert calls["run_mode"] == RunMode.INCREMENTAL
+
+    def test_the_command_gives_the_parsed_environment_to_the_api(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path
+    ):
+        _give_api(monkeypatch, calls, "compile", result=None)
+
+        CliRunner().invoke(cli, ["compile", "--project", str(tmp_path), "--env", "prod"])
+
+        assert isinstance(calls["env"], Environment)
+        assert calls["env"].name == "prod"
+
+    def test_the_command_continues_without_environments_yml(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path
+    ):
+        """A compile makes no connection, thus the name alone is enough."""
+
+        def fake_load(env_name: str | None = None) -> tuple[str, Environment]:
+            raise EnvironmentsFileNotFoundError("/home/analyst/.clair/environments.yml")
+
+        monkeypatch.setattr("clair.cli.main.load_environment", fake_load)
+        _give_api(monkeypatch, calls, "compile", result=None)
+
+        result = CliRunner().invoke(
+            cli, ["compile", "--project", str(tmp_path), "--env", "prod"]
+        )
+
+        assert result.exit_code == 0
+        assert calls["env"] == "prod"
 
 
 class TestDocsCommand:

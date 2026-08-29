@@ -25,6 +25,9 @@ Each step below links to its source code.
 gives the account, the warehouse, the role, and the credentials. It also gives the
 environment name, which step 2 needs. See [Environments](environments.md).
 
+The CLI does this step. `clair.run()` takes the parsed `Environment`, and it reads no
+file. See [Python API](../reference/python-api.md).
+
 ## 2. Find the routing entry
 
 *Source: [`environments/project_routing.py`][project-routing-py] — `load_project_routing()`, and [`environments/routing.py`][routing-py] — `route()`*

@@ -6,10 +6,20 @@ that calls it, thus `clair run` calls `clair.run()`. A notebook, a test, or
 another program calls the same functions::
 
     import clair
+    from clair import Environment
 
-    summary = clair.run("~/projects/analytics", select=["+mydb.analytics.orders"])
+    environment = Environment(
+        name="dev", account="ab12345", user="analyst", warehouse="compute_wh"
+    )
+    summary = clair.run(
+        "~/projects/analytics", env=environment, select=["+mydb.analytics.orders"]
+    )
     print(summary.succeeded_count, summary.failed_count)
     print(summary.result("mydb.analytics.orders").statements)
+
+`run`, `compile` and `test` accept the parsed Environment. They read no file, and
+they need no home directory: the CLI parses ~/.clair/environments.yml, and it
+gives the object to these functions.
 
 Each function gives a result object with the complete data of the operation. No
 function writes to stdout, and no function stops the process. A fault raises a
@@ -18,7 +28,6 @@ function writes to stdout, and no function stops the process. A fault raises a
 
 from __future__ import annotations
 
-import os
 import shutil
 from collections import defaultdict
 from collections.abc import Sequence
@@ -48,13 +57,12 @@ from clair.core.runner import RunResult, RunSummary, run_project
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import TestResult, TestSummary, run_tests
 from clair.core.validation import ValidationReport, validate_project
-from clair.environments.environments import Environment, load_environment
+from clair.environments.environments import Environment
 from clair.environments.project_routing import (
     describe_unnamed_environment,
     load_project_routing,
 )
 from clair.environments.routing import RoutingEntry
-from clair.exceptions import EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import TrouveAbc, TrouveType
 from clair.web_ui.catalog import build_catalog
@@ -63,6 +71,18 @@ from clair.web_ui.server import serve
 logger = structlog.get_logger()
 
 Selectors = Sequence[str] | None
+
+# The environment of an operation. An Environment holds the connection settings.
+# A name selects the routing entry only, thus a function that needs no
+# connection accepts it.
+EnvSpec = Environment | str | None
+
+
+def _env_name_of(env: EnvSpec) -> str:
+    """Give the environment name of *env*. None gives "dev"."""
+    if isinstance(env, Environment):
+        return env.name
+    return env or "dev"
 
 
 def _resolve_routing(project_root: Path, env_name: str) -> RoutingEntry | None:
@@ -118,7 +138,7 @@ def compile(
     *,
     select: Selectors = None,
     exclude: Selectors = None,
-    env: str | None = None,
+    env: EnvSpec = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     use_staging: bool = True,
 ) -> CompileOutput:
@@ -131,9 +151,10 @@ def compile(
         project_dir: The root directory of the project.
         select: The patterns that select Trouves. None selects each Trouve.
         exclude: The patterns that remove Trouves, after the selection.
-        env: The environment name from ~/.clair/environments.yml. None takes
-            CLAIR_ENV, then "dev". Clair compiles without an environment if that
-            file does not exist.
+        env: An Environment, or an environment name. This function reads no
+            file: the caller parses environments.yml, or it makes the
+            Environment itself. A name selects the routing entry, and it leaves
+            ``clair.env`` empty in each Trouve module. None gives the name "dev".
         run_mode: The run mode for the new SQL statements.
         use_staging: If True, the plan shows the staged path.
 
@@ -146,15 +167,8 @@ def compile(
     project_root = Path(project_dir).expanduser().resolve()
     run_id = uuid6.uuid7().hex
 
-    environment: Environment | None = None
-    env_name = env or "dev"
-    try:
-        env_name, environment = load_environment(env)
-    except EnvironmentsFileNotFoundError:
-        logger.warning(
-            "compile.no_environments_file",
-            detail="Clair compiles without an environment. Run `clair init` to make environments.yml.",
-        )
+    environment = env if isinstance(env, Environment) else None
+    env_name = _env_name_of(env)
 
     routing = _resolve_routing(project_root, env_name)
     discovered = discover_project(
@@ -198,9 +212,9 @@ def compile(
 def run(
     project_dir: str | Path = ".",
     *,
+    env: Environment,
     select: Selectors = None,
     exclude: Selectors = None,
-    env: str | None = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     test: bool = True,
     sample: bool = False,
@@ -218,7 +232,9 @@ def run(
         project_dir: The root directory of the project.
         select: The patterns that select Trouves. None selects each Trouve.
         exclude: The patterns that remove Trouves, after the selection.
-        env: The environment name from ~/.clair/environments.yml.
+        env: The Environment that holds the connection settings, and that names
+            the routing entry. This function reads no file: the caller parses
+            environments.yml, or it makes the Environment itself.
         run_mode: full_refresh writes each table again. incremental writes only
             the new data.
         test: If True, clair runs the data quality tests of a Trouve after it
@@ -249,7 +265,9 @@ def run(
             reason="test=False skips the tests that decide the promotion, so clair writes to each physical address directly",
         )
 
-    env_name, environment = load_environment(env)
+    # `environment` names the object, and `env` names the argument.
+    environment = env
+    env_name = environment.name
     # The caller replaces the thread count of the environment.
     thread_count = threads if threads is not None else environment.threads
     profile_defaults = {"warehouse": environment.warehouse, "role": environment.role}
@@ -368,9 +386,9 @@ def run(
 def test(
     project_dir: str | Path = ".",
     *,
+    env: Environment,
     select: Selectors = None,
     exclude: Selectors = None,
-    env: str | None = None,
     sample: bool = False,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
@@ -381,7 +399,9 @@ def test(
         project_dir: The root directory of the project.
         select: The patterns that select Trouves. None selects each Trouve.
         exclude: The patterns that remove Trouves, after the selection.
-        env: The environment name from ~/.clair/environments.yml.
+        env: The Environment that holds the connection settings, and that names
+            the routing entry. This function reads no file: the caller parses
+            environments.yml, or it makes the Environment itself.
         sample: If True, clair runs the tests on a sample of each Trouve, and
             runs no row count test.
         threads: The number of Trouves that clair tests at one time. None takes
@@ -398,7 +418,9 @@ def test(
     """
     project_root = Path(project_dir).expanduser().resolve()
 
-    env_name, environment = load_environment(env)
+    # `environment` names the object, and `env` names the argument.
+    environment = env
+    env_name = environment.name
     # The caller replaces the thread count of the environment.
     thread_count = threads if threads is not None else environment.threads
     profile_defaults = {"warehouse": environment.warehouse, "role": environment.role}
@@ -456,7 +478,7 @@ def test(
 def validate(
     project_dir: str | Path = ".",
     *,
-    env: str | None = None,
+    env: EnvSpec = None,
 ) -> ValidationReport:
     """Apply the project routing entries to each Trouve. This needs no connection.
 
@@ -470,8 +492,8 @@ def validate(
 
     Args:
         project_dir: The root directory of the project.
-        env: The environment name that selects the routing entry. None takes
-            CLAIR_ENV, then "dev".
+        env: An Environment, or an environment name. This function uses the
+            name only, because it makes no connection. None gives "dev".
 
     Returns:
         A ValidationReport. Read ``is_valid`` for the result of the command.
@@ -480,7 +502,7 @@ def validate(
         ClairError: If clair cannot read the project or the routing file.
     """
     project_root = Path(project_dir).expanduser().resolve()
-    env_name = env or os.environ.get("CLAIR_ENV") or "dev"
+    env_name = _env_name_of(env)
     return validate_project(project_root, env_name)
 
 
