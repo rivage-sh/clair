@@ -142,6 +142,11 @@ def incremental_checked_file(
 
     An UPSERT matches on ``id``. An APPEND takes no primary key column, and
     RunConfig rejects one.
+
+    ``ratio`` is a FLOAT. `tables_are_equal` compares a float column inside a
+    tolerance, and this column makes the integration job run that path against
+    Snowflake. A cast to FLOAT is necessary, because a division of two NUMBER
+    values gives a NUMBER.
     """
     if incremental_mode == IncrementalMode.UPSERT:
         primary_key_line = '        primary_key_columns=["id"],\n'
@@ -168,11 +173,12 @@ trouve = Trouve(
     type=TrouveType.TABLE,
     docs="The candidate of an incremental run. TestRowCount decides it.",
     sql=f"""
-        select id, amount from {{source_rows}}
+        select id, amount, amount::float / 3 as ratio from {{source_rows}}
     """,
     columns=[
         Column(name="id", type=ColumnType.STRING),
         Column(name="amount", type=ColumnType.NUMBER),
+        Column(name="ratio", type=ColumnType.FLOAT),
     ],
     run_config=RunConfig(
         run_mode=RunMode.INCREMENTAL,
