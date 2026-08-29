@@ -64,6 +64,17 @@ it. [`clair validate`](../cli/validate.md) reports that fault.
 A pandas Trouve holds the same information in a list. Its `input_addresses` gives the
 address of each input, in the parameter order of the transform.
 
+### A file that clair cannot read stops the run
+
+A Trouve file that raises at import time — a name that does not exist, a package that
+nobody installed, two files that import each other — stops discovery. clair raises
+`ProjectDiscoveryError`, and the error names each file and each cause.
+
+clair does not skip the file and continue. A skip removes the Trouve from the DAG, and the
+run then builds fewer tables than the project declares and reports success. The error
+holds each fault together, thus you repair the project one time and not one file at a
+time.
+
 ## 4. Build the DAG
 
 *Source: [`core/dag.py`][dag-py] — `build_dag()`*

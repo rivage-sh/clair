@@ -2,6 +2,11 @@
 
 You can set warehouse and role defaults for each database directory or schema directory. Then different parts of your project can use different compute or permissions. You do not change `~/.clair/environments.yml`.
 
+clair reads the two files from the directories of the Trouve: the schema directory is the
+parent of the Trouve file, and the database directory is the parent of the schema
+directory. Thus the config applies at each depth, and a project below other directories
+keeps its defaults.
+
 ## `__database_config__.py`
 
 Place this file at the database directory level:

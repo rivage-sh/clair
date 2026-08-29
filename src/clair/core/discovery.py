@@ -23,7 +23,7 @@ from clair.environments.routing import (
     detect_routing_collisions,
     route,
 )
-from clair.exceptions import DiscoveryError
+from clair.exceptions import DiscoveryError, ProjectDiscoveryError
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
@@ -39,13 +39,49 @@ _CONFIG_FILES = {"__database_config__.py", "__schema_config__.py"}
 logger = structlog.get_logger()
 
 
+TROUVE_DEPTH = 3
+"""The number of path parts that a Trouve file holds below its project root.
+
+The parts are database_name/schema_name/table_name.py. A file above that depth
+holds no schema name and no database name, thus clair cannot make its address.
+"""
+
+
 def compute_logical_address(file_path: Path) -> TrouveAddress:
     """Make the logical address from the last three parts of the path.
 
     Example: .../database_name/schema_name/table_name.py becomes
     database_name.schema_name.table_name
+
+    A directory above the database directory takes no part in the address. Thus
+    a project inside a larger repository keeps the addresses that it declares.
+    Call ``describe_shallow_trouve`` first: this function reads the parts of the
+    path, and a file too near the root would take a part from outside the
+    project.
     """
     return TrouveAddress.parse(".".join(file_path.with_suffix("").parts[-3:]))
+
+
+def describe_shallow_trouve(file_path: Path, project_root: Path) -> str | None:
+    """Tell you why a file is too near the project root, or give None.
+
+    The address of a Trouve comes from the last three parts of its path. A file
+    with fewer than three parts below the root would take a part from a
+    directory outside the project. The address would then hold the name of the
+    parent directory of the project, and the same project would write to two
+    different tables on two machines.
+    """
+    parts = file_path.relative_to(project_root).parts
+    if len(parts) >= TROUVE_DEPTH:
+        return None
+    location = "the project root" if len(parts) == 1 else "/".join(parts[:-1])
+    return (
+        f"{file_path}: a Trouve file sits {TROUVE_DEPTH} levels below the project "
+        f"root, as database_name/schema_name/table_name.py. This file sits in "
+        f"{location}, which gives it no database name and no schema name. Move "
+        f"the file, or give the file a name that starts with _ to hide it from "
+        f"discovery."
+    )
 
 
 def _is_trouve_candidate(file_path: Path) -> bool:
@@ -88,6 +124,12 @@ def _resolve_config(
     1. The profile defaults
     2. __database_config__.py
     3. __schema_config__.py
+
+    The function starts at the file and moves up, in the same direction as
+    ``compute_logical_address``. The schema directory is the parent of the file,
+    and the database directory is the parent of the schema directory. Thus a
+    project below other directories keeps its config, and the config directory
+    is always the directory that the address names.
     """
     profile_wh = (profile_defaults or {}).get("warehouse")
     profile_role = (profile_defaults or {}).get("role")
@@ -96,28 +138,26 @@ def _resolve_config(
         role=profile_role if profile_role and profile_role.strip() else None,
     )
 
-    rel = file_path.relative_to(project_root)
-    parts = list(rel.parts)
+    schema_directory = file_path.parent
+    database_directory = schema_directory.parent
 
-    if len(parts) >= 2:
-        db_defaults = _load_config_file(
-            project_root / parts[0] / "__database_config__.py", project_root
-        )
-        if isinstance(db_defaults, DatabaseDefaults):
-            if db_defaults.warehouse and db_defaults.warehouse.strip():
-                config.warehouse = db_defaults.warehouse
-            if db_defaults.role and db_defaults.role.strip():
-                config.role = db_defaults.role
+    db_defaults = _load_config_file(
+        database_directory / "__database_config__.py", project_root
+    )
+    if isinstance(db_defaults, DatabaseDefaults):
+        if db_defaults.warehouse and db_defaults.warehouse.strip():
+            config.warehouse = db_defaults.warehouse
+        if db_defaults.role and db_defaults.role.strip():
+            config.role = db_defaults.role
 
-    if len(parts) >= 3:
-        schema_defaults = _load_config_file(
-            project_root / parts[0] / parts[1] / "__schema_config__.py", project_root
-        )
-        if isinstance(schema_defaults, SchemaDefaults):
-            if schema_defaults.warehouse and schema_defaults.warehouse.strip():
-                config.warehouse = schema_defaults.warehouse
-            if schema_defaults.role and schema_defaults.role.strip():
-                config.role = schema_defaults.role
+    schema_defaults = _load_config_file(
+        schema_directory / "__schema_config__.py", project_root
+    )
+    if isinstance(schema_defaults, SchemaDefaults):
+        if schema_defaults.warehouse and schema_defaults.warehouse.strip():
+            config.warehouse = schema_defaults.warehouse
+        if schema_defaults.role and schema_defaults.role.strip():
+            config.role = schema_defaults.role
 
     return config
 
@@ -295,7 +335,6 @@ def discover_project(
     errors: list[str] = []
 
     for file_path in candidates:
-        logical_address = compute_logical_address(file_path)
         module_name = str(
             file_path.relative_to(project_root).with_suffix("")
         ).replace(os.sep, ".")
@@ -319,7 +358,17 @@ def discover_project(
         if not isinstance(trouve_obj, TrouveAbc):
             continue
 
-        collected.append((trouve_obj, logical_address, file_path, module_name))
+        # The depth rule applies to a Trouve file, and not to each Python file.
+        # A project can hold a script or a helper near its root, and that file
+        # declares no Trouve.
+        shallow = describe_shallow_trouve(file_path, project_root)
+        if shallow:
+            errors.append(shallow)
+            continue
+
+        collected.append(
+            (trouve_obj, compute_logical_address(file_path), file_path, module_name)
+        )
 
     # Phase A: make the logical address and the physical address of each Trouve.
     # The logical address comes from the file path. DAG edges and selectors use it.
@@ -417,6 +466,12 @@ def discover_project(
 
     trouve_count = len(collected)
     logger.info("discovery.complete", project_root=str(project_root), trouves=trouve_count, errors=len(errors))
+
+    # A fault stops the run. A file that clair cannot read holds a Trouve that
+    # the DAG then misses, and a run would report success after it built fewer
+    # tables than the project declares.
+    if errors:
+        raise ProjectDiscoveryError(errors)
 
     return [trouve for trouve, _, _, _ in collected]
 
