@@ -10,16 +10,16 @@ clair test [--project PATH] [--env NAME] [--select PATTERN]... [--sample] [--thr
 
 ```bash
 # Run all tests
-clair test --project . --env dev
+clair test --env dev
 
 # Run tests for a specific schema
-clair test --project . --env dev --select='refined.orders.*'
+clair test --env dev --select='refined.orders.*'
 
 # Run against a sample (faster; skips TestRowCount)
-clair test --project . --env dev --sample
+clair test --env dev --sample
 
 # Test 8 Trouves at one time
-clair test --project . --env dev --threads 8
+clair test --env dev --threads 8
 ```
 
 ## Behavior
@@ -41,7 +41,7 @@ If you give `--sample`, most tests run against `SELECT TOP 1000 *` instead of th
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | `.` | Path to the clair project root |
+| `--project` | the root search | Path to the clair project root. Without it, clair walks up from the working directory to the first `__clair_project__.py` |
 | `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--sample` | `false` | Run the tests against `SELECT TOP 1000 *` |

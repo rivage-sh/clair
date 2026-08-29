@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from clair.environments.project_routing import ROUTING_FILE_NAME
+from clair.trouves.project_config import PROJECT_FILE_NAME
 
 # ---------------------------------------------------------------------------
 # The file templates.
@@ -17,6 +18,23 @@ from clair import Trouve, TrouveType
 trouve = Trouve(
     type=TrouveType.SOURCE,
 )
+'''
+
+_PROJECT_TEMPLATE = '''\
+"""Clair project marker -- this file marks the root of the project.
+
+Clair walks up from your working directory to the first file with this name,
+in the same way that git finds .git. Thus you run a clair command from any
+directory of the project, and --project is only an override.
+
+The default configuration is correct for almost every project. A project inside
+a Python package needs one value, `package`. See
+https://clair.rivage.sh/topics/project-layout/
+"""
+
+from clair import ProjectConfig
+
+project = ProjectConfig()
 '''
 
 _ROUTING_TEMPLATE = '''\
@@ -109,8 +127,8 @@ def scaffold_project(
 ) -> list[tuple[str, str]]:
     """Make a new Clair project in *project_dir*.
 
-    The function writes an example source Trouve file and a project
-    ``__routing__.py`` file. It also writes the global
+    The function writes an example source Trouve file, the
+    ``__clair_project__.py`` marker file, and a project ``__routing__.py`` file. It also writes the global
     ``~/.clair/environments.yml`` file, if that file does not exist.
 
     Args:
@@ -129,6 +147,7 @@ def scaffold_project(
     # Each project file, as a (relative_path, template_content) pair.
     project_files: list[tuple[str, str]] = [
         (f"{source_database_name}/{source_schema_name}/{source_table_name}.py", _SOURCE_TROUVE_TEMPLATE),
+        (PROJECT_FILE_NAME, _PROJECT_TEMPLATE),
         (ROUTING_FILE_NAME, _ROUTING_TEMPLATE),
     ]
 

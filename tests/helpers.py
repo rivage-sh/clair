@@ -24,6 +24,7 @@ from clair.core.test_runner import TestResult
 from clair.environments.routing import RoutingEntry, TrouveAddress
 from clair.trouves.address import NodeAddresses
 from clair.trouves.config import ResolvedConfig
+from clair.trouves.project_config import PROJECT_FILE_NAME
 from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.trouve import (
     CompiledAttributes,
@@ -31,6 +32,24 @@ from clair.trouves.trouve import (
     Trouve,
     TrouveType,
 )
+
+PROJECT_MARKER_CONTENT = """\
+from clair import ProjectConfig
+
+project = ProjectConfig()
+"""
+
+
+def write_project_marker(project_root: Path) -> Path:
+    """Write __clair_project__.py at *project_root*, and give the root.
+
+    Discovery reads this file, thus a test project needs it. Use the function
+    for a project root that is not ``tmp_path``: the ``project_marker`` fixture
+    writes the file in ``tmp_path`` for each test.
+    """
+    project_root.mkdir(parents=True, exist_ok=True)
+    (project_root / PROJECT_FILE_NAME).write_text(PROJECT_MARKER_CONTENT)
+    return project_root
 
 
 class DatabaseOverrideRouting(RoutingEntry):

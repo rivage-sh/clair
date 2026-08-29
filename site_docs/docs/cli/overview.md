@@ -7,7 +7,9 @@ the same work with no `subprocess` call.
 
 All commands share two common flags:
 
-- `--project` — path to the clair project root (default: `.`)
+- `--project` — path to the clair project root. Without it, clair walks up from the
+  working directory to the first `__clair_project__.py`, in the same way that git finds
+  `.git`
 - `--env` — environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py` (default: `CLAIR_ENV` or `dev`)
 
 ## Commands

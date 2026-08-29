@@ -74,6 +74,7 @@ from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.project_config import ProjectConfig
 from clair.trouves.run_config import (
     SOURCE,
     TARGET,
@@ -116,6 +117,7 @@ __all__ = [
     "IncrementalMode",
     "NodeAddresses",
     "PandasTrouve",
+    "ProjectConfig",
     "RoutingEntry",
     "RoutingTable",
     "RunConfig",

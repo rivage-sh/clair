@@ -11,6 +11,7 @@ from clair import (
     RunConfig, RunMode, IncrementalMode, UpsertConfig,
     TestUnique, TestNotNull, TestRowCount, TestUniqueColumns,
     DatabaseDefaults, SchemaDefaults,
+    ProjectConfig,
 )
 ```
 
@@ -19,3 +20,7 @@ from clair import (
 - **[Column](column-api.md)** — column definitions
 - **[RunConfig](run-config-api.md)** — incremental materialization config
 - **[Tests](tests-api.md)** — data quality test classes
+
+`ProjectConfig` holds no page of its own. It goes in `__clair_project__.py` at the project
+root, and [Project Layout](../topics/project-layout.md)
+gives the complete behaviour.
