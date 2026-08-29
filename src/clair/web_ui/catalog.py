@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from clair import __version__
+from clair._version import __version__
 from clair.core.dag import ClairDag
 from clair.trouves.trouve import TrouveType
 from clair.web_ui.columns import infer_columns
