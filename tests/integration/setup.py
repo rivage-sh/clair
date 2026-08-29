@@ -1,6 +1,19 @@
-"""Make the schema of one run, and put the source tables in it.
+"""Make the empty schema of one run.
 
-Run it as a module to prepare a schema by hand:
+The `Prepare the schema` step of `.github/workflows/integration.yml` runs this
+module one time, before pytest starts. The run starts with a drop, because a
+second commit of one pull request reuses the schema name of the first, and a
+Trouve that the commit deleted would stay.
+
+The drop belongs here and not in a fixture. A parallel run starts one worker
+process for each group of tests, and each worker runs the session fixtures. A
+drop in a fixture would remove the tables of a worker that still runs.
+
+`load_source_tables` stays in this module, and the `example_sources` fixture
+calls it. The name of each copy holds the prefix of one test class, thus the
+clone happens for each class, and not one time for the run.
+
+Run it as a module to make a schema by hand:
 
     uv run python -m tests.integration.setup --schema-name PR_42
 """
@@ -10,6 +23,7 @@ from __future__ import annotations
 import argparse
 
 from clair.adapters.snowflake import SnowflakeAdapter
+from tests.integration.clean_up import drop_schema
 from tests.integration.config import (
     DATABASE_NAME,
     IntegrationConfig,
@@ -50,12 +64,12 @@ def load_source_tables(adapter: SnowflakeAdapter, schema_name: str) -> list[str]
     return made
 
 
-def prepare(config: IntegrationConfig) -> list[str]:
-    """Make the schema of the run and load the source tables."""
+def prepare_schema(config: IntegrationConfig) -> None:
+    """Drop the schema of the run, and make it again, empty."""
     adapter = connect(config)
     try:
+        drop_schema(adapter, config.schema_name)
         create_schema(adapter, config.schema_name)
-        return load_source_tables(adapter, config.schema_name)
     finally:
         adapter.close()
 
@@ -76,8 +90,8 @@ def main() -> None:
             }
         )
 
-    tables = prepare(config)
-    print(f"{DATABASE_NAME}.{config.schema_name}: {len(tables)} source tables")
+    prepare_schema(config)
+    print(f"{DATABASE_NAME}.{config.schema_name}: the schema is empty")
 
 
 if __name__ == "__main__":

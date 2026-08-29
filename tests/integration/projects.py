@@ -14,6 +14,7 @@ from clair import TrouveAddress
 from clair.core.discovery import discover_project
 from clair.trouves.trouve import TrouveAbc, TrouveType
 from tests.integration.config import DATABASE_NAME
+from tests.integration.routing_rule import make_table_name
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE_PROJECTS_DIR = REPOSITORY_ROOT / "examples" / "projects"
@@ -26,34 +27,39 @@ CI_ROUTING_FILE = '''\
 """The routing entry of the pull request tests.
 
 Every Trouve goes to one schema of the test database, and a SOURCE Trouve is not
-an exception. The three logical parts become one table name, thus two projects
-never collide.
+an exception. `tests.integration.routing_rule` holds the name rule, and the
+assertions of a test read the same module. Thus one change moves both.
+
+This file is not a project file that a user writes. clair reads it in the pytest
+process, and `tests` is importable there because pytest puts the repository root
+on `sys.path`. A copy of this project outside pytest cannot import the module,
+and it does not need to.
 """
 
 import os
 
 from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
+from tests.integration.routing_rule import make_table_name
 
 DATABASE_NAME = "clair_pr_testing"
 
 
 class PullRequestTestingRouting(RoutingEntry):
-    """Send every Trouve to clair_pr_testing.<schema>.<db>__<schema>__<table>."""
+    """Send every Trouve to clair_pr_testing.<schema>.<prefix>__<db>__<schema>__<table>."""
 
     environment_name: str = "pr_testing"
 
     def route(
         self, trouve_address: TrouveAddress, trouve_type: TrouveType
     ) -> TrouveAddress:
-        table_name = (
-            f"{trouve_address.database_name}__"
-            f"{trouve_address.schema_name}__"
-            f"{trouve_address.table_name}"
-        )
         return TrouveAddress(
             database_name=DATABASE_NAME,
             schema_name=os.environ["CLAIR_PR_TESTING_SCHEMA_NAME"],
-            table_name=table_name,
+            table_name=make_table_name(
+                trouve_address.database_name,
+                trouve_address.schema_name,
+                trouve_address.table_name,
+            ),
         )
 
 
@@ -85,10 +91,11 @@ def example_project_paths() -> list[Path]:
 def physical_table_name(logical_name: str) -> str:
     """Give the routed table name of one logical name.
 
-    The rule matches CI_ROUTING_FILE: three logical parts become one name.
+    `routing_rule.make_table_name` holds the rule, and CI_ROUTING_FILE reads the
+    same function. This function takes the three parts as one dotted text,
+    because a test holds a logical name in that shape.
     """
-    database_name, schema_name, table_name = logical_name.split(".")
-    return f"{database_name}__{schema_name}__{table_name}"
+    return make_table_name(*logical_name.split("."))
 
 
 def physical_address(logical_name: str, schema_name: str) -> TrouveAddress:

@@ -25,13 +25,13 @@ import pytest
 
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.environments.environments import Environment
-from tests.integration.clean_up import drop_schema
 from tests.integration.config import (
     IntegrationConfig,
     IntegrationConfigError,
     load_config,
 )
-from tests.integration.setup import prepare
+from tests.integration.routing_rule import TABLE_PREFIX_VARIABLE, workspace_prefix_of
+from tests.integration.setup import create_schema, load_source_tables
 from tests.integration.warehouse import connect
 
 
@@ -50,10 +50,13 @@ def integration_config() -> IntegrationConfig:
 
 @pytest.fixture(scope="session")
 def snowflake_workspace(integration_config: IntegrationConfig) -> IntegrationConfig:
-    """Give one empty schema, with the source tables of each example project.
+    """Give the schema of the run.
 
-    The run starts with a drop. A second commit of one pull request reuses the
-    schema name of the first, and a Trouve that the commit deleted would stay.
+    This fixture drops nothing. A parallel run starts one worker process for
+    each group of tests, thus each worker runs this fixture. A drop here would
+    remove the tables of a worker that still runs. The `Prepare the schema` step
+    of `.github/workflows/integration.yml` drops the schema one time, before
+    pytest starts.
 
     The run does not drop the schema at the end, thus you can read the tables of
     a failed run. `.github/workflows/integration-clean-up.yml` drops the schema
@@ -61,12 +64,54 @@ def snowflake_workspace(integration_config: IntegrationConfig) -> IntegrationCon
     """
     adapter = connect(integration_config)
     try:
-        drop_schema(adapter, integration_config.schema_name)
+        create_schema(adapter, integration_config.schema_name)
     finally:
         adapter.close()
-
-    prepare(integration_config)
     return integration_config
+
+
+@pytest.fixture(scope="class", autouse=True)
+def workspace_prefix(request: pytest.FixtureRequest) -> Iterator[str]:
+    """Give each test class its own table names inside the schema of the run.
+
+    The module name and the class name become the prefix of each table that the
+    class builds. Two classes that build the same example project then write two
+    different tables, and they can run at the same time.
+
+    The prefix comes from the code, thus a new test class is isolated with no
+    action from the author. A name that a person selects can repeat.
+
+    `--dist loadscope` sends each class to one worker, thus one class holds one
+    prefix in one process.
+    """
+    prefix = workspace_prefix_of(
+        request.module.__name__.rsplit(".", 1)[-1],
+        request.cls.__name__ if request.cls is not None else None,
+    )
+    variables = pytest.MonkeyPatch()
+    variables.setenv(TABLE_PREFIX_VARIABLE, prefix)
+    yield prefix
+    variables.undo()
+
+
+@pytest.fixture(scope="class")
+def example_sources(
+    snowflake_workspace: IntegrationConfig, workspace_prefix: str
+) -> list[str]:
+    """Clone the golden source table of each example project into the workspace.
+
+    A clone is a zero copy operation, thus each class can hold its own copy. The
+    name of each copy holds `workspace_prefix`, so this fixture runs one time
+    for each class, and not one time for the session.
+
+    A probe project of the staging tests and the seed tests makes its own rows.
+    Only a test of a project in `examples/projects/` asks for this fixture.
+    """
+    adapter = connect(snowflake_workspace)
+    try:
+        return load_source_tables(adapter, snowflake_workspace.schema_name)
+    finally:
+        adapter.close()
 
 
 @pytest.fixture(scope="session")
