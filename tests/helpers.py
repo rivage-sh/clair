@@ -32,6 +32,27 @@ from clair.trouves.trouve import (
     TrouveType,
 )
 
+PASSTHROUGH_ROUTING_FILE = """\
+from clair import RoutingTable
+
+routing = RoutingTable(entries=[])
+"""
+
+
+def write_project_marker(project_root: Path) -> Path:
+    """Write ``__routing__.py`` at *project_root*, and give the root back.
+
+    The routing file marks the root of a clair project, thus a test project
+    needs it. Use this function for a project root below ``tmp_path``: the
+    ``project_marker`` fixture writes the file in ``tmp_path`` for each test.
+    The empty table gives passthrough routing, the same as before the file.
+    """
+    project_root.mkdir(parents=True, exist_ok=True)
+    marker_path = project_root / "__routing__.py"
+    if not marker_path.exists():
+        marker_path.write_text(PASSTHROUGH_ROUTING_FILE)
+    return project_root
+
 
 class DatabaseOverrideRouting(RoutingEntry):
     """Send every Trouve, a SOURCE too, to one database."""

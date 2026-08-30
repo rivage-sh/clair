@@ -17,6 +17,20 @@ Each step below links to its source code.
 | 6 | [Resolve the addresses](#6-resolve-the-addresses) | The table that each Trouve reads |
 | 7 | [Execute](#7-execute) | One Snowflake object for each Trouve |
 
+## 0. Find the project root
+
+*Source: [`core/discovery.py`][discovery-py] — `find_project_root()`*
+
+Each step below takes a project root. `__routing__.py` marks it: clair walks up from the
+working directory to the first one, in the same way that git finds `.git`. Thus you run a
+command from any directory of the project. A directory that holds no `__routing__.py`, and
+no parent with one, stops the command. See
+[Project Layout](project-layout.md#the-project-root).
+
+The search reads the file system, thus it belongs to the one file system reader of
+`core/`. It runs before the pipeline: it produces the `project_dir` that step 2 and step 3
+then take.
+
 ## 1. Load the environment
 
 *Source: [`environments/environments.py`][environments-py] — `load_environment()`*
@@ -63,6 +77,24 @@ it. [`clair validate`](../cli/validate.md) reports that fault.
 
 A pandas Trouve holds the same information in a list. Its `input_addresses` gives the
 address of each input, in the parameter order of the transform.
+
+### One file gives one Trouve object
+
+clair imports each Trouve file, and the Trouve files import each other. Python keys its
+module table by the module name, thus one file under two names would run two times and
+give two `Trouve` objects. clair would then know one object, while the SQL of the author
+points to the other, and the DAG would lose that edge in silence.
+
+*Source: [`core/module_identity.py`][module-identity-py]*
+
+clair removes the fault at its origin. A file below the project root gives one module
+object, whatever name an import uses: the import resolves in the normal way, and the
+existing module object then answers under the new name too. The standard library does the
+same by hand — `os.path` and `posixpath` are two names for one module.
+
+A reference token that survives compilation stops the run anyway, and the error names the
+Trouve. clair never sends unresolved SQL to the warehouse: Snowflake answers with a parse
+error that names the token and nothing else.
 
 ### A file that clair cannot read stops the run
 
@@ -298,6 +330,7 @@ address, a collision, and an address that you type as text.
 [project-routing-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/environments/project_routing.py
 [routing-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/environments/routing.py
 [discovery-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/discovery.py
+[module-identity-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/module_identity.py
 [refs-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/trouves/_refs.py
 [text-references-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/text_references.py
 [dag-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/dag.py

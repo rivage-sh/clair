@@ -17,13 +17,20 @@ import clair as _clair_pkg
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
 
+from clair.core import module_identity
+from clair.environments.project_routing import ROUTING_FILE_NAME
 from clair.environments.routing import (
     RoutingEntry,
     TrouveAddress,
     detect_routing_collisions,
     route,
 )
-from clair.exceptions import DiscoveryError, ProjectDiscoveryError
+from clair.exceptions import (
+    DiscoveryError,
+    NotAProjectRootError,
+    ProjectDiscoveryError,
+    ProjectRootNotFoundError,
+)
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
@@ -45,6 +52,42 @@ TROUVE_DEPTH = 3
 The parts are database_name/schema_name/table_name.py. A file above that depth
 holds no schema name and no database name, thus clair cannot make its address.
 """
+
+
+def find_project_root(start_directory: Path) -> Path:
+    """Give the first directory at or above *start_directory* with ``__routing__.py``.
+
+    That file sits at the root of every clair project, thus it marks the root,
+    in the same way that ``.git`` marks a git repository. A user therefore runs
+    a clair command from any directory of the project.
+
+    Raises:
+        ProjectRootNotFoundError: No directory at or above *start_directory*
+            holds the marker file.
+    """
+    start_directory = start_directory.resolve()
+    for directory in [start_directory, *start_directory.parents]:
+        if (directory / ROUTING_FILE_NAME).is_file():
+            return directory
+    raise ProjectRootNotFoundError(str(start_directory), ROUTING_FILE_NAME)
+
+
+def _package_anchor(project_root: Path) -> Path | None:
+    """Give the directory above the package that holds *project_root*, or None.
+
+    A project root that holds ``__init__.py`` is part of a Python package. The
+    author of such a project imports a Trouve file through that package, for
+    example ``from clair_projects.analytics.source.orders.raw import trouve``.
+    That import needs the directory above the package on ``sys.path``. The
+    function walks up while ``__init__.py`` exists, in the same way that pytest
+    finds the package root of a test file.
+    """
+    if not (project_root / "__init__.py").is_file():
+        return None
+    anchor = project_root
+    while (anchor.parent / "__init__.py").is_file():
+        anchor = anchor.parent
+    return anchor.parent
 
 
 def compute_logical_address(file_path: Path) -> TrouveAddress:
@@ -90,13 +133,21 @@ def _is_trouve_candidate(file_path: Path) -> bool:
     return file_path.suffix == ".py"
 
 
-def _load_config_file(
-    file_path: Path, project_root: Path
-) -> DatabaseDefaults | SchemaDefaults | None:
+def _config_module_name(file_path: Path) -> str:
+    """Make a sys.modules name for a config file.
+
+    The name comes from the complete path, thus two projects of one monorepo
+    never take one name. A name from the path below the project root would
+    collide, and the second project would then read the config of the first.
+    """
+    sanitized = re.sub(r"\W", "_", str(file_path.with_suffix("")))
+    return f"_clair_config_{sanitized}"
+
+
+def _load_config_file(file_path: Path) -> DatabaseDefaults | SchemaDefaults | None:
     if not file_path.exists():
         return None
-    rel = file_path.relative_to(project_root).with_suffix("")
-    module_name = str(rel).replace(os.sep, "_").replace(".", "_") + "_cfg"
+    module_name = _config_module_name(file_path)
     try:
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
@@ -114,7 +165,6 @@ def _load_config_file(
 
 def _resolve_config(
     file_path: Path,
-    project_root: Path,
     profile_defaults: dict[str, str | None] | None = None,
 ) -> ResolvedConfig:
     """Make the merged config of a Trouve. The function moves up the directory tree.
@@ -141,18 +191,14 @@ def _resolve_config(
     schema_directory = file_path.parent
     database_directory = schema_directory.parent
 
-    db_defaults = _load_config_file(
-        database_directory / "__database_config__.py", project_root
-    )
+    db_defaults = _load_config_file(database_directory / "__database_config__.py")
     if isinstance(db_defaults, DatabaseDefaults):
         if db_defaults.warehouse and db_defaults.warehouse.strip():
             config.warehouse = db_defaults.warehouse
         if db_defaults.role and db_defaults.role.strip():
             config.role = db_defaults.role
 
-    schema_defaults = _load_config_file(
-        schema_directory / "__schema_config__.py", project_root
-    )
+    schema_defaults = _load_config_file(schema_directory / "__schema_config__.py")
     if isinstance(schema_defaults, SchemaDefaults):
         if schema_defaults.warehouse and schema_defaults.warehouse.strip():
             config.warehouse = schema_defaults.warehouse
@@ -207,9 +253,13 @@ def _detect_imports(
 
 
 # The root of each project that this process discovered. A second discovery
-# removes the modules of the projects before it, and takes their roots off
-# sys.path.
+# removes the modules of the projects before it.
 _loaded_project_roots: set[str] = set()
+
+# The sys.path entries that clair inserted. This set is separate from
+# _loaded_project_roots: a package anchor can hold the library modules of a
+# whole monorepo, and a discovery must never take those out of sys.modules.
+_inserted_sys_path_entries: set[str] = set()
 
 
 def _module_locations(module: object) -> list[str]:
@@ -258,10 +308,12 @@ def _forget_project_modules(project_root: Path) -> None:
         if any(_is_inside(location, root) for location in locations for root in roots):
             sys.modules.pop(module_name, None)
 
-    for other_root in _loaded_project_roots - {str(project_root)}:
-        if other_root in sys.path:
-            sys.path.remove(other_root)
+    for entry in list(_inserted_sys_path_entries - {str(project_root)}):
+        if entry in sys.path:
+            sys.path.remove(entry)
+        _inserted_sys_path_entries.discard(entry)
     _loaded_project_roots.clear()
+    module_identity.unwatch_every_project_root()
 
 
 def _is_inside(location: str, root: str) -> bool:
@@ -308,16 +360,41 @@ def discover_project(
     _clair_pkg.env = environment
     _clair_pkg.run_mode = run_mode
 
+    # The marker check. Without it, clair reads a directory that holds many
+    # projects as one project, and it builds one DAG from all of them.
+    if not (project_root / ROUTING_FILE_NAME).is_file():
+        raise NotAProjectRootError(str(project_root), ROUTING_FILE_NAME)
+
     # Empty the refs registry and remove the modules of each project that this
     # process loaded. Thus each discovery run starts from a clean state.
     clear_refs()
     _forget_project_modules(project_root)
 
-    # Put the project root in sys.path. Thus an import of a different Trouve works.
+    # Put the project root in sys.path. Thus an import of a different Trouve
+    # from the project root works. A project inside a Python package also gets
+    # its package anchor, thus an import through the package works too.
     project_root_str = str(project_root)
-    if project_root_str not in sys.path:
-        sys.path.insert(0, project_root_str)
+    sys_path_entries = [project_root_str]
+    package_anchor = _package_anchor(project_root)
+    if package_anchor is not None:
+        sys_path_entries.append(str(package_anchor))
+        # A parent package of the project can sit in sys.modules from an
+        # earlier discovery, with a __path__ that points to another tree.
+        # Python does not recompute the __path__ of a regular package, thus
+        # clair removes the chain, and the next import reads sys.path again.
+        chain_parts = project_root.relative_to(package_anchor).parts
+        for depth in range(1, len(chain_parts) + 1):
+            sys.modules.pop(".".join(chain_parts[:depth]), None)
+    for entry in sys_path_entries:
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
+            _inserted_sys_path_entries.add(entry)
     _loaded_project_roots.add(project_root_str)
+
+    # One file below the project root gives one module object, whatever name an
+    # import uses. Without this, one file imported under two names runs two
+    # times, and the second Trouve object breaks the DAG. See module_identity.
+    module_identity.watch_project_root(project_root)
 
     # Collect the candidate files.
     candidates: list[Path] = []
@@ -339,8 +416,13 @@ def discover_project(
             file_path.relative_to(project_root).with_suffix("")
         ).replace(os.sep, ".")
 
-        if module_name in sys.modules:
-            module = sys.modules[module_name]
+        # An earlier candidate can import this file as a dependency, under this
+        # name or under another name. The file identifies the module, thus one
+        # file gives one module object and one Trouve object.
+        already_loaded_module = module_identity.module_for_file(file_path)
+        if already_loaded_module is not None:
+            module = already_loaded_module
+            module_name = module.__name__
         else:
             try:
                 spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -438,7 +520,7 @@ def discover_project(
                 module_name=module_name,
                 imports=transform_imports,
                 input_addresses=input_addresses,
-                config=_resolve_config(file_path, project_root, profile_defaults),
+                config=_resolve_config(file_path, profile_defaults),
                 execution_type=ExecutionType.PANDAS,
             )
             for test in trouve_obj.tests:
@@ -455,7 +537,7 @@ def discover_project(
                 file_path=file_path.relative_to(project_root),
                 module_name=module_name,
                 imports=_detect_imports(trouve_obj.sql, logical_addresses, logical),
-                config=_resolve_config(file_path, project_root, profile_defaults),
+                config=_resolve_config(file_path, profile_defaults),
                 execution_type=ExecutionType.SNOWFLAKE,
             )
             for test in trouve_obj.tests:
@@ -463,6 +545,8 @@ def discover_project(
                     test.resolved_sql = _resolve_sql(
                         test.sql, logical_addresses, this_address=logical
                     )
+
+    errors.extend(_describe_unresolved_tokens(collected))
 
     trouve_count = len(collected)
     logger.info("discovery.complete", project_root=str(project_root), trouves=trouve_count, errors=len(errors))
@@ -474,6 +558,86 @@ def discover_project(
         raise ProjectDiscoveryError(errors)
 
     return [trouve for trouve, _, _, _ in collected]
+
+
+def _names_of_a_file_that_ran_two_times(file_path: Path) -> list[str]:
+    """Give the module names of *file_path* when the file gave two module objects.
+
+    Two names for one file are correct: the module identity finder gives the
+    second name the module of the first, in the same way that ``os.path`` and
+    ``posixpath`` name one module. Two **objects** are the fault, because each
+    object holds its own Trouve. The function therefore counts the objects, and
+    it answers an empty list for a file that ran one time.
+    """
+    names_of_object: dict[int, list[str]] = {}
+    target = file_path.resolve()
+    for module_name, module in list(sys.modules.items()):
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            continue
+        try:
+            if Path(module_file).resolve() != target:
+                continue
+        except OSError:
+            continue
+        names_of_object.setdefault(id(module), []).append(module_name)
+    if len(names_of_object) < 2:
+        return []
+    return sorted(name for names in names_of_object.values() for name in names)
+
+
+def _describe_unresolved_tokens(
+    collected: Sequence[tuple[TrouveAbc, TrouveAddress, Path, str]],
+) -> list[str]:
+    """Give one fault for each Trouve that keeps a placeholder token.
+
+    A token stays in the SQL when clair holds no address for the object that
+    the author interpolated. The module identity finder removes the common
+    cause — one file that runs two times under two names — but an import
+    machinery that clair does not see, for example the finder of an editable
+    install, can still make a second module object. Clair must never send such
+    SQL to the warehouse: the warehouse answers with a parse error that names
+    the token and nothing else, and the DAG has already lost the edge in
+    silence.
+    """
+    # A file that ran two times is the probable cause, and that file is the
+    # referenced file, not the file that keeps the token. Name each such file.
+    duplicates = {
+        file_path.name: names
+        for _, _, file_path, _ in collected
+        if (names := _names_of_a_file_that_ran_two_times(file_path))
+    }
+    duplicate_text = ""
+    if duplicates:
+        listed = "; ".join(
+            f"{file_name} as " + " and ".join(names)
+            for file_name, names in sorted(duplicates.items())
+        )
+        duplicate_text = f" Python ran one file two times: {listed}."
+
+    faults: list[str] = []
+    for trouve_obj, logical_address, file_path, _ in collected:
+        compiled = trouve_obj.compiled
+        if compiled is None:
+            continue
+        texts = [compiled.resolved_sql]
+        texts.extend(
+            test.resolved_sql
+            for test in trouve_obj.tests
+            if isinstance(test, TestSql) and test.resolved_sql
+        )
+        tokens = sorted({
+            match.group(0) for text in texts for match in _PLACEHOLDER_RE.finditer(text)
+        })
+        if not tokens:
+            continue
+        faults.append(
+            f"{file_path}: the Trouve '{logical_address}' interpolates a "
+            "Trouve object that clair did not collect, thus a reference token "
+            "stays in the SQL. Clair stops, because the warehouse cannot read "
+            "that SQL." + duplicate_text
+        )
+    return faults
 
 
 def find_routing_collisions(trouves: Sequence[TrouveAbc]) -> list[tuple[str, list[str]]]:

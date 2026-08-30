@@ -75,8 +75,10 @@ export CLAIR_USER=alice
 rule that gives an invalid name, and two Trouves that go to one target:
 
 ```bash
-clair validate --project examples/projects/example_1
-clair validate --project examples/projects/example_1 --env prod
+cd examples/projects/example_1
+
+clair validate
+clair validate --env prod
 ```
 
 This entry gives a SOURCE back unchanged, thus the `source` schema keeps its logical name
@@ -86,14 +88,16 @@ See the [Routing](../../site_docs/docs/topics/routing.md) for the full rules.
 
 ## Running the example
 
-From the project root (`clair/`):
+From the repository root:
 
 ```bash
+cd examples/projects/example_1
+
 # Compile (offline -- resolves the DAG and prints the generated SQL)
-clair compile --project examples/projects/example_1
+clair compile
 
 # Run (executes against Snowflake)
-clair run --project examples/projects/example_1 --env dev
+clair run --env dev
 ```
 
 After running, you should see three new tables in Snowflake:

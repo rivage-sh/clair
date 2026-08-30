@@ -28,6 +28,14 @@ from tests.helpers import make_run_result, make_test_result
 
 
 @pytest.fixture(autouse=True)
+def working_directory_is_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run each command inside a project. The commands find the root there."""
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
 def restore_the_logger() -> Any:
     """Give structlog its default configuration back after each command.
 
@@ -92,7 +100,7 @@ def _give_api(
 ) -> None:
     """Replace one function of `clair.api` with a false function."""
 
-    def fake(project_dir: str | Path = ".", **keyword_arguments: Any) -> Any:
+    def fake(project_dir: str | Path | None = None, **keyword_arguments: Any) -> Any:
         calls["project_dir"] = project_dir
         calls.update(keyword_arguments)
         if error is not None:
@@ -113,7 +121,7 @@ class TestRunCommand:
             RunSummary(results=[_run_result()], env_name="dev", run_id="abc"),
         )
 
-        result = CliRunner().invoke(cli, ["run", "--project", str(tmp_path)])
+        result = CliRunner().invoke(cli, ["run"])
 
         assert result.exit_code == 0
 
@@ -131,7 +139,7 @@ class TestRunCommand:
             ),
         )
 
-        result = CliRunner().invoke(cli, ["run", "--project", str(tmp_path)])
+        result = CliRunner().invoke(cli, ["run"])
 
         assert result.exit_code == 1
 
@@ -148,7 +156,7 @@ class TestRunCommand:
             ),
         )
 
-        result = CliRunner().invoke(cli, ["run", "--project", str(tmp_path)])
+        result = CliRunner().invoke(cli, ["run"])
 
         assert result.exit_code == 1
 
@@ -159,7 +167,7 @@ class TestRunCommand:
             monkeypatch, calls, "run", RunSummary(results=[], env_name="dev", run_id="abc")
         )
 
-        result = CliRunner().invoke(cli, ["run", "--project", str(tmp_path)])
+        result = CliRunner().invoke(cli, ["run"])
 
         assert result.exit_code == 0
         assert "no Trouves to run" in result.output
@@ -169,7 +177,7 @@ class TestRunCommand:
     ):
         _give_api(monkeypatch, calls, "run", error=ClairError("no environments.yml"))
 
-        result = CliRunner().invoke(cli, ["run", "--project", str(tmp_path)])
+        result = CliRunner().invoke(cli, ["run"])
 
         assert result.exit_code == 1
 
@@ -184,7 +192,6 @@ class TestRunCommand:
             cli,
             [
                 "run",
-                "--project", str(tmp_path),
                 "--select", "+mydb.analytics.orders",
                 "--exclude", "mydb.reports.*",
                 "--env", "prod",
@@ -195,7 +202,9 @@ class TestRunCommand:
             ],
         )
 
-        assert calls["project_dir"] == str(tmp_path)
+        # The CLI passes no directory. The API walks up from the working
+        # directory to the project root.
+        assert calls["project_dir"] is None
         assert calls["select"] == ("+mydb.analytics.orders",)
         assert calls["exclude"] == ("mydb.reports.*",)
         assert isinstance(calls["env"], Environment)
@@ -226,7 +235,7 @@ class TestTestCommand:
             ),
         )
 
-        result = CliRunner().invoke(cli, ["test", "--project", str(tmp_path)])
+        result = CliRunner().invoke(cli, ["test"])
 
         assert result.exit_code == 1
 
@@ -235,7 +244,7 @@ class TestTestCommand:
     ):
         _give_api(monkeypatch, calls, "test", TestSummary(results=[]))
 
-        result = CliRunner().invoke(cli, ["test", "--project", str(tmp_path)])
+        result = CliRunner().invoke(cli, ["test"])
 
         assert result.exit_code == 0
 
@@ -248,7 +257,6 @@ class TestTestCommand:
             cli,
             [
                 "test",
-                "--project", str(tmp_path),
                 "--select", "mydb.*",
                 "--sample",
                 "--threads", "2",
@@ -266,7 +274,7 @@ class TestCompileCommand:
     ):
         _give_api(monkeypatch, calls, "compile", error=ClairError("a bad Trouve"))
 
-        result = CliRunner().invoke(cli, ["compile", "--project", str(tmp_path)])
+        result = CliRunner().invoke(cli, ["compile"])
 
         assert result.exit_code == 1
 
@@ -276,7 +284,7 @@ class TestCompileCommand:
         _give_api(monkeypatch, calls, "compile", result=None)
 
         result = CliRunner().invoke(
-            cli, ["compile", "--project", str(tmp_path), "--run-mode", "incremental"]
+            cli, ["compile", "--run-mode", "incremental"]
         )
 
         assert result.exit_code == 0
@@ -287,7 +295,7 @@ class TestCompileCommand:
     ):
         _give_api(monkeypatch, calls, "compile", result=None)
 
-        CliRunner().invoke(cli, ["compile", "--project", str(tmp_path), "--env", "prod"])
+        CliRunner().invoke(cli, ["compile", "--env", "prod"])
 
         assert isinstance(calls["env"], Environment)
         assert calls["env"].name == "prod"
@@ -304,7 +312,7 @@ class TestCompileCommand:
         _give_api(monkeypatch, calls, "compile", result=None)
 
         result = CliRunner().invoke(
-            cli, ["compile", "--project", str(tmp_path), "--env", "prod"]
+            cli, ["compile", "--env", "prod"]
         )
 
         assert result.exit_code == 0
@@ -319,7 +327,7 @@ class TestDocsCommand:
             monkeypatch, calls, "docs", error=OSError("[Errno 48] Address already in use")
         )
 
-        result = CliRunner().invoke(cli, ["docs", "--project", str(tmp_path)])
+        result = CliRunner().invoke(cli, ["docs"])
 
         assert result.exit_code == 1
 
@@ -332,7 +340,6 @@ class TestDocsCommand:
             cli,
             [
                 "docs",
-                "--project", str(tmp_path),
                 "--port", "9000",
                 "--host", "0.0.0.0",
                 "--no-browser",

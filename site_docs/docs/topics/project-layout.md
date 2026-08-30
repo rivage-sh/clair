@@ -1,5 +1,43 @@
 # Project Layout
 
+## The project root
+
+`__routing__.py` marks the root of a clair project. Each command walks up from
+the working directory to the first `__routing__.py`, in the same way that git
+finds `.git`:
+
+```bash
+cd my_project/refined/orders
+clair run                       # clair finds my_project/
+```
+
+The file is thus necessary, also when it holds no entry. An empty table gives
+passthrough routing, and each Trouve writes to its logical address:
+
+```python
+# my_project/__routing__.py
+from clair import RoutingTable
+
+routing = RoutingTable(entries=[])
+```
+
+The marker gives clair the **boundary** of a project too. A directory that holds
+many projects holds no `__routing__.py`, thus clair stops and names that
+directory. Without the marker, clair reads such a directory as one project, and
+it builds one DAG from every project below it.
+
+```bash
+cd examples/projects        # this directory holds four projects
+clair dag
+Error: .../examples/projects holds no __routing__.py, thus it is not a clair
+project root. A directory that holds many projects gives this error: give the
+path of one project. Run `clair init` to make a new project.
+```
+
+The Python API takes the same root. `clair.run()` with no directory starts the
+same search, and a path names a project directly. See
+[Python API](../reference/python-api.md#project_dir).
+
 ## Directory → Snowflake name
 
 The directory structure below your project root maps directly to fully-qualified Snowflake names:
@@ -44,6 +82,30 @@ must not share its name with a package that Python can already import in your en
 A package that pip installed wins, and the import of the Trouve then fails with
 `No module named 'source.orders'`.
 
+### Two names for one file
+
+A project inside a Python package gives one Trouve file two possible import names. Clair
+imports `source/orders/raw.py` from the project root as `source.orders.raw`, and the
+author of a monorepo can import the same file through the package:
+
+```python
+# monorepo/clair_projects/analytics/refined/orders/daily.py
+from clair_projects.analytics.source.orders.raw import trouve as raw_orders
+```
+
+Python keys its module table by the name, thus two names would run one file two times and
+give two different `Trouve` objects. Clair prevents that: one file below the project root
+gives **one** module object, whatever name an import uses. The two imports above therefore
+give the same object, and the DAG keeps the edge between the two files.
+
+You write no configuration for this. Clair also puts the package above the project root on
+the import path when the project root holds an `__init__.py`, thus the import above needs
+no `sys.path` change from you.
+
+If a reference still does not resolve — an import machinery that clair does not see can
+make a second module object — clair stops the run and names the Trouve. It never sends
+unresolved SQL to Snowflake.
+
 ## Typical layout
 
 A clair project in production usually has 3 or 4 layers:
@@ -79,7 +141,7 @@ my_project/
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `__routing__.py` | project root | The [routing](routing.md) entry of each environment |
+| `__routing__.py` | project root | Marks the project root, and holds the [routing](routing.md) entry of each environment |
 | `__database_config__.py` | database directory | Warehouse/role defaults for all Trouves in that database |
 | `__schema_config__.py` | schema directory | Warehouse/role defaults for all Trouves in that schema |
 

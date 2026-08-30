@@ -3,23 +3,23 @@
 Remove compiled artifacts from `_clairtifacts/`.
 
 ```bash
-clair clean [--project PATH] [--before AGE] [--dry-run] [--yes]
+clair clean [--before AGE] [--dry-run] [--yes]
 ```
 
 ## Example
 
 ```bash
 # Show what clair will delete (older than 7 days)
-clair clean --project . --before 7d --dry-run
+clair clean --before 7d --dry-run
 
 # Delete after you confirm
-clair clean --project . --before 7d
+clair clean --before 7d
 
 # Skip confirmation (useful in CI)
-clair clean --project . --before 7d --yes
+clair clean --before 7d --yes
 
 # Delete everything
-clair clean --project .
+clair clean
 ```
 
 ## `--before` formats
@@ -52,7 +52,6 @@ Would remove 3 artifact run(s):
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | `.` | Path to the clair project root |
 | `--before` | (none — all runs) | Remove the artifacts that are older than this age or date |
 | `--dry-run` | `false` | Show the artifacts, but do not delete them |
 | `--yes` | `false` | Skip the confirmation prompt |
