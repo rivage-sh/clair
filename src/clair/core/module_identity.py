@@ -95,6 +95,14 @@ class _AliasLoader(importlib.abc.Loader):
         self._original_name = module.__name__
         self._original_spec = module.__spec__
 
+    def is_package(self, fullname: str) -> bool:
+        """Tell the import machinery that a package stays a package.
+
+        ``spec_from_loader`` reads this method. Without it the new spec holds
+        no search location, thus ``import <alias>.submodule`` would fail.
+        """
+        return hasattr(self._module, "__path__")
+
     def create_module(self, spec: importlib.machinery.ModuleSpec) -> ModuleType:
         return self._module
 
@@ -126,9 +134,16 @@ class _OneModulePerFileFinder(importlib.abc.MetaPathFinder):
             # The first import of this file. The normal machinery loads it, and
             # sys.modules then holds it for the next name.
             return None
-        return importlib.util.spec_from_loader(
+        alias_spec = importlib.util.spec_from_loader(
             fullname, _AliasLoader(existing_module), origin=spec.origin
         )
+        if alias_spec is not None and alias_spec.submodule_search_locations is not None:
+            # A package keeps the search path of the module that runs the file,
+            # thus a submodule of the alias resolves in the same directory.
+            alias_spec.submodule_search_locations = list(
+                getattr(existing_module, "__path__", [])
+            )
+        return alias_spec
 
 
 _finder = _OneModulePerFileFinder()

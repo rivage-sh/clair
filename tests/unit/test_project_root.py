@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -216,6 +217,45 @@ class TestOneModulePerFile:
             and Path(module_file).resolve() == source_file.resolve()
         }
         assert len(objects) == 1
+
+
+    def test_a_package_alias_keeps_its_submodules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A package below the root keeps its search path under a second name.
+
+        A Trouve file can import a helper package of the project. The finder
+        gives the second name the module of the first, and a package must stay
+        a package: an alias with no search path breaks ``import alias.helper``.
+        """
+        project_root = write_project_marker(tmp_path / "analytics")
+        (project_root / "shop" / "source").mkdir(parents=True)
+        (project_root / "shop" / "refined").mkdir(parents=True)
+        (project_root / "toolkit").mkdir()
+        (project_root / "toolkit" / "__init__.py").write_text("")
+        (project_root / "toolkit" / "sql_helper.py").write_text(
+            "def active_rows() -> str:\n    return 'where is_active'\n"
+        )
+        (project_root / "shop" / "source" / "orders.py").write_text(SOURCE_FILE)
+        (project_root / "shop" / "refined" / "daily.py").write_text(
+            "import toolkit\n"
+            "from toolkit.sql_helper import active_rows\n"
+            "from shop.source.orders import trouve as orders\n"
+            "from clair import Trouve\n"
+            'trouve = Trouve(sql=f"SELECT * FROM {orders} {active_rows()}")\n'
+        )
+        monkeypatch.syspath_prepend(str(project_root))
+        # The helper package loads before discovery, thus discovery meets a
+        # package that sys.modules already holds. The test writes the package
+        # at run time, thus the import takes its name as text.
+        importlib.import_module("toolkit.sql_helper")
+
+        trouves = discover_project(project_root)
+
+        refined = compiled_of(trouves, "shop.refined.daily")
+        assert refined.resolved_sql == (
+            "SELECT * FROM shop.source.orders where is_active"
+        )
 
 
 class TestTheFlatProject:
