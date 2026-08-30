@@ -236,16 +236,22 @@ trouve = Trouve(
 ### 3. Compile and run
 
 ```bash
+cd my_project
+
 # Inspect the generated SQL without touching Snowflake
-clair compile --project=my_project
+clair compile
 
 # Execute against Snowflake
-clair run --project=my_project --env=dev
+clair run --env=dev
 ```
 
 ---
 
 ## CLI reference
+
+Each command finds the project root: it walks up from the working directory to
+the first `__routing__.py`, in the same way that git finds `.git`. Thus you run
+a command from any directory of the project.
 
 ```bash
 clair --help   # list all commands
@@ -260,39 +266,39 @@ clair init --project=./my_project
 ### `clair compile`
 Resolve the DAG and write SQL to `_clairtifacts/`. No Snowflake connection needed.
 ```bash
-clair compile --project=./my_project [--select='db.schema.*'] [--run-mode=incremental]
+clair compile [--select='db.schema.*'] [--run-mode=incremental]
 ```
 
 ### `clair run`
 Execute Trouves against Snowflake in topological order.
 ```bash
-clair run --project=./my_project --env=dev [--select='db.schema.*'] [--run-mode=incremental]
+clair run --env=dev [--select='db.schema.*'] [--run-mode=incremental]
 ```
 
 ### `clair test`
 Run data quality tests against Snowflake.
 ```bash
-clair test --project=./my_project --env=dev [--select='db.schema.*']
+clair test --env=dev [--select='db.schema.*']
 ```
 
 ### `clair dag`
 Print the dependency graph as an indented tree.
 ```bash
-clair dag --project=./my_project [--select='db.schema.*']
+clair dag [--select='db.schema.*']
 ```
 
 ### `clair docs`
 Start a local web UI showing the project DAG and per-Trouve documentation. No Snowflake connection needed.
 ```bash
-clair docs --project=./my_project [--port=8741] [--host=127.0.0.1] [--no-browser]
+clair docs [--port=8741] [--host=127.0.0.1] [--no-browser]
 ```
 
 ### `clair clean`
 Remove compiled artifacts from `_clairtifacts/`.
 ```bash
-clair clean --project=./my_project --before=7d          # older than 7 days
-clair clean --project=./my_project --before=2026-03-01  # before a date
-clair clean --project=./my_project --dry-run            # preview only
+clair clean --before=7d          # older than 7 days
+clair clean --before=2026-03-01  # before a date
+clair clean --dry-run            # preview only
 ```
 
 ---
@@ -342,7 +348,7 @@ trouve = Trouve(
 `TestSql` is skipped during `--sample` runs.
 
 ```bash
-clair test --project=./my_project --env=dev
+clair test --env=dev
 ```
 
 ---
@@ -431,16 +437,16 @@ All commands accept `--select` for glob-style filtering on fully-qualified names
 
 ```bash
 # Run everything in one schema
-clair run --project=. --env=dev --select='source.products.*'
+clair run --env=dev --select='source.products.*'
 
 # Run a specific table
-clair run --project=. --env=dev --select='derived.products.top_reviewed'
+clair run --env=dev --select='derived.products.top_reviewed'
 
 # Compile only tables matching a name pattern across all schemas
-clair compile --project=. --select='*.*.top_*'
+clair compile --select='*.*.top_*'
 
 # Union multiple patterns -- select from two schemas at once
-clair run --project=. --env=dev --select='source.products.*' --select='derived.products.*'
+clair run --env=dev --select='source.products.*' --select='derived.products.*'
 ```
 
 ---
@@ -481,7 +487,7 @@ Example projects are included under `examples/projects/`:
 
 Each numbered project holds a `__routing__.py` with a `dev` entry and a `prod` entry. The
 `dev` entry reads `CLAIR_USER`, thus each person writes to a separate database. Run
-`clair validate --project examples/projects/example_1` to find a routing problem without a
+`clair validate` in `examples/projects/example_1` to find a routing problem without a
 Snowflake connection.
 
 The README of each project holds the SQL that creates and seeds the source tables, and the SQL

@@ -106,28 +106,28 @@ Every test generates a SQL query. **Zero rows in the result = pass. One row or m
 **Automatically after each successful node:**
 
 ```bash
-clair run --project . --env dev
+clair run --env dev
 # the tests run after each successful TABLE or VIEW
 ```
 
 **Skip the tests in a run:**
 
 ```bash
-clair run --project . --env dev --no-test
+clair run --env dev --no-test
 ```
 
 **A test run on its own:**
 
 ```bash
-clair test --project . --env dev
-clair test --project . --env dev --select='refined.orders.*'
+clair test --env dev
+clair test --env dev --select='refined.orders.*'
 ```
 
 **Tests on a sample.** Most tests run against `SELECT TOP 1000 *`. clair skips `TestRowCount`:
 
 ```bash
-clair run --project . --env dev --sample
-clair test --project . --env dev --sample
+clair run --env dev --sample
+clair test --env dev --sample
 ```
 
 ## Test reference
@@ -146,5 +146,5 @@ See also: [Tests API reference](../reference/tests-api.md).
 A test runs after clair materializes a Trouve, because only then does a table exist to query. A direct write would thus tell you that production is already wrong. [Staging](staging.md) changes the order, and each run works this way: clair writes each Trouve to a staging address, runs the tests there, and gives the data its physical address only after each test passes.
 
 ```bash
-clair run --project . --env prod
+clair run --env prod
 ```

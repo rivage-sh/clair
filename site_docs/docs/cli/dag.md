@@ -3,13 +3,13 @@
 Print the dependency graph of the project as an indented tree. The command does not need a Snowflake connection.
 
 ```bash
-clair dag [--project PATH] [--select PATTERN]...
+clair dag [--select PATTERN]...
 ```
 
 ## Example
 
 ```bash
-clair dag --project ./examples/projects/example_1
+cd examples/projects/example_1 && clair dag
 ```
 
 Output:
@@ -26,14 +26,13 @@ example_1_database.source.events (SOURCE)
 Select specific Trouves to see a subgraph:
 
 ```bash
-clair dag --project . --select='refined.*.*'
+clair dag --select='refined.*.*'
 ```
 
 ## Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | `.` | Path to the clair project root |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 
 ## See also

@@ -64,8 +64,10 @@ export CLAIR_USER=alice
 rule that gives an invalid name, and two Trouves that go to one target:
 
 ```bash
-clair validate --project examples/projects/example_3
-clair validate --project examples/projects/example_3 --env prod
+cd examples/projects/example_3
+
+clair validate
+clair validate --env prod
 ```
 
 This entry gives a SOURCE back unchanged, thus the `source` schema keeps its logical name
@@ -80,11 +82,13 @@ All commands run from the repo root (`clair/`).
 ### 1. Compile (no Snowflake connection)
 
 ```bash
+cd examples/projects/example_3
+
 # Preview full-refresh SQL (default)
-clair compile --project examples/projects/example_3
+clair compile
 
 # Preview incremental SQL — shows INSERT INTO and MERGE statements with <run_id> placeholder
-clair compile --project examples/projects/example_3 --run-mode incremental
+clair compile --run-mode incremental
 ```
 
 ### 2. Full refresh run (first run)
@@ -92,7 +96,7 @@ clair compile --project examples/projects/example_3 --run-mode incremental
 Creates all tables from scratch. Use this to initialise the derived tables before testing incremental.
 
 ```bash
-clair run --project examples/projects/example_3 --env dev
+cd examples/projects/example_3 && clair run --env dev
 ```
 
 Verify:
@@ -115,7 +119,7 @@ insert into example_3_database.source.orders values
 ### 4. Incremental run
 
 ```bash
-clair run --project examples/projects/example_3 --env dev --run-mode incremental
+cd examples/projects/example_3 && clair run --env dev --run-mode incremental
 ```
 
 Expected behaviour:

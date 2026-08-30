@@ -5,7 +5,7 @@ Snowflake can test a table only after the table exists. A direct write therefore
 Staging closes that window, and it is **how clair writes**. There is no flag. Clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes.
 
 ```bash
-clair run --project . --env prod
+clair run --env prod
 ```
 
 `--no-test` is the one flag that stops this. It removes the tests that decide the promotion, so a staging address protects nothing. That run writes to each physical address directly.
@@ -61,8 +61,8 @@ Snowflake makes a clone in the metadata, so this step takes constant time for a 
 `clair compile` writes the complete plan to `_clairtifacts/`: the clone, the build at the staging address, a comment that marks the test step, and the promotion.
 
 ```bash
-clair compile --project .
-clair compile --project . --run-mode incremental
+clair compile
+clair compile --run-mode incremental
 ```
 
 ## After a failure

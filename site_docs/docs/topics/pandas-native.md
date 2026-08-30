@@ -133,7 +133,7 @@ A SQL `Trouve` can depend on the output of a `PandasTrouve`, and a `PandasTrouve
 `--select` works in the same way:
 
 ```bash
-clair run --project=. --env=dev --select='derived.products.top_rated'
+clair run --env=dev --select='derived.products.top_rated'
 ```
 
 ## Compile output

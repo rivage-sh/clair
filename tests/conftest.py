@@ -8,6 +8,20 @@ from pathlib import Path
 import pytest
 import structlog
 
+from tests.helpers import write_project_marker
+
+
+@pytest.fixture(autouse=True)
+def project_marker(tmp_path: Path) -> Path:
+    """Write ``__routing__.py`` in tmp_path, thus tmp_path is a project root.
+
+    Discovery reads the marker, and almost every test that writes a project
+    writes it in tmp_path. A test that needs a project root below tmp_path
+    writes its own marker with ``write_project_marker``. A test that writes its
+    own ``__routing__.py`` into tmp_path replaces this one.
+    """
+    return write_project_marker(tmp_path)
+
 
 @pytest.fixture
 def simple_project() -> Path:
@@ -34,7 +48,14 @@ def clean_sys_modules():
     for mod_name in after - before:
         if any(
             part in mod_name
-            for part in ("source.", "analytics.", "db.", "tmp_project", "_clair_routing_")
+            for part in (
+                "source.",
+                "analytics.",
+                "db.",
+                "tmp_project",
+                "_clair_routing_",
+                "clair_projects",
+            )
         ):
             del sys.modules[mod_name]
 

@@ -203,7 +203,7 @@ On the first run, the target table does not exist. clair then does a full refres
 Force a full refresh for one run:
 
 ```bash
-clair run --project=. --env=dev --run-mode=full_refresh
+clair run --env=dev --run-mode=full_refresh
 ```
 
 ## `RunConfig` field reference

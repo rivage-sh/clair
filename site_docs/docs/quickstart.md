@@ -45,8 +45,9 @@ Give an example Snowflake table that contains source data (for example source.or
 ✓ Project ready.
 
 Next steps:
-  1. clair compile --project /path/to/my_project
-  2. clair run    --project /path/to/my_project
+  1. cd /path/to/my_project
+  2. clair compile
+  3. clair run
 ```
 
 ## 2. Create a project
@@ -153,11 +154,13 @@ trouve = Trouve(
 ## 4. Compile and run
 
 ```bash
+cd my_project
+
 # Read the generated SQL. This does not connect to Snowflake.
-clair compile --project=my_project
+clair compile
 
 # Run against Snowflake
-clair run --project=my_project --env=dev
+clair run --env=dev
 ```
 
 ## Next steps

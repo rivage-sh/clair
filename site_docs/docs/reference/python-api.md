@@ -63,11 +63,26 @@ Each function gives a result object with the complete data of the operation. No
 function writes to stdout, and no function stops the process: a fault raises a
 `ClairError`.
 
+### `project_dir`
+
+Each function takes the project root as its first argument. `None`, the default,
+starts the root search: clair walks up from the working directory to the first
+`__routing__.py`. Give the path to name a project in a different directory.
+
+```python
+clair.validate()                          # the project of the working directory
+clair.validate("~/projects/analytics")    # a project that you name
+```
+
+A directory that holds many projects raises `NotAProjectRootError`, because it
+holds no `__routing__.py` of its own. See
+[Project Layout](../topics/project-layout.md#the-project-root).
+
 ## `clair.run()`
 
 ```python
 def run(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     env: Environment,
     select: Sequence[str] | None = None,
@@ -207,7 +222,7 @@ class Statement(BaseModel):
 
 ```python
 def compile(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     select: Sequence[str] | None = None,
     exclude: Sequence[str] | None = None,
@@ -240,7 +255,7 @@ physical address.
 
 ```python
 def test(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     env: Environment,
     select: Sequence[str] | None = None,
@@ -290,7 +305,7 @@ class TestResult(BaseModel):
 
 ```python
 def validate(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     env: Environment | str | None = None,
 ) -> ValidationReport
@@ -318,7 +333,7 @@ for problem in report.address_problems:
 
 ```python
 def clean(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     before: str | None = None,
     dry_run: bool = False,
@@ -345,14 +360,14 @@ print(plan.run_count, plan.run_ids)
 
 ```python
 def docs(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     host: str = "127.0.0.1",
     port: int = 8741,
     open_browser: bool = True,
 ) -> None
 
-def catalog(project_dir: str | Path = ".") -> dict
+def catalog(project_dir: str | Path | None = None) -> dict
 ```
 
 `docs()` starts the local web UI. The function does not give control back.
