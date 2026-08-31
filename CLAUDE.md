@@ -51,8 +51,20 @@ uv sync --reinstall           # repair a broken editable install
 ```
 
 Features go in a git worktree under `.claude/worktrees/<branch-name>/`. A worktree shares
-the git history but holds its own `.venv/`, so run `uv venv && uv sync` after you enter a
-new one, and run each command from inside the worktree — not from the repo root.
+the git history but holds its own environment. Run these commands after you enter a new
+worktree, and run each command from inside the worktree — not from the repo root.
+
+```bash
+uv venv venv && ln -s venv .venv && uv sync
+```
+
+Give the directory the name `venv`, and link `.venv` to it. On macOS a file sync agent,
+such as iCloud Drive, sets the `UF_HIDDEN` flag on each file below a directory with a dot
+prefix. Python skips a `.pth` file with that flag, and prints no message
+(python/cpython#113659). The editable install of clair is a `.pth` file. Therefore a
+directory with the name `.venv` makes `uv run clair` fail with `ModuleNotFoundError: No
+module named 'clair'`, some hours after each `uv sync`. The link keeps the default path of
+uv correct, so no environment variable is necessary.
 
 A worktree shares each branch ref with the main checkout. Only the working tree and the
 index belong to one worktree. Therefore:
