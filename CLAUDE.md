@@ -41,26 +41,18 @@ Packages inside `src/clair/`:
 
 ## Tooling: uv and worktrees
 
-Always use `uv run`. Never invoke `venv.nosync/bin/python` or `venv.nosync/bin/pytest` directly.
-
-`UV_PROJECT_ENVIRONMENT=venv.nosync` gives the environment the directory name
-`venv.nosync`. Put it before each uv command that reads or writes the environment. iCloud
-Drive skips a directory whose name ends with `.nosync`.
+Always use `uv run`. Never invoke `.venv/bin/python` or `.venv/bin/pytest` directly.
 
 ```bash
-UV_PROJECT_ENVIRONMENT=venv.nosync uv sync              # install or update each dependency
-UV_PROJECT_ENVIRONMENT=venv.nosync uv run clair         # run the CLI (clair.cli.main:cli)
-UV_PROJECT_ENVIRONMENT=venv.nosync uv run pytest tests/ # run the tests
-UV_PROJECT_ENVIRONMENT=venv.nosync uv sync --reinstall  # repair a broken editable install
+uv sync                       # install or update each dependency
+uv run clair                  # run the CLI (entrypoint: clair.cli.main:cli)
+uv run pytest tests/          # run the tests
+uv sync --reinstall           # repair a broken editable install
 ```
 
 Features go in a git worktree under `.claude/worktrees/<branch-name>/`. A worktree shares
-the git history but holds its own environment. Run this command after you enter a new
-worktree, and run each command from inside the worktree — not from the repo root.
-
-```bash
-UV_PROJECT_ENVIRONMENT=venv.nosync uv sync
-```
+the git history but holds its own `.venv/`, so run `uv venv && uv sync` after you enter a
+new one, and run each command from inside the worktree — not from the repo root.
 
 A worktree shares each branch ref with the main checkout. Only the working tree and the
 index belong to one worktree. Therefore:
@@ -82,19 +74,6 @@ index belong to one worktree. Therefore:
 Replicate each failure locally and iterate until every job passes. Do not push commits to
 see if the remote turns green. Each CI job is one command: read `.github/workflows/ci.yml`,
 and run the commands locally. Push one commit after they pass.
-
-CI makes the environment at `.venv`, and your machine makes it at `venv.nosync`. The three
-jobs are therefore:
-
-```bash
-uvx ruff check
-VIRTUAL_ENV=venv.nosync uvx ty check --exclude examples/notebooks
-UV_PROJECT_ENVIRONMENT=venv.nosync uv run pytest -m "not integration"
-```
-
-`ty` reads `VIRTUAL_ENV`, and it does not read `UV_PROJECT_ENVIRONMENT`. Without that
-variable `ty` finds no environment, and it reports an unresolved import for each
-dependency.
 
 For a merge conflict, pull main, resolve, and push. Favour simplicity over a clean commit
 history — CI squash-merges each PR.

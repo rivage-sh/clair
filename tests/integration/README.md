@@ -140,7 +140,7 @@ The `Prepare the schema` step of `.github/workflows/integration.yml` drops the
 schema, then it makes the schema again, empty:
 
 ```bash
-UV_PROJECT_ENVIRONMENT=venv.nosync uv run python -m tests.integration.setup
+uv run python -m tests.integration.setup
 ```
 
 A second commit of one pull request reuses the schema name of the first, and a
@@ -158,7 +158,7 @@ schema when the pull request closes, merged or not.
 To drop one schema by hand:
 
 ```bash
-UV_PROJECT_ENVIRONMENT=venv.nosync uv run python -m tests.integration.clean_up --schema-name pr_42
+uv run python -m tests.integration.clean_up --schema-name pr_42
 ```
 
 ## Run the tests on your machine
@@ -167,8 +167,8 @@ UV_PROJECT_ENVIRONMENT=venv.nosync uv run python -m tests.integration.clean_up -
 export CLAIR_PR_TESTING_SNOWFLAKE_ACCOUNT=...
 export CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PATH=/path/to/clair_pr_testing_f.p8
 export CLAIR_PR_TESTING_SCHEMA_NAME=local_<you>_<branch>
-UV_PROJECT_ENVIRONMENT=venv.nosync uv run python -m tests.integration.setup
-UV_PROJECT_ENVIRONMENT=venv.nosync uv run pytest tests/integration -m integration -v -n 6
+uv run python -m tests.integration.setup
+uv run pytest tests/integration -m integration -v -n 6
 ```
 
 `CLAIR_PR_TESTING_SCHEMA_NAME` is mandatory, and it has no default. The setup

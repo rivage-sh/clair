@@ -25,11 +25,11 @@ You need a Snowflake account with:
 From the **project root** (`clair/`), run:
 
 ```bash
-UV_PROJECT_ENVIRONMENT=venv.nosync uv sync
-source venv.nosync/bin/activate
+uv sync
+source .venv/bin/activate
 ```
 
-This installs the `clair` CLI into `venv.nosync/bin/clair`. With the venv activated, `clair` is available on your PATH.
+This installs the `clair` CLI into `.venv/bin/clair`. With the venv activated, `clair` is available on your PATH.
 
 ### Create the source table
 

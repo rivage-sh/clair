@@ -43,13 +43,13 @@ Clone the repo. Then use uv to sync the dependencies and to run the CLI:
 ```bash
 git clone https://github.com/rivage-sh/clair.git
 cd clair
-UV_PROJECT_ENVIRONMENT=venv.nosync uv sync
-UV_PROJECT_ENVIRONMENT=venv.nosync uv run clair --version
+uv sync
+uv run clair --version
 ```
 
 If the editable install does not work:
 
 ```bash
-UV_PROJECT_ENVIRONMENT=venv.nosync uv sync --reinstall
+uv pip install --reinstall -e .
 ```
 
