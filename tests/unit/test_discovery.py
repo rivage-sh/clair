@@ -12,8 +12,8 @@ from clair.core.discovery import (
     compute_logical_address,
     discover_project,
     find_routing_collisions,
-    recompile_for_selection,
 )
+from clair.core.references import recompile_for_selection
 from clair.exceptions import ProjectDiscoveryError
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.run_config import RunMode

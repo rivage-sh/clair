@@ -19,6 +19,16 @@ execution, and it names the module of each step. The pipeline is
 system — `discover_project()` in `core/discovery.py` — and each stage after it takes
 objects. Do not add a second reader of the file system to `core/` or to `api.py`.
 
+`discover_project()` calls two modules that hold a hard idea each. Read them before you
+change how clair loads a project:
+
+- `core/project_imports.py` owns every change that clair makes to the import system:
+  the `sys.path` entries, the `sys.modules` names, and the `sys.meta_path` finder that
+  gives one file one module object. Put no `sys.path` or `sys.modules` line in another
+  module.
+- `core/references.py` turns a Trouve reference into an address. `trouves/_refs.py`
+  makes the token at f-string time, and this module reads it back.
+
 ## Layout
 
 | Path | Holds |
@@ -33,7 +43,7 @@ Packages inside `src/clair/`:
 |---------|-------|
 | `cli/` | `main.py` — the click entrypoint. Read first for any CLI change. |
 | `trouves/` | The domain models: `trouve.py`, `column.py`, `test.py`, `config.py`, `run_config.py`, `_refs.py`. |
-| `core/` | The pipeline: `discovery.py`, `dag.py`, `compiler.py`, `runner.py`, `test_runner.py`, `dag_render.py`, `selector.py`, `scaffold.py`. |
+| `core/` | The pipeline: `discovery.py`, `project_imports.py`, `references.py`, `dag.py`, `compiler.py`, `runner.py`, `test_runner.py`, `dag_render.py`, `selector.py`, `scaffold.py`. |
 | `adapters/` | `base.py` holds the `WarehouseAdapter` ABC. `snowflake.py` is the only implementation. |
 | `environments/` | `environments.py` reads `~/.clair/environments.yml`. `routing.py` remaps targets. |
 | `web_ui/` | `clair docs` server: `catalog.py`, `columns.py`, `server.py`, bundled SPA in `static/`. |

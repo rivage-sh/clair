@@ -52,7 +52,7 @@ the logical address. See [Routing](routing.md).
 
 ## 3. Discover the project
 
-*Source: [`core/discovery.py`][discovery-py] — `discover_project()`, [`trouves/_refs.py`][refs-py], and [`core/text_references.py`][text-references-py]*
+*Source: [`core/discovery.py`][discovery-py] — `discover_project()`, [`core/references.py`][references-py], [`trouves/_refs.py`][refs-py], and [`core/text_references.py`][text-references-py]*
 
 clair walks the project directory and imports each Python file that holds a `trouve`
 object. Each file gets three addresses.
@@ -85,7 +85,7 @@ module table by the module name, thus one file under two names would run two tim
 give two `Trouve` objects. clair would then know one object, while the SQL of the author
 points to the other, and the DAG would lose that edge in silence.
 
-*Source: [`core/module_identity.py`][module-identity-py]*
+*Source: [`core/project_imports.py`][project-imports-py]*
 
 clair removes the fault at its origin. A file below the project root gives one module
 object, whatever name an import uses: the import resolves in the normal way, and the
@@ -125,7 +125,7 @@ clair then removes each SOURCE, because clair never builds a SOURCE, and it subt
 
 ## 6. Resolve the addresses
 
-*Source: [`core/discovery.py`][discovery-py] — `recompile_for_selection()`*
+*Source: [`core/references.py`][references-py] — `recompile_for_selection()`*
 
 This step decides which table each Trouve reads. clair renders the SQL a second time, from
 the tokens of step 3, and the selection now decides each address.
@@ -330,7 +330,8 @@ address, a collision, and an address that you type as text.
 [project-routing-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/environments/project_routing.py
 [routing-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/environments/routing.py
 [discovery-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/discovery.py
-[module-identity-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/module_identity.py
+[project-imports-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/project_imports.py
+[references-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/references.py
 [refs-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/trouves/_refs.py
 [text-references-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/text_references.py
 [dag-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/dag.py

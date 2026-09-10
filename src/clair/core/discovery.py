@@ -1,11 +1,21 @@
-"""Project discovery. Clair reads the project root and loads each Trouve file."""
+"""Project discovery. Clair walks the project root and compiles each Trouve file.
+
+The module does four steps, and it names a helper module for the two steps
+that hold a hard idea of their own:
+
+1. Find the project root. ``__routing__.py`` marks it.
+2. Prepare the import system, in ``core/project_imports.py``.
+3. Walk the tree, import each candidate file, and take its ``trouve`` object.
+4. Make the address of each Trouve, and render its SQL with
+   ``core/references.py``.
+
+This is the one function of ``core/`` that reads the file system. Each stage
+after it takes objects. See ``site_docs/docs/topics/anatomy-of-a-run.md``.
+"""
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import re
-import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,7 +27,12 @@ import clair as _clair_pkg
 if TYPE_CHECKING:
     from clair.environments.environments import Environment
 
-from clair.core import module_identity
+from clair.core import project_imports
+from clair.core.references import (
+    describe_unresolved_tokens,
+    detect_imports,
+    resolve_sql,
+)
 from clair.environments.project_routing import ROUTING_FILE_NAME
 from clair.environments.routing import (
     RoutingEntry,
@@ -31,7 +46,6 @@ from clair.exceptions import (
     ProjectDiscoveryError,
     ProjectRootNotFoundError,
 )
-from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves._refs import clear as clear_refs
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
 from clair.trouves.dataframe_trouve import DataframeTrouve
@@ -70,24 +84,6 @@ def find_project_root(start_directory: Path) -> Path:
         if (directory / ROUTING_FILE_NAME).is_file():
             return directory
     raise ProjectRootNotFoundError(str(start_directory), ROUTING_FILE_NAME)
-
-
-def _package_anchor(project_root: Path) -> Path | None:
-    """Give the directory above the package that holds *project_root*, or None.
-
-    A project root that holds ``__init__.py`` is part of a Python package. The
-    author of such a project imports a Trouve file through that package, for
-    example ``from clair_projects.analytics.source.orders.raw import trouve``.
-    That import needs the directory above the package on ``sys.path``. The
-    function walks up while ``__init__.py`` exists, in the same way that pytest
-    finds the package root of a test file.
-    """
-    if not (project_root / "__init__.py").is_file():
-        return None
-    anchor = project_root
-    while (anchor.parent / "__init__.py").is_file():
-        anchor = anchor.parent
-    return anchor.parent
 
 
 def compute_logical_address(file_path: Path) -> TrouveAddress:
@@ -133,33 +129,24 @@ def _is_trouve_candidate(file_path: Path) -> bool:
     return file_path.suffix == ".py"
 
 
-def _config_module_name(file_path: Path) -> str:
-    """Make a sys.modules name for a config file.
-
-    The name comes from the complete path, thus two projects of one monorepo
-    never take one name. A name from the path below the project root would
-    collide, and the second project would then read the config of the first.
-    """
-    sanitized = re.sub(r"\W", "_", str(file_path.with_suffix("")))
-    return f"_clair_config_{sanitized}"
-
-
 def _load_config_file(file_path: Path) -> DatabaseDefaults | SchemaDefaults | None:
+    """Give the defaults of one configuration file, or None.
+
+    A configuration file that clair cannot read is never fatal. The Trouve
+    then takes the defaults of the profile.
+    """
     if not file_path.exists():
         return None
-    module_name = _config_module_name(file_path)
     try:
-        spec = importlib.util.spec_from_file_location(module_name, file_path)
-        if spec is None or spec.loader is None:
-            return None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        defaults = getattr(module, "defaults", None)
-        if isinstance(defaults, (DatabaseDefaults, SchemaDefaults)):
-            return defaults
+        module = project_imports.load_support_file(file_path)
     except Exception as e:  # noqa: BLE001 — the user config code is unknown, but it is never fatal
         logger.debug("discovery.config_load_error", file=str(file_path), error=str(e))
+        return None
+    if module is None:
+        return None
+    defaults = getattr(module, "defaults", None)
+    if isinstance(defaults, (DatabaseDefaults, SchemaDefaults)):
+        return defaults
     return None
 
 
@@ -208,121 +195,124 @@ def _resolve_config(
     return config
 
 
-_PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
-
-
-def _resolve_sql(
-    sql: str,
-    id_to_address: dict[int, TrouveAddress],
-    this_address: TrouveAddress,
-) -> str:
-    """Render the SQL of the author into SQL with true addresses.
-
-    The function replaces a token that points to a different Trouve
-    (``__CLAIR_TROUVE_<id>__``) with the address in ``id_to_address``. It also
-    replaces the THIS marker (``__CLAIR_THIS__``) with ``this_address``.
-
-    Clair calls this function two times, and the map decides the difference.
-    discover_project() gives the logical addresses, because it does not know the
-    selection. recompile_for_selection() gives the address that the selection
-    decides. Both calls read the same source string, thus the second call needs
-    no text substitution on the result of the first.
-    """
-    def replace(m: re.Match[str]) -> str:
-        address = id_to_address.get(int(m.group(1)))
-        return str(address) if address else m.group(0)
-    result = _PLACEHOLDER_RE.sub(replace, sql)
-    return result.replace(THIS_PLACEHOLDER, str(this_address))
-
-
-def _detect_imports(
-    sql: str,
-    id_to_logical_address: dict[int, TrouveAddress],
+def _input_addresses_of(
+    trouve_obj: DataframeTrouve,
+    logical_addresses: dict[int, TrouveAddress],
+    file_path: Path,
     own_logical_address: TrouveAddress,
 ) -> list[str]:
-    """Give the logical address of each Trouve that the SQL points to with a token."""
-    imports: list[str] = []
-    for obj_id_str in _PLACEHOLDER_RE.findall(sql):
-        dependency = id_to_logical_address.get(int(obj_id_str))
-        if dependency is None or dependency == own_logical_address:
-            continue
-        if str(dependency) not in imports:
-            imports.append(str(dependency))
-    return imports
+    """Give the logical address of each input, in the parameter order.
 
-
-
-# The root of each project that this process discovered. A second discovery
-# removes the modules of the projects before it.
-_loaded_project_roots: set[str] = set()
-
-# The sys.path entries that clair inserted. This set is separate from
-# _loaded_project_roots: a package anchor can hold the library modules of a
-# whole monorepo, and a discovery must never take those out of sys.modules.
-_inserted_sys_path_entries: set[str] = set()
-
-
-def _module_locations(module: object) -> list[str]:
-    """Give each file path and each directory path of one module.
-
-    A module gives ``__file__``. A package, a namespace package too, gives
-    ``__path__``. A namespace package has no ``__file__``, thus the path list
-    is the one way to find the project that it belongs to.
+    This list is the counterpart of the addresses in the SQL of a SQL Trouve:
+    discovery writes the logical address, and recompile_for_selection() changes
+    it in the same way. Thus the two backends read the same tables.
     """
-    locations: list[str] = []
-    module_file = getattr(module, "__file__", None)
-    if module_file:
-        locations.append(str(module_file))
-    # A namespace package recalculates its path list, and that step reads the
-    # parent module. An earlier discovery can remove that parent, and the read
-    # then fails. Such a module has no path that a caller can use, thus an
-    # empty list is the correct answer.
-    try:
-        module_path = list(getattr(module, "__path__", []))
-    except Exception:  # noqa: BLE001 -- the import machinery raises many types here
-        module_path = []
-    locations.extend(str(entry) for entry in module_path)
-    return locations
+    input_addresses: list[str] = []
+    for upstream in trouve_obj.upstream_trouves():
+        dependency = logical_addresses.get(id(upstream))
+        if dependency is None:
+            raise DiscoveryError(
+                str(file_path),
+                f"the Trouve '{own_logical_address}' names an input that clair "
+                "did not find. Each input must be the `trouve` object of a "
+                "file in this project.",
+            )
+        input_addresses.append(str(dependency))
+    return input_addresses
 
 
-def _forget_project_modules(project_root: Path) -> None:
-    """Remove each Trouve module of a clair project from ``sys.modules``.
+def _compile_trouve(
+    trouve_obj: TrouveAbc,
+    *,
+    file_path: Path,
+    module_name: str,
+    project_root: Path,
+    logical_addresses: dict[int, TrouveAddress],
+    physical_addresses: dict[int, TrouveAddress],
+    profile_defaults: dict[str, str | None] | None,
+) -> None:
+    """Give one Trouve its CompiledAttributes, and resolve the SQL of each test.
 
-    Two projects can give one module the same name. The probe projects of the
-    tests do this, and a notebook that runs two projects does it too. Python
-    keeps the first module under that name, so the second discovery would read
-    the files of the first project. The function therefore removes the modules
-    of each project that this process loaded, and takes the other project roots
-    off ``sys.path``.
+    The execution type decides the shape of the result. A SQL Trouve holds its
+    addresses in its SQL, and a pandas Trouve holds them in a list.
     """
-    roots = {str(project_root), *_loaded_project_roots}
+    logical = logical_addresses[id(trouve_obj)]
+    physical = physical_addresses[id(trouve_obj)]
+    relative_file_path = file_path.relative_to(project_root)
+    config = _resolve_config(file_path, profile_defaults)
 
-    # Read the locations of every module first, and delete after. A namespace
-    # package reads its parent module when it gives its path list, thus a
-    # deletion in the middle of the loop hides the modules that come after it.
-    locations_of = {
-        module_name: _module_locations(module)
-        for module_name, module in list(sys.modules.items())
-    }
-    for module_name, locations in locations_of.items():
-        if any(_is_inside(location, root) for location in locations for root in roots):
-            sys.modules.pop(module_name, None)
+    if trouve_obj.execution_type == ExecutionType.PANDAS:
+        assert isinstance(trouve_obj, DataframeTrouve)
+        input_addresses = _input_addresses_of(
+            trouve_obj, logical_addresses, file_path, logical
+        )
+        # An input that the Trouve reads two times gives one import, and a
+        # Trouve that reads itself gives none.
+        transform_imports = [
+            address
+            for address in dict.fromkeys(input_addresses)
+            if address != str(logical)
+        ]
+        trouve_obj.compiled = CompiledAttributes(
+            physical_address=physical,
+            logical_address=logical,
+            resolved_sql="",
+            resolved_transform=trouve_obj.source_text(),
+            file_path=relative_file_path,
+            module_name=module_name,
+            imports=transform_imports,
+            input_addresses=input_addresses,
+            config=config,
+            execution_type=ExecutionType.PANDAS,
+        )
+    elif trouve_obj.execution_type == ExecutionType.SNOWFLAKE:
+        assert isinstance(trouve_obj, Trouve)
+        trouve_obj.compiled = CompiledAttributes(
+            physical_address=physical,
+            logical_address=logical,
+            resolved_sql=resolve_sql(
+                trouve_obj.sql, logical_addresses, this_address=logical
+            ),
+            file_path=relative_file_path,
+            module_name=module_name,
+            imports=detect_imports(trouve_obj.sql, logical_addresses, logical),
+            config=config,
+            execution_type=ExecutionType.SNOWFLAKE,
+        )
+    else:
+        raise DiscoveryError(
+            str(file_path),
+            f"clair cannot compile the execution type "
+            f"'{trouve_obj.execution_type}'.",
+        )
 
-    for entry in list(_inserted_sys_path_entries - {str(project_root)}):
-        if entry in sys.path:
-            sys.path.remove(entry)
-        _inserted_sys_path_entries.discard(entry)
-    _loaded_project_roots.clear()
-    module_identity.unwatch_every_project_root()
+    # A test reads the tables that its Trouve reads, thus the same map renders
+    # the SQL of each test.
+    for test in trouve_obj.tests:
+        if isinstance(test, TestSql):
+            test.resolved_sql = resolve_sql(
+                test.sql, logical_addresses, this_address=logical
+            )
 
 
-def _is_inside(location: str, root: str) -> bool:
-    """Tell you if *location* is the root directory, or a path below it."""
-    try:
-        Path(location).relative_to(root)
-    except ValueError:
-        return False
-    return True
+def _collect_candidate_files(project_root: Path) -> list[Path]:
+    """Give each Python file that can hold a Trouve, in path order.
+
+    Discovery skips a directory and a file that starts with ``_``, thus a
+    project holds a helper module that no Trouve declaration reaches.
+    """
+    candidates: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(project_root):
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if name not in _SKIP_DIRS and not name.startswith("_")
+        ]
+        for filename in filenames:
+            file_path = Path(dirpath) / filename
+            if _is_trouve_candidate(file_path):
+                candidates.append(file_path)
+    return sorted(candidates)
 
 
 def discover_project(
@@ -365,46 +355,13 @@ def discover_project(
     if not (project_root / ROUTING_FILE_NAME).is_file():
         raise NotAProjectRootError(str(project_root), ROUTING_FILE_NAME)
 
-    # Empty the refs registry and remove the modules of each project that this
-    # process loaded. Thus each discovery run starts from a clean state.
+    # Empty the refs registry, and prepare the import system for this project.
+    # Thus each discovery starts from a clean state, and one file below the
+    # project root gives one module object.
     clear_refs()
-    _forget_project_modules(project_root)
+    project_imports.make_project_importable(project_root)
 
-    # Put the project root in sys.path. Thus an import of a different Trouve
-    # from the project root works. A project inside a Python package also gets
-    # its package anchor, thus an import through the package works too.
-    project_root_str = str(project_root)
-    sys_path_entries = [project_root_str]
-    package_anchor = _package_anchor(project_root)
-    if package_anchor is not None:
-        sys_path_entries.append(str(package_anchor))
-        # A parent package of the project can sit in sys.modules from an
-        # earlier discovery, with a __path__ that points to another tree.
-        # Python does not recompute the __path__ of a regular package, thus
-        # clair removes the chain, and the next import reads sys.path again.
-        chain_parts = project_root.relative_to(package_anchor).parts
-        for depth in range(1, len(chain_parts) + 1):
-            sys.modules.pop(".".join(chain_parts[:depth]), None)
-    for entry in sys_path_entries:
-        if entry not in sys.path:
-            sys.path.insert(0, entry)
-            _inserted_sys_path_entries.add(entry)
-    _loaded_project_roots.add(project_root_str)
-
-    # One file below the project root gives one module object, whatever name an
-    # import uses. Without this, one file imported under two names runs two
-    # times, and the second Trouve object breaks the DAG. See module_identity.
-    module_identity.watch_project_root(project_root)
-
-    # Collect the candidate files.
-    candidates: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(project_root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith("_")]
-        for filename in filenames:
-            file_path = Path(dirpath) / filename
-            if _is_trouve_candidate(file_path):
-                candidates.append(file_path)
-    candidates.sort()
+    candidates = _collect_candidate_files(project_root)
 
     # Load each candidate. A file can be in sys.modules already, because an
     # earlier candidate imported it as a dependency.
@@ -416,25 +373,16 @@ def discover_project(
             file_path.relative_to(project_root).with_suffix("")
         ).replace(os.sep, ".")
 
-        # An earlier candidate can import this file as a dependency, under this
-        # name or under another name. The file identifies the module, thus one
-        # file gives one module object and one Trouve object.
-        already_loaded_module = module_identity.module_for_file(file_path)
-        if already_loaded_module is not None:
-            module = already_loaded_module
-            module_name = module.__name__
-        else:
-            try:
-                spec = importlib.util.spec_from_file_location(module_name, file_path)
-                if spec is None or spec.loader is None:
-                    continue
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module
-                spec.loader.exec_module(module)
-            except Exception as e:  # noqa: BLE001 — the user module code is unknown; clair reports the fault as an error
-                logger.warning("discovery.load_error", file=str(file_path), error=str(e))
-                errors.append(f"{file_path}: {e}")
-                continue
+        try:
+            module = project_imports.load_project_file(file_path, module_name)
+        except Exception as e:  # noqa: BLE001 — the user module code is unknown; clair reports the fault as an error
+            logger.warning("discovery.load_error", file=str(file_path), error=str(e))
+            errors.append(f"{file_path}: {e}")
+            continue
+        if module is None:
+            continue
+        # One file gives one module object, thus the name of that module wins.
+        module_name = module.__name__
 
         trouve_obj = getattr(module, "trouve", None)
         if not isinstance(trouve_obj, TrouveAbc):
@@ -458,22 +406,11 @@ def discover_project(
     # The routing entry sees every Trouve, a SOURCE too.
     logical_addresses: dict[int, TrouveAddress] = {}
     physical_addresses: dict[int, TrouveAddress] = {}
-    collision_check: dict[str, TrouveAddress] = {}
-
     for trouve_obj, logical_address, _, _ in collected:
         logical_addresses[id(trouve_obj)] = logical_address
-        physical_address = route(logical_address, trouve_obj.type, routing)
-        physical_addresses[id(trouve_obj)] = physical_address
-        # A TABLE that routes onto a SOURCE replaces the data that it reads.
-        collision_check[str(logical_address).upper()] = physical_address
-
-    # Make a map from an id to a logical address, for the pandas dependencies.
-    # With this map, clair finds the logical address of each Trouve that a
-    # DataframeTrouve names in its inputs.
-    id_to_logical_address: dict[int, TrouveAddress] = {
-        id(trouve_obj): logical_addresses[id(trouve_obj)]
-        for trouve_obj, _, _, _ in collected
-    }
+        physical_addresses[id(trouve_obj)] = route(
+            logical_address, trouve_obj.type, routing
+        )
 
     # Phase B: compile each Trouve.
     # Clair puts the logical addresses in the SQL. Thus, by default, the SQL
@@ -481,72 +418,17 @@ def discover_project(
     # recompile_for_selection() to change each selected upstream address to its
     # physical address.
     for trouve_obj, _, file_path, module_name in collected:
-        logical = logical_addresses[id(trouve_obj)]
-        physical = physical_addresses[id(trouve_obj)]
+        _compile_trouve(
+            trouve_obj,
+            file_path=file_path,
+            module_name=module_name,
+            project_root=project_root,
+            logical_addresses=logical_addresses,
+            physical_addresses=physical_addresses,
+            profile_defaults=profile_defaults,
+        )
 
-        if trouve_obj.execution_type == ExecutionType.PANDAS:
-            assert isinstance(trouve_obj, DataframeTrouve)
-            transform_imports: list[str] = []
-            # The address that each input reads, in the parameter order of the
-            # transform. This list is the counterpart of the addresses in the
-            # SQL of a SQL Trouve: discovery writes the logical address, and
-            # recompile_for_selection() changes it in the same way. Thus the two
-            # backends read the same tables.
-            input_addresses: list[str] = []
-            for upstream in trouve_obj.upstream_trouves():
-                dependency = id_to_logical_address.get(id(upstream))
-                if dependency is None:
-                    raise DiscoveryError(
-                        str(file_path),
-                        f"the Trouve '{logical}' names an input that clair did "
-                        "not find. Each input must be the `trouve` object of a "
-                        "file in this project.",
-                    )
-                input_addresses.append(str(dependency))
-
-                if dependency == logical:
-                    continue
-                if str(dependency) not in transform_imports:
-                    transform_imports.append(str(dependency))
-
-            resolved_transform = trouve_obj.source_text()
-
-            trouve_obj.compiled = CompiledAttributes(
-                physical_address=physical,
-                logical_address=logical,
-                resolved_sql="",
-                resolved_transform=resolved_transform,
-                file_path=file_path.relative_to(project_root),
-                module_name=module_name,
-                imports=transform_imports,
-                input_addresses=input_addresses,
-                config=_resolve_config(file_path, profile_defaults),
-                execution_type=ExecutionType.PANDAS,
-            )
-            for test in trouve_obj.tests:
-                if isinstance(test, TestSql):
-                    test.resolved_sql = _resolve_sql(
-                        test.sql, logical_addresses, this_address=logical
-                    )
-        else:
-            assert isinstance(trouve_obj, Trouve)
-            trouve_obj.compiled = CompiledAttributes(
-                physical_address=physical,
-                logical_address=logical,
-                resolved_sql=_resolve_sql(trouve_obj.sql, logical_addresses, this_address=logical),
-                file_path=file_path.relative_to(project_root),
-                module_name=module_name,
-                imports=_detect_imports(trouve_obj.sql, logical_addresses, logical),
-                config=_resolve_config(file_path, profile_defaults),
-                execution_type=ExecutionType.SNOWFLAKE,
-            )
-            for test in trouve_obj.tests:
-                if isinstance(test, TestSql):
-                    test.resolved_sql = _resolve_sql(
-                        test.sql, logical_addresses, this_address=logical
-                    )
-
-    errors.extend(_describe_unresolved_tokens(collected))
+    errors.extend(describe_unresolved_tokens(collected))
 
     trouve_count = len(collected)
     logger.info("discovery.complete", project_root=str(project_root), trouves=trouve_count, errors=len(errors))
@@ -558,86 +440,6 @@ def discover_project(
         raise ProjectDiscoveryError(errors)
 
     return [trouve for trouve, _, _, _ in collected]
-
-
-def _names_of_a_file_that_ran_two_times(file_path: Path) -> list[str]:
-    """Give the module names of *file_path* when the file gave two module objects.
-
-    Two names for one file are correct: the module identity finder gives the
-    second name the module of the first, in the same way that ``os.path`` and
-    ``posixpath`` name one module. Two **objects** are the fault, because each
-    object holds its own Trouve. The function therefore counts the objects, and
-    it answers an empty list for a file that ran one time.
-    """
-    names_of_object: dict[int, list[str]] = {}
-    target = file_path.resolve()
-    for module_name, module in list(sys.modules.items()):
-        module_file = getattr(module, "__file__", None)
-        if not module_file:
-            continue
-        try:
-            if Path(module_file).resolve() != target:
-                continue
-        except OSError:
-            continue
-        names_of_object.setdefault(id(module), []).append(module_name)
-    if len(names_of_object) < 2:
-        return []
-    return sorted(name for names in names_of_object.values() for name in names)
-
-
-def _describe_unresolved_tokens(
-    collected: Sequence[tuple[TrouveAbc, TrouveAddress, Path, str]],
-) -> list[str]:
-    """Give one fault for each Trouve that keeps a placeholder token.
-
-    A token stays in the SQL when clair holds no address for the object that
-    the author interpolated. The module identity finder removes the common
-    cause — one file that runs two times under two names — but an import
-    machinery that clair does not see, for example the finder of an editable
-    install, can still make a second module object. Clair must never send such
-    SQL to the warehouse: the warehouse answers with a parse error that names
-    the token and nothing else, and the DAG has already lost the edge in
-    silence.
-    """
-    # A file that ran two times is the probable cause, and that file is the
-    # referenced file, not the file that keeps the token. Name each such file.
-    duplicates = {
-        file_path.name: names
-        for _, _, file_path, _ in collected
-        if (names := _names_of_a_file_that_ran_two_times(file_path))
-    }
-    duplicate_text = ""
-    if duplicates:
-        listed = "; ".join(
-            f"{file_name} as " + " and ".join(names)
-            for file_name, names in sorted(duplicates.items())
-        )
-        duplicate_text = f" Python ran one file two times: {listed}."
-
-    faults: list[str] = []
-    for trouve_obj, logical_address, file_path, _ in collected:
-        compiled = trouve_obj.compiled
-        if compiled is None:
-            continue
-        texts = [compiled.resolved_sql]
-        texts.extend(
-            test.resolved_sql
-            for test in trouve_obj.tests
-            if isinstance(test, TestSql) and test.resolved_sql
-        )
-        tokens = sorted({
-            match.group(0) for text in texts for match in _PLACEHOLDER_RE.finditer(text)
-        })
-        if not tokens:
-            continue
-        faults.append(
-            f"{file_path}: the Trouve '{logical_address}' interpolates a "
-            "Trouve object that clair did not collect, thus a reference token "
-            "stays in the SQL. Clair stops, because the warehouse cannot read "
-            "that SQL." + duplicate_text
-        )
-    return faults
 
 
 def find_routing_collisions(trouves: Sequence[TrouveAbc]) -> list[tuple[str, list[str]]]:
@@ -656,100 +458,3 @@ def find_routing_collisions(trouves: Sequence[TrouveAbc]) -> list[tuple[str, lis
         if trouve.compiled and trouve.type != TrouveType.SOURCE
     }
     return detect_routing_collisions(logical_to_physical)
-
-
-def _reference_addresses_for_selection(
-    trouves: Sequence[TrouveAbc], selected_addresses: set[str]
-) -> dict[int, TrouveAddress]:
-    """Give the address that each Trouve reads at, keyed by the object id.
-
-    Three rules decide the address:
-
-    * This run builds the Trouve, thus a reader takes the physical address. The
-      new data goes there.
-    * This run does not build the Trouve, thus a reader takes the logical
-      address. Nothing writes a new copy, thus the production table holds the
-      newest data.
-    * The Trouve is a SOURCE, thus a reader takes the physical address. Clair
-      never builds a SOURCE, thus the routing entry is the only statement about
-      where the data is.
-    """
-    reference_addresses: dict[int, TrouveAddress] = {}
-    for trouve in trouves:
-        if not trouve.compiled:
-            continue
-        this_run_builds_it = (
-            str(trouve.compiled.physical_address) in selected_addresses
-        )
-        if trouve.type == TrouveType.SOURCE or this_run_builds_it:
-            reference_addresses[id(trouve)] = trouve.compiled.physical_address
-        else:
-            reference_addresses[id(trouve)] = trouve.compiled.logical_address
-    return reference_addresses
-
-
-def recompile_for_selection(
-    trouves: Sequence[TrouveAbc], selected_addresses: set[str]
-) -> None:
-    """Resolve each address again, now that clair knows the selection.
-
-    discover_project() resolves each reference to a logical production address,
-    because it does not know the selection yet. This function resolves each
-    reference a second time, and the selection now decides each address. See
-    ``_reference_addresses_for_selection`` for the rule.
-
-    The function reads the placeholder tokens of the author, and not the
-    addresses that discovery wrote. ``Trouve.sql`` and ``TestSql.sql`` keep
-    those tokens, thus clair renders the SQL again from the source. Only a token
-    becomes an address. An address that the author types as text stays as it is,
-    and it makes no DAG edge either.
-
-    This function changes each Trouve in place. It writes three places: the
-    resolved_sql of a SQL Trouve, the resolved_sql of each TestSql, and the
-    input_addresses of a DataFrame Trouve. It changes nothing for a Trouve outside
-    the selection, because this run does not execute that Trouve.
-
-    Args:
-        trouves: Each Trouve from discover_project().
-        selected_addresses: The physical addresses of the Trouves for this run.
-            The DAG selector gives them.
-    """
-    reference_addresses = _reference_addresses_for_selection(
-        trouves, selected_addresses
-    )
-
-    for trouve in trouves:
-        if not trouve.compiled:
-            continue
-        if str(trouve.compiled.physical_address) not in selected_addresses:
-            continue
-
-        # The Trouve writes to its own physical address, thus its own SQL points
-        # to the physical address too. An incremental Trouve reads the target
-        # with the THIS marker.
-        this_address = trouve.compiled.physical_address
-
-        if isinstance(trouve, Trouve):
-            trouve.compiled = trouve.compiled.model_copy(
-                update={
-                    "resolved_sql": _resolve_sql(
-                        trouve.sql, reference_addresses, this_address=this_address
-                    )
-                }
-            )
-        elif isinstance(trouve, DataframeTrouve):
-            # A DataFrame Trouve names each input in a list, and not in SQL.
-            trouve.compiled = trouve.compiled.model_copy(
-                update={
-                    "input_addresses": [
-                        str(reference_addresses[id(upstream)])
-                        for upstream in trouve.upstream_trouves()
-                    ]
-                }
-            )
-
-        for test in trouve.tests:
-            if isinstance(test, TestSql):
-                test.resolved_sql = _resolve_sql(
-                    test.sql, reference_addresses, this_address=this_address
-                )
