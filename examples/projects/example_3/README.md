@@ -22,7 +22,7 @@ source.orders  (SOURCE)
 ## Prerequisites
 
 - Snowflake account with an environment at `~/.clair/environments.yml` (examples below use `dev`)
-- clair installed: from the repo root run `uv sync && source .venv/bin/activate`
+- clair installed: from the repo root run `UV_PROJECT_ENVIRONMENT=venv uv sync && source venv/bin/activate`
 
 ## Setup: create the source table
 

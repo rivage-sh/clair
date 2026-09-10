@@ -29,8 +29,8 @@ You need a Snowflake account with:
 From the **project root** (`clair/`), run:
 
 ```bash
-uv sync
-source .venv/bin/activate
+UV_PROJECT_ENVIRONMENT=venv uv sync
+source venv/bin/activate
 ```
 
 ### Seed the source tables
