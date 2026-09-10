@@ -52,8 +52,8 @@ from clair.core.discovery import (
     discover_project,
     find_project_root,
     find_routing_collisions,
-    recompile_for_selection,
 )
+from clair.core.references import recompile_for_selection
 from clair.core.runner import RunResult, RunSummary, run_project
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import TestResult, TestSummary, run_tests
