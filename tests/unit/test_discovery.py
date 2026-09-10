@@ -11,9 +11,9 @@ import pytest
 from clair.core.discovery import (
     compute_logical_address,
     discover_project,
-    find_routing_collisions,
 )
 from clair.core.references import recompile_for_selection
+from clair.environments.routing import detect_routing_collisions_of_trouves
 from clair.exceptions import ProjectDiscoveryError
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.run_config import RunMode
@@ -231,7 +231,7 @@ class TestDiscoveryWithRouting:
 
         trouves = discover_project(tmp_path, routing=routing)
 
-        collisions = find_routing_collisions(trouves)
+        collisions = detect_routing_collisions_of_trouves(trouves)
         assert len(collisions) == 1
         target, sources = collisions[0]
         assert target == "DEV.finance.orders"

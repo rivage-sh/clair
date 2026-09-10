@@ -160,6 +160,35 @@ class TestRoutingFileValidation:
             load_project_routing(routing_project, "dev")
 
 
+class TestTwoProjectsOfOneMonorepo:
+    """Each project reads its own __routing__.py.
+
+    Two projects of one monorepo hold two files of one name. The test states
+    the result that a user sees, and it names no mechanism: the loader keys its
+    cache by the path, and it runs the file that the caller names.
+    """
+
+    def test_each_project_gives_its_own_entry(self, tmp_path: Path) -> None:
+        first_project = tmp_path / "first"
+        second_project = tmp_path / "second"
+        first_project.mkdir()
+        second_project.mkdir()
+        _write_with_prelude(first_project, '''
+            routing = RoutingTable(entries=[DatabaseOverride(database_name="FIRST")])
+        ''')
+        _write_with_prelude(second_project, '''
+            routing = RoutingTable(entries=[DatabaseOverride(database_name="SECOND")])
+        ''')
+
+        first = load_project_routing(first_project, "dev")
+        second = load_project_routing(second_project, "dev")
+
+        assert first.entry is not None
+        assert second.entry is not None
+        assert first.entry.model_dump()["database_name"] == "FIRST"
+        assert second.entry.model_dump()["database_name"] == "SECOND"
+
+
 class TestRoutingFileCache:
     def test_repeated_loads_run_the_file_one_time(self, routing_project: Path):
         _write_with_prelude(routing_project, '''
