@@ -11,6 +11,7 @@ The integration tests run the API against Snowflake. The API tests in
 
 from __future__ import annotations
 
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -349,3 +350,13 @@ class TestDocsCommand:
         assert calls["port"] == 9000
         assert calls["host"] == "0.0.0.0"
         assert calls["open_browser"] is False
+
+
+class TestVersion:
+    """`clair --version` must print the version of the installed package."""
+
+    def test_the_option_prints_the_version_of_the_package(self):
+        result = CliRunner().invoke(cli, ["--version"])
+
+        assert result.exit_code == 0
+        assert result.output.strip() == f"clair, version {version('rivage-clair')}"
