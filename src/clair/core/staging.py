@@ -18,12 +18,19 @@ is already wrong. Clair writes through a staging address instead:
 A downstream Trouve reads the physical address, because clair promotes each node
 immediately after the tests of that node. The SQL of a dependent therefore finds
 the data that it expects.
+
+A Trouve that changes from a TABLE to a VIEW, or from a VIEW to a TABLE, needs
+one more step. Snowflake replaces an object with an object of the same type
+only, thus clair drops the object of the old type immediately before the
+promotion. Only the warehouse knows that type, so the runner asks it and the
+compiler writes a comment. See ``build_drop_physical_statement()``.
 """
 
 from __future__ import annotations
 
 from pydantic import ValidationError
 
+from clair.adapters.base import ObjectType
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError
 from clair.trouves.trouve import TrouveType
@@ -133,6 +140,53 @@ def build_promote_statement(
     return (
         f"-- staging: promote the tested table\n"
         f"CREATE OR REPLACE TABLE {physical_address} CLONE {staging_address} COPY GRANTS"
+    )
+
+
+def build_drop_physical_statement(
+    current_type: ObjectType, physical_address: TrouveAddress
+) -> str:
+    """Give the statement that drops the object that stands in the way of a promotion.
+
+    Snowflake replaces an object with an object of the same type only. Against a
+    different type ``CREATE OR REPLACE`` raises ``Object '<name>' already
+    exists.`` A Trouve that changes from a TABLE to a VIEW, or from a VIEW to a
+    TABLE, therefore needs a drop first.
+
+    The drop must name the type that the address holds now, because
+    ``DROP VIEW IF EXISTS`` against a table raises ``Object found is of type
+    'TABLE', not specified type 'VIEW'``. Only the warehouse knows that type, so
+    the runner asks ``adapter.object_type()`` and the compiler cannot make this
+    statement.
+
+    Args:
+        current_type: The type of the object that the address holds now.
+        physical_address: The address that clair must clear.
+
+    Returns:
+        One SQL statement.
+    """
+    object_type_name = "VIEW" if current_type == ObjectType.VIEW else "TABLE"
+    return (
+        f"-- object type: the Trouve changed its type, so clair drops the old object\n"
+        f"DROP {object_type_name} IF EXISTS {physical_address}"
+    )
+
+
+def build_type_change_comment(
+    trouve_type: TrouveType, physical_address: TrouveAddress
+) -> str:
+    """Give the comment that tells a reader of the plan about the conditional drop.
+
+    ``clair compile`` opens no warehouse connection, thus it cannot know the type
+    that the physical address holds now, and it cannot put a real drop in the
+    plan. The comment names the condition instead, so a reader of the compiled
+    SQL knows that the run can send one more statement here.
+    """
+    object_type_name = "VIEW" if trouve_type == TrouveType.VIEW else "TABLE"
+    return (
+        f"-- object type: if {physical_address} holds an object that is not a "
+        f"{object_type_name}, clair drops it here first"
     )
 
 

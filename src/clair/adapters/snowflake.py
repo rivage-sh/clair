@@ -10,7 +10,7 @@ import snowflake.connector
 from cryptography.hazmat.primitives import serialization
 from snowflake.connector.pandas_tools import write_pandas
 
-from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter
+from clair.adapters.base import ObjectType, Statement, StatementStatus, WarehouseAdapter
 from clair.trouves.address import TrouveAddress
 
 
@@ -117,15 +117,39 @@ class SnowflakeAdapter(WarehouseAdapter):
         finally:
             cursor.close()
 
-    def table_exists(self, database_name: str, schema_name: str, table_name: str) -> bool:
-        """Tell you if the table exists in Snowflake. Reads INFORMATION_SCHEMA."""
-        result = self.execute(
-            f"SELECT 1 FROM {database_name}.INFORMATION_SCHEMA.TABLES "
-            f"WHERE TABLE_CATALOG = '{database_name.upper()}' "
-            f"AND TABLE_SCHEMA = '{schema_name.upper()}' "
-            f"AND TABLE_NAME = '{table_name.upper()}'"
-        )
-        return result.row_count > 0
+    def object_type(self, address: TrouveAddress) -> ObjectType | None:
+        """Give the type of the object at the address. Reads INFORMATION_SCHEMA.
+
+        ``INFORMATION_SCHEMA.TABLES`` holds a row for a view too, and the
+        ``TABLE_TYPE`` column separates the two. Snowflake also writes
+        ``MATERIALIZED VIEW`` and ``EXTERNAL TABLE`` in that column. Clair makes
+        neither type, but a user can point a Trouve at an address that holds
+        one, so this method reads each name that holds the word VIEW as a view.
+
+        The method gives None when the address holds no object, and also when
+        the query fails, for example because the database does not exist. A
+        caller must therefore make no decision that needs the object to exist.
+        """
+        if self._conn is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(
+                f"SELECT TABLE_TYPE FROM {address.database_name}.INFORMATION_SCHEMA.TABLES "
+                f"WHERE TABLE_CATALOG = '{address.database_name.upper()}' "
+                f"AND TABLE_SCHEMA = '{address.schema_name.upper()}' "
+                f"AND TABLE_NAME = '{address.table_name.upper()}'"
+            )
+            row = cursor.fetchone()
+        except Exception:  # noqa: BLE001 — a query that fails means "clair sees no object"
+            return None
+        finally:
+            cursor.close()
+
+        if row is None or row[0] is None:
+            return None
+        return ObjectType.VIEW if "VIEW" in str(row[0]).upper() else ObjectType.TABLE
 
     def set_context(
         self,

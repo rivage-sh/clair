@@ -31,9 +31,7 @@ def execute(adapter: SnowflakeAdapter, sql: str) -> None:
 
 def table_exists(adapter: SnowflakeAdapter, address: TrouveAddress) -> bool:
     """Tell you if the table or the view at one address exists."""
-    return adapter.table_exists(
-        address.database_name, address.schema_name, address.table_name
-    )
+    return adapter.object_type(address) is not None
 
 
 def row_count(adapter: SnowflakeAdapter, address: TrouveAddress) -> int:
