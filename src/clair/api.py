@@ -50,6 +50,7 @@ from clair.core.dag import ClairDag, build_dag
 from clair.core.discovery import (
     ARTIFACTS_DIR_NAME,
     discover_project,
+    find_project_root,
     find_routing_collisions,
     recompile_for_selection,
 )
@@ -76,6 +77,17 @@ Selectors = Sequence[str] | None
 # A name selects the routing entry only, thus a function that needs no
 # connection accepts it.
 EnvSpec = Environment | str | None
+
+
+def _resolve_project_root(project_dir: str | Path | None) -> Path:
+    """Give the project root as an absolute path.
+
+    None starts the root search: clair walks up from the working directory to
+    the first ``__routing__.py``, in the same way that git finds ``.git``.
+    """
+    if project_dir is None:
+        return find_project_root(Path.cwd())
+    return Path(project_dir).expanduser().resolve()
 
 
 def _env_name_of(env: EnvSpec) -> str:
@@ -134,7 +146,7 @@ def _select_nodes(
 
 
 def compile(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     select: Selectors = None,
     exclude: Selectors = None,
@@ -148,7 +160,9 @@ def compile(
     each Trouve, the physical address, and the staging address.
 
     Args:
-        project_dir: The root directory of the project.
+        project_dir: The root directory of the project. None starts the
+            root search: clair walks up from the working directory to the
+            first ``__routing__.py``.
         select: The patterns that select Trouves. None selects each Trouve.
         exclude: The patterns that remove Trouves, after the selection.
         env: An Environment, or an environment name. This function reads no
@@ -164,7 +178,7 @@ def compile(
     Raises:
         ClairError: If discovery, routing, or compilation fails.
     """
-    project_root = Path(project_dir).expanduser().resolve()
+    project_root = _resolve_project_root(project_dir)
     run_id = uuid6.uuid7().hex
 
     environment = env if isinstance(env, Environment) else None
@@ -210,7 +224,7 @@ def compile(
 
 
 def run(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     env: Environment,
     select: Selectors = None,
@@ -229,7 +243,9 @@ def run(
     then writes to each physical address directly.
 
     Args:
-        project_dir: The root directory of the project.
+        project_dir: The root directory of the project. None starts the
+            root search: clair walks up from the working directory to the
+            first ``__routing__.py``.
         select: The patterns that select Trouves. None selects each Trouve.
         exclude: The patterns that remove Trouves, after the selection.
         env: The Environment that holds the connection settings, and that names
@@ -256,7 +272,7 @@ def run(
             that fails gives a RunResult with the FAILURE status, and raises no
             error, because the other branches of the DAG continue.
     """
-    project_root = Path(project_dir).expanduser().resolve()
+    project_root = _resolve_project_root(project_dir)
     run_id = uuid6.uuid7().hex
     use_staging = test
     if not test:
@@ -384,7 +400,7 @@ def run(
 
 
 def test(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     env: Environment,
     select: Selectors = None,
@@ -396,7 +412,9 @@ def test(
     """Run the data quality tests of a project on the warehouse.
 
     Args:
-        project_dir: The root directory of the project.
+        project_dir: The root directory of the project. None starts the
+            root search: clair walks up from the working directory to the
+            first ``__routing__.py``.
         select: The patterns that select Trouves. None selects each Trouve.
         exclude: The patterns that remove Trouves, after the selection.
         env: The Environment that holds the connection settings, and that names
@@ -416,7 +434,7 @@ def test(
     Raises:
         ClairError: If discovery, routing, or the connection fails.
     """
-    project_root = Path(project_dir).expanduser().resolve()
+    project_root = _resolve_project_root(project_dir)
 
     # `environment` names the object, and `env` names the argument.
     environment = env
@@ -476,7 +494,7 @@ def test(
 
 
 def validate(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     env: EnvSpec = None,
 ) -> ValidationReport:
@@ -491,7 +509,9 @@ def validate(
             print(collision.physical_address, collision.logical_addresses)
 
     Args:
-        project_dir: The root directory of the project.
+        project_dir: The root directory of the project. None starts the
+            root search: clair walks up from the working directory to the
+            first ``__routing__.py``.
         env: An Environment, or an environment name. This function uses the
             name only, because it makes no connection. None gives "dev".
 
@@ -501,13 +521,13 @@ def validate(
     Raises:
         ClairError: If clair cannot read the project or the routing file.
     """
-    project_root = Path(project_dir).expanduser().resolve()
+    project_root = _resolve_project_root(project_dir)
     env_name = _env_name_of(env)
     return validate_project(project_root, env_name)
 
 
 def clean(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     before: str | None = None,
     dry_run: bool = False,
@@ -516,7 +536,9 @@ def clean(
     """Remove the compiled artifacts of the old runs. This needs no connection.
 
     Args:
-        project_dir: The root directory of the project.
+        project_dir: The root directory of the project. None starts the
+            root search: clair walks up from the working directory to the
+            first ``__routing__.py``.
         before: Remove each run before this time: 'today', 'yesterday',
             'last_week', a duration such as '7d', or an ISO date. None removes
             each run.
@@ -529,7 +551,7 @@ def clean(
     Raises:
         InvalidBeforeSpecError: If clair cannot read *before*.
     """
-    project_root = Path(project_dir).expanduser().resolve()
+    project_root = _resolve_project_root(project_dir)
     artifacts_dir = project_root / ARTIFACTS_DIR_NAME
 
     cutoff: datetime | None = None
@@ -555,11 +577,13 @@ def clean(
     )
 
 
-def catalog(project_dir: str | Path = ".") -> dict:
+def catalog(project_dir: str | Path | None = None) -> dict:
     """Make the documentation catalog of a project. This needs no connection.
 
     Args:
-        project_dir: The root directory of the project.
+        project_dir: The root directory of the project. None starts the
+            root search: clair walks up from the working directory to the
+            first ``__routing__.py``.
 
     Returns:
         The catalog dictionary: one entry for each Trouve, and the lineage edges.
@@ -567,13 +591,13 @@ def catalog(project_dir: str | Path = ".") -> dict:
     Raises:
         ClairError: If discovery fails.
     """
-    project_root = Path(project_dir).expanduser().resolve()
+    project_root = _resolve_project_root(project_dir)
     dag = build_dag(discover_project(project_root))
     return build_catalog(dag, project_root)
 
 
 def docs(
-    project_dir: str | Path = ".",
+    project_dir: str | Path | None = None,
     *,
     host: str = "127.0.0.1",
     port: int = 8741,
@@ -582,7 +606,9 @@ def docs(
     """Start the local documentation server. This function does not give control back.
 
     Args:
-        project_dir: The root directory of the project.
+        project_dir: The root directory of the project. None starts the
+            root search: clair walks up from the working directory to the
+            first ``__routing__.py``.
         host: The address of the server.
         port: The port of the server.
         open_browser: If True, clair opens the browser on the server address.
@@ -591,10 +617,11 @@ def docs(
         ClairError: If discovery fails.
         OSError: If the port is in use.
     """
-    project_catalog = catalog(project_dir)
+    project_root = _resolve_project_root(project_dir)
+    project_catalog = catalog(project_root)
     logger.info(
         "docs.start",
-        project=str(Path(project_dir).expanduser().resolve()),
+        project=str(project_root),
         host=host,
         port=port,
     )

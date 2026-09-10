@@ -7,7 +7,7 @@ The `clair run`, `clair compile`, `clair test`, and `clair dag` commands accept 
 `--select` takes a glob pattern. clair matches the pattern against the fully-qualified name of the Trouve (`database.schema.table`). The `*` wildcard matches inside one segment.
 
 ```bash
-clair run --project=. --env=dev --select='refined.orders.*'
+clair run --env=dev --select='refined.orders.*'
 ```
 
 ## Graph operators
@@ -28,19 +28,19 @@ neighbours of each matched Trouve from the DAG.
 **Build a Trouve and all that it depends on:**
 
 ```bash
-clair run --project=. --env=dev --select='+derived.products.top_reviewed'
+clair run --env=dev --select='+derived.products.top_reviewed'
 ```
 
 **Build a Trouve and all that depends on it:**
 
 ```bash
-clair run --project=. --env=dev --select='refined.orders.clean_orders+'
+clair run --env=dev --select='refined.orders.clean_orders+'
 ```
 
 **Build the direct parents only:**
 
 ```bash
-clair run --project=. --env=dev --select='1+derived.products.top_reviewed'
+clair run --env=dev --select='1+derived.products.top_reviewed'
 ```
 
 The glob rules of the previous section apply to the part of the pattern between the
@@ -52,25 +52,25 @@ ancestor and every descendant of those Trouves.
 **A full schema:**
 
 ```bash
-clair run --project=. --env=dev --select='source.products.*'
+clair run --env=dev --select='source.products.*'
 ```
 
 **Single Trouve:**
 
 ```bash
-clair run --project=. --env=dev --select='derived.products.top_reviewed'
+clair run --env=dev --select='derived.products.top_reviewed'
 ```
 
 **Name pattern across all databases and schemas:**
 
 ```bash
-clair compile --project=. --select='*.*.top_*'
+clair compile --select='*.*.top_*'
 ```
 
 **Exact database, any schema, name pattern:**
 
 ```bash
-clair run --project=. --env=dev --select='refined.*.daily_*'
+clair run --env=dev --select='refined.*.daily_*'
 ```
 
 ## Use more than one selector
@@ -78,7 +78,7 @@ clair run --project=. --env=dev --select='refined.*.daily_*'
 Repeat `--select` to add more patterns. clair includes each Trouve that matches one pattern or more:
 
 ```bash
-clair run --project=. --env=dev \
+clair run --env=dev \
   --select='source.products.*' \
   --select='derived.products.*'
 ```

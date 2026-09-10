@@ -3,20 +3,20 @@
 Resolve the DAG and write the generated SQL to `_clairtifacts/`. The command does not connect to Snowflake.
 
 ```bash
-clair compile [--project PATH] [--env NAME] [--select PATTERN]... [--run-mode MODE]
+clair compile [--env NAME] [--select PATTERN]... [--run-mode MODE]
 ```
 
 ## Example
 
 ```bash
 # Compile the whole project
-clair compile --project .
+clair compile
 
 # Compile and apply routing (requires --env)
-clair compile --project . --env prod
+clair compile --env prod
 
 # Compile only the orders schema
-clair compile --project . --select='refined.orders.*'
+clair compile --select='refined.orders.*'
 ```
 
 Each plan shows the staged path: the build at the staging address, a comment that marks the test step, and the promotion. See [Staging](../topics/staging.md).
@@ -51,7 +51,6 @@ _clairtifacts/
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | `.` | Path to the clair project root |
 | `--env` | optional | Environment name. It selects the entry in `__routing__.py` that clair applies to the generated SQL. |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Selects which SQL variant clair generates. |

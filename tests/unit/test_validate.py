@@ -7,6 +7,7 @@ text. One class at the end covers the exit code of the CLI.
 
 from __future__ import annotations
 
+import contextlib
 import textwrap
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from clair.core.text_references import TextReferenceLocation
 from clair.core.validation import ValidationReport
 from clair.environments.environments import Environment
 from clair.exceptions import ClairError
+from tests.helpers import write_project_marker
 
 # Every routing file in these tests needs an entry class. This prelude gives one.
 _PRELUDE = """\
@@ -27,6 +29,21 @@ import os
 from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
 
 
+"""
+
+# A routing entry that changes no address. The project root always holds a
+# routing file, thus this entry is the "no routing" case.
+PASSTHROUGH_ENTRY = """
+    class PassthroughRouting(RoutingEntry):
+        environment_name: str = "dev"
+
+        def route(
+            self, trouve_address: TrouveAddress, trouve_type: TrouveType
+        ) -> TrouveAddress:
+            return trouve_address
+
+
+    routing = RoutingTable(entries=[PassthroughRouting()])
 """
 
 # A routing entry that adds "_dev" to the database name.
@@ -105,6 +122,7 @@ def project_with_trouves(tmp_path: Path) -> Path:
     """
     project_dir = tmp_path / "proj"
     (project_dir / "source" / "raw").mkdir(parents=True)
+    write_routing(project_dir, PASSTHROUGH_ENTRY)
     (project_dir / "source" / "raw" / "orders.py").write_text(
         "from clair import Trouve, TrouveType\n\n"
         "trouve = Trouve(type=TrouveType.SOURCE)\n"
@@ -134,11 +152,11 @@ def problem_addresses(report: ValidationReport) -> list[str]:
 class TestAValidProject:
     """A project with no problem gives an empty report."""
 
-    def test_no_routing_file_is_valid(self, project_with_trouves: Path):
+    def test_a_passthrough_entry_is_valid(self, project_with_trouves: Path):
         report = clair.validate(project_with_trouves)
         assert report.is_valid is True
         assert report.problem_count == 0
-        assert report.routing_file is None
+        assert report.routing_file == project_with_trouves / "__routing__.py"
 
     def test_a_valid_entry_is_valid(self, project_with_trouves: Path):
         write_routing(project_with_trouves, DEV_SUFFIX_ENTRY)
@@ -168,8 +186,7 @@ class TestAValidProject:
         assert clair.validate(project_with_trouves).routable_count == 3
 
     def test_an_empty_project_routes_nothing(self, tmp_path: Path):
-        project_dir = tmp_path / "empty"
-        project_dir.mkdir()
+        project_dir = write_project_marker(tmp_path / "empty")
         report = clair.validate(project_dir)
         assert report.routable_count == 0
         assert report.is_valid is True
@@ -347,7 +364,9 @@ class TestTheEnvironment:
         report = clair.validate(project_with_trouves, env="typo")
         assert report.is_valid is True
 
-    def test_no_routing_file_gives_no_warning(self, project_with_trouves: Path):
+    def test_a_file_that_names_the_environment_gives_no_warning(
+        self, project_with_trouves: Path
+    ):
         assert clair.validate(project_with_trouves).unnamed_environment_warning is None
 
 
@@ -394,9 +413,9 @@ class TestTheCommand:
     """The exit code of `clair validate`. The report tests cover the semantics."""
 
     def run_command(self, project_dir: Path, *arguments: str):
-        return CliRunner().invoke(
-            cli, ["validate", "--project", str(project_dir), *arguments]
-        )
+        """Run `clair validate` inside *project_dir*. The command finds the root."""
+        with contextlib.chdir(project_dir):
+            return CliRunner().invoke(cli, ["validate", *arguments])
 
     def test_the_environment_variable_selects_the_environment(
         self, project_with_trouves: Path, monkeypatch

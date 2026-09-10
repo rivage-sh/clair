@@ -3,20 +3,20 @@
 Start a local web UI for the project DAG and the documentation of each Trouve. The command does not need a Snowflake connection.
 
 ```bash
-clair docs [--project PATH] [--port PORT] [--host HOST] [--no-browser]
+clair docs [--port PORT] [--host HOST] [--no-browser]
 ```
 
 ## Example
 
 ```bash
 # Open in browser (default)
-clair docs --project .
+clair docs
 
 # Custom port
-clair docs --project . --port 9000
+clair docs --port 9000
 
 # Do not open the browser automatically
-clair docs --project . --no-browser
+clair docs --no-browser
 ```
 
 ## What the UI shows
@@ -41,7 +41,6 @@ Press `Ctrl+C` to stop the server.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | `.` | Path to the clair project root |
 | `--port` | `8741` | Port for the local docs server |
 | `--host` | `127.0.0.1` | Bind address |
 | `--no-browser` | `false` | Do not open the browser automatically |

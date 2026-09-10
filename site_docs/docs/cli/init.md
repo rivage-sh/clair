@@ -50,8 +50,9 @@ Give an example Snowflake table that contains source data (for example source.or
 ✓ Project ready.
 
 Next steps:
-  1. clair compile --project /path/to/my_project
-  2. clair run    --project /path/to/my_project
+  1. cd /path/to/my_project
+  2. clair compile
+  3. clair run
 ```
 
 ## Files created

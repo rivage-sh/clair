@@ -78,6 +78,44 @@ class InvalidRoutingConfigError(ClairError):
 
 
 
+class ProjectRootNotFoundError(ClairError):
+    """Clair raises this error when the root search finds no project.
+
+    The search walks up from a start directory to the first ``__routing__.py``,
+    in the same way that git finds ``.git``. That file marks the root of a
+    clair project.
+    """
+
+    def __init__(self, start_directory: str, marker_file_name: str) -> None:
+        self.start_directory = start_directory
+        self.marker_file_name = marker_file_name
+        super().__init__(
+            f"Clair cannot find {marker_file_name} in {start_directory}, or in "
+            "a directory above it. That file marks the root of a clair "
+            "project. Run the command from a directory inside a project, or "
+            "run `clair init` to make a project."
+        )
+
+
+class NotAProjectRootError(ClairError):
+    """Clair raises this error when the given directory holds no marker file.
+
+    A directory that holds many projects gives this error. Without the marker,
+    clair would read such a directory as one project, and it would build one
+    DAG from every project below it.
+    """
+
+    def __init__(self, project_root: str, marker_file_name: str) -> None:
+        self.project_root = project_root
+        self.marker_file_name = marker_file_name
+        super().__init__(
+            f"{project_root} holds no {marker_file_name}, thus it is not a "
+            "clair project root. A directory that holds many projects gives "
+            "this error: give the path of one project. Run `clair init` to "
+            "make a new project."
+        )
+
+
 class DiscoveryError(ClairError):
     """Clair raises this error when it cannot load a Trouve file."""
 

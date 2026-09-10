@@ -22,6 +22,10 @@ trouve = Trouve(
 _ROUTING_TEMPLATE = '''\
 """Clair routing -- gives each environment its physical write target.
 
+This file also marks the root of the clair project. Each clair command walks up
+from the working directory to this file, in the same way that git finds .git.
+Keep the file at the project root, also when it holds no entry.
+
 Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
 and gives the physical TrouveAddress.

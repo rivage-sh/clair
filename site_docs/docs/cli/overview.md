@@ -5,9 +5,13 @@ Each command parses the arguments and calls one function of the
 `clair compile` calls `clair.compile()`, and so on. A notebook or a program does
 the same work with no `subprocess` call.
 
-All commands share two common flags:
+Each command finds the project root itself: it walks up from the working directory to the
+first `__routing__.py`, in the same way that git finds `.git`. Thus you run a command from
+any directory of the project. `clair init` is the exception, because it makes the root.
+See [Project Layout](../topics/project-layout.md#the-project-root).
 
-- `--project` — path to the clair project root (default: `.`)
+All commands share one common flag:
+
 - `--env` — environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py` (default: `CLAIR_ENV` or `dev`)
 
 ## Commands

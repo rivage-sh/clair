@@ -18,6 +18,7 @@ from clair.core.discovery import discover_project
 from clair.core.runner import RunStatus, run_project
 from clair.core.test_runner import run_tests
 from clair.trouves.address import TrouveAddress
+from tests.helpers import write_project_marker
 
 
 class CallRecorder:
@@ -171,7 +172,7 @@ def diamond_project(tmp_path: Path) -> Path:
     orders is the SOURCE. left and right both read orders, thus they can run at
     one time. joined reads left and right, thus it runs last.
     """
-    project_root = tmp_path / "diamond"
+    project_root = write_project_marker(tmp_path / "diamond")
 
     _write(
         project_root / "db" / "raw" / "orders.py",
@@ -228,7 +229,7 @@ def diamond_project(tmp_path: Path) -> Path:
 @pytest.fixture
 def chain_project(tmp_path: Path) -> Path:
     """Make a project with a chain: orders -> first -> middle -> last."""
-    project_root = tmp_path / "chain"
+    project_root = write_project_marker(tmp_path / "chain")
 
     _write(
         project_root / "db" / "raw" / "orders.py",
@@ -514,7 +515,7 @@ class TestAdapterPool:
 
 class TestParallelTests:
     def test_the_results_keep_the_order_of_selected(self, tmp_path: Path):
-        project_root = tmp_path / "tested"
+        project_root = write_project_marker(tmp_path / "tested")
         _write(
             project_root / "db" / "raw" / "orders.py",
             """

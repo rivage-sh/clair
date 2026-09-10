@@ -7,14 +7,13 @@ This command needs no Snowflake credentials, so CI runs it on every change.
 ```bash
 clair validate
 clair validate --env prod
-clair validate --project path/to/project
+clair validate
 ```
 
 ## Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--project` | `.` | Path to the clair project root. |
 | `--env` | `CLAIR_ENV` or `dev` | The environment to route for. It matches an entry in `__routing__.py`. |
 
 ## What it examines

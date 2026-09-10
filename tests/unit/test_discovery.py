@@ -23,6 +23,7 @@ from tests.helpers import (
     DatabaseOverrideRouting,
     SchemaIsolationRouting,
     SourceAwareRouting,
+    write_project_marker,
 )
 
 
@@ -621,6 +622,7 @@ class TestTwoProjectsInOneProcess:
 
     def _write_project(self, root: Path, sql: str) -> Path:
         """Write a project with one SOURCE Trouve and one TABLE that reads it."""
+        write_project_marker(root)
         schema_dir = root / "mydb" / "refined"
         schema_dir.mkdir(parents=True)
         (root / "mydb" / "source").mkdir(parents=True)

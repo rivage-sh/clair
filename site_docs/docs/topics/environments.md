@@ -132,8 +132,8 @@ clair resolves the environment name in this order:
 3. `"dev"` (default)
 
 ```bash
-clair run --project . --env prod
-CLAIR_ENV=prod clair run --project .
+clair run --env prod
+CLAIR_ENV=prod clair run
 ```
 
 ## CI usage
@@ -146,7 +146,7 @@ In CI, set `CLAIR_ENV` and use key-pair authentication. This method does not nee
   env:
     CLAIR_ENV: prod
     SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
-  run: clair run --project .
+  run: clair run
 ```
 
 ## Routing

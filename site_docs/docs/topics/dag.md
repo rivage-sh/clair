@@ -30,7 +30,7 @@ source.orders.raw      ✓  (SOURCE — no SQL, passthrough)
 Use `clair dag` to print the dependency tree:
 
 ```
-$ clair dag --project ./my_project
+$ cd ./my_project && clair dag
 
 example_1_database.source.events (SOURCE)
 └── example_1_database.refined.events (TABLE)
@@ -41,7 +41,7 @@ example_1_database.source.events (SOURCE)
 Use `--select` to see a subgraph:
 
 ```bash
-clair dag --project . --select='mydb.refined.*'
+clair dag --select='mydb.refined.*'
 ```
 
 ## Artifacts

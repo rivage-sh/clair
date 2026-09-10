@@ -14,7 +14,11 @@ from clair._logging import configure_logging
 from clair.core.artifacts import InvalidBeforeSpecError
 from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
-from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
+from clair.core.discovery import (
+    ARTIFACTS_DIR_NAME,
+    discover_project,
+    find_project_root,
+)
 from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.environments.environments import (
     DEFAULT_THREADS,
@@ -22,11 +26,13 @@ from clair.environments.environments import (
     load_environment,
     resolve_env_name,
 )
+from clair.environments.project_routing import ROUTING_FILE_NAME
 from clair.exceptions import (
     ClairError,
     EnvironmentsFileNotFoundError,
     InvalidRoutingConfigError,
     InvalidTrouveAddressError,
+    ProjectRootNotFoundError,
 )
 from clair.trouves.run_config import RunMode
 
@@ -78,6 +84,21 @@ def init(project: str | None) -> None:
     if project is None:
         project = click.prompt("Project directory", default=".", type=str)
     project_dir = Path(project).resolve()
+
+    # A project inside a project gives two roots, and the root search would
+    # then find the outer one. Clair refuses, and it names the file it found.
+    try:
+        existing_root = find_project_root(project_dir)
+    except ProjectRootNotFoundError:
+        existing_root = None
+    if existing_root is not None:
+        click.echo(
+            f"Error: {existing_root / ROUTING_FILE_NAME} exists, thus "
+            f"{project_dir} is inside a clair project. Give --project a "
+            "directory outside that project.",
+            err=True,
+        )
+        sys.exit(1)
 
     # Step 2 -- The environment.
     environments_path = Path.home() / ".clair" / "environments.yml"
@@ -133,8 +154,9 @@ def init(project: str | None) -> None:
     click.echo("\u2713 Project ready.")
     click.echo("")
     click.echo("Next steps:")
-    click.echo(f"  1. clair compile --project {project_dir}")
-    click.echo(f"  2. clair run    --project {project_dir}")
+    click.echo(f"  1. cd {project_dir}")
+    click.echo("  2. clair compile")
+    click.echo("  3. clair run")
     click.echo("")
 
 
@@ -233,12 +255,6 @@ def _prompt_and_write_environment() -> None:
     help="Pattern that removes Trouves. The syntax is the same as --select. Clair applies it after the selection.",
 )
 @click.option(
-    "--project",
-    default=".",
-    type=click.Path(exists=True, file_okay=False),
-    help="Path to the Clair project root",
-)
-@click.option(
     "--env",
     default=None,
     help="Environment name from ~/.clair/environments.yml",
@@ -249,11 +265,10 @@ def _prompt_and_write_environment() -> None:
     default="full_refresh",
     help="Run mode. full_refresh writes all tables again. incremental writes only the new data.",
 )
-def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str) -> None:
+def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str) -> None:
     """Compile the project and show the new SQL. This needs no Snowflake connection."""
     try:
         clair_api.compile(
-            project,
             select=select,
             exclude=exclude,
             env=_load_environment_or_name(env),
@@ -270,22 +285,17 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], project: str,
 
 @cli.command()
 @click.option(
-    "--project",
-    default=".",
-    help="Path to the Clair project root (defaults to current directory)",
-)
-@click.option(
     "--env",
     default=None,
     help="Environment name to route for; matches an entry in __routing__.py",
 )
-def validate(project: str, env: str | None) -> None:
+def validate(env: str | None) -> None:
     """Apply the project routing entries to every Trouve.
 
     This command needs no Snowflake credentials, so CI runs it on every change.
     """
     try:
-        report = clair_api.validate(project, env=_load_environment_or_name(env))
+        report = clair_api.validate(env=_load_environment_or_name(env))
     except ClairError as e:
         logger.error("validate.error", error=str(e))
         sys.exit(1)
@@ -302,17 +312,10 @@ def validate(project: str, env: str | None) -> None:
     multiple=True,
     help="Glob pattern that selects Trouves. Give the option again to add more patterns. Example: --select='mydb.analytics.*' --select='mydb.reports.*'",
 )
-@click.option(
-    "--project",
-    default=".",
-    type=click.Path(exists=True, file_okay=False),
-    help="Path to the Clair project root",
-)
-def dag(select: tuple[str, ...], project: str) -> None:
+def dag(select: tuple[str, ...]) -> None:
     """Show the project DAG as a tree with indents."""
-    project_root = Path(project).resolve()
-
     try:
+        project_root = find_project_root(Path.cwd())
         discovered = discover_project(project_root)
         dag_graph = build_dag(discovered)
 
@@ -326,12 +329,6 @@ def dag(select: tuple[str, ...], project: str) -> None:
 
 
 @cli.command()
-@click.option(
-    "--project",
-    default=".",
-    type=click.Path(exists=True, file_okay=False),
-    help="Path to the Clair project root",
-)
 @click.option(
     "--port",
     default=8741,
@@ -348,10 +345,10 @@ def dag(select: tuple[str, ...], project: str) -> None:
     is_flag=True,
     help="Do not open the browser",
 )
-def docs(project: str, port: int, host: str, no_browser: bool) -> None:
+def docs(port: int, host: str, no_browser: bool) -> None:
     """Start a local web UI. It shows the project documentation and the lineage."""
     try:
-        clair_api.docs(project, host=host, port=port, open_browser=not no_browser)
+        clair_api.docs(host=host, port=port, open_browser=not no_browser)
     except OSError as e:
         if "address already in use" in str(e).lower():
             logger.error("docs.port_in_use", port=port, detail=f"Port {port} is in use. Use --port with a different number.")
@@ -373,12 +370,6 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     "--exclude",
     multiple=True,
     help="Pattern that removes Trouves. The syntax is the same as --select. Clair applies it after the selection.",
-)
-@click.option(
-    "--project",
-    default=".",
-    type=click.Path(exists=True, file_okay=False),
-    help="Path to the Clair project root",
 )
 @click.option(
     "--env",
@@ -409,11 +400,10 @@ def docs(project: str, port: int, host: str, no_browser: bool) -> None:
     default=None,
     help="The number of Trouves that run at one time. The default comes from the environment.",
 )
-def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, run_mode: str, no_test: bool, sample: bool, threads: int | None) -> None:
+def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, no_test: bool, sample: bool, threads: int | None) -> None:
     """Run the Trouves on Snowflake. Then run the data quality tests."""
     try:
         summary = clair_api.run(
-            project,
             select=select,
             exclude=exclude,
             env=_load_environment(env),
@@ -451,12 +441,6 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
     help="Pattern that removes Trouves. The syntax is the same as --select. Clair applies it after the selection.",
 )
 @click.option(
-    "--project",
-    default=".",
-    type=click.Path(exists=True, file_okay=False),
-    help="Path to the Clair project root",
-)
-@click.option(
     "--env",
     default=None,
     help="Environment name from ~/.clair/environments.yml",
@@ -474,12 +458,11 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: st
     help="The number of Trouves that clair tests at one time. The default comes from the environment.",
 )
 def test(
-    select: tuple[str, ...], exclude: tuple[str, ...], project: str, env: str | None, sample: bool, threads: int | None
+    select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, sample: bool, threads: int | None
 ) -> None:
     """Run the data quality tests on Snowflake."""
     try:
         summary = clair_api.test(
-            project,
             select=select,
             exclude=exclude,
             env=_load_environment(env),
@@ -496,12 +479,6 @@ def test(
 
 @cli.command()
 @click.option(
-    "--project",
-    default=".",
-    type=click.Path(exists=True, file_okay=False),
-    help="Path to the Clair project root",
-)
-@click.option(
     "--before",
     default=None,
     metavar="AGE",
@@ -517,11 +494,11 @@ def test(
     is_flag=True,
     help="Do not ask for confirmation.",
 )
-def clean(project: str, before: str | None, dry_run: bool, yes: bool) -> None:
+def clean(before: str | None, dry_run: bool, yes: bool) -> None:
     """Delete the compiled artifacts in _clairtifacts/."""
     try:
         # A dry run first. The user confirms, and clair then removes the runs.
-        plan = clair_api.clean(project, before=before, dry_run=True)
+        plan = clair_api.clean(before=before, dry_run=True)
     except InvalidBeforeSpecError as error:
         raise click.BadParameter(str(error), param_hint="--before") from None
     except ClairError as error:
@@ -554,7 +531,7 @@ def clean(project: str, before: str | None, dry_run: bool, yes: bool) -> None:
     if not yes:
         click.confirm(f"\nRemove {plan.run_count} run(s)?", abort=True)
 
-    clair_api.clean(project, before=before)
+    clair_api.clean(before=before)
     click.echo(f"Clair removed {plan.run_count} run(s).")
 
 
