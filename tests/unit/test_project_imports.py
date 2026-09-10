@@ -83,13 +83,9 @@ SOURCE_ROOT = Path(__file__).parent.parent.parent / "src" / "clair"
 # The state of the import system that one module of clair owns.
 IMPORT_SYSTEM_ATTRIBUTES = frozenset({"modules", "path", "meta_path"})
 
-# core/project_imports.py owns each of them. environments/project_routing.py
-# loads the one __routing__.py of a project under a name of its own, with a
-# cache that reads the modification time of the file.
-PERMITTED_FILES = frozenset({
-    Path("core/project_imports.py"),
-    Path("environments/project_routing.py"),
-})
+# core/project_imports.py owns each of them, and no other file of clair reads
+# or writes one. Each loader of a clair file goes through that module.
+PERMITTED_FILES = frozenset({Path("core/project_imports.py")})
 
 
 def files_that_touch_the_import_system() -> list[str]:

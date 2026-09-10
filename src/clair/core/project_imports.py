@@ -226,20 +226,30 @@ def load_project_file(file_path: Path, module_name: str) -> ModuleType | None:
     return module
 
 
-def load_support_file(file_path: Path) -> ModuleType | None:
-    """Run a clair configuration file, and give its module.
+SUPPORT_MODULE_PREFIX = "_clair_support_"
+"""The first part of the module name of each clair file that holds no Trouve."""
 
-    A configuration file declares no Trouve — ``__database_config__.py`` and
-    ``__schema_config__.py`` are the two. The name of the module comes from the
-    complete path, thus two projects of one monorepo never take one name. A
-    name from the path below the project root would collide, and the second
-    project would then read the configuration of the first.
+
+def load_support_file(file_path: Path) -> ModuleType | None:
+    """Run a clair file that declares no Trouve, and give its module.
+
+    Three files take this path: ``__routing__.py``, ``__database_config__.py``,
+    and ``__schema_config__.py``. Each one holds Python, and none of them holds
+    a ``trouve`` object, thus the finder of this module takes no part: the file
+    keeps a name of its own in ``sys.modules``.
+
+    The function runs the file at each call. It reads no module back by name,
+    thus the name decides no result: the spec carries the path of the file, and
+    a caller always receives the data of the file that it named. The name comes
+    from the complete path for two smaller reasons. Two support files then hold
+    two entries in ``sys.modules`` at one time, and a traceback names the file
+    that raised.
 
     Returns None when Python gives no loader for the file. Raises the error of
-    the file itself.
+    the file itself, because each caller writes its own message.
     """
     sanitized = re.sub(r"\W", "_", str(file_path.with_suffix("")))
-    module_name = f"_clair_config_{sanitized}"
+    module_name = f"{SUPPORT_MODULE_PREFIX}{sanitized}"
 
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     if spec is None or spec.loader is None:

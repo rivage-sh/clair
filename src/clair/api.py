@@ -51,7 +51,6 @@ from clair.core.discovery import (
     ARTIFACTS_DIR_NAME,
     discover_project,
     find_project_root,
-    find_routing_collisions,
 )
 from clair.core.references import recompile_for_selection
 from clair.core.runner import RunResult, RunSummary, run_project
@@ -63,7 +62,10 @@ from clair.environments.project_routing import (
     describe_unnamed_environment,
     load_project_routing,
 )
-from clair.environments.routing import RoutingEntry
+from clair.environments.routing import (
+    RoutingEntry,
+    detect_routing_collisions_of_trouves,
+)
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import TrouveAbc, TrouveType
 from clair.web_ui.catalog import build_catalog
@@ -113,7 +115,9 @@ def _resolve_routing(project_root: Path, env_name: str) -> RoutingEntry | None:
 
 def _warn_about_routing_collisions(trouves: list[TrouveAbc], env_name: str) -> None:
     """Show each routing collision, before the SQL starts."""
-    for physical_address, logical_sources in find_routing_collisions(trouves):
+    for physical_address, logical_sources in detect_routing_collisions_of_trouves(
+        trouves
+    ):
         logger.warning(
             "routing.collision",
             env=env_name,

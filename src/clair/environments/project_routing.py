@@ -14,12 +14,10 @@ top-level key in ``~/.clair/environments.yml``.
 
 from __future__ import annotations
 
-import hashlib
-import importlib.util
-import sys
 from pathlib import Path
 from typing import NamedTuple
 
+from clair.core.project_imports import load_support_file
 from clair.environments.routing import RoutingEntry, RoutingTable
 from clair.exceptions import InvalidRoutingFileError
 
@@ -55,12 +53,6 @@ class ProjectRouting(NamedTuple):
         return self.file_exists and not self.has_entry
 
 
-def _module_name_for(path: Path) -> str:
-    """Build a module name that is unique per routing file path."""
-    digest = hashlib.md5(str(path).encode()).hexdigest()[:8]
-    return f"_clair_routing_{digest}"
-
-
 def _load_routing_table(path: Path) -> RoutingTable:
     """Run a routing file and give back its routing table.
 
@@ -79,22 +71,14 @@ def _load_routing_table(path: Path) -> RoutingTable:
     if cached is not None:
         return cached
 
-    module_name = _module_name_for(path)
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise InvalidRoutingFileError(str(path), "clair cannot read this file")
-
-    module = importlib.util.module_from_spec(spec)
-    # Register the module before execution. A class or a dataclass in the file
-    # then keeps one identity across loads.
-    sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        module = load_support_file(path)
     except Exception as exc:
-        del sys.modules[module_name]
         raise InvalidRoutingFileError(
             str(path), f"{type(exc).__name__}: {exc}"
         ) from exc
+    if module is None:
+        raise InvalidRoutingFileError(str(path), "clair cannot read this file")
 
     if not hasattr(module, ROUTING_TABLE_ATTRIBUTE):
         raise InvalidRoutingFileError(

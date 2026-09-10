@@ -16,7 +16,6 @@ after it takes objects. See ``site_docs/docs/topics/anatomy-of-a-run.md``.
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,7 +36,6 @@ from clair.environments.project_routing import ROUTING_FILE_NAME
 from clair.environments.routing import (
     RoutingEntry,
     TrouveAddress,
-    detect_routing_collisions,
     route,
 )
 from clair.exceptions import (
@@ -51,7 +49,7 @@ from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefault
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveAbc
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
 _SKIP_DIRS = {"clair", "tests", ARTIFACTS_DIR_NAME, "__pycache__", ".git", ".venv", "node_modules"}
@@ -440,21 +438,3 @@ def discover_project(
         raise ProjectDiscoveryError(errors)
 
     return [trouve for trouve, _, _, _ in collected]
-
-
-def find_routing_collisions(trouves: Sequence[TrouveAbc]) -> list[tuple[str, list[str]]]:
-    """Give a (physical_target, [logical_sources]) pair for each routing collision.
-
-    A collision occurs when two Trouves that are not SOURCE Trouves route to one
-    physical address. Call this function after discover_project(), to show each
-    collision to the user.
-
-    The result is an empty list when no routing policy is active. Then the
-    logical address and the physical address are equal for each Trouve.
-    """
-    logical_to_physical = {
-        str(trouve.compiled.logical_address): str(trouve.compiled.physical_address)
-        for trouve in trouves
-        if trouve.compiled and trouve.type != TrouveType.SOURCE
-    }
-    return detect_routing_collisions(logical_to_physical)
