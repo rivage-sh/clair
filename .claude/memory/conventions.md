@@ -119,7 +119,7 @@ Apply the documentation rule to this directory:
 - The example code in `site_docs/docs/` must stay identical to the equivalent code in
   `examples/projects/`. Change one, change the other.
 - Execute a notebook that you change, and commit the outputs:
-  `UV_PROJECT_ENVIRONMENT=venv uv run jupyter nbconvert --to notebook --execute
+  `UV_PROJECT_ENVIRONMENT=venv.nosync uv run jupyter nbconvert --to notebook --execute
   --inplace <notebook>`. An output that a person wrote by hand is a lie that CI
   cannot find.
 - A notebook must run on a machine with no Snowflake account: no connection, no

@@ -18,8 +18,8 @@ Read them in that order. 01 gives the operations, and each other notebook uses o
 From the repository root:
 
 ```sh
-UV_PROJECT_ENVIRONMENT=venv uv sync --extra examples
-UV_PROJECT_ENVIRONMENT=venv uv run jupyter notebook examples/notebooks/
+UV_PROJECT_ENVIRONMENT=venv.nosync uv sync --extra examples
+UV_PROJECT_ENVIRONMENT=venv.nosync uv run jupyter notebook examples/notebooks/
 ```
 
 The `examples` extra adds jupyter, matplotlib and pyvis. clair itself needs none of them.

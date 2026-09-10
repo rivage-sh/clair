@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+venv.nosync/
 dist/
 build/
 *.ipynb_checkpoints/
