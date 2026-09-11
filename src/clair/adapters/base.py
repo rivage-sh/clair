@@ -26,6 +26,18 @@ class StatementStatus(StrEnum):
     NOT_RUN = "not_run"
 
 
+class ObjectType(StrEnum):
+    """The type of an object that exists in the warehouse.
+
+    Clair materializes a TABLE or a VIEW. It never makes a SOURCE, thus this
+    enum holds two members and ``TrouveType`` holds three. An adapter maps the
+    type names of its warehouse onto these two members.
+    """
+
+    TABLE = "table"
+    VIEW = "view"
+
+
 class Statement(BaseModel):
     """One SQL statement, and what the warehouse answered.
 
@@ -93,8 +105,14 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
-    def table_exists(self, database_name: str, schema_name: str, table_name: str) -> bool:
-        """Tell you if the table exists in the warehouse."""
+    def object_type(self, address: TrouveAddress) -> ObjectType | None:
+        """Give the type of the object at the address, or None if it holds none.
+
+        Clair asks this question before it writes to a physical address. A
+        warehouse replaces an object with an object of the same type only, so a
+        Trouve that changes from a TABLE to a VIEW needs a drop first. The
+        answer also tells the runner if an incremental Trouve has a base table.
+        """
         ...
 
     @abstractmethod

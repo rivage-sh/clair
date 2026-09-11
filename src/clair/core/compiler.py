@@ -15,6 +15,7 @@ from clair.core.staging import (
     build_clone_statement,
     build_drop_staging_statement,
     build_promote_statement,
+    build_type_change_comment,
     make_staging_address,
 )
 from clair.exceptions import CompileError
@@ -148,11 +149,15 @@ def build_statements(
     """
     effective_mode = resolve_effective_mode(trouve, run_mode)
 
-    if not use_staging:
-        return trouve.build_sql(effective_mode, run_id=run_id)
-
     assert trouve.compiled is not None
     physical_address = trouve.compiled.physical_address
+
+    if not use_staging:
+        return [
+            build_type_change_comment(trouve.type, physical_address),
+            *trouve.build_sql(effective_mode, run_id=run_id),
+        ]
+
     staging_address = make_staging_address(physical_address, run_id)
 
     statements: list[str] = []
@@ -163,6 +168,7 @@ def build_statements(
     )
 
     statements.append("-- staging: the data quality tests run here")
+    statements.append(build_type_change_comment(trouve.type, physical_address))
     statements.append(
         build_promote_statement(
             trouve.type,

@@ -11,7 +11,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter
+from clair.adapters.base import ObjectType, Statement, StatementStatus, WarehouseAdapter
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
@@ -145,8 +145,8 @@ class RecordingAdapter(WarehouseAdapter):
     ) -> None:
         return None
 
-    def table_exists(self, database_name: str, schema_name: str, table_name: str) -> bool:
-        return True
+    def object_type(self, address: TrouveAddress) -> ObjectType | None:
+        return ObjectType.TABLE
 
     def close(self) -> None:
         self.closed = True

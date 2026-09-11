@@ -87,6 +87,8 @@ trouve = Trouve(
 
 A VIEW is the same as a TABLE, but clair runs `CREATE OR REPLACE VIEW`. A VIEW cannot use incremental strategies.
 
+You can change the type of a Trouve at any time. Clair drops the object of the old type and makes the new one — see [A Trouve that changes its type](staging.md#a-trouve-that-changes-its-type).
+
 ```python
 # reports/orders/recent.py  →  reports.orders.recent
 from clair import Trouve, TrouveType

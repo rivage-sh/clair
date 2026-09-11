@@ -17,7 +17,7 @@ from typing import Any
 
 import pandas as pd
 
-from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter
+from clair.adapters.base import ObjectType, Statement, StatementStatus, WarehouseAdapter
 from clair.core.dag import ClairDag
 from clair.core.runner import RunResult
 from clair.core.test_runner import TestResult
@@ -268,6 +268,9 @@ class RecordingAdapter(WarehouseAdapter):
             Statement. Use the name of a Trouve to fail that Trouve.
         existing_tables: The address of each table that the warehouse holds.
             None means that every table exists, which is the common case.
+        existing_views: The address of each view that the warehouse holds. An
+            address here answers VIEW, even when existing_tables holds it too.
+            Use it to test a Trouve that changes its type.
         dataframes: The DataFrame at each address, by the address text.
         default_dataframe: The DataFrame that a read of an absent address gives.
             None makes an absent address raise a KeyError.
@@ -285,6 +288,7 @@ class RecordingAdapter(WarehouseAdapter):
         *,
         fail_on: Sequence[str] = (),
         existing_tables: Sequence[str] | None = None,
+        existing_views: Sequence[str] = (),
         dataframes: dict[str, pd.DataFrame] | None = None,
         default_dataframe: pd.DataFrame | None = None,
         select_row_count: int = 0,
@@ -295,6 +299,7 @@ class RecordingAdapter(WarehouseAdapter):
     ) -> None:
         self.fail_on = list(fail_on)
         self.existing_tables = None if existing_tables is None else set(existing_tables)
+        self.existing_views = set(existing_views)
         self.dataframes: dict[str, pd.DataFrame] = dict(dataframes or {})
         self.default_dataframe = default_dataframe
         self.select_row_count = select_row_count
@@ -325,6 +330,7 @@ class RecordingAdapter(WarehouseAdapter):
             existing_tables=None
             if self.existing_tables is None
             else sorted(self.existing_tables),
+            existing_views=sorted(self.existing_views),
             dataframes=self.dataframes,
             default_dataframe=self.default_dataframe,
             select_row_count=self.select_row_count,
@@ -380,12 +386,12 @@ class RecordingAdapter(WarehouseAdapter):
         finally:
             self.record.leave()
 
-    def table_exists(
-        self, database_name: str, schema_name: str, table_name: str
-    ) -> bool:
+    def object_type(self, address: TrouveAddress) -> ObjectType | None:
+        if str(address) in self.existing_views:
+            return ObjectType.VIEW
         if self.existing_tables is None:
-            return True
-        return f"{database_name}.{schema_name}.{table_name}" in self.existing_tables
+            return ObjectType.TABLE
+        return ObjectType.TABLE if str(address) in self.existing_tables else None
 
     # The DataFrames.
 

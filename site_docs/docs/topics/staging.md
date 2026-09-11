@@ -54,7 +54,29 @@ CREATE OR REPLACE TABLE db.schema.orders CLONE db.schema.orders__clair_<run_id> 
 DROP TABLE IF EXISTS db.schema.orders__clair_<run_id>
 ```
 
-Snowflake makes a clone in the metadata, so this step takes constant time for a table of any size. If the physical table does not exist, clair changes that Trouve to the full refresh mode and makes no clone. The promotion does not change.
+Snowflake makes a clone in the metadata, so this step takes constant time for a table of any size. Two conditions give the clone no base: the physical address holds nothing, and the physical address holds a view because the Trouve was a `VIEW` before. In each condition clair changes that Trouve to the full refresh mode and makes no clone. The promotion does not change.
+
+## A Trouve that changes its type
+
+Change `type=TrouveType.TABLE` to `type=TrouveType.VIEW`, or the reverse, and clair repairs the physical address for you.
+
+This needs a step, because Snowflake replaces an object with an object of the same type only. `CREATE OR REPLACE VIEW` against a name that holds a table raises `Object '<name>' already exists.` Clair therefore asks the warehouse for the type that the address holds, and it drops the old object immediately before the promotion:
+
+```sql
+-- object type: the Trouve changed its type, so clair drops the old object
+DROP TABLE IF EXISTS db.schema.orders
+
+-- staging: promote the tested view
+CREATE OR REPLACE VIEW db.schema.orders COPY GRANTS AS ( ... )
+```
+
+Three properties come from the position of that drop:
+
+- **The tests run first.** Clair drops the old object after the tests on the staging object pass. A candidate that fails its tests leaves the old object as it was.
+- **The grants go away.** The drop removes each privilege on the old object, and `COPY GRANTS` then has nothing to copy. Clair writes a warning that names the address. An administrator must grant those privileges again.
+- **`clair compile` shows a comment, and not the drop.** The compiler opens no warehouse connection, thus it cannot know the type that the address holds now. The plan holds `-- object type: if <address> holds an object that is not a TABLE, clair drops it here first`.
+
+A run with no data quality tests writes the physical address directly. The drop then goes in front of the build, and not in front of a promotion.
 
 ## The plan
 
