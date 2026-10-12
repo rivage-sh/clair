@@ -1179,7 +1179,8 @@ class TestTrouveAbc:
 
     def test_trouve_abc_is_not_instantiable(self):
         with pytest.raises(TypeError, match="abstract"):
-            TrouveAbc()  # type: ignore[abstract]
+            # The test builds the abstract class on purpose, to see it refuse.
+            TrouveAbc()  # ty: ignore[call-non-callable]
 
     def test_sql_trouve_gives_no_upstream_trouves(self):
         """A SQL Trouve declares its dependencies with placeholder tokens."""

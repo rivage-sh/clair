@@ -21,7 +21,7 @@ def _multiline_renderer(_logger: Any, _method: str, event_dict: MutableMapping[s
 
     # The local clock time is correct here, because a person reads these times
     # during the run.
-    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]  # noqa: DTZ005 — an accuracy of one millisecond
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     kv = {"timestamp": ts, **event_dict}
 
     if sys.stderr.isatty():
