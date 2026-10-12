@@ -20,7 +20,6 @@ from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.staging import (
     build_clone_statement,
-    build_drop_physical_statement,
     build_drop_staging_statement,
     build_promote_statement,
     make_staging_address,
@@ -335,52 +334,46 @@ def wanted_object_type(trouve_type: TrouveType) -> ObjectType:
     return ObjectType.VIEW if trouve_type == TrouveType.VIEW else ObjectType.TABLE
 
 
-def type_change_drop_sql(
+def type_change_error(
     trouve_type: TrouveType,
     adapter: WarehouseAdapter,
     physical_address: TrouveAddress,
-    logical_address: str,
 ) -> str | None:
-    """Give the drop that clears the physical address, if the Trouve changed its type.
+    """Give the error that stops a Trouve whose type differs from the object at its address.
 
-    A warehouse replaces an object with an object of the same type only, so a
-    Trouve that changes from a TABLE to a VIEW, or from a VIEW to a TABLE, must
-    clear its address first. Clair asks the warehouse for the type that the
-    address holds now, because the compiler has no connection and cannot know it.
+    A warehouse replaces an object with an object of the same type only. A
+    Trouve that changes from a TABLE to a VIEW, or from a VIEW to a TABLE, thus
+    needs a drop of the old object. Clair does not send that drop. A drop removes
+    each privilege on the object, and the role of the run often cannot grant
+    them again, for example in a managed access schema. The person who changed
+    the type must drop the object, and decide about the grants.
 
-    The drop removes each privilege on the old object. ``COPY GRANTS`` then has
-    nothing to copy, so the new object starts with no grant. This function
-    writes a warning that names the address, because an administrator must give
-    those privileges again.
+    Clair asks the warehouse for the type, because the compiler opens no
+    connection and cannot know it.
 
     Args:
         trouve_type: The type that the Trouve has now, TABLE or VIEW.
         adapter: A warehouse adapter with an open connection.
         physical_address: The address that clair writes to.
-        logical_address: The address of the Trouve, for the log line.
 
     Returns:
-        The SQL of the drop, or None when the address needs no drop. The caller
-        executes it immediately before it writes the physical address, and it
-        must stop when the drop fails.
+        The error message, or None when the address holds nothing or an object
+        of the correct type. The caller must stop before it writes the physical
+        address.
     """
     current_type = adapter.object_type(physical_address)
     if current_type is None or current_type == wanted_object_type(trouve_type):
         return None
 
-    logger.warning(
-        "run.node.object_type_changed",
-        logical=logical_address,
-        physical=str(physical_address),
-        old_type=current_type.value,
-        new_type=wanted_object_type(trouve_type).value,
-        message=(
-            f"Clair drops the {current_type.value} at {physical_address} to make a "
-            f"{wanted_object_type(trouve_type).value}. Each privilege on the old "
-            f"object goes away. An administrator must grant them again."
-        ),
+    old_type_name = current_type.value.upper()
+    new_type_name = wanted_object_type(trouve_type).value.upper()
+    return (
+        f"{physical_address} holds a {old_type_name}, and the Trouve is now a "
+        f"{new_type_name}. Snowflake cannot replace one type with the other. "
+        f"Clair does not drop the {old_type_name}, because a drop removes each "
+        f"grant on it. Run DROP {old_type_name} {physical_address}, then run "
+        f"clair again"
     )
-    return build_drop_physical_statement(current_type, physical_address)
 
 
 def _promote_or_keep(
@@ -416,21 +409,14 @@ def _promote_or_keep(
     assert trouve.compiled is not None
 
     # The tests passed, so the candidate must reach the physical address. A
-    # Trouve that changed its type finds an object of the old type there, and a
-    # warehouse replaces an object of the same type only. Clear it first.
-    drop_sql = type_change_drop_sql(
-        trouve.type, adapter, physical_address, str(addresses.logical)
-    )
-    if drop_sql is not None:
-        type_change_drop = adapter.execute(drop_sql)
-        statements.append(type_change_drop)
-        if not type_change_drop.success:
-            return statements, (
-                f"the tests passed, but clair cannot drop the object of the old "
-                f"type at {physical_address}: "
-                f"{type_change_drop.error or 'unknown error'}. "
-                f"The candidate stays at {staging_address}"
-            )
+    # Trouve that changed its type finds an object of the old type there. Clair
+    # stops, and keeps the tested candidate for the person who fixes the address.
+    type_error = type_change_error(trouve.type, adapter, physical_address)
+    if type_error is not None:
+        return statements, (
+            f"the tests passed, but clair does not promote: {type_error}. "
+            f"The tested candidate stays at {staging_address}"
+        )
 
     promotion = adapter.execute(
         build_promote_statement(
@@ -576,37 +562,23 @@ def _run_node(
 
     staging_address = addresses.staging
 
+    # A run with no staging writes the physical address directly, thus it has no
+    # candidate to keep. A Trouve that changed its type stops before any write.
+    # A staged run builds and tests first, and stops in _promote_or_keep.
+    if staging_address is None and trouve.type != TrouveType.SOURCE:
+        type_error = type_change_error(trouve.type, adapter, addresses.physical)
+        if type_error is not None:
+            logger.warning("run.node.failure", logical=logical_address, physical=name, error=type_error)
+            return _NodeOutcome(
+                RunResult(addresses=addresses, error=type_error),
+                downstream_ok=False,
+            )
+
     # A DataframeTrouve is different. Clair reads the data, builds a DataFrame
     # and writes it. Clair does not execute SQL.
     if trouve.execution_type == ExecutionType.PANDAS:
         assert isinstance(trouve, DataframeTrouve)
         logger.info("run.node.start", logical=logical_address, physical=name, effective_mode="full_refresh")
-
-        # write_dataframe replaces a table. Against an address that holds a view
-        # it fails, in the same way that CREATE OR REPLACE TABLE fails. A run
-        # with no staging writes the physical address, so clear it first. A
-        # staged run drops later, in _promote_or_keep.
-        if staging_address is None:
-            drop_sql = type_change_drop_sql(
-                trouve.type, adapter, addresses.physical, logical_address
-            )
-            if drop_sql is not None:
-                type_change_drop = adapter.execute(drop_sql)
-                if not type_change_drop.success:
-                    logger.warning("run.node.failure", logical=logical_address, physical=name, error=type_change_drop.error)
-                    return _NodeOutcome(
-                        RunResult(
-                            addresses=addresses,
-                            statements=[type_change_drop],
-                            error=(
-                                f"Clair cannot drop the object of the old type at "
-                                f"{addresses.physical}: "
-                                f"{type_change_drop.error or 'unknown error'}"
-                            ),
-                        ),
-                        downstream_ok=False,
-                    )
-
         result = _run_dataframe_trouve(trouve, adapter, addresses, RunMode.FULL_REFRESH)
 
         downstream_ok = True
@@ -649,8 +621,9 @@ def _run_node(
     # An incremental run adds to the rows that the target table holds, thus it
     # needs a target table. Two conditions give it none: the address holds
     # nothing, and the address holds a view because the Trouve was a VIEW
-    # before. Both change the run to the full refresh mode, and the full refresh
-    # then drops the view and makes the table.
+    # before. Both change the run to the full refresh mode. For the view, the
+    # full refresh builds and tests a candidate, and the promotion then stops,
+    # because the address holds an object of the old type.
     if effective_mode == RunMode.INCREMENTAL:
         current_type = adapter.object_type(addresses.physical)
         if current_type is None:
@@ -667,16 +640,6 @@ def _run_node(
     # table needs that data first. A zero-copy clone gives it in constant time.
     if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
         plan = [build_clone_statement(addresses.physical, staging_address)] + plan
-
-    # A run with no staging writes the physical address directly, thus the drop
-    # of a changed type belongs in front of the plan. A staged run drops later,
-    # in _promote_or_keep, after the tests pass.
-    if staging_address is None and plan:
-        drop_sql = type_change_drop_sql(
-            trouve.type, adapter, addresses.physical, logical_address
-        )
-        if drop_sql is not None:
-            plan = [drop_sql] + plan
 
     if not plan:
         return _NodeOutcome(None, downstream_ok=True)

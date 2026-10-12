@@ -212,7 +212,7 @@ class TestStagingCompilePlan:
         staging = _staging_name("db.s.orders", RUN_ID)
         assert f"CREATE OR REPLACE TABLE {staging}" in statements[0]
         assert "the data quality tests run here" in statements[1]
-        assert "is not a TABLE, clair drops it here first" in statements[2]
+        assert "is not a TABLE, clair stops here" in statements[2]
         assert f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging} COPY GRANTS" in statements[3]
         assert f"DROP TABLE IF EXISTS {staging}" in statements[4]
 
@@ -231,11 +231,11 @@ class TestStagingCompilePlan:
 
     def test_plan_without_staging_is_the_plain_build(self):
         # The plan holds the build, and one comment in front of it. A run with
-        # no staging writes the physical address directly, thus it can send a
-        # drop first, and the comment tells the reader of the plan.
+        # no staging writes the physical address directly, thus it can stop
+        # before the build, and the comment tells the reader of the plan.
         trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
         statements = build_statements(
             trouve, RunMode.FULL_REFRESH, RUN_ID, use_staging=False
         )
-        assert "is not a TABLE, clair drops it here first" in statements[0]
+        assert "is not a TABLE, clair stops here" in statements[0]
         assert statements[1:] == trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID)

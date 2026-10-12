@@ -1,13 +1,18 @@
-"""Prove that a Trouve which changes its type repairs its address, in Snowflake.
+"""Prove what a Trouve that changes its type does, in Snowflake.
 
 Snowflake replaces an object with an object of the same type only. Against a
 different type ``CREATE OR REPLACE`` raises ``Object '<name>' already exists.``
-Clair therefore asks the warehouse for the type of the object at the physical
-address, and it drops that object before it writes the new one.
+Clair does not drop the old object, because a drop removes each grant on it.
+The run builds and tests the candidate, stops before the promotion, and names
+the drop that a person must run.
 
-These tests are the proof of the whole feature, because the fault lives in
-Snowflake and no fake adapter shows it. Each test class builds one Trouve, runs
-it, rewrites the same file with the other type, and runs it again.
+These tests are the proof of the feature, because the fault lives in Snowflake
+and no fake adapter shows it. Each test class runs one Trouve three times:
+
+1. As the first type. The run makes the object.
+2. As the second type. The run stops, and the object keeps the first type.
+3. As the second type again, after the test runs the drop from the error. The
+   address is empty, thus the run makes the object of the second type.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import clair
 from clair.adapters.base import ObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunStatus, RunSummary
+from clair.core.staging import make_staging_address
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
@@ -29,6 +35,7 @@ from tests.integration.projects import (
     CI_ROUTING_FILE,
     physical_address,
 )
+from tests.integration.warehouse import execute
 
 pytestmark = pytest.mark.integration
 
@@ -68,20 +75,24 @@ def _rewrite_trouve(project_path: Path, database_name: str, trouve_type: str) ->
 
 
 class _TypeChangeRuns(NamedTuple):
-    """The two runs, and the type that the address held between them.
+    """The three runs, and the types that the warehouse held between them.
 
-    The fixture runs both runs before the first test starts. A test that asks
-    the warehouse after the fixture therefore sees the second type only. The
-    fixture reads the first type between the two runs, and keeps it here.
+    The fixture runs all three runs before the first test starts. A test that
+    asks the warehouse after the fixture sees the last state only, so the
+    fixture reads each state at the time that it exists, and keeps it here.
     """
 
     first: RunSummary
     type_after_first_run: ObjectType | None
     second: RunSummary
+    type_after_second_run: ObjectType | None
+    candidate_type_after_second_run: ObjectType | None
+    third: RunSummary
+    type_after_third_run: ObjectType | None
 
 
 class _TypeChangeCase:
-    """One run of each type, in the order that the subclass names."""
+    """One Trouve that changes from FIRST_TYPE to SECOND_TYPE."""
 
     DATABASE_NAME: str = ""
     FIRST_TYPE: str = ""
@@ -99,7 +110,7 @@ class _TypeChangeCase:
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> _TypeChangeRuns:
-        """Run the Trouve as the first type, then as the second type."""
+        """Run the first type, change the type, run, drop by hand, run again."""
         project_path = _write_project(
             tmp_path_factory.mktemp(self.DATABASE_NAME),
             self.DATABASE_NAME,
@@ -112,7 +123,25 @@ class _TypeChangeCase:
 
         _rewrite_trouve(project_path, self.DATABASE_NAME, self.SECOND_TYPE)
         second = clair.run(project_path, env=environment, run_mode=RunMode.FULL_REFRESH)
-        return _TypeChangeRuns(first, type_after_first_run, second)
+        type_after_second_run = adapter.object_type(address)
+        candidate_type_after_second_run = adapter.object_type(
+            make_staging_address(address, second.run_id)
+        )
+
+        # The person reads the error and runs the drop that it names.
+        execute(adapter, f"DROP {self.FIRST_TYPE} {address}")
+        third = clair.run(project_path, env=environment, run_mode=RunMode.FULL_REFRESH)
+        type_after_third_run = adapter.object_type(address)
+
+        return _TypeChangeRuns(
+            first,
+            type_after_first_run,
+            second,
+            type_after_second_run,
+            candidate_type_after_second_run,
+            third,
+            type_after_third_run,
+        )
 
     def test_the_first_run_makes_the_object_of_the_first_type(
         self, runs: _TypeChangeRuns
@@ -120,36 +149,38 @@ class _TypeChangeCase:
         result = runs.first.result(self.logical_name)
 
         assert result is not None
-        assert result.status == RunStatus.SUCCESS
+        assert result.status == RunStatus.SUCCESS, result.error
         assert runs.type_after_first_run == ObjectType[self.FIRST_TYPE]
 
-    def test_the_second_run_replaces_it_with_the_other_type(
-        self,
-        runs: _TypeChangeRuns,
-        adapter: SnowflakeAdapter,
-        clair_environment: IntegrationConfig,
+    def test_the_second_run_fails_and_names_the_drop(
+        self, runs: _TypeChangeRuns, clair_environment: IntegrationConfig
     ) -> None:
-        """Without the drop, Snowflake raises "Object ... already exists"."""
         result = runs.second.result(self.logical_name)
+        address = physical_address(self.logical_name, clair_environment.schema_name)
 
         assert result is not None, "the second run holds no result for the Trouve"
-        assert result.status == RunStatus.SUCCESS, result.error
-        address = physical_address(self.logical_name, clair_environment.schema_name)
-        assert adapter.object_type(address) == ObjectType[self.SECOND_TYPE]
+        assert result.status == RunStatus.FAILURE
+        assert f"Run DROP {self.FIRST_TYPE} {address}" in result.error
 
-    def test_the_second_run_sends_the_drop_of_the_old_type(
+    def test_the_second_run_keeps_the_object_of_the_first_type(
         self, runs: _TypeChangeRuns
     ) -> None:
-        result = runs.second.result(self.logical_name)
+        """Clair sends no drop, so each grant on the object stays."""
+        assert runs.type_after_second_run == ObjectType[self.FIRST_TYPE]
+
+    def test_the_second_run_keeps_a_tested_candidate_of_the_second_type(
+        self, runs: _TypeChangeRuns
+    ) -> None:
+        assert runs.candidate_type_after_second_run == ObjectType[self.SECOND_TYPE]
+
+    def test_after_the_drop_the_next_run_makes_the_second_type(
+        self, runs: _TypeChangeRuns
+    ) -> None:
+        result = runs.third.result(self.logical_name)
 
         assert result is not None
-        drops = [
-            statement.sql
-            for statement in result.statements
-            if "the Trouve changed its type" in statement.sql
-        ]
-        assert len(drops) == 1, "clair sends the drop one time"
-        assert f"DROP {self.FIRST_TYPE} IF EXISTS" in drops[0]
+        assert result.status == RunStatus.SUCCESS, result.error
+        assert runs.type_after_third_run == ObjectType[self.SECOND_TYPE]
 
 
 class TestATableThatBecomesAView(_TypeChangeCase):

@@ -1,9 +1,10 @@
 """The tests of a Trouve that changes between a TABLE and a VIEW.
 
-Snowflake replaces an object with an object of the same type only. A Trouve that
-changes its type therefore needs a drop before the write. Only the warehouse
-knows the type that an address holds now, thus the runner asks it, and the
-compiler puts a comment in the plan.
+Snowflake replaces an object with an object of the same type only. Clair does
+not drop the old object, because a drop removes each grant on it. A staged run
+builds and tests the candidate, then stops before the promotion and keeps the
+candidate. A run with no staging stops before any write. The error names the
+drop that a person must run.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from clair.adapters.base import ObjectType, StatementStatus
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.runner import RunResult, RunStatus, run_project, wanted_object_type
-from clair.core.staging import build_drop_physical_statement, make_staging_address
+from clair.core.staging import make_staging_address
 from clair.environments.routing import TrouveAddress
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode
@@ -37,11 +38,9 @@ ADDRESS = "analytics.revenue.orders"
 # The staging address starts with the physical address, thus a test that looks
 # for a physical statement by its address alone also finds the staging one.
 # Each statement carries a comment that names its step, so the tests match that.
-TYPE_CHANGE_DROP = "the Trouve changed its type"
 SEED_CLONE = "clone the target"
 PROMOTE_TABLE = "promote the tested table"
 PROMOTE_VIEW = "promote the tested view"
-DROP_STAGING = "drop the staging object"
 
 AnyTrouve = TypeVar("AnyTrouve", bound=TrouveAbc)
 
@@ -72,8 +71,19 @@ def _run(
     use_staging: bool = True,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     tests_passed: bool = True,
+    tested_addresses: list[str] | None = None,
 ) -> RunResult:
-    """Run one Trouve, and give the single RunResult."""
+    """Run one Trouve, and give the single RunResult.
+
+    *tested_addresses* receives the address of each object that the data
+    quality tests examined.
+    """
+
+    def run_the_tests(name: str, address: str, _adapter: object) -> bool:
+        if tested_addresses is not None:
+            tested_addresses.append(address)
+        return tests_passed
+
     dag = build_dag([_compile(trouve)])
     selected = get_executable_nodes(dag)
     results = list(
@@ -83,7 +93,7 @@ def _run(
             adapter,
             run_mode=run_mode,
             run_id=RUN_ID,
-            after_node_success=(lambda *_: tests_passed) if use_staging else None,
+            after_node_success=run_the_tests if use_staging else None,
             use_staging=use_staging,
         )
     )
@@ -100,6 +110,15 @@ def _executed_sql(result: RunResult) -> list[str]:
     ]
 
 
+def _drops_of_the_physical_object(result: RunResult) -> list[str]:
+    """Give each statement that drops the physical address, and not the staging one."""
+    return [
+        sql
+        for sql in _executed_sql(result)
+        if "DROP" in sql and _staging_address() not in sql
+    ]
+
+
 class TestWantedObjectType:
     def test_a_table_trouve_wants_a_table(self):
         assert wanted_object_type(TrouveType.TABLE) == ObjectType.TABLE
@@ -108,58 +127,49 @@ class TestWantedObjectType:
         assert wanted_object_type(TrouveType.VIEW) == ObjectType.VIEW
 
 
-class TestDropStatement:
-    def test_the_drop_names_the_type_that_the_address_holds_now(self):
-        address = TrouveAddress.parse(ADDRESS)
-        # The drop must name the old type. DROP VIEW against a table raises
-        # "Object found is of type 'TABLE', not specified type 'VIEW'".
-        assert "DROP TABLE IF EXISTS analytics.revenue.orders" in (
-            build_drop_physical_statement(ObjectType.TABLE, address)
-        )
-        assert "DROP VIEW IF EXISTS analytics.revenue.orders" in (
-            build_drop_physical_statement(ObjectType.VIEW, address)
-        )
-
-
 class TestStagedRun:
-    def test_a_table_that_becomes_a_view_drops_the_table_first(self):
+    def test_a_table_that_becomes_a_view_stops_before_the_promotion(self):
         # RecordingAdapter answers TABLE for each address, thus the physical
         # address holds a table and the Trouve asks for a view.
         adapter = RecordingAdapter()
         result = _run(Trouve(type=TrouveType.VIEW, sql="SELECT 1 AS id"), adapter)
 
-        assert result.status == RunStatus.SUCCESS
-        executed = _executed_sql(result)
-        drop_index = next(i for i, sql in enumerate(executed) if TYPE_CHANGE_DROP in sql)
-        promote_index = next(i for i, sql in enumerate(executed) if PROMOTE_VIEW in sql)
-        assert drop_index < promote_index
-        assert f"DROP TABLE IF EXISTS {ADDRESS}" in executed[drop_index]
+        assert result.status == RunStatus.FAILURE
+        assert f"{ADDRESS} holds a TABLE, and the Trouve is now a VIEW" in result.error
+        assert f"Run DROP TABLE {ADDRESS}" in result.error
+        assert not [sql for sql in _executed_sql(result) if PROMOTE_VIEW in sql]
+        assert _drops_of_the_physical_object(result) == []
 
-    def test_a_view_that_becomes_a_table_drops_the_view_first(self):
+    def test_a_view_that_becomes_a_table_stops_before_the_promotion(self):
         adapter = RecordingAdapter(existing_views=[ADDRESS])
         result = _run(Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"), adapter)
 
-        assert result.status == RunStatus.SUCCESS
-        executed = _executed_sql(result)
-        drop_index = next(i for i, sql in enumerate(executed) if TYPE_CHANGE_DROP in sql)
-        promote_index = next(i for i, sql in enumerate(executed) if PROMOTE_TABLE in sql)
-        assert drop_index < promote_index
-        assert f"DROP VIEW IF EXISTS {ADDRESS}" in executed[drop_index]
+        assert result.status == RunStatus.FAILURE
+        assert f"{ADDRESS} holds a VIEW, and the Trouve is now a TABLE" in result.error
+        assert f"Run DROP VIEW {ADDRESS}" in result.error
+        assert not [sql for sql in _executed_sql(result) if PROMOTE_TABLE in sql]
+        assert _drops_of_the_physical_object(result) == []
 
-    def test_a_type_that_does_not_change_sends_no_drop_of_the_physical_object(self):
-        adapter = RecordingAdapter()
-        result = _run(Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"), adapter)
+    def test_the_candidate_is_built_and_tested_and_kept(self):
+        # A person who reads the error can query a tested candidate, so the
+        # stop comes after the build and after the tests.
+        adapter = RecordingAdapter(existing_views=[ADDRESS])
+        tested_addresses: list[str] = []
+        result = _run(
+            Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"),
+            adapter,
+            tested_addresses=tested_addresses,
+        )
 
-        assert result.status == RunStatus.SUCCESS
-        # The plan drops the staging object, and it drops nothing else.
-        drops = [sql for sql in _executed_sql(result) if "DROP" in sql]
-        assert len(drops) == 1
-        assert DROP_STAGING in drops[0]
-        assert _staging_address() in drops[0]
+        assert f"CREATE OR REPLACE TABLE {_staging_address()}" in _executed_sql(result)[0]
+        assert tested_addresses == [_staging_address()]
+        assert f"The tested candidate stays at {_staging_address()}" in result.error
+        # Clair drops the staging object only after a promotion.
+        assert not [sql for sql in _executed_sql(result) if "DROP" in sql]
 
-    def test_a_type_change_waits_for_the_tests_to_pass(self):
-        # The tests fail, thus the physical address keeps its object. A drop
-        # here destroys the old data for a candidate that clair rejects.
+    def test_a_failed_test_reports_the_test_and_not_the_type(self):
+        # The tests come first. A candidate that fails them is the first fault
+        # to fix, and the type of the address does not matter yet.
         adapter = RecordingAdapter()
         result = _run(
             Trouve(type=TrouveType.VIEW, sql="SELECT 1 AS id"),
@@ -168,34 +178,36 @@ class TestStagedRun:
         )
 
         assert result.status == RunStatus.FAILURE
-        assert not [sql for sql in _executed_sql(result) if TYPE_CHANGE_DROP in sql]
+        assert "the tests failed" in result.error
+        assert "holds a TABLE" not in result.error
 
-    def test_a_drop_that_fails_stops_the_node_and_keeps_the_candidate(self):
-        adapter = RecordingAdapter(fail_on=["DROP TABLE IF EXISTS analytics"])
+    def test_a_type_that_does_not_change_promotes(self):
+        adapter = RecordingAdapter()
+        result = _run(Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"), adapter)
+
+        assert result.status == RunStatus.SUCCESS
+        assert [sql for sql in _executed_sql(result) if PROMOTE_TABLE in sql]
+
+    def test_an_address_that_holds_nothing_promotes(self):
+        # After the person drops the old object, the next run takes this path.
+        adapter = RecordingAdapter(existing_tables=[])
         result = _run(Trouve(type=TrouveType.VIEW, sql="SELECT 1 AS id"), adapter)
 
-        assert result.status == RunStatus.FAILURE
-        assert "cannot drop the object of the old type" in result.error
-        assert _staging_address() in result.error
-        # Clair sent no promotion after the drop failed.
-        assert not [sql for sql in _executed_sql(result) if PROMOTE_VIEW in sql]
+        assert result.status == RunStatus.SUCCESS
+        assert [sql for sql in _executed_sql(result) if PROMOTE_VIEW in sql]
 
-    def test_the_log_warns_that_the_grants_go_away(self):
+    def test_the_failure_is_in_the_log(self):
         adapter = RecordingAdapter()
         with capture_logs() as log_entries:
             _run(Trouve(type=TrouveType.VIEW, sql="SELECT 1 AS id"), adapter)
 
-        warnings = [
-            e for e in log_entries if e["event"] == "run.node.object_type_changed"
-        ]
-        assert len(warnings) == 1
-        assert warnings[0]["old_type"] == "table"
-        assert warnings[0]["new_type"] == "view"
-        assert "privilege" in warnings[0]["message"]
+        failures = [e for e in log_entries if e["event"] == "run.node.failure"]
+        assert len(failures) == 1
+        assert f"Run DROP TABLE {ADDRESS}" in failures[0]["error"]
 
 
 class TestRunWithNoStaging:
-    def test_the_drop_comes_before_the_build(self):
+    def test_a_type_change_stops_before_any_write(self):
         adapter = RecordingAdapter(existing_views=[ADDRESS])
         result = _run(
             Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"),
@@ -203,12 +215,13 @@ class TestRunWithNoStaging:
             use_staging=False,
         )
 
-        assert result.status == RunStatus.SUCCESS
-        executed = _executed_sql(result)
-        assert "DROP VIEW IF EXISTS" in executed[0]
-        assert f"CREATE OR REPLACE TABLE {ADDRESS}" in executed[1]
+        assert result.status == RunStatus.FAILURE
+        assert f"Run DROP VIEW {ADDRESS}" in result.error
+        # No staging step, thus no candidate to keep, and no word about one.
+        assert "candidate" not in result.error
+        assert result.statements == []
 
-    def test_a_type_that_does_not_change_sends_no_drop(self):
+    def test_a_type_that_does_not_change_builds(self):
         adapter = RecordingAdapter()
         result = _run(
             Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"),
@@ -217,7 +230,7 @@ class TestRunWithNoStaging:
         )
 
         assert result.status == RunStatus.SUCCESS
-        assert not [sql for sql in _executed_sql(result) if "DROP" in sql]
+        assert f"CREATE OR REPLACE TABLE {ADDRESS}" in _executed_sql(result)[0]
 
 
 class TestIncrementalFallback:
@@ -230,10 +243,30 @@ class TestIncrementalFallback:
             ),
         )
 
-    def test_a_view_at_the_address_changes_the_run_to_a_full_refresh(self):
+    def test_a_view_at_the_address_builds_a_full_candidate_and_stops(self):
         # An incremental run needs a base table, and a view is not one. Clair
-        # makes the table again, and the promotion drops the view.
+        # builds the full table as the candidate, tests it, and then stops,
+        # because the address holds a view.
         adapter = RecordingAdapter(existing_views=[ADDRESS])
+        with capture_logs() as log_entries:
+            result = _run(
+                self._incremental_trouve(), adapter, run_mode=RunMode.INCREMENTAL
+            )
+
+        assert result.status == RunStatus.FAILURE
+        assert result.effective_run_mode == RunMode.FULL_REFRESH
+        fallbacks = [
+            e for e in log_entries if e["event"] == "run.node.incremental_fallback"
+        ]
+        assert len(fallbacks) == 1
+        assert fallbacks[0]["reason"] == "object_type_changed"
+        # A clone of a view into a table is an error in Snowflake, thus the
+        # plan must hold no seed clone.
+        assert not [sql for sql in _executed_sql(result) if SEED_CLONE in sql]
+        assert f"Run DROP VIEW {ADDRESS}" in result.error
+
+    def test_an_address_that_holds_nothing_changes_the_run_to_a_full_refresh(self):
+        adapter = RecordingAdapter(existing_tables=[])
         with capture_logs() as log_entries:
             result = _run(
                 self._incremental_trouve(), adapter, run_mode=RunMode.INCREMENTAL
@@ -244,36 +277,15 @@ class TestIncrementalFallback:
         fallbacks = [
             e for e in log_entries if e["event"] == "run.node.incremental_fallback"
         ]
-        assert len(fallbacks) == 1
-        assert fallbacks[0]["reason"] == "object_type_changed"
-        # A clone of a view into a table is an error in Snowflake, thus the
-        # plan must hold no seed clone. The promotion clones, and that is a
-        # clone of the staging table, not of the view.
-        assert not [sql for sql in _executed_sql(result) if SEED_CLONE in sql]
-        drops = [sql for sql in _executed_sql(result) if TYPE_CHANGE_DROP in sql]
-        assert len(drops) == 1
-        assert f"DROP VIEW IF EXISTS {ADDRESS}" in drops[0]
-
-    def test_an_address_that_holds_nothing_changes_the_run_to_a_full_refresh(self):
-        adapter = RecordingAdapter(existing_tables=[])
-        with capture_logs() as log_entries:
-            result = _run(
-                self._incremental_trouve(), adapter, run_mode=RunMode.INCREMENTAL
-            )
-
-        assert result.effective_run_mode == RunMode.FULL_REFRESH
-        fallbacks = [
-            e for e in log_entries if e["event"] == "run.node.incremental_fallback"
-        ]
         assert fallbacks[0]["reason"] == "object_not_found"
 
     def test_a_table_at_the_address_keeps_the_incremental_mode(self):
         adapter = RecordingAdapter()
         result = _run(self._incremental_trouve(), adapter, run_mode=RunMode.INCREMENTAL)
 
+        assert result.status == RunStatus.SUCCESS
         assert result.effective_run_mode == RunMode.INCREMENTAL
         assert [sql for sql in _executed_sql(result) if SEED_CLONE in sql]
-        assert not [sql for sql in _executed_sql(result) if TYPE_CHANGE_DROP in sql]
 
 
 class _FakeCursor:
