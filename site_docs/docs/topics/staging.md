@@ -54,7 +54,34 @@ CREATE OR REPLACE TABLE db.schema.orders CLONE db.schema.orders__clair_<run_id> 
 DROP TABLE IF EXISTS db.schema.orders__clair_<run_id>
 ```
 
-Snowflake makes a clone in the metadata, so this step takes constant time for a table of any size. If the physical table does not exist, clair changes that Trouve to the full refresh mode and makes no clone. The promotion does not change.
+Snowflake makes a clone in the metadata, so this step takes constant time for a table of any size. Two conditions give the clone no base: the physical address holds nothing, and the physical address holds a view because the Trouve was a `VIEW` before. In each condition clair changes that Trouve to the full refresh mode and makes no clone. The promotion does not change.
+
+## A Trouve that changes its type
+
+Change `type=TrouveType.TABLE` to `type=TrouveType.VIEW`, or the reverse, and the next run stops before the promotion. You drop the old object, and the run after that makes the new one.
+
+Snowflake replaces an object with an object of the same type only. `CREATE OR REPLACE VIEW` against a name that holds a table raises `Object '<name>' already exists.` The only repair is a drop, and a drop removes each grant on the object. The role that runs clair often cannot grant them again — for example in a managed access schema. Clair therefore does not drop the object. The person who changed the type decides about the grants.
+
+The run does these steps:
+
+1. It builds the candidate at the staging address, and runs the data quality tests on it, as usual.
+2. It asks the warehouse for the type of the object at the physical address. The type is different, so the Trouve fails, and clair skips each Trouve downstream of it.
+3. The physical object and its grants do not change. The tested candidate stays at the staging address, for your examination.
+
+The error names the drop to run:
+
+```text
+db.schema.orders holds a TABLE, and the Trouve is now a VIEW. Snowflake cannot
+replace one type with the other. Clair does not drop the TABLE, because a drop
+removes each grant on it. Run DROP TABLE db.schema.orders, then run clair again.
+The tested candidate stays at db.schema.orders__clair_<run_id>
+```
+
+After the drop, the address holds nothing, and the next run takes the usual path.
+
+A run with no data quality tests has no staging step, thus it has no candidate to keep. It stops before it writes anything.
+
+`clair compile` opens no warehouse connection, thus it cannot know the type that the address holds. The plan shows the condition as a comment: `-- object type: if <address> holds an object that is not a TABLE, clair stops here and writes nothing to it`.
 
 ## The plan
 

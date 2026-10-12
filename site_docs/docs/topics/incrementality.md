@@ -198,6 +198,8 @@ run_config=RunConfig(
 
 On the first run, the target table does not exist. clair then does a full refresh, and it ignores your strategy. The runs after the first one use your incremental mode.
 
+A Trouve that changes from a `VIEW` to an incremental `TABLE` has no base table either, because the address holds a view. Clair builds and tests a full refresh candidate, then stops before the promotion, and tells you to drop the view — see [A Trouve that changes its type](staging.md#a-trouve-that-changes-its-type).
+
 ## Change the mode at the command line
 
 Force a full refresh for one run:

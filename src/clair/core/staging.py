@@ -18,6 +18,13 @@ is already wrong. Clair writes through a staging address instead:
 A downstream Trouve reads the physical address, because clair promotes each node
 immediately after the tests of that node. The SQL of a dependent therefore finds
 the data that it expects.
+
+A Trouve that changes from a TABLE to a VIEW, or from a VIEW to a TABLE, stops
+before the promotion. Snowflake replaces an object with an object of the same
+type only, and clair does not drop the old object, because a drop removes each
+grant on it. The tested candidate stays, and the error names the drop to run.
+Only the warehouse knows the type that the address holds, so the runner asks it
+and the compiler writes a comment.
 """
 
 from __future__ import annotations
@@ -133,6 +140,22 @@ def build_promote_statement(
     return (
         f"-- staging: promote the tested table\n"
         f"CREATE OR REPLACE TABLE {physical_address} CLONE {staging_address} COPY GRANTS"
+    )
+
+
+def build_type_change_comment(
+    trouve_type: TrouveType, physical_address: TrouveAddress
+) -> str:
+    """Give the comment that tells a reader of the plan about the type test.
+
+    ``clair compile`` opens no warehouse connection, thus it cannot know the type
+    that the physical address holds now. The comment names the condition, so a
+    reader of the compiled SQL knows that the run can stop here.
+    """
+    object_type_name = "VIEW" if trouve_type == TrouveType.VIEW else "TABLE"
+    return (
+        f"-- object type: if {physical_address} holds an object that is not a "
+        f"{object_type_name}, clair stops here and writes nothing to it"
     )
 
 
