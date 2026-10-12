@@ -15,7 +15,7 @@ import pandas as pd
 import structlog
 from pydantic import BaseModel, computed_field
 
-from clair.adapters.base import ObjectType, Statement, StatementStatus, WarehouseAdapter
+from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.staging import (
@@ -324,14 +324,14 @@ def _run_dataframe_trouve(
     )
 
 
-def wanted_object_type(trouve_type: TrouveType) -> ObjectType:
+def wanted_object_type(trouve_type: TrouveType) -> WarehouseObjectType:
     """Give the warehouse object type that a Trouve of this type must have.
 
     Clair never materializes a SOURCE Trouve, thus a SOURCE never reaches this
     function.
     """
     assert trouve_type != TrouveType.SOURCE, "clair does not materialize a SOURCE Trouve"
-    return ObjectType.VIEW if trouve_type == TrouveType.VIEW else ObjectType.TABLE
+    return WarehouseObjectType.VIEW if trouve_type == TrouveType.VIEW else WarehouseObjectType.TABLE
 
 
 def type_change_error(
@@ -629,7 +629,7 @@ def _run_node(
         if current_type is None:
             logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_not_found")
             effective_mode = RunMode.FULL_REFRESH
-        elif current_type != ObjectType.TABLE:
+        elif current_type != WarehouseObjectType.TABLE:
             logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_type_changed")
             effective_mode = RunMode.FULL_REFRESH
 

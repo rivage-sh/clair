@@ -10,7 +10,7 @@ import snowflake.connector
 from cryptography.hazmat.primitives import serialization
 from snowflake.connector.pandas_tools import write_pandas
 
-from clair.adapters.base import ObjectType, Statement, StatementStatus, WarehouseAdapter
+from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
 from clair.trouves.address import TrouveAddress
 
 
@@ -117,7 +117,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         finally:
             cursor.close()
 
-    def object_type(self, address: TrouveAddress) -> ObjectType | None:
+    def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
         """Give the type of the object at the address. Reads INFORMATION_SCHEMA.
 
         ``INFORMATION_SCHEMA.TABLES`` holds a row for a view too, and the
@@ -149,7 +149,7 @@ class SnowflakeAdapter(WarehouseAdapter):
 
         if row is None or row[0] is None:
             return None
-        return ObjectType.VIEW if "VIEW" in str(row[0]).upper() else ObjectType.TABLE
+        return WarehouseObjectType.VIEW if "VIEW" in str(row[0]).upper() else WarehouseObjectType.TABLE
 
     def set_context(
         self,

@@ -26,7 +26,7 @@ class StatementStatus(StrEnum):
     NOT_RUN = "not_run"
 
 
-class ObjectType(StrEnum):
+class WarehouseObjectType(StrEnum):
     """The type of an object that exists in the warehouse.
 
     Clair materializes a TABLE or a VIEW. It never makes a SOURCE, thus this
@@ -105,7 +105,7 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
-    def object_type(self, address: TrouveAddress) -> ObjectType | None:
+    def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
         """Give the type of the object at the address, or None if it holds none.
 
         Clair asks this question before it writes to a physical address. A

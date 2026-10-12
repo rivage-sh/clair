@@ -15,7 +15,7 @@ from typing import Any, TypeVar, cast
 import pytest
 from structlog.testing import capture_logs
 
-from clair.adapters.base import ObjectType, StatementStatus
+from clair.adapters.base import StatementStatus, WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.runner import RunResult, RunStatus, run_project, wanted_object_type
@@ -121,10 +121,10 @@ def _drops_of_the_physical_object(result: RunResult) -> list[str]:
 
 class TestWantedObjectType:
     def test_a_table_trouve_wants_a_table(self):
-        assert wanted_object_type(TrouveType.TABLE) == ObjectType.TABLE
+        assert wanted_object_type(TrouveType.TABLE) == WarehouseObjectType.TABLE
 
     def test_a_view_trouve_wants_a_view(self):
-        assert wanted_object_type(TrouveType.VIEW) == ObjectType.VIEW
+        assert wanted_object_type(TrouveType.VIEW) == WarehouseObjectType.VIEW
 
 
 class TestStagedRun:
@@ -330,21 +330,21 @@ def _snowflake_adapter_that_answers(
 
 
 class TestSnowflakeObjectType:
-    """The map from the TABLE_TYPE column of Snowflake onto ObjectType."""
+    """The map from the TABLE_TYPE column of Snowflake onto WarehouseObjectType."""
 
     def test_a_base_table_is_a_table(self):
         adapter, _ = _snowflake_adapter_that_answers(("BASE TABLE",))
-        assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == ObjectType.TABLE
+        assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.TABLE
 
     def test_a_view_is_a_view(self):
         adapter, _ = _snowflake_adapter_that_answers(("VIEW",))
-        assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == ObjectType.VIEW
+        assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.VIEW
 
     def test_a_materialized_view_is_a_view(self):
         # Clair makes no materialized view, but a user can point a Trouve at an
         # address that holds one. A view is the closer answer of the two.
         adapter, _ = _snowflake_adapter_that_answers(("MATERIALIZED VIEW",))
-        assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == ObjectType.VIEW
+        assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.VIEW
 
     def test_no_row_means_the_address_holds_nothing(self):
         adapter, _ = _snowflake_adapter_that_answers(None)

@@ -17,7 +17,7 @@ from typing import Any
 
 import pandas as pd
 
-from clair.adapters.base import ObjectType, Statement, StatementStatus, WarehouseAdapter
+from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
 from clair.core.dag import ClairDag
 from clair.core.runner import RunResult
 from clair.core.test_runner import TestResult
@@ -386,12 +386,12 @@ class RecordingAdapter(WarehouseAdapter):
         finally:
             self.record.leave()
 
-    def object_type(self, address: TrouveAddress) -> ObjectType | None:
+    def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
         if str(address) in self.existing_views:
-            return ObjectType.VIEW
+            return WarehouseObjectType.VIEW
         if self.existing_tables is None:
-            return ObjectType.TABLE
-        return ObjectType.TABLE if str(address) in self.existing_tables else None
+            return WarehouseObjectType.TABLE
+        return WarehouseObjectType.TABLE if str(address) in self.existing_tables else None
 
     # The DataFrames.
 

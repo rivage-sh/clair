@@ -23,7 +23,7 @@ from typing import NamedTuple
 import pytest
 
 import clair
-from clair.adapters.base import ObjectType
+from clair.adapters.base import WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunStatus, RunSummary
 from clair.core.staging import make_staging_address
@@ -83,12 +83,12 @@ class _TypeChangeRuns(NamedTuple):
     """
 
     first: RunSummary
-    type_after_first_run: ObjectType | None
+    type_after_first_run: WarehouseObjectType | None
     second: RunSummary
-    type_after_second_run: ObjectType | None
-    candidate_type_after_second_run: ObjectType | None
+    type_after_second_run: WarehouseObjectType | None
+    candidate_type_after_second_run: WarehouseObjectType | None
     third: RunSummary
-    type_after_third_run: ObjectType | None
+    type_after_third_run: WarehouseObjectType | None
 
 
 class _TypeChangeCase:
@@ -150,7 +150,7 @@ class _TypeChangeCase:
 
         assert result is not None
         assert result.status == RunStatus.SUCCESS, result.error
-        assert runs.type_after_first_run == ObjectType[self.FIRST_TYPE]
+        assert runs.type_after_first_run == WarehouseObjectType[self.FIRST_TYPE]
 
     def test_the_second_run_fails_and_names_the_drop(
         self, runs: _TypeChangeRuns, clair_environment: IntegrationConfig
@@ -166,12 +166,12 @@ class _TypeChangeCase:
         self, runs: _TypeChangeRuns
     ) -> None:
         """Clair sends no drop, so each grant on the object stays."""
-        assert runs.type_after_second_run == ObjectType[self.FIRST_TYPE]
+        assert runs.type_after_second_run == WarehouseObjectType[self.FIRST_TYPE]
 
     def test_the_second_run_keeps_a_tested_candidate_of_the_second_type(
         self, runs: _TypeChangeRuns
     ) -> None:
-        assert runs.candidate_type_after_second_run == ObjectType[self.SECOND_TYPE]
+        assert runs.candidate_type_after_second_run == WarehouseObjectType[self.SECOND_TYPE]
 
     def test_after_the_drop_the_next_run_makes_the_second_type(
         self, runs: _TypeChangeRuns
@@ -180,7 +180,7 @@ class _TypeChangeCase:
 
         assert result is not None
         assert result.status == RunStatus.SUCCESS, result.error
-        assert runs.type_after_third_run == ObjectType[self.SECOND_TYPE]
+        assert runs.type_after_third_run == WarehouseObjectType[self.SECOND_TYPE]
 
 
 class TestATableThatBecomesAView(_TypeChangeCase):
