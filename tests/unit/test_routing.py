@@ -79,7 +79,8 @@ class TestTrouveAddress:
 class TestRoutingEntry:
     def test_the_base_class_needs_a_route_method(self):
         with pytest.raises(TypeError):
-            RoutingEntry(environment_name="dev")
+            # The test builds the abstract class on purpose, to see it refuse.
+            RoutingEntry(environment_name="dev")  # ty: ignore[call-non-callable]
 
     def test_a_subclass_keeps_its_own_fields(self):
         entry = DatabaseOverrideRouting(
