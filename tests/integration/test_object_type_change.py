@@ -13,6 +13,7 @@ it, rewrites the same file with the other type, and runs it again.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -66,6 +67,19 @@ def _rewrite_trouve(project_path: Path, database_name: str, trouve_type: str) ->
     trouve_file.write_text(_trouve_file(trouve_type))
 
 
+class _TypeChangeRuns(NamedTuple):
+    """The two runs, and the type that the address held between them.
+
+    The fixture runs both runs before the first test starts. A test that asks
+    the warehouse after the fixture therefore sees the second type only. The
+    fixture reads the first type between the two runs, and keeps it here.
+    """
+
+    first: RunSummary
+    type_after_first_run: ObjectType | None
+    second: RunSummary
+
+
 class _TypeChangeCase:
     """One run of each type, in the order that the subclass names."""
 
@@ -82,43 +96,41 @@ class _TypeChangeCase:
         self,
         clair_environment: IntegrationConfig,
         environment: Environment,
+        adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
-    ) -> tuple[RunSummary, RunSummary]:
+    ) -> _TypeChangeRuns:
         """Run the Trouve as the first type, then as the second type."""
         project_path = _write_project(
             tmp_path_factory.mktemp(self.DATABASE_NAME),
             self.DATABASE_NAME,
             self.FIRST_TYPE,
         )
+        address = physical_address(self.logical_name, clair_environment.schema_name)
+
         first = clair.run(project_path, env=environment, run_mode=RunMode.FULL_REFRESH)
+        type_after_first_run = adapter.object_type(address)
 
         _rewrite_trouve(project_path, self.DATABASE_NAME, self.SECOND_TYPE)
         second = clair.run(project_path, env=environment, run_mode=RunMode.FULL_REFRESH)
-        return first, second
+        return _TypeChangeRuns(first, type_after_first_run, second)
 
     def test_the_first_run_makes_the_object_of_the_first_type(
-        self,
-        runs: tuple[RunSummary, RunSummary],
-        adapter: SnowflakeAdapter,
-        clair_environment: IntegrationConfig,
+        self, runs: _TypeChangeRuns
     ) -> None:
-        first, _ = runs
-        result = first.result(self.logical_name)
+        result = runs.first.result(self.logical_name)
 
         assert result is not None
         assert result.status == RunStatus.SUCCESS
-        address = physical_address(self.logical_name, clair_environment.schema_name)
-        assert adapter.object_type(address) == ObjectType[self.FIRST_TYPE]
+        assert runs.type_after_first_run == ObjectType[self.FIRST_TYPE]
 
     def test_the_second_run_replaces_it_with_the_other_type(
         self,
-        runs: tuple[RunSummary, RunSummary],
+        runs: _TypeChangeRuns,
         adapter: SnowflakeAdapter,
         clair_environment: IntegrationConfig,
     ) -> None:
         """Without the drop, Snowflake raises "Object ... already exists"."""
-        _, second = runs
-        result = second.result(self.logical_name)
+        result = runs.second.result(self.logical_name)
 
         assert result is not None, "the second run holds no result for the Trouve"
         assert result.status == RunStatus.SUCCESS, result.error
@@ -126,10 +138,9 @@ class _TypeChangeCase:
         assert adapter.object_type(address) == ObjectType[self.SECOND_TYPE]
 
     def test_the_second_run_sends_the_drop_of_the_old_type(
-        self, runs: tuple[RunSummary, RunSummary]
+        self, runs: _TypeChangeRuns
     ) -> None:
-        _, second = runs
-        result = second.result(self.logical_name)
+        result = runs.second.result(self.logical_name)
 
         assert result is not None
         drops = [
