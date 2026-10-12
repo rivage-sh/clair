@@ -53,7 +53,7 @@ def clean_sys_modules():
                 "analytics.",
                 "db.",
                 "tmp_project",
-                "_clair_routing_",
+                "_clair_support_",
                 "clair_projects",
             )
         ):

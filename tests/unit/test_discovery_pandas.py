@@ -5,7 +5,8 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from clair.core.discovery import discover_project, recompile_for_selection
+from clair.core.discovery import discover_project
+from clair.core.references import recompile_for_selection
 from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.trouve import Trouve, TrouveAbc
 from tests.helpers import DatabaseOverrideRouting

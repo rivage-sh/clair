@@ -11,6 +11,7 @@ import structlog
 
 from clair import api as clair_api
 from clair._logging import configure_logging
+from clair._version import __version__
 from clair.core.artifacts import InvalidBeforeSpecError
 from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
@@ -65,7 +66,7 @@ def _load_environment_or_name(env_name: str | None) -> Environment | str:
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="clair")
+@click.version_option(version=__version__, prog_name="clair")
 def cli() -> None:
     """Clair -- Python-native data transformation for Snowflake."""
     configure_logging()

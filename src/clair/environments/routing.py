@@ -15,6 +15,7 @@ an error.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ValidationError, model_validator
@@ -255,3 +256,26 @@ def detect_routing_collisions(
         for target, sources in target_to_sources.items()
         if len(sources) > 1
     ]
+
+
+def detect_routing_collisions_of_trouves(
+    trouves: Sequence[TrouveAbc],
+) -> list[tuple[str, list[str]]]:
+    """Give a (physical_target, [logical_sources]) pair for each routing collision.
+
+    This function takes the compiled Trouves, and
+    ``detect_routing_collisions`` takes a map of addresses. Call this one after
+    ``discover_project()``, and the other one when you hold the addresses
+    already.
+
+    A collision occurs when two Trouves that are not SOURCE Trouves route to
+    one physical address. The result is an empty list when no routing policy is
+    active. Then the logical address and the physical address are equal for
+    each Trouve.
+    """
+    logical_to_physical = {
+        str(trouve.compiled.logical_address): str(trouve.compiled.physical_address)
+        for trouve in trouves
+        if trouve.compiled and trouve.type != TrouveType.SOURCE
+    }
+    return detect_routing_collisions(logical_to_physical)
