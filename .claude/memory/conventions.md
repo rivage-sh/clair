@@ -57,6 +57,19 @@ argument for them. A user who reads that page wants to know where the file goes.
 
 ---
 
+### `build_sql()` takes no connection, and a runtime fact arrives as data
+
+`Trouve.build_sql()` is the extension point for each build that clair does not model, and
+it takes no warehouse connection. That is invariant 4 at the level of one method:
+`clair compile` calls it offline, thus a pull request shows the complete plan. A method
+that queries the warehouse — a dbt introspective macro — makes the plan depend on the
+state of the warehouse at run time, and no reviewer can read it.
+
+Some builds need a fact of the warehouse: the type of the object at the address, or its
+columns. The runner asks for that fact with a named probe on the `WarehouseAdapter` ABC,
+in the same way as `object_type()`. If a plan needs the answer, the runner gives it to
+`build_sql()` as data. Never give `build_sql()` the adapter.
+
 ## The documentation gives orientation. The code gives the truth.
 
 `grep` `site_docs/docs/` to learn what a feature does — it is Markdown, and it is small
@@ -84,7 +97,7 @@ directory, and keep the other kinds out of it.
 | `index.md`, `installation.md`, `quickstart.md` | Tutorial | A person who never used clair | One path, and it always operates. |
 | `topics/` | Explanation | A person who wants to understand clair | The reader learns *why*, and does no work. |
 | `cli/`, `reference/` | Reference | A person in the middle of a task | Complete, dry, and shaped by the code. |
-| (none today) | How-to | A person with a goal | One goal, one recipe, from start to end. |
+| `guides/` | How-to | A person with a goal | One goal, one recipe, from start to end. |
 
 - **Reference takes its shape from the code.** One page per class or per command, each
   field, each flag, each default. A person reads a fragment of it, not the page. When a
@@ -97,8 +110,8 @@ directory, and keep the other kinds out of it.
   wrong place. Put it in `topics/`, and leave a link. `topics/library-and-cli.md` holds
   the position that clair is a Python library and the CLI is a thin caller of it, because
   that argument sat as two lines inside `reference/python-api.md`.
-- **The how-to column is empty today.** A task-shaped page — clair in CI, clair in a
-  pytest suite, clair in Airflow — goes in a new `guides/` directory, not in `topics/`.
+- **A task-shaped page goes in `guides/`, not in `topics/`.** For example clair in CI,
+  clair in a pytest suite, clair in Airflow. `guides/custom-build-sql.md` is the model.
 
 ### `examples/` rots in the same way, and CI does not execute it
 

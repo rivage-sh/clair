@@ -1,7 +1,7 @@
 # Trouve API
 
 ```python
-from clair import PandasTrouve, SeedTrouve, Trouve, TrouveAbc, TrouveType
+from clair import BuildPlan, PandasTrouve, SeedTrouve, Trouve, TrouveAbc, TrouveType
 ```
 
 Clair has one Trouve class for each backend. `TrouveAbc` is the abstract base
@@ -83,11 +83,39 @@ class Trouve(TrouveAbc):
 | `is_compiled` | `bool` | `True` after clair discovers the project |
 | `physical_address` | `TrouveAddress` | The address that clair writes to. `str()` gives `database.schema.table`. Raises `RuntimeError` if not compiled. |
 
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `build_sql(effective_mode, run_id, staging_address=None)` | `BuildPlan` | The statements that write the object. Raises `RuntimeError` if not compiled. A subclass can override it. See [Write your own build](../guides/custom-build-sql.md). |
+
 ### Validation rules
 
 - TABLE and VIEW: `sql` must be non-empty
 - SOURCE: `sql` must be empty
 - INCREMENTAL mode: only TABLE supports it (not VIEW)
+
+## `BuildPlan`
+
+The statements that `Trouve.build_sql()` gives for one Trouve.
+
+```python
+class BuildPlan(BaseModel):
+    statements:         list[str] = []
+    cleanup_statements: list[str] = []
+
+    @property
+    def all_statements(self) -> list[str]: ...  # statements, then cleanup_statements
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `statements` | `list[str]` | The statements that write the object, in order. clair stops at the first one that fails. |
+| `cleanup_statements` | `list[str]` | The statements that remove each object that the plan makes for one run. clair executes them after `statements`, when they pass and when one of them fails. A failed cleanup statement does not fail the Trouve. |
+| `all_statements` | `list[str]` | Property. Each statement in the order of a run that passes. |
+
+A SOURCE gives an empty `BuildPlan`. UPSERT puts the drop of its merge source in
+`cleanup_statements`.
 
 ## `CompiledAttributes`
 

@@ -8,9 +8,13 @@ statements pass and when one of them fails. A subclass that overrides
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 import pytest
 from structlog.testing import capture_logs
 
+import clair
 from clair.adapters.base import StatementStatus
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.runner import RunResult, RunStatus, run_project
@@ -139,3 +143,33 @@ def test_a_staged_upsert_drops_the_merge_source_after_a_failure(failed_text: str
     assert adapter.record.statements[-1].endswith(
         f"DROP TABLE IF EXISTS {PHYSICAL_ADDRESS}__clair_merge_test"
     )
+
+
+EXAMPLE_3 = Path(__file__).parents[2] / "examples" / "projects" / "example_3"
+
+
+def test_the_example_override_compiles_its_window_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """examples/projects/example_3 holds the subclass that the build_sql() guide shows."""
+    # The dev routing of the example reads the name of the developer.
+    monkeypatch.setenv("CLAIR_USER", "tester")
+    project_root = tmp_path / "example_3"
+    shutil.copytree(EXAMPLE_3, project_root)
+
+    output = clair.compile(project_root, run_mode=RunMode.INCREMENTAL)
+
+    node = output.node("example_3_database.derived.daily_revenue")
+    assert node is not None
+    window_rows = f"{node.addresses.physical}__window_{output.run_id}"
+    # A statement can start with a comment line, and a comment can stand alone.
+    without_comments = [
+        "\n".join(line for line in sql.splitlines() if not line.startswith("--"))
+        for sql in node.sql
+    ]
+    plan_statements = [sql for sql in without_comments if sql]
+    assert plan_statements[0].startswith(f"CREATE OR REPLACE TABLE {node.addresses.staging} CLONE")
+    assert plan_statements[1].startswith(f"CREATE OR REPLACE TABLE {window_rows} AS")
+    assert plan_statements[2].startswith(f"DELETE FROM {node.addresses.staging}")
+    assert plan_statements[3].startswith(f"INSERT INTO {node.addresses.staging}")
+    assert plan_statements[4] == f"DROP TABLE IF EXISTS {window_rows}"
