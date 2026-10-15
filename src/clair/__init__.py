@@ -93,7 +93,7 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import Trouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import BuildPlan, Trouve, TrouveAbc, TrouveType
 
 # discover_project() sets this before it loads the Trouve modules.
 # It stays None outside of a clair discovery run.
@@ -108,6 +108,7 @@ __all__ = [
     "TARGET",
     "THIS",
     "AnyTest",
+    "BuildPlan",
     "Column",
     "ColumnType",
     "DatabaseDefaults",
