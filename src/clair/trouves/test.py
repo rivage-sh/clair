@@ -41,14 +41,14 @@ Put it in an f-string to point to the table that the test examines::
 class Test(BaseModel, ABC):
     """The abstract parent of all the data quality tests.
 
-    Each subclass must set ``type`` to a Literal string, which is the tag of the
-    union. Each subclass must also supply a ``to_sql(physical_address)`` method.
+    Each subclass must declare ``type`` as a Literal string, which is the tag of
+    ``AnyTest``. The parent declares no ``type`` field, because a subclass cannot
+    narrow a mutable ``str`` field to a Literal. Each subclass must also supply a
+    ``to_sql(physical_address)`` method.
 
     The ``label`` property comes from the class name. Clair removes the ``Test``
     prefix and makes the remainder snake_case.
     """
-
-    type: str
 
     @abstractmethod
     def to_sql(self, physical_address: str) -> str:
