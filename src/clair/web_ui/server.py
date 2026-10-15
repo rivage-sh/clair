@@ -25,7 +25,13 @@ class CatalogHandler(SimpleHTTPRequestHandler):
     and thus each request is fast.
     """
 
-    server: CatalogServer  # This handler operates only with a CatalogServer.
+    @property
+    def catalog_server(self) -> CatalogServer:
+        """The server of this handler. This handler operates only with a CatalogServer."""
+        server = self.server
+        if not isinstance(server, CatalogServer):
+            raise TypeError(f"CatalogHandler needs a CatalogServer, not {type(server).__name__}.")
+        return server
 
     def do_GET(self) -> None:
         if self.path == "/api/catalog.json":
@@ -38,7 +44,7 @@ class CatalogHandler(SimpleHTTPRequestHandler):
             self._serve_file(self.path.lstrip("/"))
 
     def _serve_catalog(self) -> None:
-        body = self.server.catalog_json
+        body = self.catalog_server.catalog_json
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
