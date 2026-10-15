@@ -29,6 +29,28 @@ from clair.trouves.run_config import SOURCE, TARGET, IncrementalMode, RunConfig,
 from clair.trouves.test import AnyTest
 
 
+class BuildPlan(BaseModel):
+    """The SQL statements that materialize one Trouve.
+
+    Attributes:
+        statements: The statements that write the object, in order. The runner
+            stops at the first statement that fails.
+        cleanup_statements: The statements that remove each object that the
+            statements make for one run only, for example a temporary table.
+            The runner executes them after the statements, when the statements
+            pass and when one of them fails. Thus a cleanup statement must be
+            correct after any statement, for example ``DROP TABLE IF EXISTS``.
+    """
+
+    statements: list[str] = []
+    cleanup_statements: list[str] = []
+
+    @property
+    def all_statements(self) -> list[str]:
+        """Give each statement in the order of a run that passes."""
+        return [*self.statements, *self.cleanup_statements]
+
+
 class UpsertPlan(BaseModel):
     """The decisions that the MERGE of an UPSERT run needs.
 
@@ -243,7 +265,7 @@ class Trouve(TrouveAbc):
         effective_mode: RunMode,
         run_id: str,
         staging_address: TrouveAddress | None = None,
-    ) -> list[str]:
+    ) -> BuildPlan:
         """Make the SQL statements that materialize this Trouve.
 
         Args:
@@ -254,8 +276,8 @@ class Trouve(TrouveAbc):
                 reference to an upstream Trouve keeps its physical address.
 
         Returns:
-            The SQL statements to execute, in order. The list is empty for a
-            SOURCE Trouve.
+            The statements to execute, and the statements that clean up after
+            them. The plan is empty for a SOURCE Trouve.
 
         Raises:
             RuntimeError: If clair did not compile the Trouve.
@@ -266,21 +288,21 @@ class Trouve(TrouveAbc):
         assert self.compiled is not None
 
         if self.type == TrouveType.SOURCE:
-            return []
+            return BuildPlan()
 
         resolved_sql = self.compiled.resolved_sql.strip()
         address = str(staging_address) if staging_address else self.physical_address
 
         if effective_mode == RunMode.FULL_REFRESH:
             object_type = "TABLE" if self.type == TrouveType.TABLE else "VIEW"
-            return [
+            return BuildPlan(statements=[
                 f"CREATE OR REPLACE {object_type} {address} AS (\n{resolved_sql}\n)"
-            ]
+            ])
 
         if self.run_config.incremental_mode == IncrementalMode.APPEND:
-            return [
+            return BuildPlan(statements=[
                 f"INSERT INTO {address}\nSELECT * FROM (\n{resolved_sql}\n)"
-            ]
+            ])
 
         plan = self.upsert_plan(run_id)
         create_merge_source = (
@@ -301,7 +323,10 @@ class Trouve(TrouveAbc):
             f"-- [3/3] drop the merge source table\n"
             f"DROP TABLE IF EXISTS {plan.merge_source_address}"
         )
-        return [create_merge_source, merge, drop_merge_source]
+        return BuildPlan(
+            statements=[create_merge_source, merge],
+            cleanup_statements=[drop_merge_source],
+        )
 
     def upsert_plan(self, run_id: str) -> UpsertPlan:
         """Give the decisions that the MERGE of an UPSERT run needs.
