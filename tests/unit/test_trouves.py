@@ -439,7 +439,7 @@ class TestBuildSqlSource:
             sql="",
             resolved_sql="",
         )
-        result = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
+        result = trouve.build_sql(RunMode.FULL_REFRESH, "run_001").all_statements
         assert result == []
 
 
@@ -449,7 +449,7 @@ class TestBuildSqlFullRefresh:
             physical_address="prod.analytics.orders",
             resolved_sql="SELECT * FROM raw.orders",
         )
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
+        statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001").all_statements
 
         assert len(statements) == 1
         assert statements[0] == (
@@ -463,7 +463,7 @@ class TestBuildSqlFullRefresh:
             physical_address="prod.analytics.orders_view",
             resolved_sql="SELECT * FROM raw.orders",
         )
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
+        statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001").all_statements
 
         assert len(statements) == 1
         assert statements[0] == (
@@ -474,7 +474,7 @@ class TestBuildSqlFullRefresh:
     def test_resolved_sql_is_stripped(self):
         """The code removes each space at the start and at the end of resolved_sql."""
         trouve = _compiled_trouve(resolved_sql="  \n  SELECT 1  \n  ")
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
+        statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001").all_statements
         assert "SELECT 1" in statements[0]
         assert "  \n  SELECT 1" not in statements[0]
 
@@ -489,7 +489,7 @@ class TestBuildSqlAppend:
                 incremental_mode=IncrementalMode.APPEND,
             ),
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_002")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_002").all_statements
 
         assert len(statements) == 1
         assert statements[0].startswith("INSERT INTO prod.analytics.events")
@@ -517,7 +517,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
             columns=self.columns,
             run_config=self.run_config,
         )
-        self.statements = self.trouve.build_sql(RunMode.INCREMENTAL, "abc123")
+        self.statements = self.trouve.build_sql(RunMode.INCREMENTAL, "abc123").all_statements
 
     def test_produces_three_statements(self):
         assert len(self.statements) == 3
@@ -571,7 +571,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_99")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_99").all_statements
         merge_stmt = statements[1]
 
         assert "ON target.region = source.region AND target.product_id = source.product_id" in merge_stmt
@@ -593,7 +593,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_99")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_99").all_statements
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -621,7 +621,7 @@ class TestBuildSqlUpsertWithJoinSql:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_j1")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_j1").all_statements
         merge_stmt = statements[1]
 
         assert "ON target.id = source.id AND target.name IS NOT NULL" in merge_stmt
@@ -644,7 +644,7 @@ class TestBuildSqlUpsertWithJoinSql:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_j2")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_j2").all_statements
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -674,7 +674,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_uc1")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_uc1").all_statements
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -700,7 +700,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_uc2")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_uc2").all_statements
         merge_stmt = statements[1]
 
         assert "INSERT (id, name)" in merge_stmt
@@ -727,7 +727,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_uc3")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_uc3").all_statements
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -765,7 +765,7 @@ class TestBuildSqlStagingTableName:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "unique_run_42")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, "unique_run_42").all_statements
 
         staging_name = "db.schema.target_table__clair_merge_unique_run_42"
         assert staging_name in statements[0]

@@ -639,37 +639,37 @@ def _run_node(
     # An incremental run changes data that already exists, so the staging
     # table needs that data first. A zero-copy clone gives it in constant time.
     if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
-        plan = [build_clone_statement(addresses.physical, staging_address)] + plan
+        clone_statement = build_clone_statement(addresses.physical, staging_address)
+        plan = plan.model_copy(update={"statements": [clone_statement, *plan.statements]})
 
-    if not plan:
+    if not plan.statements:
         return _NodeOutcome(None, downstream_ok=True)
 
     start = time.monotonic()
     statements: list[Statement] = []
     failed_at = None
 
-    for statement_index, sql in enumerate(plan):
+    for statement_index, sql in enumerate(plan.statements):
         statements.append(adapter.execute(sql))
         if not statements[-1].success:
             failed_at = statement_index
             break
 
-    duration = time.monotonic() - start
     row_count = statements[-1].row_count
 
     # The result holds each statement of the plan, thus the reader sees the
     # complete plan and the point where clair stopped.
-    statements.extend(Statement(sql=sql) for sql in plan[len(statements):])
+    statements.extend(Statement(sql=sql) for sql in plan.statements[len(statements):])
 
-    # UPSERT cleanup. The UPSERT mode always ends with these three statements:
-    # make the merge table, merge it, drop it. If the merge failed, drop the
-    # merge table anyway. The index comes from the end of the list, because a
-    # staged incremental run puts a clone in front of the three.
-    if failed_at is not None and len(plan) >= 3:
-        merge_index = len(plan) - 2
-        drop_index = len(plan) - 1
-        if failed_at == merge_index:
-            adapter.execute(plan[drop_index])
+    # A failed cleanup leaves an object that the run made for itself, and the
+    # data of the Trouve stays correct. Thus it does not fail the node.
+    for sql in plan.cleanup_statements:
+        cleanup_statement = adapter.execute(sql)
+        statements.append(cleanup_statement)
+        if not cleanup_statement.success:
+            logger.warning("run.node.cleanup_failure", logical=logical_address, physical=name, error=cleanup_statement.error)
+
+    duration = time.monotonic() - start
 
     # A staged run tests the staging object, then promotes it or keeps it.
     staging_error = ""

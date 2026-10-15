@@ -270,9 +270,14 @@ thus clair changes that node to the full refresh mode and writes
 no flag from you.
 
 An `upsert` node makes three statements: it builds a merge source table, it merges that
-table into the staging table, and it drops the merge source table. If the `MERGE` fails,
-clair drops the merge source table anyway. A failure leaves you the staging candidate to
-examine, and no clutter that you did not ask for. See [Incrementality](incrementality.md).
+table into the staging table, and it drops the merge source table. The drop is a cleanup
+statement. clair runs it after the other statements, when they pass and when one of them
+fails. A failure leaves you the staging candidate to examine, and no clutter that you did
+not ask for. See [Incrementality](incrementality.md).
+
+A failed cleanup statement does not fail the node, because the data of the Trouve stays
+correct. clair writes `run.node.cleanup_failure` to the log, and the result of the node
+holds the statement and its error.
 
 ### A failure stops one branch, and not the run
 

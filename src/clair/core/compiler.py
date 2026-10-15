@@ -155,7 +155,7 @@ def build_statements(
     if not use_staging:
         return [
             build_type_change_comment(trouve.type, physical_address),
-            *trouve.build_sql(effective_mode, run_id=run_id),
+            *trouve.build_sql(effective_mode, run_id=run_id).all_statements,
         ]
 
     staging_address = make_staging_address(physical_address, run_id)
@@ -164,7 +164,9 @@ def build_statements(
     if effective_mode == RunMode.INCREMENTAL:
         statements.append(build_clone_statement(physical_address, staging_address))
     statements.extend(
-        trouve.build_sql(effective_mode, run_id=run_id, staging_address=staging_address)
+        trouve.build_sql(
+            effective_mode, run_id=run_id, staging_address=staging_address
+        ).all_statements
     )
 
     statements.append("-- staging: the data quality tests run here")
