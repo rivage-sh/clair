@@ -9,6 +9,7 @@ gives one project a clean state.
 from __future__ import annotations
 
 import ast
+import json
 import sys
 from pathlib import Path
 
@@ -153,7 +154,37 @@ class TestTheFinderStandsAside:
         import json
 
         assert json.__name__ == "json"
-        assert project_imports.module_for_file(Path(json.__file__)) is json
+        # The index holds the files of a project, and a library file is not one.
+        assert project_imports.module_for_file(Path(json.__file__)) is None
 
     def test_a_file_that_no_module_runs_gives_none(self, tmp_path: Path) -> None:
         assert project_imports.module_for_file(tmp_path / "absent.py") is None
+
+
+class TestTheIndexFollowsSysModules:
+    """The index gives a name, and sys.modules stays the authority for the object."""
+
+    def test_a_project_file_gives_its_module(self, tmp_path: Path) -> None:
+        project_root = write_project(tmp_path / "only", "ONLY")
+        discover_project(project_root)
+        rows_file = project_root / "mydb" / "source" / "rows.py"
+
+        assert project_imports.module_for_file(rows_file) is sys.modules["mydb.source.rows"]
+
+    def test_a_module_that_left_sys_modules_gives_none(self, tmp_path: Path) -> None:
+        project_root = write_project(tmp_path / "only", "ONLY")
+        discover_project(project_root)
+        rows_file = project_root / "mydb" / "source" / "rows.py"
+
+        del sys.modules["mydb.source.rows"]
+
+        assert project_imports.module_for_file(rows_file) is None
+
+    def test_a_name_that_now_holds_another_file_gives_none(self, tmp_path: Path) -> None:
+        project_root = write_project(tmp_path / "only", "ONLY")
+        discover_project(project_root)
+        rows_file = project_root / "mydb" / "source" / "rows.py"
+
+        sys.modules["mydb.source.rows"] = json
+
+        assert project_imports.module_for_file(rows_file) is None

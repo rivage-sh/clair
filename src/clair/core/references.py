@@ -28,7 +28,7 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-from clair.core.project_imports import names_of_a_file_that_ran_two_times
+from clair.core.project_imports import names_of_files_that_ran_two_times
 from clair.environments.routing import TrouveAddress
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.dataframe_trouve import DataframeTrouve
@@ -93,22 +93,7 @@ def describe_unresolved_tokens(
     the token and nothing else, and the DAG has already lost the edge in
     silence.
     """
-    # A file that ran two times is the probable cause, and that file is the
-    # referenced file, not the file that keeps the token. Name each such file.
-    duplicates = {
-        file_path.name: names
-        for _, _, file_path, _ in collected
-        if (names := names_of_a_file_that_ran_two_times(file_path))
-    }
-    duplicate_text = ""
-    if duplicates:
-        listed = "; ".join(
-            f"{file_name} as " + " and ".join(names)
-            for file_name, names in sorted(duplicates.items())
-        )
-        duplicate_text = f" Python ran one file two times: {listed}."
-
-    faults: list[str] = []
+    faulty: list[tuple[TrouveAddress, Path]] = []
     for trouve_obj, logical_address, file_path, _ in collected:
         compiled = trouve_obj.compiled
         if compiled is None:
@@ -119,11 +104,26 @@ def describe_unresolved_tokens(
             for test in trouve_obj.tests
             if isinstance(test, TestSql) and test.resolved_sql
         )
-        tokens = sorted({
-            match.group(0) for text in texts for match in _PLACEHOLDER_RE.finditer(text)
-        })
-        if not tokens:
-            continue
+        if any(_PLACEHOLDER_RE.search(text) for text in texts):
+            faulty.append((logical_address, file_path))
+    if not faulty:
+        return []
+
+    # A file that ran two times is the probable cause, and that file is the
+    # referenced file, not the file that keeps the token. Name each such file.
+    duplicates = names_of_files_that_ran_two_times(
+        file_path for _, _, file_path, _ in collected
+    )
+    duplicate_text = ""
+    if duplicates:
+        listed = "; ".join(
+            f"{file_path.name} as " + " and ".join(names)
+            for file_path, names in sorted(duplicates.items())
+        )
+        duplicate_text = f" Python ran one file two times: {listed}."
+
+    faults: list[str] = []
+    for logical_address, file_path in faulty:
         faults.append(
             f"{file_path}: the Trouve '{logical_address}' interpolates a "
             "Trouve object that clair did not collect, thus a reference token "
