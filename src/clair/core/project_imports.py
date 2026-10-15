@@ -42,7 +42,7 @@ import importlib.machinery
 import importlib.util
 import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from types import ModuleType
 
@@ -50,10 +50,15 @@ from types import ModuleType
 # reads it on each import, and it stands aside when the set is empty.
 _watched_project_roots: set[Path] = set()
 
-# Path.resolve() makes system calls. One import scans every module in
-# sys.modules, thus this cache keys the resolved path by the raw __file__
-# string.
+# Path.resolve() makes system calls, thus this cache keys the resolved path by
+# the raw path string.
 _resolved_path_cache: dict[str, Path] = {}
+
+# The module name of each project file that discovery or the finder loads.
+# sys.modules holds the module object, and stays the authority for it. This
+# index finds the name of a file with no scan of sys.modules, thus discovery
+# grows with the number of files, and not with files times modules.
+_module_name_of_file: dict[Path, str] = {}
 
 # The root of each project that this process loaded. The next project forgets
 # the modules of each of them.
@@ -162,6 +167,7 @@ def _forget_loaded_projects(next_project_root: Path) -> None:
     _loaded_project_roots.clear()
     _watched_project_roots.clear()
     _resolved_path_cache.clear()
+    _module_name_of_file.clear()
 
 
 def _module_locations(module: object) -> list[str]:
@@ -215,6 +221,7 @@ def load_project_file(file_path: Path, module_name: str) -> ModuleType | None:
         return None
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    _module_name_of_file[_resolve(str(file_path))] = module_name
     try:
         spec.loader.exec_module(module)
     except BaseException:
@@ -264,30 +271,38 @@ def load_support_file(file_path: Path) -> ModuleType | None:
     return module
 
 
-def names_of_a_file_that_ran_two_times(file_path: Path) -> list[str]:
-    """Give the module names of *file_path* when the file gave two module objects.
+def names_of_files_that_ran_two_times(file_paths: Iterable[Path]) -> dict[Path, list[str]]:
+    """Give the module names of each file of *file_paths* that gave two module objects.
 
     Two names for one file are correct: the finder gives the second name the
     module of the first, in the same way that ``os.path`` and ``posixpath``
     name one module. Two **objects** are the fault, because each object holds
-    its own Trouve. The function therefore counts the objects, and it answers
-    an empty list for a file that ran one time.
+    its own Trouve. The function therefore counts the objects, and it leaves
+    out a file that ran one time.
+
+    The function scans sys.modules one time, and not the index: a second
+    object comes from an importer that clair does not see. Call it only to
+    explain a fault, because the scan reads every module of the process.
     """
-    names_of_object: dict[int, list[str]] = {}
-    target = file_path.resolve()
+    targets = {_resolve(str(file_path)): file_path for file_path in file_paths}
+    names_of_object_of_file: dict[Path, dict[int, list[str]]] = {}
     for module_name, module in list(sys.modules.items()):
         module_file = getattr(module, "__file__", None)
         if not module_file:
             continue
         try:
-            if Path(module_file).resolve() != target:
-                continue
+            resolved = _resolve(module_file)
         except OSError:
             continue
+        if resolved not in targets:
+            continue
+        names_of_object = names_of_object_of_file.setdefault(targets[resolved], {})
         names_of_object.setdefault(id(module), []).append(module_name)
-    if len(names_of_object) < 2:
-        return []
-    return sorted(name for names in names_of_object.values() for name in names)
+    return {
+        file_path: sorted(name for names in names_of_object.values() for name in names)
+        for file_path, names_of_object in names_of_object_of_file.items()
+        if len(names_of_object) >= 2
+    }
 
 
 def _resolve(raw_path: str) -> Path:
@@ -301,16 +316,19 @@ def _resolve(raw_path: str) -> Path:
 def module_for_file(file_path: Path) -> ModuleType | None:
     """Give the module object that runs *file_path*, or None.
 
-    ``sys.modules`` is the one authority. The function scans it, thus a module
-    that any importer loaded — discovery, or an import in a Trouve file — is
-    the answer, and no second registry can go stale.
+    The index gives the name, and sys.modules gives the object. A name that
+    sys.modules no longer holds, or holds for a different file, is stale, and
+    the answer is then None.
     """
     target = _resolve(str(file_path))
-    for module in list(sys.modules.values()):
-        module_file = getattr(module, "__file__", None)
-        if module_file and _resolve(module_file) == target:
-            return module
-    return None
+    module_name = _module_name_of_file.get(target)
+    if module_name is None:
+        return None
+    module = sys.modules.get(module_name)
+    module_file = getattr(module, "__file__", None)
+    if not module_file or _resolve(module_file) != target:
+        return None
+    return module
 
 
 def _is_below_a_watched_root(file_path: Path) -> bool:
@@ -369,9 +387,10 @@ class _OneModulePerFileFinder(importlib.abc.MetaPathFinder):
             return None
         existing_module = module_for_file(file_path)
         if existing_module is None:
-            # The first import of this file. The normal machinery loads it, and
-            # sys.modules then holds it for the next name.
-            return None
+            # The first import of this file. The normal loader runs it, and the
+            # index gives its name to the next import.
+            _module_name_of_file[file_path] = fullname
+            return spec
         alias_spec = importlib.util.spec_from_loader(
             fullname, _AliasLoader(existing_module), origin=spec.origin
         )
