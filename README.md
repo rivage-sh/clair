@@ -376,9 +376,10 @@ trouve = Trouve(
 run_config=Incremental(strategy=Upsert(primary_key_columns=["user_id"]))
 ```
 
-**DeleteInsert** — deletes each row that a new row matches, then inserts the new rows:
+**DeleteInsert** — deletes each row that a new row matches, or each row in the range of the new rows, then inserts the new rows:
 ```python
 run_config=Incremental(strategy=DeleteInsert(primary_key_columns=["event_date"]))
+run_config=Incremental(strategy=DeleteInsert(range_column="event_date"))
 ```
 
 If the target table doesn't exist yet, clair runs a full refresh automatically regardless of the configured strategy.

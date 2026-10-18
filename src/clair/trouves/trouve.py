@@ -350,22 +350,35 @@ class Trouve(TrouveAbc):
     def _delete_insert_build_plan(
         self, strategy: DeleteInsert, address: str, resolved_sql: str, run_id: str
     ) -> BuildPlan:
-        """Make the plan that replaces each target row that a new row matches.
+        """Make the plan that deletes the target rows of the new rows, then inserts the new rows.
 
         A DELETE_INSERT keeps a duplicate key in the new rows, where a MERGE
         fails. A key on a date column replaces each day that the new rows hold.
+        A range column replaces each day from the first to the last day of the
+        new rows. Its bounds are scalar subqueries, and Snowflake prunes the
+        micro-partitions of the target on them when it compiles the DELETE.
         """
         new_rows_address = self.new_rows_address(run_id)
         create_new_rows = (
             f"-- [1/4] create the new rows table\n"
             f"CREATE OR REPLACE TABLE {new_rows_address} AS (\n{resolved_sql}\n)"
         )
-        delete_matched_rows = (
-            f"-- [2/4] delete each target row that a new row matches\n"
-            f"DELETE FROM {address} AS {TARGET}\n"
-            f"USING {new_rows_address} AS {SOURCE}\n"
-            f"WHERE {strategy.match_condition}"
-        )
+        if strategy.range_column is not None:
+            range_column = strategy.range_column
+            delete_replaced_rows = (
+                f"-- [2/4] delete each target row in the range of the new rows\n"
+                f"DELETE FROM {address} AS {TARGET}\n"
+                f"WHERE {TARGET}.{range_column} BETWEEN "
+                f"(SELECT MIN({range_column}) FROM {new_rows_address}) "
+                f"AND (SELECT MAX({range_column}) FROM {new_rows_address})"
+            )
+        else:
+            delete_replaced_rows = (
+                f"-- [2/4] delete each target row that a new row matches\n"
+                f"DELETE FROM {address} AS {TARGET}\n"
+                f"USING {new_rows_address} AS {SOURCE}\n"
+                f"WHERE {strategy.match_condition}"
+            )
         insert_new_rows = (
             f"-- [3/4] insert the new rows\n"
             f"INSERT INTO {address}\nSELECT * FROM {new_rows_address}"
@@ -375,7 +388,7 @@ class Trouve(TrouveAbc):
             f"DROP TABLE IF EXISTS {new_rows_address}"
         )
         return BuildPlan(
-            statements=[create_new_rows, delete_matched_rows, insert_new_rows],
+            statements=[create_new_rows, delete_replaced_rows, insert_new_rows],
             cleanup_statements=[drop_new_rows],
         )
 

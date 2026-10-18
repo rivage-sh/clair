@@ -12,7 +12,7 @@ incremental SQL. It gives ``Incremental()`` with no strategy.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -47,6 +47,11 @@ class Append(_ConfigModel):
     mode: Literal[IncrementalMode.APPEND] = IncrementalMode.APPEND
 
 
+def _or_list(names: tuple[str, ...]) -> str:
+    """Give "a or b", or "a, b or c"."""
+    return " or ".join([", ".join(names[:-1]), names[-1]])
+
+
 class _MatchingStrategy(_ConfigModel):
     """A strategy that matches a new row to a row of the target table.
 
@@ -57,18 +62,27 @@ class _MatchingStrategy(_ConfigModel):
             ``source``. Use it in place of primary_key_columns.
     """
 
+    # The fields that each select the target rows. A strategy takes one of them.
+    match_field_names: ClassVar[tuple[str, ...]] = ("primary_key_columns", "join_sql")
+
     primary_key_columns: list[str] | None = None
     join_sql: str | None = None
 
     @model_validator(mode="after")
     def _give_exactly_one_match(self) -> _MatchingStrategy:
         strategy_name = type(self).__name__
-        if self.primary_key_columns is not None and self.join_sql is not None:
+        given_names = [
+            field_name
+            for field_name in self.match_field_names
+            if getattr(self, field_name) is not None
+        ]
+        if not given_names:
+            raise ValueError(f"{strategy_name} needs {_or_list(self.match_field_names)}")
+        if len(given_names) > 1:
             raise ValueError(
-                f"{strategy_name} takes primary_key_columns or join_sql, but not both"
+                f"{strategy_name} takes only one of {_or_list(self.match_field_names)}, "
+                f"but it got {' and '.join(given_names)}"
             )
-        if self.primary_key_columns is None and self.join_sql is None:
-            raise ValueError(f"{strategy_name} needs primary_key_columns or join_sql")
         return self
 
     @property
@@ -99,9 +113,26 @@ class Upsert(_MatchingStrategy):
 
 
 class DeleteInsert(_MatchingStrategy):
-    """Delete each target row that a new row matches, then insert the new rows."""
+    """Delete the target rows that the new rows replace, then insert the new rows.
+
+    A key or a join deletes each target row that a new row matches. A range
+    column deletes each target row in the range of the new rows, thus it also
+    removes a row that the new rows do not hold any more.
+
+    Attributes:
+        range_column: Delete each target row whose value of this column is
+            between the minimum and the maximum of the new rows. Use it in
+            place of primary_key_columns or join_sql.
+    """
+
+    match_field_names: ClassVar[tuple[str, ...]] = (
+        "primary_key_columns",
+        "join_sql",
+        "range_column",
+    )
 
     mode: Literal[IncrementalMode.DELETE_INSERT] = IncrementalMode.DELETE_INSERT
+    range_column: str | None = None
 
 
 IncrementalStrategy = Annotated[Append | Upsert | DeleteInsert, Field(discriminator="mode")]

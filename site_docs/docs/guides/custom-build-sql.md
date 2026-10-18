@@ -107,6 +107,10 @@ an incremental run, the plan writes the rows of the window to a table of their o
 the window from the target, and inserts the rows. The drop of the window table is a cleanup
 statement, thus it runs when the `DELETE` or the `INSERT` fails too.
 
+The built-in `DeleteInsert(range_column=...)` deletes each row between the minimum and the
+maximum of the new rows. This subclass deletes each row from the minimum on, thus it also
+removes each row after the last new row.
+
 ## 2. Use the subclass in a Trouve file
 
 ```python

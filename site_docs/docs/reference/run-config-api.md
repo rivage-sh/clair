@@ -68,15 +68,22 @@ Give `primary_key_columns` or `join_sql`, and not both.
 
 ### `DeleteInsert`
 
-Delete each target row that a new row matches, then insert all the new rows. It needs no `columns`.
+Delete the target rows that the new rows replace, then insert all the new rows. It needs no `columns`.
 
 ```python
 class DeleteInsert(BaseModel):
     primary_key_columns: list[str] | None = None
     join_sql:            str | None = None
+    range_column:        str | None = None
 ```
 
-The two fields have the same meaning as on `Upsert`. Give one of them, and not both.
+| Field | Default | Description |
+|-------|---------|-------------|
+| `primary_key_columns` | `None` | Delete each target row whose key a new row holds. The same meaning as on `Upsert`. |
+| `join_sql` | `None` | Delete each target row that this condition matches, with the aliases `target` and `source`. |
+| `range_column` | `None` | Delete each target row whose value of this column is between the minimum and the maximum of the new rows. |
+
+Give one of the three fields only.
 
 ## `RunMode`
 
@@ -110,6 +117,9 @@ Incremental(
 
 # Replace each day that the new rows hold
 Incremental(strategy=DeleteInsert(primary_key_columns=["created_date"]))
+
+# Replace each day from the first to the last day of the new rows
+Incremental(strategy=DeleteInsert(range_column="created_date"))
 
 # A build_sql() override writes the incremental SQL
 Incremental()
