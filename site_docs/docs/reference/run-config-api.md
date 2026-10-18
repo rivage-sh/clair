@@ -1,10 +1,86 @@
 # RunConfig API
 
 ```python
-from clair import RunConfig, RunMode, IncrementalMode, UpsertConfig
+from clair import Append, DeleteInsert, FullRefresh, Incremental, RunConfig, RunMode, Upsert
 ```
 
+`RunConfig` is the type of `Trouve.run_config`. It is one of two classes:
+
+```python
+RunConfig = FullRefresh | Incremental
+```
+
+A full refresh takes no parameter. An incremental run takes a strategy, and each strategy holds only the parameters that it reads. Thus a parameter that a strategy does not read is an error when the Trouve file runs.
+
+## `FullRefresh`
+
+Make the object again on each run. It is the default `run_config`.
+
+```python
+class FullRefresh(BaseModel):
+    run_mode: Literal[RunMode.FULL_REFRESH] = RunMode.FULL_REFRESH
+```
+
+## `Incremental`
+
+Apply the new data only, to the object that exists.
+
+```python
+class Incremental(BaseModel):
+    run_mode: Literal[RunMode.INCREMENTAL] = RunMode.INCREMENTAL
+    strategy: Append | Upsert | DeleteInsert | None = None
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `strategy` | `None` | The built-in method that writes the new data. `None` tells clair that a [`build_sql()` override](../guides/custom-build-sql.md) writes the incremental SQL. A `Trouve` with no override and no strategy raises a `CompileError` on an incremental run. |
+
+## Strategies
+
+### `Append`
+
+Insert the new rows, and keep each row that the table holds. It takes no parameter.
+
+```python
+class Append(BaseModel): ...
+```
+
+### `Upsert`
+
+Merge the new rows: update each row that matches, and insert each other row. It needs `columns` on the Trouve.
+
+```python
+class Upsert(BaseModel):
+    primary_key_columns: list[str] | None = None
+    join_sql:            str | None = None
+    update_columns:      list[str] | None = None
+    insert_columns:      list[str] | None = None
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `primary_key_columns` | `None` | The columns to match on. clair generates `target.col = source.col` for each one. |
+| `join_sql` | `None` | Your own match condition, with the aliases `target` and `source`. Use it in place of `primary_key_columns`. |
+| `update_columns` | `None` — each column that is not a key | The columns for `WHEN MATCHED THEN UPDATE SET`. With `join_sql`, the default is each column. |
+| `insert_columns` | `None` — each column | The columns for `WHEN NOT MATCHED THEN INSERT`. |
+
+Give `primary_key_columns` or `join_sql`, and not both.
+
+### `DeleteInsert`
+
+Delete each target row that a new row matches, then insert all the new rows. It needs no `columns`.
+
+```python
+class DeleteInsert(BaseModel):
+    primary_key_columns: list[str] | None = None
+    join_sql:            str | None = None
+```
+
+The two fields have the same meaning as on `Upsert`. Give one of them, and not both.
+
 ## `RunMode`
+
+The mode of one run. `--run-mode` on the CLI, `clair.run_mode` in a Trouve file, and the `effective_mode` argument of `build_sql()` hold a `RunMode`.
 
 ```python
 class RunMode(StrEnum):
@@ -12,103 +88,34 @@ class RunMode(StrEnum):
     INCREMENTAL  = "incremental"
 ```
 
-## `IncrementalMode`
-
-```python
-class IncrementalMode(StrEnum):
-    APPEND        = "append"
-    UPSERT        = "upsert"
-    DELETE_INSERT = "delete_insert"
-```
-
-## `UpsertConfig`
-
-Exact control of the columns in an UPSERT MERGE statement.
-
-```python
-class UpsertConfig(BaseModel):
-    update_columns: list[str] | None = None
-    insert_columns: list[str] | None = None
-```
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `update_columns` | `None` — all the columns that are not keys | The columns for `WHEN MATCHED THEN UPDATE SET` |
-| `insert_columns` | `None` — all the columns | The columns for `WHEN NOT MATCHED THEN INSERT` |
-
-## `RunConfig`
-
-```python
-class RunConfig(BaseModel):
-    run_mode:             RunMode = RunMode.FULL_REFRESH
-    incremental_mode:     IncrementalMode | None = None
-    primary_key_columns:  list[str] | None = None
-    join_sql:             str | None = None
-    upsert_config:        UpsertConfig | None = None
-```
-
-### Fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `run_mode` | `RunMode` | `FULL_REFRESH` | `FULL_REFRESH` makes the table again. `INCREMENTAL` applies the new data only. |
-| `incremental_mode` | `IncrementalMode \| None` | `None` | `APPEND`, `UPSERT` or `DELETE_INSERT`. Necessary if `run_mode=INCREMENTAL`. |
-| `primary_key_columns` | `list[str] \| None` | `None` | The columns to match on for UPSERT and DELETE_INSERT. clair generates `target.col = source.col`. |
-| `join_sql` | `str \| None` | `None` | Your own match condition for UPSERT and DELETE_INSERT. Use it in place of `primary_key_columns`. |
-| `upsert_config` | `UpsertConfig \| None` | `None` | Control of the columns in an UPSERT MERGE statement. UPSERT only. |
-
-### Validation matrix
-
-| `run_mode` | `incremental_mode` | `primary_key_columns` / `join_sql` | Valid? |
-|---|---|---|---|
-| `FULL_REFRESH` | `None` | Not set | ✓ |
-| `FULL_REFRESH` | any | any | ✗ — `incremental_mode` applies to INCREMENTAL only |
-| `INCREMENTAL` | `None` | any | ✗ — `incremental_mode` is necessary |
-| `INCREMENTAL` | `APPEND` | Not set | ✓ |
-| `INCREMENTAL` | `APPEND` | Set | ✗ — APPEND does not accept `primary_key_columns` or `join_sql` |
-| `INCREMENTAL` | `UPSERT` | Neither set | ✗ — give one of the two |
-| `INCREMENTAL` | `UPSERT` | Both set | ✗ — give one of the two, not both |
-| `INCREMENTAL` | `UPSERT` | Exactly one set | ✓ |
-| `INCREMENTAL` | `DELETE_INSERT` | Neither set, or both set | ✗ — give exactly one of the two |
-| `INCREMENTAL` | `DELETE_INSERT` | Exactly one set | ✓ — `upsert_config` is not permitted |
-
-### Examples
+## Examples
 
 ```python
 # The default — a full refresh, written out
-RunConfig()
+FullRefresh()
 
-# Incremental, with APPEND
-RunConfig(
-    run_mode=RunMode.INCREMENTAL,
-    incremental_mode=IncrementalMode.APPEND,
-)
+# Append the new rows
+Incremental(strategy=Append())
 
-# UPSERT on one key
-RunConfig(
-    run_mode=RunMode.INCREMENTAL,
-    incremental_mode=IncrementalMode.UPSERT,
-    primary_key_columns=["customer_id"],
-)
+# Merge on one key
+Incremental(strategy=Upsert(primary_key_columns=["customer_id"]))
 
-# UPSERT with your own join condition
-RunConfig(
-    run_mode=RunMode.INCREMENTAL,
-    incremental_mode=IncrementalMode.UPSERT,
-    join_sql="target.customer_id = source.customer_id AND target.region = source.region",
-    upsert_config=UpsertConfig(
+# Merge with your own join condition, and update two columns only
+Incremental(
+    strategy=Upsert(
+        join_sql="target.customer_id = source.customer_id AND target.region = source.region",
         update_columns=["total_orders", "last_order_at"],
     ),
 )
 
-# DELETE_INSERT: replace each day that the new rows hold
-RunConfig(
-    run_mode=RunMode.INCREMENTAL,
-    incremental_mode=IncrementalMode.DELETE_INSERT,
-    primary_key_columns=["created_date"],
-)
+# Replace each day that the new rows hold
+Incremental(strategy=DeleteInsert(primary_key_columns=["created_date"]))
+
+# A build_sql() override writes the incremental SQL
+Incremental()
 ```
 
 ## See also
 
 - [Incrementality](../topics/incrementality.md)
+- [Write your own build with `build_sql()`](../guides/custom-build-sql.md)

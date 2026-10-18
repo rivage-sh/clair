@@ -44,7 +44,7 @@ class TrouveAbc(BaseModel, ABC):
     columns:    list[Column] = []
     tests:      list[AnyTest] = []
     docs:       str = ""
-    run_config: RunConfig = RunConfig()
+    run_config: RunConfig = FullRefresh()
     compiled:   CompiledAttributes | None = None
 
     @property

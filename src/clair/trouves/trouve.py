@@ -29,9 +29,13 @@ from clair.trouves.column import Column
 from clair.trouves.run_config import (
     SOURCE,
     TARGET,
-    IncrementalMode,
+    Append,
+    DeleteInsert,
+    FullRefresh,
+    Incremental,
     RunConfig,
     RunMode,
+    Upsert,
     match_condition,
 )
 from clair.trouves.test import AnyTest
@@ -159,7 +163,7 @@ class TrouveAbc(BaseModel, ABC):
         columns: The column definitions, for the docs and for future checks.
         tests: The data quality tests.
         docs: The documentation text for this Trouve.
-        run_config: The materialization strategy.
+        run_config: FullRefresh, or Incremental with its strategy.
         compiled: Discovery sets this. It stays None until discovery reads the
              project.
     """
@@ -168,7 +172,7 @@ class TrouveAbc(BaseModel, ABC):
     columns: list[Column] = []
     tests: list[AnyTest] = []
     docs: str = ""
-    run_config: RunConfig = Field(default_factory=RunConfig)
+    run_config: RunConfig = Field(default_factory=FullRefresh)
     compiled: CompiledAttributes | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -284,6 +288,7 @@ class Trouve(TrouveAbc):
 
         Raises:
             RuntimeError: If clair did not compile the Trouve.
+            CompileError: If an incremental run has no built-in strategy.
             ValueError: If the config asks for UPSERT but has no columns.
         """
         if not self.is_compiled:
@@ -302,16 +307,28 @@ class Trouve(TrouveAbc):
                 f"CREATE OR REPLACE {object_type} {address} AS (\n{resolved_sql}\n)"
             ])
 
-        incremental_mode = self.run_config.incremental_mode
-        if incremental_mode == IncrementalMode.APPEND:
+        strategy = self.incremental_strategy()
+        if strategy is None:
+            raise CompileError(
+                f"{self.compiled.logical_address} runs in the incremental mode, but its "
+                "run_config names no strategy. Give Incremental(strategy=...), or "
+                "override build_sql() to write the incremental SQL."
+            )
+        if isinstance(strategy, Append):
             return BuildPlan(statements=[
                 f"INSERT INTO {address}\nSELECT * FROM (\n{resolved_sql}\n)"
             ])
-        if incremental_mode == IncrementalMode.UPSERT:
+        if isinstance(strategy, Upsert):
             return self._upsert_build_plan(address, resolved_sql, run_id)
-        if incremental_mode == IncrementalMode.DELETE_INSERT:
-            return self._delete_insert_build_plan(address, resolved_sql, run_id)
-        raise CompileError(f"No incremental plan for the mode {incremental_mode}.")
+        if isinstance(strategy, DeleteInsert):
+            return self._delete_insert_build_plan(strategy, address, resolved_sql, run_id)
+        raise CompileError(f"No incremental plan for the strategy {strategy}.")
+
+    def incremental_strategy(self) -> Append | Upsert | DeleteInsert | None:
+        """Give the built-in strategy of an incremental run_config, or None."""
+        if isinstance(self.run_config, Incremental):
+            return self.run_config.strategy
+        return None
 
     def _upsert_build_plan(self, address: str, resolved_sql: str, run_id: str) -> BuildPlan:
         """Make the plan that merges the new rows into the target table."""
@@ -340,7 +357,7 @@ class Trouve(TrouveAbc):
         )
 
     def _delete_insert_build_plan(
-        self, address: str, resolved_sql: str, run_id: str
+        self, strategy: DeleteInsert, address: str, resolved_sql: str, run_id: str
     ) -> BuildPlan:
         """Make the plan that replaces each target row that a new row matches.
 
@@ -348,9 +365,6 @@ class Trouve(TrouveAbc):
         fails. A key on a date column replaces each day that the new rows hold.
         """
         new_rows_address = self.new_rows_address(run_id)
-        condition = match_condition(
-            self.run_config.join_sql, list(self.run_config.primary_key_columns or [])
-        )
         create_new_rows = (
             f"-- [1/4] create the new rows table\n"
             f"CREATE OR REPLACE TABLE {new_rows_address} AS (\n{resolved_sql}\n)"
@@ -359,7 +373,7 @@ class Trouve(TrouveAbc):
             f"-- [2/4] delete each target row that a new row matches\n"
             f"DELETE FROM {address} AS {TARGET}\n"
             f"USING {new_rows_address} AS {SOURCE}\n"
-            f"WHERE {condition}"
+            f"WHERE {strategy.match_condition}"
         )
         insert_new_rows = (
             f"-- [3/4] insert the new rows\n"
@@ -400,18 +414,21 @@ class Trouve(TrouveAbc):
             The plan of the MERGE.
 
         Raises:
+            TypeError: If the strategy is not Upsert.
             ValueError: If the Trouve has no column.
         """
+        strategy = self.incremental_strategy()
+        if not isinstance(strategy, Upsert):
+            raise TypeError("upsert_plan() needs Incremental(strategy=Upsert(...))")
         if not self.columns:
-            raise ValueError("the upsert mode needs columns on the Trouve")
+            raise ValueError("the upsert strategy needs columns on the Trouve")
 
         all_column_names = [column.name for column in self.columns]
-        primary_key_columns = list(self.run_config.primary_key_columns or [])
-        upsert_config = self.run_config.upsert_config
+        primary_key_columns = list(strategy.primary_key_columns or [])
 
-        if upsert_config and upsert_config.update_columns is not None:
-            update_column_names = list(upsert_config.update_columns)
-        elif self.run_config.join_sql:
+        if strategy.update_columns is not None:
+            update_column_names = list(strategy.update_columns)
+        elif strategy.join_sql:
             # A join of the author names no key column, thus clair cannot
             # remove one. Each column stays in the UPDATE.
             update_column_names = all_column_names
@@ -422,14 +439,14 @@ class Trouve(TrouveAbc):
                 if column_name not in set(primary_key_columns)
             ]
 
-        if upsert_config and upsert_config.insert_columns is not None:
-            insert_column_names = list(upsert_config.insert_columns)
+        if strategy.insert_columns is not None:
+            insert_column_names = list(strategy.insert_columns)
         else:
             insert_column_names = all_column_names
 
         return UpsertPlan(
             merge_source_address=self.new_rows_address(run_id),
-            join_sql=self.run_config.join_sql,
+            join_sql=strategy.join_sql,
             join_key_columns=primary_key_columns,
             update_column_names=update_column_names,
             insert_column_names=insert_column_names,

@@ -8,7 +8,7 @@ You import all the public types directly from `clair`:
 from clair import (
     Trouve, TrouveType,
     Column, ColumnType,
-    RunConfig, RunMode, IncrementalMode, UpsertConfig,
+    RunConfig, FullRefresh, Incremental, Append, Upsert, DeleteInsert, RunMode,
     TestUnique, TestNotNull, TestRowCount, TestUniqueColumns,
     DatabaseDefaults, SchemaDefaults,
 )
@@ -17,5 +17,5 @@ from clair import (
 - **[Python API](python-api.md)** — the operations: `clair.run()`, `clair.compile()`, `clair.test()`, `clair.docs()` and `clair.catalog()`
 - **[Trouve](trouve-api.md)** — the core classes: `TrouveAbc`, `Trouve` for SQL, `PandasTrouve` for pandas, and `SeedTrouve` for a table that holds its rows in the file
 - **[Column](column-api.md)** — column definitions
-- **[RunConfig](run-config-api.md)** — incremental materialization config
+- **[RunConfig](run-config-api.md)** — `FullRefresh` or `Incremental`, and the incremental strategies
 - **[Tests](tests-api.md)** — data quality test classes

@@ -18,7 +18,7 @@ from clair.core.staging import (
 )
 from clair.environments.routing import TrouveAddress
 from clair.trouves.config import ResolvedConfig
-from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode
+from clair.trouves.run_config import Append, Incremental, RunMode, Upsert
 from clair.trouves.trouve import (
     CompiledAttributes,
     ExecutionType,
@@ -144,9 +144,7 @@ class TestBuildSqlStagingAddress:
         trouve = _compile(
             Trouve(
                 sql="SELECT 1 AS id",
-                run_config=RunConfig(
-                    run_mode=RunMode.INCREMENTAL, incremental_mode=IncrementalMode.APPEND
-                ),
+                run_config=Incremental(strategy=Append()),
             ),
             "db.s.orders",
         )
@@ -163,11 +161,7 @@ class TestBuildSqlStagingAddress:
                     Column(name="id", type=ColumnType.NUMBER),
                     Column(name="amount", type=ColumnType.NUMBER),
                 ],
-                run_config=RunConfig(
-                    run_mode=RunMode.INCREMENTAL,
-                    incremental_mode=IncrementalMode.UPSERT,
-                    primary_key_columns=["id"],
-                ),
+                run_config=Incremental(strategy=Upsert(primary_key_columns=["id"])),
             ),
             "db.s.orders",
         )
@@ -220,9 +214,7 @@ class TestStagingCompilePlan:
         trouve = _compile(
             Trouve(
                 sql="SELECT 1 AS id",
-                run_config=RunConfig(
-                    run_mode=RunMode.INCREMENTAL, incremental_mode=IncrementalMode.APPEND
-                ),
+                run_config=Incremental(strategy=Append()),
             ),
             "db.s.orders",
         )

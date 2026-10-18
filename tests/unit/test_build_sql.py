@@ -12,10 +12,11 @@ from typing import Any
 
 import pytest
 
+from clair.exceptions import CompileError
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import ResolvedConfig
-from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode, UpsertConfig
+from clair.trouves.run_config import Append, DeleteInsert, Incremental, RunConfig, RunMode, Upsert
 from clair.trouves.trouve import BuildPlan, CompiledAttributes, ExecutionType, Trouve, TrouveType
 
 # The three columns that the upsert tests share.
@@ -58,16 +59,12 @@ def make_compiled_trouve(
     return trouve
 
 
-def make_upsert_trouve(**run_config_arguments) -> Trouve:
+def make_upsert_trouve(**strategy_arguments) -> Trouve:
     """Make a compiled Trouve that runs in the UPSERT mode."""
     return make_compiled_trouve(
         sql=UPSERT_SQL,
         columns=list(UPSERT_COLUMNS),
-        run_config=RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            **run_config_arguments,
-        ),
+        run_config=Incremental(strategy=Upsert(**strategy_arguments)),
     )
 
 
@@ -106,14 +103,26 @@ class TestAppend:
 
     def test_an_append_makes_one_insert(self):
         trouve = make_compiled_trouve(
-            run_config=RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.APPEND,
-            ),
+            run_config=Incremental(strategy=Append()),
         )
         statements = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc").all_statements
         assert len(statements) == 1
         assert statements[0].startswith("INSERT INTO db.schema.my_table")
+
+
+class TestIncrementalWithoutAStrategy:
+    """Incremental() with no strategy is for a build_sql() override, which writes its own SQL."""
+
+    def test_the_built_in_build_sql_raises_and_names_the_trouve(self):
+        trouve = make_compiled_trouve(run_config=Incremental())
+        with pytest.raises(CompileError, match="db.schema.my_table .* names no strategy"):
+            trouve.build_sql(RunMode.INCREMENTAL, run_id="abc")
+
+    def test_a_full_refresh_needs_no_strategy(self):
+        """The first run of an incremental Trouve is a full refresh, and it reads no strategy."""
+        trouve = make_compiled_trouve(run_config=Incremental())
+        statements = trouve.build_sql(RunMode.FULL_REFRESH, run_id="abc").all_statements
+        assert statements[0].startswith("CREATE OR REPLACE TABLE db.schema.my_table")
 
 
 class TestUpsertPlanColumns:
@@ -142,7 +151,7 @@ class TestUpsertPlanColumns:
         assert plan.update_column_names == ["id", "name", "value"]
 
     @pytest.mark.parametrize(
-        "run_config_arguments",
+        "match_arguments",
         [
             pytest.param({"primary_key_columns": ["id"]}, id="a_key_column"),
             pytest.param(
@@ -150,26 +159,24 @@ class TestUpsertPlanColumns:
             ),
         ],
     )
-    def test_update_columns_wins_against_each_default(self, run_config_arguments):
+    def test_update_columns_wins_against_each_default(self, match_arguments):
         plan = make_upsert_trouve(
-            **run_config_arguments,
-            upsert_config=UpsertConfig(update_columns=["name"]),
+            **match_arguments,
+            update_columns=["name"],
         ).upsert_plan("abc")
         assert plan.update_column_names == ["name"]
 
     def test_insert_columns_limits_the_insert(self):
         plan = make_upsert_trouve(
             primary_key_columns=["id"],
-            upsert_config=UpsertConfig(insert_columns=["id", "name"]),
+            insert_columns=["id", "name"],
         ).upsert_plan("abc")
         assert plan.insert_column_names == ["id", "name"]
 
     def test_the_two_settings_work_together(self):
         plan = make_upsert_trouve(
             join_sql="target.id = source.id",
-            upsert_config=UpsertConfig(
-                update_columns=["name"], insert_columns=["id", "name"]
-            ),
+            update_columns=["name"], insert_columns=["id", "name"],
         ).upsert_plan("abc")
         assert plan.update_column_names == ["name"]
         assert plan.insert_column_names == ["id", "name"]
@@ -177,20 +184,16 @@ class TestUpsertPlanColumns:
     def test_an_empty_update_column_list_updates_nothing(self):
         plan = make_upsert_trouve(
             primary_key_columns=["id"],
-            upsert_config=UpsertConfig(update_columns=[]),
+            update_columns=[],
         ).upsert_plan("abc")
         assert plan.update_column_names == []
 
     def test_a_trouve_with_no_column_raises(self):
         trouve = make_compiled_trouve(
             columns=[],
-            run_config=RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.UPSERT,
-                primary_key_columns=["id"],
-            ),
+            run_config=Incremental(strategy=Upsert(primary_key_columns=["id"])),
         )
-        with pytest.raises(ValueError, match="the upsert mode needs columns"):
+        with pytest.raises(ValueError, match="the upsert strategy needs columns"):
             trouve.upsert_plan("abc")
 
 
@@ -216,7 +219,7 @@ class TestUpsertPlanJoin:
         assert plan.join_condition == "target.a = source.b"
 
     def test_a_key_column_and_a_join_together_raise(self):
-        """RunConfig makes the illegal state impossible, thus the plan never sees it."""
+        """Upsert makes the illegal state impossible, thus the plan never sees it."""
         with pytest.raises(ValueError, match="but not both"):
             make_upsert_trouve(
                 primary_key_columns=["id"], join_sql="target.a = source.b"
@@ -290,15 +293,11 @@ class TestUpsertStatements:
         assert "MERGE INTO db.schema.my_table__clair_stg AS target" in merge
 
 
-def make_delete_insert_trouve(**run_config_arguments) -> Trouve:
+def make_delete_insert_trouve(**strategy_arguments) -> Trouve:
     """Make a compiled Trouve that runs in the DELETE_INSERT mode. It declares no column."""
     return make_compiled_trouve(
         sql=UPSERT_SQL,
-        run_config=RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.DELETE_INSERT,
-            **run_config_arguments,
-        ),
+        run_config=Incremental(strategy=DeleteInsert(**strategy_arguments)),
     )
 
 
@@ -308,9 +307,9 @@ class TestDeleteInsertStatements:
     NEW_ROWS_ADDRESS = "db.schema.my_table__clair_new_rows_abc"
     STAGING_ADDRESS = TrouveAddress.parse("db.schema.my_table__clair_stg")
 
-    def build_plan(self, **run_config_arguments) -> BuildPlan:
+    def build_plan(self, **match_arguments) -> BuildPlan:
         """Give the plan of a staging run. The INSERT copies each column, thus no column is necessary."""
-        trouve = make_delete_insert_trouve(**run_config_arguments)
+        trouve = make_delete_insert_trouve(**match_arguments)
         return trouve.build_sql(
             RunMode.INCREMENTAL, run_id="abc", staging_address=self.STAGING_ADDRESS
         )

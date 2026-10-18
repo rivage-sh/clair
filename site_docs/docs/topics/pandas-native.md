@@ -155,7 +155,7 @@ def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
 
 ## Limitations
 
-- **Full-refresh only.** Incremental strategies are not available. A `PandasTrouve` always replaces the table. A `RunConfig` with an incremental mode raises an error.
+- **Full-refresh only.** Incremental strategies are not available. A `PandasTrouve` always replaces the table. An `Incremental` run_config raises an error.
 - **TABLE output only.** Views and sources are not available.
 - **A full table read.** clair reads all the upstream rows into memory. Chunked reads are not available.
 

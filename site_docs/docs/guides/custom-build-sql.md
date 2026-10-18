@@ -1,8 +1,8 @@
 # Write your own build with `build_sql()`
 
 clair makes the SQL of a Trouve with `Trouve.build_sql()`. A subclass of `Trouve` can
-override it, and give each statement that it wants. Use it when the built-in modes —
-full refresh, APPEND, and UPSERT — do not do what the table needs.
+override it, and give each statement that it wants. Use it when the built-in strategies —
+`Append`, `Upsert`, and `DeleteInsert` — do not do what the table needs.
 
 This guide makes one such subclass: an incremental table that replaces a window of recent
 days. The code is in `examples/projects/example_3`.
@@ -118,8 +118,7 @@ import clair
 from clair import (
     Column,
     ColumnType,
-    IncrementalMode,
-    RunConfig,
+    Incremental,
     RunMode,
     TestUnique,
     TrouveType,
@@ -145,14 +144,11 @@ trouve = ReplaceWindowTrouve(
     docs="""
         The revenue of each day. In each incremental run, clair replaces the last 3 days,
         thus a late order changes the total of its day. ReplaceWindowTrouve overrides
-        build_sql(), and its plan replaces the APPEND statement.
+        build_sql(), and its plan writes the incremental SQL.
     """,
     sql=sql,
     window_column="created_date",
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.APPEND,
-    ),
+    run_config=Incremental(),
     columns=[
         Column(name="created_date", type=ColumnType.DATE),
         Column(name="order_count", type=ColumnType.INTEGER),
@@ -162,8 +158,8 @@ trouve = ReplaceWindowTrouve(
 )
 ```
 
-`RunConfig` needs an `incremental_mode` when `run_mode` is `INCREMENTAL`. The override
-decides the statements, thus `APPEND` here has no effect on the SQL.
+`Incremental()` names no strategy, because the override writes the incremental SQL. A
+`Trouve` with no override and no strategy raises a `CompileError` on an incremental run.
 
 ## 3. Read the plan
 

@@ -5,8 +5,7 @@ import clair
 from clair import (
     Column,
     ColumnType,
-    IncrementalMode,
-    RunConfig,
+    Incremental,
     RunMode,
     TestUnique,
     TrouveType,
@@ -32,14 +31,11 @@ trouve = ReplaceWindowTrouve(
     docs="""
         The revenue of each day. In each incremental run, clair replaces the last 3 days,
         thus a late order changes the total of its day. ReplaceWindowTrouve overrides
-        build_sql(), and its plan replaces the APPEND statement.
+        build_sql(), and its plan writes the incremental SQL.
     """,
     sql=sql,
     window_column="created_date",
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.APPEND,
-    ),
+    run_config=Incremental(),
     columns=[
         Column(name="created_date", type=ColumnType.DATE),
         Column(name="order_count", type=ColumnType.INTEGER),

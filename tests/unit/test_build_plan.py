@@ -20,7 +20,7 @@ from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.runner import RunResult, RunStatus, run_project
 from clair.environments.routing import TrouveAddress
 from clair.trouves.column import Column, ColumnType
-from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode
+from clair.trouves.run_config import DeleteInsert, Incremental, RunMode, Upsert
 from clair.trouves.trouve import BuildPlan, Trouve
 from tests.helpers import RecordingAdapter, make_compiled_trouve
 
@@ -110,19 +110,19 @@ NEW_ROWS_TABLE = f"{PHYSICAL_ADDRESS}__clair_new_rows"
 
 
 @pytest.mark.parametrize(
-    ("incremental_mode", "failed_text"),
+    ("strategy_type", "failed_text"),
     [
         # The clone statement also holds CREATE OR REPLACE TABLE, thus the
         # failure text names the new rows table for that case.
-        (IncrementalMode.UPSERT, f"CREATE OR REPLACE TABLE {NEW_ROWS_TABLE}"),
-        (IncrementalMode.UPSERT, "MERGE INTO"),
-        (IncrementalMode.DELETE_INSERT, f"CREATE OR REPLACE TABLE {NEW_ROWS_TABLE}"),
-        (IncrementalMode.DELETE_INSERT, "DELETE FROM"),
-        (IncrementalMode.DELETE_INSERT, "INSERT INTO"),
+        (Upsert, f"CREATE OR REPLACE TABLE {NEW_ROWS_TABLE}"),
+        (Upsert, "MERGE INTO"),
+        (DeleteInsert, f"CREATE OR REPLACE TABLE {NEW_ROWS_TABLE}"),
+        (DeleteInsert, "DELETE FROM"),
+        (DeleteInsert, "INSERT INTO"),
     ],
 )
 def test_a_staged_incremental_run_drops_the_new_rows_table_after_a_failure(
-    incremental_mode: IncrementalMode, failed_text: str
+    strategy_type: type[Upsert | DeleteInsert], failed_text: str
 ) -> None:
     trouve = Trouve(
         sql="select 1 as id, 'a' as name",
@@ -130,11 +130,7 @@ def test_a_staged_incremental_run_drops_the_new_rows_table_after_a_failure(
             Column(name="id", type=ColumnType.INTEGER),
             Column(name="name", type=ColumnType.STRING),
         ],
-        run_config=RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=incremental_mode,
-            primary_key_columns=["id"],
-        ),
+        run_config=Incremental(strategy=strategy_type(primary_key_columns=["id"])),
     )
     compiled = make_compiled_trouve(PHYSICAL_ADDRESS).compiled
     assert compiled is not None

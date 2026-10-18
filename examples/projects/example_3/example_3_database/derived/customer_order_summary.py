@@ -1,14 +1,6 @@
 from example_3_database.refined.orders import trouve as refined_orders
 
-from clair import (
-    Column,
-    ColumnType,
-    IncrementalMode,
-    RunConfig,
-    RunMode,
-    Trouve,
-    TrouveType,
-)
+from clair import Column, ColumnType, Incremental, Trouve, TrouveType, Upsert
 
 trouve = Trouve(
     type=TrouveType.TABLE,
@@ -33,11 +25,7 @@ trouve = Trouve(
         from {refined_orders}
         group by customer_id
     """,
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.UPSERT,
-        primary_key_columns=["customer_id"],
-    ),
+    run_config=Incremental(strategy=Upsert(primary_key_columns=["customer_id"])),
     columns=[
         Column(name="customer_id", type=ColumnType.STRING),
         Column(name="total_orders", type=ColumnType.NUMBER),
