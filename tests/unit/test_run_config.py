@@ -1,143 +1,93 @@
-"""The tests of the RunConfig rules."""
+"""The tests of the run configuration types.
+
+``RunConfig`` is ``FullRefresh | Incremental``, and each strategy holds only the
+fields that it reads. Thus most illegal states have no constructor, and the
+tests below cover the few rules that a type cannot state.
+"""
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
-from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode, UpsertConfig
-
-
-class TestRunConfigValidation:
-    def test_default_full_refresh(self):
-        config = RunConfig()
-        assert config.run_mode == RunMode.FULL_REFRESH
-        assert config.incremental_mode is None
-
-    def test_full_refresh_explicit(self):
-        config = RunConfig(run_mode=RunMode.FULL_REFRESH)
-        assert config.run_mode == RunMode.FULL_REFRESH
-
-    def test_incremental_append(self):
-        config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.APPEND,
-        )
-        assert config.run_mode == RunMode.INCREMENTAL
-        assert config.incremental_mode == IncrementalMode.APPEND
-
-    def test_incremental_upsert_with_primary_key_columns(self):
-        config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["id"],
-        )
-        assert config.primary_key_columns == ["id"]
-
-    def test_incremental_upsert_with_join_sql(self):
-        config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            join_sql="target.id = source.id",
-        )
-        assert config.join_sql == "target.id = source.id"
-
-    def test_full_refresh_rejects_incremental_mode(self):
-        with pytest.raises(ValueError, match="you can set incremental_mode only when run_mode is incremental"):
-            RunConfig(
-                run_mode=RunMode.FULL_REFRESH,
-                incremental_mode=IncrementalMode.APPEND,
-            )
-
-    def test_incremental_requires_strategy(self):
-        with pytest.raises(ValueError, match="the incremental run_mode needs incremental_mode"):
-            RunConfig(run_mode=RunMode.INCREMENTAL)
-
-    def test_append_rejects_primary_key_columns(self):
-        with pytest.raises(ValueError, match="you can set primary_key_columns only for the upsert mode"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.APPEND,
-                primary_key_columns=["id"],
-            )
-
-    def test_append_rejects_join_sql(self):
-        with pytest.raises(ValueError, match="you can set join_sql only for the upsert mode"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.APPEND,
-                join_sql="target.id = source.id",
-            )
-
-    def test_upsert_rejects_both_primary_key_columns_and_join_sql(self):
-        with pytest.raises(ValueError, match="set primary_key_columns or join_sql, but not both"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.UPSERT,
-                primary_key_columns=["id"],
-                join_sql="target.id = source.id",
-            )
-
-    def test_upsert_requires_primary_key_columns_or_join_sql(self):
-        with pytest.raises(ValueError, match="the upsert mode needs primary_key_columns or join_sql"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.UPSERT,
-            )
-
-    def test_upsert_accepts_upsert_config(self):
-        config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            join_sql="target.id = source.id",
-            upsert_config=UpsertConfig(update_columns=["name"], insert_columns=["id", "name"]),
-        )
-        assert config.upsert_config is not None
-        assert config.upsert_config.update_columns == ["name"]
-        assert config.upsert_config.insert_columns == ["id", "name"]
-
-    def test_append_rejects_upsert_config(self):
-        with pytest.raises(ValueError, match="you can set upsert_config only for the upsert mode"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.APPEND,
-                upsert_config=UpsertConfig(update_columns=["name"]),
-            )
+from clair.trouves.run_config import (
+    Append,
+    DeleteInsert,
+    FullRefresh,
+    Incremental,
+    RunConfig,
+    RunMode,
+    Upsert,
+)
 
 
-@pytest.mark.parametrize("incremental_mode", [IncrementalMode.UPSERT, IncrementalMode.DELETE_INSERT])
-class TestEachModeThatMatchesRows:
-    """UPSERT and DELETE_INSERT both match a new row to a target row."""
+def test_each_config_names_its_run_mode():
+    assert FullRefresh().run_mode == RunMode.FULL_REFRESH
+    assert Incremental().run_mode == RunMode.INCREMENTAL
+
+
+def test_an_incremental_config_without_a_strategy_is_valid():
+    """A build_sql() override writes its own incremental SQL."""
+    assert Incremental().strategy is None
+
+
+@pytest.mark.parametrize("strategy_type", [Upsert, DeleteInsert])
+class TestEachStrategyThatMatchesRows:
+    """Upsert and DeleteInsert both match a new row to a target row."""
 
     @pytest.mark.parametrize(
-        "match_arguments",
-        [{"primary_key_columns": ["id"]}, {"join_sql": "target.id = source.id"}],
+        ("match_arguments", "expected_condition"),
+        [
+            ({"primary_key_columns": ["id"]}, "target.id = source.id"),
+            (
+                {"primary_key_columns": ["id", "region"]},
+                "target.id = source.id AND target.region = source.region",
+            ),
+            ({"join_sql": "target.day = source.day"}, "target.day = source.day"),
+        ],
     )
-    def test_a_key_or_a_join_is_enough(self, incremental_mode, match_arguments):
-        config = RunConfig(
-            run_mode=RunMode.INCREMENTAL, incremental_mode=incremental_mode, **match_arguments
-        )
-        assert config.incremental_mode == incremental_mode
+    def test_a_key_or_a_join_makes_the_match_condition(
+        self, strategy_type, match_arguments, expected_condition
+    ):
+        assert strategy_type(**match_arguments).match_condition == expected_condition
 
-    def test_no_key_and_no_join_raises(self, incremental_mode):
+    def test_no_key_and_no_join_raises(self, strategy_type):
         with pytest.raises(
-            ValueError, match=f"the {incremental_mode} mode needs primary_key_columns or join_sql"
+            ValidationError, match=f"{strategy_type.__name__} needs primary_key_columns or join_sql"
         ):
-            RunConfig(run_mode=RunMode.INCREMENTAL, incremental_mode=incremental_mode)
+            strategy_type()
 
-    def test_a_key_and_a_join_together_raise(self, incremental_mode):
-        with pytest.raises(ValueError, match="set primary_key_columns or join_sql, but not both"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=incremental_mode,
-                primary_key_columns=["id"],
-                join_sql="target.id = source.id",
-            )
+    def test_a_key_and_a_join_together_raise(self, strategy_type):
+        with pytest.raises(ValidationError, match="but not both"):
+            strategy_type(primary_key_columns=["id"], join_sql="target.id = source.id")
 
 
-def test_delete_insert_rejects_upsert_config():
-    """A DELETE_INSERT inserts each column of the new rows, thus no column list applies."""
-    with pytest.raises(ValueError, match="you can set upsert_config only for the upsert mode"):
-        RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.DELETE_INSERT,
-            primary_key_columns=["id"],
-            upsert_config=UpsertConfig(update_columns=["name"]),
-        )
+@pytest.mark.parametrize(
+    ("config_type", "arguments"),
+    [
+        # Each one is a field of the flat RunConfig that clair replaced. An
+        # unknown field must fail, and not disappear in silence.
+        (Incremental, {"incremental_mode": "append"}),
+        (Incremental, {"primary_key_columns": ["id"]}),
+        (FullRefresh, {"strategy": Append()}),
+        (Append, {"primary_key_columns": ["id"]}),
+        (DeleteInsert, {"primary_key_columns": ["id"], "update_columns": ["name"]}),
+    ],
+)
+def test_a_field_that_the_config_does_not_read_raises(config_type, arguments):
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        config_type(**arguments)
+
+
+@pytest.mark.parametrize(
+    "run_config",
+    [
+        FullRefresh(),
+        Incremental(),
+        Incremental(strategy=Append()),
+        Incremental(strategy=Upsert(primary_key_columns=["id"], update_columns=["name"])),
+        Incremental(strategy=DeleteInsert(join_sql="target.day = source.day")),
+    ],
+)
+def test_a_config_survives_a_round_trip_through_json(run_config):
+    """The catalog writes the config as JSON, and the discriminators read it back."""
+    adapter = TypeAdapter(RunConfig)
+    assert adapter.validate_json(adapter.dump_json(run_config)) == run_config

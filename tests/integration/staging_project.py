@@ -141,17 +141,20 @@ def incremental_checked_file(
     """Give the candidate Trouve that clair materializes incrementally.
 
     An UPSERT and a DELETE_INSERT match on ``id``. An APPEND takes no primary
-    key column, and RunConfig rejects one.
+    key column, and Append rejects one.
 
     ``ratio`` is a FLOAT. `tables_are_equal` compares a float column inside a
     tolerance, and this column makes the integration job run that path against
     Snowflake. A cast to FLOAT is necessary, because a division of two NUMBER
     values gives a NUMBER.
     """
-    if incremental_mode in (IncrementalMode.UPSERT, IncrementalMode.DELETE_INSERT):
-        primary_key_line = '        primary_key_columns=["id"],\n'
-    elif incremental_mode == IncrementalMode.APPEND:
-        primary_key_line = ""
+    strategy = None
+    if incremental_mode == IncrementalMode.APPEND:
+        strategy = "Append()"
+    elif incremental_mode == IncrementalMode.UPSERT:
+        strategy = 'Upsert(primary_key_columns=["id"])'
+    elif incremental_mode == IncrementalMode.DELETE_INSERT:
+        strategy = 'DeleteInsert(primary_key_columns=["id"])'
     else:
         raise ValueError(f"The probe project has no Trouve for {incremental_mode}.")
 
@@ -159,14 +162,15 @@ def incremental_checked_file(
 from {database_name}.source.rows import trouve as source_rows
 
 from clair import (
+    Append,
     Column,
     ColumnType,
-    IncrementalMode,
-    RunConfig,
-    RunMode,
+    DeleteInsert,
+    Incremental,
     TestRowCount,
     Trouve,
     TrouveType,
+    Upsert,
 )
 
 trouve = Trouve(
@@ -180,10 +184,7 @@ trouve = Trouve(
         Column(name="amount", type=ColumnType.NUMBER),
         Column(name="ratio", type=ColumnType.FLOAT),
     ],
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.{incremental_mode.name},
-{primary_key_line}    ),
+    run_config=Incremental(strategy={strategy}),
     tests=[TestRowCount(min_rows={minimum_rows})],
 )
 '''

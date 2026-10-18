@@ -22,7 +22,7 @@ from clair.core.runner import RunResult, RunStatus, run_project, wanted_object_t
 from clair.core.staging import make_staging_address
 from clair.environments.routing import TrouveAddress
 from clair.trouves.config import ResolvedConfig
-from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode
+from clair.trouves.run_config import Append, Incremental, RunMode
 from clair.trouves.trouve import (
     CompiledAttributes,
     ExecutionType,
@@ -238,9 +238,7 @@ class TestIncrementalFallback:
         return Trouve(
             type=TrouveType.TABLE,
             sql="SELECT 1 AS id",
-            run_config=RunConfig(
-                run_mode=RunMode.INCREMENTAL, incremental_mode=IncrementalMode.APPEND
-            ),
+            run_config=Incremental(strategy=Append()),
         )
 
     def test_a_view_at_the_address_builds_a_full_candidate_and_stops(self):

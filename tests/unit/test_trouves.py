@@ -1,4 +1,4 @@
-"""The complete tests of Trouve, RunConfig, the test models, refs, and build_sql."""
+"""The complete tests of Trouve, the test models, refs, and build_sql."""
 
 from pathlib import Path
 
@@ -11,10 +11,12 @@ from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
 from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import (
-    IncrementalMode,
+    Append,
+    FullRefresh,
+    Incremental,
     RunConfig,
     RunMode,
-    UpsertConfig,
+    Upsert,
 )
 from clair.trouves.test import (
     TestNotNull,
@@ -61,7 +63,7 @@ def _compiled_trouve(
         type=trouve_type,
         sql=sql,
         columns=columns or [],
-        run_config=run_config or RunConfig(),
+        run_config=run_config or FullRefresh(),
     )
     trouve.compiled = _compiled_attrs(
         physical_address=physical_address,
@@ -107,7 +109,7 @@ class TestTrouveConstruction:
     def test_default_run_config_is_full_refresh(self):
         trouve = Trouve(sql="SELECT 1")
         assert trouve.run_config.run_mode == RunMode.FULL_REFRESH
-        assert trouve.run_config.incremental_mode is None
+        assert isinstance(trouve.run_config, FullRefresh)
 
     def test_table_rejects_empty_sql(self):
         with pytest.raises(ValueError, match="must have sql"):
@@ -216,10 +218,7 @@ class TestTrouveIncrementalValidation:
             Trouve(
                 type=TrouveType.VIEW,
                 sql="SELECT 1",
-                run_config=RunConfig(
-                    run_mode=RunMode.INCREMENTAL,
-                    incremental_mode=IncrementalMode.APPEND,
-                ),
+                run_config=Incremental(strategy=Append()),
             )
 
     def test_source_with_incremental_raises(self):
@@ -231,20 +230,14 @@ class TestTrouveIncrementalValidation:
         with pytest.raises(ValueError):
             Trouve(
                 type=TrouveType.SOURCE,
-                run_config=RunConfig(
-                    run_mode=RunMode.INCREMENTAL,
-                    incremental_mode=IncrementalMode.APPEND,
-                ),
+                run_config=Incremental(strategy=Append()),
             )
 
     def test_table_with_incremental_append_valid(self):
         trouve = Trouve(
             type=TrouveType.TABLE,
             sql="SELECT 1",
-            run_config=RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.APPEND,
-            ),
+            run_config=Incremental(strategy=Append()),
         )
         assert trouve.run_config.run_mode == RunMode.INCREMENTAL
 
@@ -252,107 +245,10 @@ class TestTrouveIncrementalValidation:
         trouve = Trouve(
             type=TrouveType.TABLE,
             sql="SELECT 1",
-            run_config=RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.UPSERT,
-                primary_key_columns=["id"],
-            ),
+            run_config=Incremental(strategy=Upsert(primary_key_columns=["id"])),
         )
-        assert trouve.run_config.incremental_mode == IncrementalMode.UPSERT
-
-
-# ---------------------------------------------------------------------------
-# The RunConfig rules
-# ---------------------------------------------------------------------------
-
-
-class TestRunConfigValidation:
-    def test_default_is_full_refresh(self):
-        config = RunConfig()
-        assert config.run_mode == RunMode.FULL_REFRESH
-        assert config.incremental_mode is None
-
-    def test_full_refresh_with_incremental_mode_raises(self):
-        with pytest.raises(ValueError, match="you can set incremental_mode only when run_mode is incremental"):
-            RunConfig(
-                run_mode=RunMode.FULL_REFRESH,
-                incremental_mode=IncrementalMode.APPEND,
-            )
-
-    def test_incremental_without_incremental_mode_raises(self):
-        with pytest.raises(ValueError, match="the incremental run_mode needs incremental_mode"):
-            RunConfig(run_mode=RunMode.INCREMENTAL)
-
-    def test_append_with_primary_key_columns_raises(self):
-        with pytest.raises(ValueError, match="you can set primary_key_columns only for the upsert mode"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.APPEND,
-                primary_key_columns=["id"],
-            )
-
-    def test_append_with_join_sql_raises(self):
-        with pytest.raises(ValueError, match="you can set join_sql only for the upsert mode"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.APPEND,
-                join_sql="target.id = source.id",
-            )
-
-    def test_append_with_upsert_config_raises(self):
-        with pytest.raises(ValueError, match="you can set upsert_config only for the upsert mode"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.APPEND,
-                upsert_config=UpsertConfig(update_columns=["name"]),
-            )
-
-    def test_upsert_with_both_primary_key_and_join_sql_raises(self):
-        with pytest.raises(ValueError, match="set primary_key_columns or join_sql, but not both"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.UPSERT,
-                primary_key_columns=["id"],
-                join_sql="target.id = source.id",
-            )
-
-    def test_upsert_with_neither_primary_key_nor_join_sql_raises(self):
-        with pytest.raises(ValueError, match="the upsert mode needs primary_key_columns or join_sql"):
-            RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.UPSERT,
-            )
-
-    def test_upsert_with_primary_key_columns_valid(self):
-        config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["id"],
-        )
-        assert config.primary_key_columns == ["id"]
-
-    def test_upsert_with_join_sql_valid(self):
-        config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            join_sql="target.id = source.id AND target.region = source.region",
-        )
-        assert config.join_sql is not None
-
-    def test_upsert_with_multiple_primary_key_columns(self):
-        config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["id", "region"],
-        )
-        assert config.primary_key_columns == ["id", "region"]
-
-    def test_append_valid(self):
-        config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.APPEND,
-        )
-        assert config.incremental_mode == IncrementalMode.APPEND
+        assert isinstance(trouve.run_config, Incremental)
+        assert isinstance(trouve.run_config.strategy, Upsert)
 
 
 # ---------------------------------------------------------------------------
@@ -484,10 +380,7 @@ class TestBuildSqlAppend:
         trouve = _compiled_trouve(
             physical_address="prod.analytics.events",
             resolved_sql="SELECT * FROM staging.events WHERE ts > '2024-01-01'",
-            run_config=RunConfig(
-                run_mode=RunMode.INCREMENTAL,
-                incremental_mode=IncrementalMode.APPEND,
-            ),
+            run_config=Incremental(strategy=Append()),
         )
         statements = trouve.build_sql(RunMode.INCREMENTAL, "run_002").all_statements
 
@@ -506,11 +399,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
             Column(name="name", type="STRING"),
             Column(name="amount", type="NUMBER"),
         ]
-        self.run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["id"],
-        )
+        self.run_config = Incremental(strategy=Upsert(primary_key_columns=["id"]))
         self.trouve = _compiled_trouve(
             physical_address="db.schema.orders",
             resolved_sql="SELECT id, name, amount FROM staging.orders",
@@ -560,11 +449,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             Column(name="product_id", type="INTEGER"),
             Column(name="quantity", type="NUMBER"),
         ]
-        run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["region", "product_id"],
-        )
+        run_config = Incremental(strategy=Upsert(primary_key_columns=["region", "product_id"]))
         trouve = _compiled_trouve(
             physical_address="db.schema.inventory",
             resolved_sql="SELECT region, product_id, quantity FROM raw.inv",
@@ -582,11 +467,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             Column(name="product_id", type="INTEGER"),
             Column(name="quantity", type="NUMBER"),
         ]
-        run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["region", "product_id"],
-        )
+        run_config = Incremental(strategy=Upsert(primary_key_columns=["region", "product_id"]))
         trouve = _compiled_trouve(
             physical_address="db.schema.inventory",
             resolved_sql="SELECT region, product_id, quantity FROM raw.inv",
@@ -610,10 +491,8 @@ class TestBuildSqlUpsertWithJoinSql:
             Column(name="id", type="INTEGER"),
             Column(name="name", type="STRING"),
         ]
-        run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            join_sql="target.id = source.id AND target.name IS NOT NULL",
+        run_config = Incremental(
+            strategy=Upsert(join_sql="target.id = source.id AND target.name IS NOT NULL"),
         )
         trouve = _compiled_trouve(
             physical_address="db.schema.users",
@@ -633,11 +512,7 @@ class TestBuildSqlUpsertWithJoinSql:
             Column(name="name", type="STRING"),
             Column(name="score", type="NUMBER"),
         ]
-        run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            join_sql="target.id = source.id",
-        )
+        run_config = Incremental(strategy=Upsert(join_sql="target.id = source.id"))
         trouve = _compiled_trouve(
             physical_address="db.schema.scores",
             resolved_sql="SELECT id, name, score FROM raw.scores",
@@ -653,8 +528,8 @@ class TestBuildSqlUpsertWithJoinSql:
         assert "score = source.score" in update_part
 
 
-class TestBuildSqlUpsertWithUpsertConfig:
-    """An UPSERT where upsert_config replaces update_columns and insert_columns."""
+class TestBuildSqlUpsertColumnOverrides:
+    """An UPSERT where update_columns and insert_columns replace the defaults."""
 
     def test_custom_update_columns(self):
         columns = [
@@ -662,12 +537,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             Column(name="name", type="STRING"),
             Column(name="email", type="STRING"),
         ]
-        run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["id"],
-            upsert_config=UpsertConfig(update_columns=["email"]),
-        )
+        run_config = Incremental(strategy=Upsert(primary_key_columns=["id"], update_columns=["email"]))
         trouve = _compiled_trouve(
             physical_address="db.schema.users",
             resolved_sql="SELECT id, name, email FROM raw.users",
@@ -688,12 +558,7 @@ class TestBuildSqlUpsertWithUpsertConfig:
             Column(name="name", type="STRING"),
             Column(name="email", type="STRING"),
         ]
-        run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["id"],
-            upsert_config=UpsertConfig(insert_columns=["id", "name"]),
-        )
+        run_config = Incremental(strategy=Upsert(primary_key_columns=["id"], insert_columns=["id", "name"]))
         trouve = _compiled_trouve(
             physical_address="db.schema.users",
             resolved_sql="SELECT id, name, email FROM raw.users",
@@ -709,18 +574,13 @@ class TestBuildSqlUpsertWithUpsertConfig:
         assert "source.email" not in merge_stmt.split("VALUES")[1]
 
     def test_custom_update_columns_with_join_sql(self):
-        """upsert_config.update_columns wins against the join_sql default of all the columns."""
+        """update_columns wins against the join_sql default of all the columns."""
         columns = [
             Column(name="id", type="INTEGER"),
             Column(name="name", type="STRING"),
             Column(name="score", type="NUMBER"),
         ]
-        run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            join_sql="target.id = source.id",
-            upsert_config=UpsertConfig(update_columns=["score"]),
-        )
+        run_config = Incremental(strategy=Upsert(join_sql="target.id = source.id", update_columns=["score"]))
         trouve = _compiled_trouve(
             physical_address="db.schema.scores",
             resolved_sql="SELECT id, name, score FROM raw.scores",
@@ -738,27 +598,19 @@ class TestBuildSqlUpsertWithUpsertConfig:
 
 class TestBuildSqlUpsertErrors:
     def test_upsert_without_columns_raises(self):
-        run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["id"],
-        )
+        run_config = Incremental(strategy=Upsert(primary_key_columns=["id"]))
         trouve = _compiled_trouve(
             columns=[],
             run_config=run_config,
         )
-        with pytest.raises(ValueError, match="the upsert mode needs columns on the Trouve"):
+        with pytest.raises(ValueError, match="the upsert strategy needs columns on the Trouve"):
             trouve.build_sql(RunMode.INCREMENTAL, "run_err")
 
 
 class TestBuildSqlStagingTableName:
     def test_staging_name_includes_run_id(self):
         columns = [Column(name="id", type="INTEGER"), Column(name="val", type="STRING")]
-        run_config = RunConfig(
-            run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
-            primary_key_columns=["id"],
-        )
+        run_config = Incremental(strategy=Upsert(primary_key_columns=["id"]))
         trouve = _compiled_trouve(
             physical_address="db.schema.target_table",
             resolved_sql="SELECT id, val FROM raw.data",
@@ -1160,10 +1012,7 @@ class TestPandasTrouve:
         with pytest.raises(ValueError, match="PandasTrouve does not support incremental mode"):
             PandasTrouve(
                 transform=my_fn,
-                run_config=RunConfig(
-                    run_mode=RunMode.INCREMENTAL,
-                    incremental_mode=IncrementalMode.APPEND,
-                ),
+                run_config=Incremental(strategy=Append()),
             )
 
     def test_pandas_trouve_is_a_trouve_abc(self):

@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from clair.core.compiler import write_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
-from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode
+from clair.trouves.run_config import Append, Incremental
 from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.trouve import ExecutionType, TrouveType
 
@@ -70,10 +70,7 @@ class TestSeedTrouveValidation:
         with pytest.raises(ValidationError, match="does not support incremental"):
             SeedTrouve(
                 dataframe=_frame(),
-                run_config=RunConfig(
-                    run_mode=RunMode.INCREMENTAL,
-                    incremental_mode=IncrementalMode.APPEND,
-                ),
+                run_config=Incremental(strategy=Append()),
             )
 
     def test_a_dataframe_with_no_column_is_rejected(self):

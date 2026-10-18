@@ -261,8 +261,8 @@ object and not to the name, thus a `SWAP` moves the production grants to the sta
 ### The mode of each node
 
 `resolve_effective_mode()` decides the mode of one Trouve. It gives `full_refresh` unless
-each of three conditions is true: the Trouve is a TABLE, its `RunConfig` asks for the
-incremental mode, and the command line asks for the incremental mode.
+each of three conditions is true: the Trouve is a TABLE, its `run_config` is
+`Incremental`, and the command line asks for the incremental mode.
 
 *Source: [`core/runner.py`][runner-py] — `resolve_effective_mode()`*
 

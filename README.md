@@ -355,11 +355,11 @@ clair test --env=dev
 
 ## Incrementality
 
-By default, every run does a full refresh. To process only new data, configure a Trouve with `RunMode.INCREMENTAL` and choose a strategy:
+By default, every run does a full refresh. To process only new data, give a Trouve `run_config=Incremental(strategy=...)`:
 
 **Append** — inserts new rows, never updates existing ones:
 ```python
-from clair import Trouve, TrouveType, RunConfig, RunMode, IncrementalMode
+from clair import Append, Incremental, Trouve, TrouveType
 
 trouve = Trouve(
     type=TrouveType.TABLE,
@@ -367,20 +367,18 @@ trouve = Trouve(
         SELECT * FROM {source_events}
         WHERE occurred_at > dateadd('day', -3, current_timestamp())
     """,
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.APPEND,
-    ),
+    run_config=Incremental(strategy=Append()),
 )
 ```
 
 **Upsert** — merges on primary key columns, updating existing rows and inserting new ones:
 ```python
-run_config=RunConfig(
-    run_mode=RunMode.INCREMENTAL,
-    incremental_mode=IncrementalMode.UPSERT,
-    primary_key_columns=["user_id"],
-)
+run_config=Incremental(strategy=Upsert(primary_key_columns=["user_id"]))
+```
+
+**DeleteInsert** — deletes each row that a new row matches, then inserts the new rows:
+```python
+run_config=Incremental(strategy=DeleteInsert(primary_key_columns=["event_date"]))
 ```
 
 If the target table doesn't exist yet, clair runs a full refresh automatically regardless of the configured strategy.

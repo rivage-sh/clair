@@ -20,17 +20,18 @@ CREATE OR REPLACE TABLE example_3_database.refined.orders AS (
 )
 ```
 
-## APPEND
+## `Append`
 
-APPEND adds the new rows only on each incremental run. Use it for event streams and for logs that you add to.
+`Append` adds the new rows only on each incremental run. Use it for event streams and for logs that you add to.
 
 Read `clair.run_mode` to change the SQL between a full refresh and an incremental run:
 
 ```python
 # example_3_database/derived/recent_orders.py
-import clair
-from clair import Column, ColumnType, IncrementalMode, RunConfig, RunMode, Trouve, TrouveType
 from example_3_database.refined.orders import trouve as refined_orders
+
+import clair
+from clair import Append, Column, ColumnType, Incremental, RunMode, Trouve, TrouveType
 
 sql = f"""
     select
@@ -57,10 +58,7 @@ trouve = Trouve(
         come late. In a full refresh, clair selects all rows and uses no date filter.
     """,
     sql=sql,
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.APPEND,
-    ),
+    run_config=Incremental(strategy=Append()),
     columns=[
         Column(name="order_id", type=ColumnType.STRING),
         Column(name="customer_id", type=ColumnType.STRING),
@@ -83,14 +81,15 @@ SELECT * FROM (
 )
 ```
 
-## UPSERT
+## `Upsert`
 
-UPSERT merges the new data into the target table. It updates the rows that exist and inserts the new rows. Use it for a table that changes slowly, such as an aggregate for each customer.
+`Upsert` merges the new data into the target table. It updates the rows that exist and inserts the new rows. Use it for a table that changes slowly, such as an aggregate for each customer.
 
 ```python
 # example_3_database/derived/customer_order_summary.py
-from clair import Column, ColumnType, IncrementalMode, RunConfig, RunMode, Trouve, TrouveType
 from example_3_database.refined.orders import trouve as refined_orders
+
+from clair import Column, ColumnType, Incremental, Trouve, TrouveType, Upsert
 
 trouve = Trouve(
     type=TrouveType.TABLE,
@@ -115,11 +114,7 @@ trouve = Trouve(
         from {refined_orders}
         group by customer_id
     """,
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.UPSERT,
-        primary_key_columns=["customer_id"],
-    ),
+    run_config=Incremental(strategy=Upsert(primary_key_columns=["customer_id"])),
     columns=[
         Column(name="customer_id", type=ColumnType.STRING),
         Column(name="total_orders", type=ColumnType.NUMBER),
@@ -132,7 +127,7 @@ trouve = Trouve(
 ```
 
 !!! note
-    UPSERT mode needs `columns`. clair uses the column list to build the MERGE statement.
+    `Upsert` needs `columns`. clair uses the column list to build the MERGE statement.
 
 Generated SQL on an incremental run — 3 statements:
 
@@ -166,41 +161,35 @@ DROP TABLE IF EXISTS example_3_database.derived.customer_order_summary__clair_ne
 If the join condition is more than an equality of columns, use `join_sql` in place of `primary_key_columns`:
 
 ```python
-run_config=RunConfig(
-    run_mode=RunMode.INCREMENTAL,
-    incremental_mode=IncrementalMode.UPSERT,
-    join_sql="target.customer_id = source.customer_id AND target.region = source.region",
-    upsert_config=UpsertConfig(
+run_config=Incremental(
+    strategy=Upsert(
+        join_sql="target.customer_id = source.customer_id AND target.region = source.region",
         update_columns=["total_orders", "total_amount"],
     ),
 )
 ```
 
-## Column overrides with `UpsertConfig`
+## Column overrides
 
-By default, MATCH updates all the columns that are not primary keys, and NO MATCH inserts all the columns. Use `UpsertConfig` to change this:
+By default, MATCH updates all the columns that are not primary keys, and NO MATCH inserts all the columns. Give `update_columns` or `insert_columns` to `Upsert` to change this:
 
 ```python
-from clair import UpsertConfig
-
-run_config=RunConfig(
-    run_mode=RunMode.INCREMENTAL,
-    incremental_mode=IncrementalMode.UPSERT,
-    primary_key_columns=["customer_id"],
-    upsert_config=UpsertConfig(
+run_config=Incremental(
+    strategy=Upsert(
+        primary_key_columns=["customer_id"],
         update_columns=["total_orders", "last_order_at"],
         insert_columns=["customer_id", "total_orders", "total_amount", "last_order_at"],
     ),
 )
 ```
 
-## DELETE_INSERT
+## `DeleteInsert`
 
-DELETE_INSERT deletes each target row that a new row matches, then inserts all the new rows. Use it to replace a window of data, for example the last 3 days.
+`DeleteInsert` deletes each target row that a new row matches, then inserts all the new rows. Use it to replace a window of data, for example the last 3 days.
 
-Choose DELETE_INSERT in place of UPSERT for two reasons:
+Choose `DeleteInsert` in place of `Upsert` for two reasons:
 
-- A MERGE fails when two new rows hold the same key. DELETE_INSERT inserts each new row, thus a duplicate key does not stop the run.
+- A MERGE fails when two new rows hold the same key. `DeleteInsert` inserts each new row, thus a duplicate key does not stop the run.
 - A key on a date column replaces each day that the new rows hold. One delete of a full day costs less than a match of each row.
 
 ```python
@@ -211,8 +200,8 @@ import clair
 from clair import (
     Column,
     ColumnType,
-    IncrementalMode,
-    RunConfig,
+    DeleteInsert,
+    Incremental,
     RunMode,
     TestUnique,
     Trouve,
@@ -242,11 +231,7 @@ trouve = Trouve(
         day, and the days before the window stay.
     """,
     sql=sql,
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.DELETE_INSERT,
-        primary_key_columns=["created_date"],
-    ),
+    run_config=Incremental(strategy=DeleteInsert(primary_key_columns=["created_date"])),
     columns=[
         Column(name="created_date", type=ColumnType.DATE),
         Column(name="order_count", type=ColumnType.INTEGER),
@@ -256,7 +241,7 @@ trouve = Trouve(
 )
 ```
 
-The key is `created_date`, thus each incremental run replaces each day of the last 3 days. A day before the window keeps its rows. DELETE_INSERT needs no `columns`: the INSERT copies each column of the new rows.
+The key is `created_date`, thus each incremental run replaces each day of the last 3 days. A day before the window keeps its rows. `DeleteInsert` needs no `columns`: the INSERT copies each column of the new rows.
 
 Generated SQL on an incremental run — 3 statements and 1 cleanup:
 
@@ -284,7 +269,7 @@ DROP TABLE IF EXISTS example_3_database.derived.daily_orders__clair_new_rows_<ru
 
 The DELETE and the INSERT write to the staging table, and clair promotes it after the tests pass. Thus the physical table never shows the rows between the DELETE and the INSERT. Clair runs the drop of the new rows table after a failure too.
 
-`join_sql` also applies to DELETE_INSERT. It gives the `WHERE` condition of the DELETE, with the aliases `target` and `source`.
+`DeleteInsert` also takes `join_sql`. It gives the `WHERE` condition of the DELETE, with the aliases `target` and `source`.
 
 !!! note
     A day that the new rows do not hold keeps its old rows. If the source deletes all the orders of one day in the window, the old total of that day stays. Use a full refresh to remove it.
@@ -303,14 +288,6 @@ Force a full refresh for one run:
 clair run --env=dev --run-mode=full_refresh
 ```
 
-## `RunConfig` field reference
+## The `run_config` types
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `run_mode` | `RunMode` | `FULL_REFRESH` | `FULL_REFRESH` or `INCREMENTAL` |
-| `incremental_mode` | `IncrementalMode \| None` | `None` | `APPEND`, `UPSERT` or `DELETE_INSERT`. Necessary if `run_mode=INCREMENTAL`. |
-| `primary_key_columns` | `list[str] \| None` | `None` | The match columns for UPSERT and DELETE_INSERT. clair generates `target.col = source.col`. |
-| `join_sql` | `str \| None` | `None` | Your own match condition for UPSERT and DELETE_INSERT. Use it in place of `primary_key_columns`. |
-| `upsert_config` | `UpsertConfig \| None` | `None` | Exact control of the columns in the MERGE. UPSERT only. |
-
-See also: [`RunConfig` API reference](../reference/run-config-api.md).
+`run_config` is `FullRefresh()` or `Incremental(strategy=...)`. Each strategy takes only the fields that it reads: `Append()` takes none, `Upsert` takes the match and the column lists, and `DeleteInsert` takes the match. See the [`RunConfig` API reference](../reference/run-config-api.md) for each field.

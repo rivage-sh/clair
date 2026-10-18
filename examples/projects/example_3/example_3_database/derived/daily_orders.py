@@ -4,8 +4,8 @@ import clair
 from clair import (
     Column,
     ColumnType,
-    IncrementalMode,
-    RunConfig,
+    DeleteInsert,
+    Incremental,
     RunMode,
     TestUnique,
     Trouve,
@@ -35,11 +35,7 @@ trouve = Trouve(
         day, and the days before the window stay.
     """,
     sql=sql,
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.DELETE_INSERT,
-        primary_key_columns=["created_date"],
-    ),
+    run_config=Incremental(strategy=DeleteInsert(primary_key_columns=["created_date"])),
     columns=[
         Column(name="created_date", type=ColumnType.DATE),
         Column(name="order_count", type=ColumnType.INTEGER),

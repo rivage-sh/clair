@@ -1,15 +1,7 @@
 from example_3_database.refined.orders import trouve as refined_orders
 
 import clair
-from clair import (
-    Column,
-    ColumnType,
-    IncrementalMode,
-    RunConfig,
-    RunMode,
-    Trouve,
-    TrouveType,
-)
+from clair import Append, Column, ColumnType, Incremental, RunMode, Trouve, TrouveType
 
 sql = f"""
     select
@@ -36,10 +28,7 @@ trouve = Trouve(
         come late. In a full refresh, clair selects all rows and uses no date filter.
     """,
     sql=sql,
-    run_config=RunConfig(
-        run_mode=RunMode.INCREMENTAL,
-        incremental_mode=IncrementalMode.APPEND,
-    ),
+    run_config=Incremental(strategy=Append()),
     columns=[
         Column(name="order_id", type=ColumnType.STRING),
         Column(name="customer_id", type=ColumnType.STRING),

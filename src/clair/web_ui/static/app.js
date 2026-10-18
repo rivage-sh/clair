@@ -429,12 +429,13 @@
         var dl = document.createElement("dl");
         dl.className = "config-dl";
 
+        var strategy = runConfig.strategy || {};
         addConfigEntry(dl, "Run Mode", runConfig.run_mode);
-        addConfigEntry(dl, "Incremental Mode", runConfig.incremental_mode);
+        addConfigEntry(dl, "Incremental Strategy", strategy.mode);
         addConfigEntry(
             dl,
             "Primary Key Columns",
-            runConfig.primary_key_columns ? runConfig.primary_key_columns.join(", ") : null
+            strategy.primary_key_columns ? strategy.primary_key_columns.join(", ") : null
         );
 
         section.appendChild(dl);
