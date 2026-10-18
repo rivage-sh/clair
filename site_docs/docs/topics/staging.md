@@ -56,6 +56,23 @@ DROP TABLE IF EXISTS db.schema.orders__clair_<run_id>
 
 Snowflake makes a clone in the metadata, so this step takes constant time for a table of any size. Two conditions give the clone no base: the physical address holds nothing, and the physical address holds a view because the Trouve was a `VIEW` before. In each condition clair changes that Trouve to the full refresh mode and makes no clone. The promotion does not change.
 
+## Two runs at one time
+
+A schedule that starts a run before the last one ends, or a person who starts a run by
+hand, gives two runs of one incremental Trouve. Each run clones the table, adds its rows to
+the clone, and promotes the clone. The second promotion replaces the table, and the rows of
+the first run disappear with no error.
+
+Clair reads the change token of the table, `SYSTEM$LAST_CHANGE_COMMIT_TIME`, before the
+clone and again before the promotion. If another run committed a change between the two,
+clair does not promote. The Trouve fails, the table keeps the rows of the other run, and
+the tested candidate stays. Run the Trouve again: the new run clones the table with the
+rows of the other run.
+
+A full refresh makes the complete table from the SQL, thus clair makes no comparison. A run
+with `--no-test` has no clone and no promotion, and two such runs can each insert their
+rows. Do not run an incremental Trouve with `--no-test` from two schedules.
+
 ## A Trouve that changes its type
 
 Change a `Table` to a `View`, or the reverse, and the next run stops before the promotion. You drop the old object, and the run after that makes the new one.
