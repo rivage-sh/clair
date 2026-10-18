@@ -51,13 +51,37 @@ class TestEachStrategyThatMatchesRows:
 
     def test_no_key_and_no_join_raises(self, strategy_type):
         with pytest.raises(
-            ValidationError, match=f"{strategy_type.__name__} needs primary_key_columns or join_sql"
+            ValidationError, match=f"{strategy_type.__name__} needs primary_key_columns"
         ):
             strategy_type()
 
     def test_a_key_and_a_join_together_raise(self, strategy_type):
-        with pytest.raises(ValidationError, match="but not both"):
+        with pytest.raises(
+            ValidationError, match="but it got primary_key_columns and join_sql"
+        ):
             strategy_type(primary_key_columns=["id"], join_sql="target.id = source.id")
+
+
+class TestDeleteInsertByRange:
+    """A range column is the third match of a DeleteInsert, and an Upsert has no such field."""
+
+    def test_a_range_column_alone_is_enough(self):
+        assert DeleteInsert(range_column="event_date").range_column == "event_date"
+
+    @pytest.mark.parametrize(
+        "other_match",
+        [{"primary_key_columns": ["id"]}, {"join_sql": "target.id = source.id"}],
+    )
+    def test_a_range_column_with_a_key_or_a_join_raises(self, other_match):
+        with pytest.raises(ValidationError, match="takes only one of"):
+            DeleteInsert(range_column="event_date", **other_match)
+
+    def test_no_match_names_the_range_column(self):
+        with pytest.raises(
+            ValidationError,
+            match="DeleteInsert needs primary_key_columns, join_sql or range_column",
+        ):
+            DeleteInsert()
 
 
 @pytest.mark.parametrize(
@@ -70,6 +94,7 @@ class TestEachStrategyThatMatchesRows:
         (FullRefresh, {"strategy": Append()}),
         (Append, {"primary_key_columns": ["id"]}),
         (DeleteInsert, {"primary_key_columns": ["id"], "update_columns": ["name"]}),
+        (Upsert, {"range_column": "event_date"}),
     ],
 )
 def test_a_field_that_the_config_does_not_read_raises(config_type, arguments):
@@ -85,6 +110,7 @@ def test_a_field_that_the_config_does_not_read_raises(config_type, arguments):
         Incremental(strategy=Append()),
         Incremental(strategy=Upsert(primary_key_columns=["id"], update_columns=["name"])),
         Incremental(strategy=DeleteInsert(join_sql="target.day = source.day")),
+        Incremental(strategy=DeleteInsert(range_column="event_date")),
     ],
 )
 def test_a_config_survives_a_round_trip_through_json(run_config):
