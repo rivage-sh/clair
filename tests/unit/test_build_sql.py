@@ -200,23 +200,14 @@ class TestUpsertPlanColumns:
 class TestUpsertPlanJoin:
     """The join comes from the key columns, or from the author."""
 
-    def test_one_key_column_makes_one_condition(self):
-        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan("abc")
-        assert plan.join_key_columns == ["id"]
-        assert plan.join_condition == "target.id = source.id"
-
-    def test_two_key_columns_join_with_and(self):
-        plan = make_upsert_trouve(
-            primary_key_columns=["id", "region"]
-        ).upsert_plan("abc")
-        assert plan.join_condition == (
-            "target.id = source.id AND target.region = source.region"
-        )
-
-    def test_a_join_of_the_author_is_the_condition(self):
-        plan = make_upsert_trouve(join_sql="target.a = source.b").upsert_plan("abc")
-        assert plan.join_sql == "target.a = source.b"
-        assert plan.join_condition == "target.a = source.b"
+    @pytest.mark.parametrize(
+        "match_arguments",
+        [{"primary_key_columns": ["id", "region"]}, {"join_sql": "target.a = source.b"}],
+    )
+    def test_the_plan_holds_the_condition_of_the_strategy(self, match_arguments):
+        """test_run_config.py covers each form of the condition."""
+        trouve = make_upsert_trouve(**match_arguments)
+        assert trouve.upsert_plan("abc").join_condition == Upsert(**match_arguments).match_condition
 
     def test_a_key_column_and_a_join_together_raise(self):
         """Upsert makes the illegal state impossible, thus the plan never sees it."""
