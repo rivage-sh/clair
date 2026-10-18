@@ -3,7 +3,7 @@
 Run Trouves against Snowflake in dependency order, then run the data quality tests.
 
 ```bash
-clair run [--env NAME] [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample] [--threads N]
+clair run [--env NAME] [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample] [--threads N] [--retries N]
 ```
 
 ## Example
@@ -69,6 +69,27 @@ clair runs the attached tests after each successful TABLE or VIEW. If a test fai
 
 The tests decide the publication. They do not report a fault after it reaches production: clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes. See [Staging](../topics/staging.md).
 
+## Retries
+
+A network fault or an internal error of Snowflake can fail one statement of a good
+Trouve. clair then runs the Trouve again, after 2 seconds, then 4, then 8. A SQL fault,
+a missing permission, a cancelled statement and a statement timeout fail at once, because
+a second attempt fails in the same way.
+
+clair runs a Trouve again only when a second run gives the same data:
+
+- **A staged run.** The build writes to the staging object only. The next attempt makes
+  that object again from the production table.
+- **A full refresh.** The next attempt makes the object again from the SQL.
+
+An incremental run with `--no-test` writes to the production table directly. A statement
+that failed on the network can still have committed in Snowflake, and a second `INSERT`
+then gives each row two times. clair therefore does not run it again. A fault in the
+promotion does not make a retry either, because the production table can already hold
+the new data.
+
+`RunResult.attempt_count` tells you how many times clair ran the Trouve.
+
 ## Flags
 
 | Flag | Default | Description |
@@ -79,6 +100,7 @@ The tests decide the publication. They do not report a fault after it reaches pr
 | `--no-test` | `false` | Skip the data quality tests |
 | `--sample` | `false` | Run the tests against `SELECT TOP 1000 *` (skips `TestRowCount`) |
 | `--threads` | the `threads` field of the environment, or `4` | The number of Trouves that run at one time. Each thread holds one Snowflake connection. |
+| `--retries` | `1` | The number of times that clair runs a Trouve again after a transient fault. See [Retries](#retries). |
 
 ## Exit codes
 

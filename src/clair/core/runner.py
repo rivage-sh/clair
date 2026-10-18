@@ -13,7 +13,7 @@ from typing import NamedTuple
 import networkx as nx
 import pandas as pd
 import structlog
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
 from clair.adapters.pool import AdapterPool
@@ -59,6 +59,8 @@ class RunResult(BaseModel):
         test_results: The data quality test results of this Trouve.
         skipped_by: The physical address of the upstream Trouve that failed and
             thus caused the skip.
+        attempt_count: The number of times that clair ran the node. A value
+            above 1 means that a transient fault made clair run it again.
     """
 
     addresses: NodeAddresses
@@ -69,6 +71,7 @@ class RunResult(BaseModel):
     row_count: int = 0
     test_results: list[TestResult] = []
     skipped_by: str | None = None
+    attempt_count: int = 1
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -460,10 +463,45 @@ class _NodeOutcome(NamedTuple):
         downstream_ok: False when clair must skip each node downstream. A node
             that fails gives False. A node that succeeds, but does not pass its
             tests, gives False too.
+        retryable: True when a second run of the node is safe and can pass. See
+            ``_is_safe_to_retry``.
     """
 
     result: RunResult | None
     downstream_ok: bool
+    retryable: bool = False
+
+
+class RetryPolicy(BaseModel):
+    """How often clair runs a node again after a transient fault.
+
+    Attributes:
+        retries: The number of runs after the first one. 0 runs each node one time.
+        delay_seconds: The wait before the first retry. Each next wait is two
+            times longer.
+    """
+
+    retries: int = Field(default=1, ge=0)
+    delay_seconds: float = Field(default=2.0, ge=0)
+
+
+def _is_safe_to_retry(
+    failed_statement: Statement,
+    staging_address: TrouveAddress | None,
+    effective_mode: RunMode,
+) -> bool:
+    """Tell you if clair can run a node again after a build statement failed.
+
+    A staged run writes only to the staging object, and the next attempt makes
+    that object again from the physical one. A full refresh makes the object
+    again from the SQL. Both give the same data on each attempt. An incremental
+    run with no staging changes the physical table, and a statement that failed
+    on the network can still have committed. A second INSERT then gives each
+    row two times, thus clair does not run it again.
+    """
+    if not failed_statement.retryable:
+        return False
+    return staging_address is not None or effective_mode == RunMode.FULL_REFRESH
 
 
 def _make_databases_and_schemas(
@@ -747,6 +785,11 @@ def _run_node(
                 f"{staging_address}, if the build made one"
             )
     logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(duration, 3), error=error_message, query_ids=query_ids)
+    # Only a build statement can make a retry. A fault in the promotion can come
+    # after the physical object changed.
+    retryable = failed_at is not None and _is_safe_to_retry(
+        statements[failed_at], staging_address, effective_mode
+    )
     return _NodeOutcome(
         RunResult(
             addresses=addresses,
@@ -757,6 +800,7 @@ def _run_node(
             row_count=row_count,
         ),
         downstream_ok=False,
+        retryable=retryable,
     )
 
 def run_project(
@@ -769,6 +813,7 @@ def run_project(
     use_staging: bool = False,
     threads: int = 1,
     environment_name: str = "",
+    retry_policy: RetryPolicy | None = None,
 ) -> Iterator[RunResult]:
     """Execute the selected Trouves. Give each result when the Trouve completes.
 
@@ -802,6 +847,9 @@ def run_project(
             after_node_success.
         threads: The number of Trouves that clair runs at one time, and thus the
             number of warehouse connections.
+        environment_name: The environment of the run. The query tag holds it.
+        retry_policy: How often clair runs a node again after a transient
+            fault. None gives ``RetryPolicy()``: one retry.
 
     Raises:
         RunError: If *use_staging* is True and *after_node_success* is None.
@@ -850,17 +898,35 @@ def run_project(
 
     pool = AdapterPool(adapter, threads)
 
+    policy = retry_policy or RetryPolicy()
+
     def run_one(name: str) -> _NodeOutcome:
-        """Run one node on the connection of this thread."""
-        return _run_node(
-            name,
-            dag,
-            pool.acquire(),
-            run_mode,
-            run_id,
-            after_node_success,
-            use_staging,
-            environment_name,
+        """Run one node on the connection of this thread, and again after a transient fault."""
+        adapter_of_thread = pool.acquire()
+        attempt_count = 1
+        while True:
+            outcome = _run_node(
+                name,
+                dag,
+                adapter_of_thread,
+                run_mode,
+                run_id,
+                after_node_success,
+                use_staging,
+                environment_name,
+            )
+            if not outcome.retryable or attempt_count > policy.retries:
+                break
+            delay_seconds = policy.delay_seconds * 2 ** (attempt_count - 1)
+            assert outcome.result is not None
+            logger.warning("run.node.retry", physical=name, attempt=attempt_count, delay_seconds=delay_seconds, error=outcome.result.error)
+            time.sleep(delay_seconds)
+            attempt_count += 1
+
+        if outcome.result is None:
+            return outcome
+        return outcome._replace(
+            result=outcome.result.model_copy(update={"attempt_count": attempt_count})
         )
 
     try:

@@ -92,6 +92,7 @@ def run(
     test: bool = True,
     sample: bool = False,
     threads: int | None = None,
+    retries: int = 1,
     adapter: WarehouseAdapter | None = None,
 ) -> RunSummary
 ```
@@ -104,6 +105,9 @@ guarantee, so `test=False` also stops the staging step.
 `threads` gives the number of Trouves that run at one time. None takes the
 thread count of the environment. See
 [Environments](../topics/environments.md).
+
+`retries` gives the number of times that clair runs a Trouve again after a
+transient fault. See [Retries](../cli/run.md#retries).
 
 Give `adapter` to keep one connection open for many calls. Clair then closes no
 connection. The default makes a `SnowflakeAdapter`, connects it, and closes it.

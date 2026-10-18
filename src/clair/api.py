@@ -55,7 +55,7 @@ from clair.core.discovery import (
     find_project_root,
 )
 from clair.core.references import recompile_for_selection
-from clair.core.runner import RunResult, RunSummary, run_project
+from clair.core.runner import RetryPolicy, RunResult, RunSummary, run_project
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import TestResult, TestSummary, run_tests
 from clair.core.validation import ValidationReport, validate_project
@@ -239,6 +239,7 @@ def run(
     test: bool = True,
     sample: bool = False,
     threads: int | None = None,
+    retries: int = 1,
     adapter: WarehouseAdapter | None = None,
 ) -> RunSummary:
     """Run the Trouves of a project on the warehouse, and test them.
@@ -264,6 +265,9 @@ def run(
         sample: If True, clair runs the tests on a sample of each Trouve.
         threads: The number of Trouves that run at one time. None takes the
             thread count of the environment.
+        retries: The number of times that clair runs a Trouve again after a
+            transient fault of the network or of the warehouse. Clair runs a
+            Trouve again only when a second run gives the same data.
         adapter: A connected warehouse adapter. The default makes a
             SnowflakeAdapter, connects it, and closes it at the end. A parallel
             run opens one more connection for each other thread.
@@ -382,6 +386,7 @@ def run(
             use_staging=use_staging,
             threads=thread_count,
             environment_name=env_name,
+            retry_policy=RetryPolicy(retries=retries),
         ):
             results.append(
                 result.model_copy(

@@ -409,7 +409,14 @@ def docs(port: int, host: str, no_browser: bool) -> None:
     default=None,
     help="The number of Trouves that run at one time. The default comes from the environment.",
 )
-def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, no_test: bool, sample: bool, threads: int | None) -> None:
+@click.option(
+    "--retries",
+    type=click.IntRange(min=0),
+    default=1,
+    show_default=True,
+    help="The number of times that clair runs a Trouve again after a transient fault.",
+)
+def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, no_test: bool, sample: bool, threads: int | None, retries: int) -> None:
     """Run the Trouves on Snowflake. Then run the data quality tests."""
     try:
         summary = clair_api.run(
@@ -420,6 +427,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_
             test=not no_test,
             sample=sample,
             threads=threads,
+            retries=retries,
         )
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
         logger.error("run.routing_error", error=str(e))

@@ -66,6 +66,9 @@ class Statement(BaseModel):
         query_url: The URL of the query detail page in the warehouse console.
         error: The error message of a statement that failed.
         row_count: The number of rows that the statement returned or changed.
+        retryable: True if the warehouse can accept the same statement on a
+            second attempt: a network fault, or an internal error of the
+            warehouse. A fault of the SQL is never retryable.
     """
 
     sql: str = ""
@@ -74,6 +77,7 @@ class Statement(BaseModel):
     query_url: str | None = None
     error: str = ""
     row_count: int = 0
+    retryable: bool = False
 
     @property
     def success(self) -> bool:

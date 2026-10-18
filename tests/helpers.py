@@ -26,7 +26,7 @@ from clair.adapters.base import (
 )
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.dag import ClairDag, build_dag, get_executable_nodes
-from clair.core.runner import RunResult, run_project
+from clair.core.runner import RetryPolicy, RunResult, run_project
 from clair.core.test_runner import TestResult
 from clair.environments.environments import Authentication, Authenticator, Connection, Environment
 from clair.environments.routing import RoutingEntry, TrouveAddress
@@ -323,6 +323,8 @@ class RecordingAdapter(WarehouseAdapter):
     Args:
         fail_on: A statement that holds one of these texts gives a failed
             Statement. Use the name of a Trouve to fail that Trouve.
+        transient_failures: The number of times that a statement which holds
+            the text fails with a retryable fault, by the text. Then it passes.
         existing_tables: The address of each table that the warehouse holds.
             None means that every table exists, which is the common case.
         table_columns: The columns that describe_columns() gives for each
@@ -349,6 +351,7 @@ class RecordingAdapter(WarehouseAdapter):
         self,
         *,
         fail_on: Sequence[str] = (),
+        transient_failures: dict[str, int] | None = None,
         existing_tables: Sequence[str] | None = None,
         table_columns: Sequence[WarehouseColumn] | None = DEFAULT_TABLE_COLUMNS,
         query_columns: Sequence[WarehouseColumn] | None = None,
@@ -362,6 +365,8 @@ class RecordingAdapter(WarehouseAdapter):
         record: StatementRecord | None = None,
     ) -> None:
         self.fail_on = list(fail_on)
+        # Shared with each new connection, thus the count holds for the run.
+        self.transient_failures = transient_failures if transient_failures is not None else {}
         self.existing_tables = None if existing_tables is None else set(existing_tables)
         self.table_columns = None if table_columns is None else list(table_columns)
         self.query_columns = None if query_columns is None else list(query_columns)
@@ -394,6 +399,7 @@ class RecordingAdapter(WarehouseAdapter):
         self.record.new_adapter()
         return RecordingAdapter(
             fail_on=self.fail_on,
+            transient_failures=self.transient_failures,
             existing_tables=None
             if self.existing_tables is None
             else sorted(self.existing_tables),
@@ -437,6 +443,18 @@ class RecordingAdapter(WarehouseAdapter):
                     query_id=query_id,
                     query_url=query_url,
                     error=f"Simulated failure for {text}",
+                )
+
+        for text, remaining_count in self.transient_failures.items():
+            if text in sql and remaining_count > 0:
+                self.transient_failures[text] = remaining_count - 1
+                return Statement(
+                    sql=sql,
+                    status=StatementStatus.FAILURE,
+                    query_id=query_id,
+                    query_url=query_url,
+                    error=f"Simulated transient failure for {text}",
+                    retryable=True,
                 )
 
         is_select = sql.lstrip().upper().startswith("SELECT")
@@ -531,11 +549,12 @@ def run_one_trouve(
     run_mode: RunMode = RunMode.FULL_REFRESH,
     tests_passed: bool = True,
     tested_addresses: list[str] | None = None,
+    retries: int = 1,
 ) -> RunResult:
     """Run one Trouve at TEST_ADDRESS, and give the single RunResult.
 
     *tested_addresses* receives the address of each object that the data
-    quality tests examined.
+    quality tests examined. A retry does not wait.
     """
 
     def run_the_tests(name: str, address: str, _adapter: object) -> bool:
@@ -554,6 +573,7 @@ def run_one_trouve(
             run_id=TEST_RUN_ID,
             after_node_success=run_the_tests if use_staging else None,
             use_staging=use_staging,
+            retry_policy=RetryPolicy(retries=retries, delay_seconds=0),
         )
     )
     assert len(results) == 1
@@ -616,6 +636,7 @@ def snowflake_adapter_that_answers(
 ) -> tuple[SnowflakeAdapter, FakeCursor]:
     """Give a SnowflakeAdapter whose connection answers the rows."""
     adapter = SnowflakeAdapter()
+    adapter._environment = make_environment()
     cursor = FakeCursor(rows, error)
     # The adapter needs a connection object only to make a cursor, thus the
     # fake gives one. cast keeps the type checker quiet about the narrow use.

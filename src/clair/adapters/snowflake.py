@@ -92,6 +92,7 @@ class SnowflakeAdapter(WarehouseAdapter):
                 query_id=query_id,
                 query_url=self._build_query_url(query_id),
                 error=str(e),
+                retryable=is_retryable_error(e),
             )
         finally:
             cursor.close()
@@ -312,3 +313,30 @@ def _columns_of(rows: list[tuple]) -> list[WarehouseColumn]:
         for row in rows
         if str(row[2]).upper() == "COLUMN"
     ]
+
+
+# The errors of the network and of the Snowflake service. A second attempt of
+# the same statement can pass. A ProgrammingError, for example a SQL fault or a
+# missing permission, fails again.
+_RETRYABLE_ERRORS = (
+    snowflake.connector.errors.OperationalError,
+    snowflake.connector.errors.InterfaceError,
+    snowflake.connector.errors.InternalError,
+    snowflake.connector.errors.BadGatewayError,
+    snowflake.connector.errors.GatewayTimeoutError,
+    snowflake.connector.errors.InternalServerError,
+    snowflake.connector.errors.OtherHTTPRetryableError,
+    snowflake.connector.errors.RequestTimeoutError,
+    snowflake.connector.errors.ServiceUnavailableError,
+    snowflake.connector.errors.TooManyRequests,
+)
+# 000604 is a cancelled statement, and 000630 is a statement that reached its
+# timeout. A person or a timeout stopped them, thus a retry is wrong.
+_STOPPED_ERROR_CODES = frozenset({604, 630})
+
+
+def is_retryable_error(error: Exception) -> bool:
+    """Tell you if a second attempt of the statement that raised *error* can pass."""
+    if getattr(error, "errno", None) in _STOPPED_ERROR_CODES:
+        return False
+    return isinstance(error, _RETRYABLE_ERRORS)
