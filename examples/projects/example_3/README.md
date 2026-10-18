@@ -1,7 +1,9 @@
 # Example 3 — Incremental Materializations
 
-Integration test project for `run_mode` functionality. Demonstrates the three incremental strategies:
-`APPEND`, `UPSERT` and `DELETE_INSERT`.
+Integration test project for `run_mode` functionality. Demonstrates the three incremental
+strategies, `APPEND`, `UPSERT` and `DELETE_INSERT`, and a Trouve subclass that overrides
+`build_sql()` to replace a window of days. See the
+[`build_sql()` guide](../../../site_docs/docs/guides/custom-build-sql.md).
 
 ## Pipeline
 
@@ -10,7 +12,8 @@ source.orders  (SOURCE)
     └── refined.orders             (TABLE, full refresh)
             ├── derived.recent_orders          (TABLE, INCREMENTAL APPEND)
             ├── derived.customer_order_summary (TABLE, INCREMENTAL UPSERT)
-            └── derived.daily_orders           (TABLE, INCREMENTAL DELETE_INSERT)
+            ├── derived.daily_orders           (TABLE, INCREMENTAL DELETE_INSERT)
+            └── derived.daily_revenue          (TABLE, INCREMENTAL, build_sql() replaces a window)
 ```
 
 | Trouve | Strategy | Description |
@@ -20,6 +23,10 @@ source.orders  (SOURCE)
 | `derived.recent_orders` | Incremental APPEND | Appends orders created in last 3 days |
 | `derived.customer_order_summary` | Incremental UPSERT on `customer_id` | Per-customer stats, merged in-place |
 | `derived.daily_orders` | Incremental DELETE_INSERT on `created_date` | Orders and revenue of each day; replaces the last 3 days |
+| `derived.daily_revenue` | Incremental, `ReplaceWindowTrouve` | Revenue of each day. Replaces the last 3 days |
+
+`_replace_window_trouve.py` holds `ReplaceWindowTrouve`. Discovery skips a file that starts
+with `_`, thus the file holds Python that a Trouve file imports, and no Trouve.
 
 ## Prerequisites
 
@@ -129,6 +136,7 @@ Expected behaviour:
 - `derived.recent_orders` — **APPEND**: the two new orders are inserted alongside existing rows
 - `derived.customer_order_summary` — **UPSERT**: `cust_c` stats are updated; `cust_d` is inserted as a new row
 - `derived.daily_orders` — **DELETE_INSERT**: clair deletes the rows of the last 3 days and inserts them again; today now counts ord_007 and ord_008
+- `derived.daily_revenue` — **window replace**: clair deletes the rows of the last 3 days, and inserts them again with the two new orders
 
 Verify:
 
@@ -138,6 +146,9 @@ select * from example_3_database.derived.recent_orders order by created_at desc;
 
 -- cust_c total_orders should be 2; cust_d should appear for the first time
 select * from example_3_database.derived.customer_order_summary order by customer_id;
+
+-- today holds ord_007 and ord_008; each day appears one time only
+select * from example_3_database.derived.daily_revenue order by created_date;
 ```
 
 ### 5. Verify UPSERT staging table cleanup
@@ -150,6 +161,11 @@ is created and dropped within the same run. After the run completes it should no
 select table_name
 from example_3_database.information_schema.tables
 where table_name ilike '%clair_staging%';
+
+-- the cleanup statement of daily_revenue drops its window table: should return no rows
+select table_name
+from example_3_database.information_schema.tables
+where table_name ilike '%__window_%';
 ```
 
 ## Teardown
