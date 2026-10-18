@@ -22,10 +22,10 @@ from click.testing import CliRunner
 from clair.cli.main import cli
 from clair.core.runner import RunResult, RunStatus, RunSummary
 from clair.core.test_runner import TestSummary
-from clair.environments.environments import Environment
+from clair.environments.environments import Authenticator, Environment, Password, PrivateKey, load_environment
 from clair.exceptions import ClairError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
-from tests.helpers import make_run_result, make_test_result
+from tests.helpers import make_environment, make_run_result, make_test_result
 
 
 @pytest.fixture(autouse=True)
@@ -74,9 +74,7 @@ def environments_file(monkeypatch: pytest.MonkeyPatch) -> Environment:
     The CLI parses ~/.clair/environments.yml, and it gives the Environment to
     the API function. These tests replace the parse step only.
     """
-    environment = Environment(
-        name="dev", account="ab12345", user="analyst", warehouse="compute_wh"
-    )
+    environment = make_environment()
 
     def fake_load(env_name: str | None = None) -> tuple[str, Environment]:
         name = env_name or "dev"
@@ -360,3 +358,43 @@ class TestVersion:
 
         assert result.exit_code == 0
         assert result.output.strip() == f"clair, version {version('rivage-clair')}"
+
+
+class TestInitWritesAnEnvironmentThatLoads:
+    """`clair init` asks for the settings, and each run reads the file that it writes."""
+
+    # The answers before the authentication method, and the answers after it.
+    ACCOUNT_ANSWERS = ("dev", "myorg-myaccount", "me@example.com")
+    SESSION_ANSWERS = ("COMPUTE_WH", "", "us-east-1", "abc12345", "4", "source.orders.raw")
+
+    @pytest.mark.parametrize(
+        ("method_answers", "expected_authentication"),
+        [
+            (["1", "~/.clair/key.p8", "n"], PrivateKey(private_key_path="~/.clair/key.p8")),
+            (["2", "secret"], Password(password="secret")),
+            (["3"], Authenticator(authenticator="externalbrowser")),
+        ],
+    )
+    def test_each_method_gives_its_authentication(
+        self,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+        method_answers: list[str],
+        expected_authentication,
+    ):
+        home_dir = tmp_path_factory.mktemp("home")
+        monkeypatch.setenv("HOME", str(home_dir))
+        project_dir = tmp_path_factory.mktemp("init") / "proj"
+        answers = [*self.ACCOUNT_ANSWERS, *method_answers, *self.SESSION_ANSWERS]
+
+        result = CliRunner().invoke(
+            cli, ["init", "--project", str(project_dir)], input="\n".join(answers) + "\n"
+        )
+
+        assert result.exit_code == 0, result.output
+        _name, environment = load_environment(
+            environments_path=home_dir / ".clair" / "environments.yml"
+        )
+        assert environment.authentication == expected_authentication
+        assert environment.connection.role is None
+        assert environment.connection.account_locator == "abc12345"

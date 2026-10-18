@@ -6,10 +6,12 @@ that calls it, thus `clair run` calls `clair.run()`. A notebook, a test, or
 another program calls the same functions::
 
     import clair
-    from clair import Environment
+    from clair import Authenticator, Connection, Environment
 
     environment = Environment(
-        name="dev", account="ab12345", user="analyst", warehouse="compute_wh"
+        name="dev",
+        connection=Connection(account="ab12345", user="analyst", warehouse="compute_wh"),
+        authentication=Authenticator(authenticator="externalbrowser"),
     )
     summary = clair.run(
         "~/projects/analytics", env=environment, select=["+mydb.analytics.orders"]
@@ -290,7 +292,10 @@ def run(
     env_name = environment.name
     # The caller replaces the thread count of the environment.
     thread_count = threads if threads is not None else environment.threads
-    profile_defaults = {"warehouse": environment.warehouse, "role": environment.role}
+    profile_defaults = {
+        "warehouse": environment.connection.warehouse,
+        "role": environment.connection.role,
+    }
     routing = _resolve_routing(project_root, env_name)
     discovered = discover_project(
         project_root,
@@ -319,7 +324,7 @@ def run(
     )
 
     # An empty account_locator leaves each query URL empty.
-    if not environment.account_locator:
+    if not environment.connection.account_locator:
         logger.warning(
             "run.no_account_locator", env=env_name, detail="Clair cannot show the query URLs."
         )
@@ -328,7 +333,7 @@ def run(
     owns_adapter = warehouse_adapter is None
     if warehouse_adapter is None:
         warehouse_adapter = SnowflakeAdapter()
-        warehouse_adapter.connect(environment.to_connection_dict())
+        warehouse_adapter.connect(environment)
 
     test_results_of_node: dict[str, list[TestResult]] = defaultdict(list)
 
@@ -445,7 +450,10 @@ def test(
     env_name = environment.name
     # The caller replaces the thread count of the environment.
     thread_count = threads if threads is not None else environment.threads
-    profile_defaults = {"warehouse": environment.warehouse, "role": environment.role}
+    profile_defaults = {
+        "warehouse": environment.connection.warehouse,
+        "role": environment.connection.role,
+    }
     routing = _resolve_routing(project_root, env_name)
     discovered = discover_project(
         project_root, profile_defaults, routing=routing, environment=environment
@@ -462,7 +470,7 @@ def test(
     owns_adapter = warehouse_adapter is None
     if warehouse_adapter is None:
         warehouse_adapter = SnowflakeAdapter()
-        warehouse_adapter.connect(environment.to_connection_dict())
+        warehouse_adapter.connect(environment)
 
     # A connection that no Trouve uses gives nothing, and it costs one login.
     thread_count = min(thread_count, len(selected))

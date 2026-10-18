@@ -28,7 +28,6 @@ from tests.integration.config import (
     DATABASE_NAME,
     IntegrationConfig,
     load_config,
-    normalise_schema_name,
 )
 from tests.integration.projects import (
     example_project_paths,
@@ -81,14 +80,7 @@ def main() -> None:
     )
     arguments = parser.parse_args()
 
-    config = load_config()
-    if arguments.schema_name:
-        config = IntegrationConfig(
-            **{
-                **config.__dict__,
-                "schema_name": normalise_schema_name(arguments.schema_name),
-            }
-        )
+    config = load_config(schema_name=arguments.schema_name or None)
 
     prepare_schema(config)
     print(f"{DATABASE_NAME}.{config.schema_name}: the schema is empty")

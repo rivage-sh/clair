@@ -21,6 +21,7 @@ from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, Wa
 from clair.core.dag import ClairDag
 from clair.core.runner import RunResult
 from clair.core.test_runner import TestResult
+from clair.environments.environments import Authentication, Authenticator, Connection, Environment
 from clair.environments.routing import RoutingEntry, TrouveAddress
 from clair.trouves.address import NodeAddresses
 from clair.trouves.config import ResolvedConfig
@@ -108,6 +109,26 @@ class SourceAwareRouting(RoutingEntry):
 # compiled Trouve, and it needs no file on the disk. These two functions make
 # one, thus no test file writes a fourth builder.
 # ---------------------------------------------------------------------------
+
+
+def make_environment(
+    name: str = "dev",
+    authentication: Authentication | None = None,
+    **connection_fields: str,
+) -> Environment:
+    """Make an Environment for a test that opens no connection.
+
+    Args:
+        name: The environment name.
+        authentication: The method. The default is SSO in a browser.
+        **connection_fields: The fields of Connection that replace the defaults.
+    """
+    connection = {"account": "ab12345", "user": "analyst", "warehouse": "compute_wh", **connection_fields}
+    return Environment(
+        name=name,
+        connection=Connection(**connection),
+        authentication=authentication or Authenticator(authenticator="externalbrowser"),
+    )
 
 
 def make_compiled_trouve(
@@ -308,7 +329,7 @@ class RecordingAdapter(WarehouseAdapter):
         self.write_error = write_error
         self.record = record or StatementRecord()
 
-        self.profile: dict[str, Any] | None = None
+        self.environment: Environment | None = None
         self.contexts: list[dict[str, str | None]] = []
         self.is_open = True
         self.written_addresses: list[str] = []
@@ -317,8 +338,8 @@ class RecordingAdapter(WarehouseAdapter):
 
     # The connection.
 
-    def connect(self, profile: dict[str, Any]) -> None:
-        self.profile = dict(profile)
+    def connect(self, environment: Environment) -> None:
+        self.environment = environment
         self.is_open = True
 
     def new_connection(self) -> RecordingAdapter:

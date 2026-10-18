@@ -18,9 +18,8 @@ import clair
 from clair.cli.main import cli
 from clair.core.text_references import TextReferenceLocation
 from clair.core.validation import ValidationReport
-from clair.environments.environments import Environment
 from clair.exceptions import ClairError
-from tests.helpers import write_project_marker
+from tests.helpers import make_environment, write_project_marker
 
 # Every routing file in these tests needs an entry class. This prelude gives one.
 _PRELUDE = """\
@@ -339,9 +338,7 @@ class TestTheEnvironment:
     ):
         """The function accepts the object that the CLI parses."""
         write_routing(project_with_trouves, entry_for_environment("prod"))
-        environment = Environment(
-            name="prod", account="ab12345", user="analyst", warehouse="compute_wh"
-        )
+        environment = make_environment(name="prod")
         assert clair.validate(project_with_trouves, env=environment).env_name == "prod"
 
     def test_the_environment_variable_changes_nothing(
