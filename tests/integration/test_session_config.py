@@ -15,6 +15,7 @@ import clair
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunStatus, RunSummary
 from clair.environments.environments import Environment
+from tests.integration.config import DATABASE_NAME as WAREHOUSE_DATABASE_NAME
 from tests.integration.projects import write_refined_project
 from tests.integration.warehouse import query_rows
 
@@ -58,7 +59,8 @@ class TestTheSession:
 
         ((query_tag,),) = query_rows(
             adapter,
-            "SELECT query_tag FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY(RESULT_LIMIT => 10000)) "
+            f"SELECT query_tag FROM TABLE({WAREHOUSE_DATABASE_NAME}.INFORMATION_SCHEMA.QUERY_HISTORY("
+            "RESULT_LIMIT => 10000)) "
             f"WHERE query_id = '{query_id}'",
         )
         tag = json.loads(str(query_tag))
