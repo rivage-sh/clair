@@ -272,9 +272,10 @@ thus clair changes that node to the full refresh mode and writes
 `run.node.incremental_fallback` to the log. The first run of a new incremental Trouve needs
 no flag from you.
 
-An `upsert` node makes three statements: it builds a merge source table, it merges that
-table into the staging table, and it drops the merge source table. The drop is a cleanup
-statement. clair runs it after the other statements, when they pass and when one of them
+An `upsert` node makes three statements: it builds a new rows table, it merges that
+table into the staging table, and it drops the new rows table. A `delete_insert` node
+builds the same table, deletes each staging row that a new row matches, inserts the new
+rows, and drops the table. The drop is a cleanup statement. clair runs it after the other statements, when they pass and when one of them
 fails. A failure leaves you the staging candidate to examine, and no clutter that you did
 not ask for. See [Incrementality](incrementality.md).
 

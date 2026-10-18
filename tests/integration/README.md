@@ -105,7 +105,7 @@ An incremental candidate makes two objects, and a full refresh makes one:
 | Object | Holds |
 |---|---|
 | `<table>__clair_<run_id>` | The staging table. A zero copy clone seeds it. |
-| `<table>__clair_merge_<run_id>` | The new rows that the MERGE of an UPSERT reads. An APPEND makes no such table. |
+| `<table>__clair_new_rows_<run_id>` | The new rows that the MERGE of an UPSERT or the DELETE of a DELETE_INSERT reads. An APPEND makes no such table. |
 
 The candidate Trouve runs on one of the two engines, because they write in
 different ways. A SQL Trouve runs `CREATE OR REPLACE TABLE` at the staging

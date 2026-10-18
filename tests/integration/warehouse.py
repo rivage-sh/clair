@@ -66,9 +66,10 @@ def staging_objects(
 ) -> list[str]:
     """Give the name of each object of clair that stays in one schema.
 
-    A staging address holds ``__clair_``, and the source table of a MERGE holds
-    ``__clair_merge_``. After a run that passed, this list is empty. The view of
-    INFORMATION_SCHEMA holds a view too, thus a staging VIEW also shows here.
+    A staging address holds ``__clair_``, and the new rows table of an UPSERT or
+    a DELETE_INSERT holds ``__clair_new_rows_``. After a run that passed, this
+    list is empty. The view of INFORMATION_SCHEMA holds a view too, thus a
+    staging VIEW also shows here.
 
     Args:
         adapter: An open connection.

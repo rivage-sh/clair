@@ -17,11 +17,35 @@ class IncrementalMode(StrEnum):
     """The method that clair uses to apply incremental data."""
     APPEND = "append"
     UPSERT = "upsert"
+    DELETE_INSERT = "delete_insert"
 
 
-# The aliases of the target table and the source table in a MERGE statement.
+# The modes that match a new row to a row of the target table. Each one needs
+# primary_key_columns or join_sql.
+MATCHING_MODES = frozenset({IncrementalMode.UPSERT, IncrementalMode.DELETE_INSERT})
+
+
+# The aliases of the target table and the source table in a MERGE or a DELETE.
 TARGET = "target"
 SOURCE = "source"
+
+
+def match_condition(join_sql: str | None, key_columns: list[str]) -> str:
+    """Give the condition that matches a target row to a source row.
+
+    Args:
+        join_sql: The condition that the author wrote, or None.
+        key_columns: The key columns that make the condition, when the author
+            wrote no join_sql.
+
+    Returns:
+        The join_sql of the author, or an equality on each key column.
+    """
+    if join_sql:
+        return join_sql
+    return " AND ".join(
+        f"{TARGET}.{column_name} = {SOURCE}.{column_name}" for column_name in key_columns
+    )
 
 
 class UpsertConfig(BaseModel):
@@ -49,10 +73,12 @@ class RunConfig(BaseModel):
         run_mode: FULL_REFRESH makes the table again. INCREMENTAL applies only
             the new data.
         incremental_mode: APPEND inserts new rows. UPSERT merges on a key.
-        primary_key_columns: The column names that UPSERT matches on. Clair makes
-            the ON clause from them.
-        join_sql: Your own ON clause for UPSERT. Use it in place of
-            primary_key_columns.
+            DELETE_INSERT deletes each target row that a new row matches, then
+            inserts the new rows.
+        primary_key_columns: The column names that UPSERT and DELETE_INSERT
+            match on. Clair makes the match condition from them.
+        join_sql: Your own match condition for UPSERT and DELETE_INSERT. Use
+            it in place of primary_key_columns.
         upsert_config: Optional column overrides for the UPSERT MERGE statement.
     """
 
@@ -70,14 +96,24 @@ class RunConfig(BaseModel):
             raise ValueError("the incremental run_mode needs incremental_mode")
         if self.incremental_mode == IncrementalMode.APPEND:
             if self.primary_key_columns is not None:
-                raise ValueError("you can set primary_key_columns only for the upsert mode")
+                raise ValueError(
+                    "you can set primary_key_columns only for the upsert mode "
+                    "and the delete_insert mode"
+                )
             if self.join_sql is not None:
-                raise ValueError("you can set join_sql only for the upsert mode")
-            if self.upsert_config is not None:
-                raise ValueError("you can set upsert_config only for the upsert mode")
-        if self.incremental_mode == IncrementalMode.UPSERT:
+                raise ValueError(
+                    "you can set join_sql only for the upsert mode and the delete_insert mode"
+                )
+        if self.upsert_config is not None and self.incremental_mode in (
+            IncrementalMode.APPEND,
+            IncrementalMode.DELETE_INSERT,
+        ):
+            raise ValueError("you can set upsert_config only for the upsert mode")
+        if self.incremental_mode in MATCHING_MODES:
             if self.primary_key_columns is not None and self.join_sql is not None:
                 raise ValueError("set primary_key_columns or join_sql, but not both")
             if self.primary_key_columns is None and self.join_sql is None:
-                raise ValueError("the upsert mode needs primary_key_columns or join_sql")
+                raise ValueError(
+                    f"the {self.incremental_mode} mode needs primary_key_columns or join_sql"
+                )
         return self

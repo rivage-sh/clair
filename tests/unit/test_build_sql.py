@@ -226,7 +226,7 @@ class TestUpsertPlanJoin:
         """Two runs at one time must not share the merge source table."""
         plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan("abc123")
         assert plan.merge_source_address == (
-            "db.schema.my_table__clair_merge_abc123"
+            "db.schema.my_table__clair_new_rows_abc123"
         )
 
 
@@ -288,3 +288,70 @@ class TestUpsertStatements:
             RunMode.INCREMENTAL, run_id="abc", staging_address=staging_address
         ).statements[1]
         assert "MERGE INTO db.schema.my_table__clair_stg AS target" in merge
+
+
+def make_delete_insert_trouve(**run_config_arguments) -> Trouve:
+    """Make a compiled Trouve that runs in the DELETE_INSERT mode. It declares no column."""
+    return make_compiled_trouve(
+        sql=UPSERT_SQL,
+        run_config=RunConfig(
+            run_mode=RunMode.INCREMENTAL,
+            incremental_mode=IncrementalMode.DELETE_INSERT,
+            **run_config_arguments,
+        ),
+    )
+
+
+class TestDeleteInsertStatements:
+    """A DELETE_INSERT writes the new rows, deletes their matches, inserts them, then drops them."""
+
+    NEW_ROWS_ADDRESS = "db.schema.my_table__clair_new_rows_abc"
+    STAGING_ADDRESS = TrouveAddress.parse("db.schema.my_table__clair_stg")
+
+    def build_plan(self, **run_config_arguments) -> BuildPlan:
+        """Give the plan of a staging run. The INSERT copies each column, thus no column is necessary."""
+        trouve = make_delete_insert_trouve(**run_config_arguments)
+        return trouve.build_sql(
+            RunMode.INCREMENTAL, run_id="abc", staging_address=self.STAGING_ADDRESS
+        )
+
+    def test_a_delete_insert_makes_three_statements_and_one_cleanup(self):
+        build_plan = self.build_plan(primary_key_columns=["id"])
+        assert len(build_plan.statements) == 3
+        assert len(build_plan.cleanup_statements) == 1
+
+    def test_the_new_rows_table_holds_the_sql_of_the_trouve(self):
+        create_new_rows = self.build_plan(primary_key_columns=["id"]).statements[0]
+        assert create_new_rows.endswith(
+            f"CREATE OR REPLACE TABLE {self.NEW_ROWS_ADDRESS} AS (\n{UPSERT_SQL}\n)"
+        )
+
+    @pytest.mark.parametrize(
+        ("match_arguments", "expected_condition"),
+        [
+            ({"primary_key_columns": ["id"]}, "target.id = source.id"),
+            (
+                {"primary_key_columns": ["id", "name"]},
+                "target.id = source.id AND target.name = source.name",
+            ),
+            ({"join_sql": "target.day = source.day"}, "target.day = source.day"),
+        ],
+    )
+    def test_the_delete_matches_on_the_key_or_the_join(self, match_arguments, expected_condition):
+        delete_matched_rows = self.build_plan(**match_arguments).statements[1]
+        assert delete_matched_rows.endswith(
+            "DELETE FROM db.schema.my_table__clair_stg AS target\n"
+            f"USING {self.NEW_ROWS_ADDRESS} AS source\n"
+            f"WHERE {expected_condition}"
+        )
+
+    def test_the_insert_writes_the_new_rows_to_the_staging_address(self):
+        """A staging run changes the candidate, thus production never shows the gap."""
+        insert_new_rows = self.build_plan(primary_key_columns=["id"]).statements[2]
+        assert insert_new_rows.endswith(
+            f"INSERT INTO db.schema.my_table__clair_stg\nSELECT * FROM {self.NEW_ROWS_ADDRESS}"
+        )
+
+    def test_the_cleanup_drops_the_new_rows_table(self):
+        cleanup_statements = self.build_plan(primary_key_columns=["id"]).cleanup_statements
+        assert cleanup_statements[0].endswith(f"DROP TABLE IF EXISTS {self.NEW_ROWS_ADDRESS}")

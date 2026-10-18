@@ -100,3 +100,44 @@ class TestRunConfigValidation:
                 incremental_mode=IncrementalMode.APPEND,
                 upsert_config=UpsertConfig(update_columns=["name"]),
             )
+
+
+@pytest.mark.parametrize("incremental_mode", [IncrementalMode.UPSERT, IncrementalMode.DELETE_INSERT])
+class TestEachModeThatMatchesRows:
+    """UPSERT and DELETE_INSERT both match a new row to a target row."""
+
+    @pytest.mark.parametrize(
+        "match_arguments",
+        [{"primary_key_columns": ["id"]}, {"join_sql": "target.id = source.id"}],
+    )
+    def test_a_key_or_a_join_is_enough(self, incremental_mode, match_arguments):
+        config = RunConfig(
+            run_mode=RunMode.INCREMENTAL, incremental_mode=incremental_mode, **match_arguments
+        )
+        assert config.incremental_mode == incremental_mode
+
+    def test_no_key_and_no_join_raises(self, incremental_mode):
+        with pytest.raises(
+            ValueError, match=f"the {incremental_mode} mode needs primary_key_columns or join_sql"
+        ):
+            RunConfig(run_mode=RunMode.INCREMENTAL, incremental_mode=incremental_mode)
+
+    def test_a_key_and_a_join_together_raise(self, incremental_mode):
+        with pytest.raises(ValueError, match="set primary_key_columns or join_sql, but not both"):
+            RunConfig(
+                run_mode=RunMode.INCREMENTAL,
+                incremental_mode=incremental_mode,
+                primary_key_columns=["id"],
+                join_sql="target.id = source.id",
+            )
+
+
+def test_delete_insert_rejects_upsert_config():
+    """A DELETE_INSERT inserts each column of the new rows, thus no column list applies."""
+    with pytest.raises(ValueError, match="you can set upsert_config only for the upsert mode"):
+        RunConfig(
+            run_mode=RunMode.INCREMENTAL,
+            incremental_mode=IncrementalMode.DELETE_INSERT,
+            primary_key_columns=["id"],
+            upsert_config=UpsertConfig(update_columns=["name"]),
+        )

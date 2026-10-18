@@ -106,8 +106,24 @@ def test_the_row_count_comes_from_the_last_statement_and_not_from_the_cleanup() 
     assert result.row_count == 7
 
 
-@pytest.mark.parametrize("failed_text", ["CREATE OR REPLACE TABLE", "MERGE INTO"])
-def test_a_staged_upsert_drops_the_merge_source_after_a_failure(failed_text: str) -> None:
+NEW_ROWS_TABLE = f"{PHYSICAL_ADDRESS}__clair_new_rows"
+
+
+@pytest.mark.parametrize(
+    ("incremental_mode", "failed_text"),
+    [
+        # The clone statement also holds CREATE OR REPLACE TABLE, thus the
+        # failure text names the new rows table for that case.
+        (IncrementalMode.UPSERT, f"CREATE OR REPLACE TABLE {NEW_ROWS_TABLE}"),
+        (IncrementalMode.UPSERT, "MERGE INTO"),
+        (IncrementalMode.DELETE_INSERT, f"CREATE OR REPLACE TABLE {NEW_ROWS_TABLE}"),
+        (IncrementalMode.DELETE_INSERT, "DELETE FROM"),
+        (IncrementalMode.DELETE_INSERT, "INSERT INTO"),
+    ],
+)
+def test_a_staged_incremental_run_drops_the_new_rows_table_after_a_failure(
+    incremental_mode: IncrementalMode, failed_text: str
+) -> None:
     trouve = Trouve(
         sql="select 1 as id, 'a' as name",
         columns=[
@@ -116,7 +132,7 @@ def test_a_staged_upsert_drops_the_merge_source_after_a_failure(failed_text: str
         ],
         run_config=RunConfig(
             run_mode=RunMode.INCREMENTAL,
-            incremental_mode=IncrementalMode.UPSERT,
+            incremental_mode=incremental_mode,
             primary_key_columns=["id"],
         ),
     )
@@ -124,10 +140,7 @@ def test_a_staged_upsert_drops_the_merge_source_after_a_failure(failed_text: str
     assert compiled is not None
     trouve.compiled = compiled.model_copy(update={"resolved_sql": trouve.sql})
     dag = build_dag([trouve])
-    # The clone statement also holds CREATE OR REPLACE TABLE, thus the failure
-    # text names the merge source for that case.
-    fail_on = f"{failed_text} {PHYSICAL_ADDRESS}__clair_merge" if failed_text.startswith("CREATE") else failed_text
-    adapter = RecordingAdapter(fail_on=[fail_on])
+    adapter = RecordingAdapter(fail_on=[failed_text])
 
     (result,) = run_project(
         dag,
@@ -141,7 +154,7 @@ def test_a_staged_upsert_drops_the_merge_source_after_a_failure(failed_text: str
 
     assert result.status == RunStatus.FAILURE
     assert adapter.record.statements[-1].endswith(
-        f"DROP TABLE IF EXISTS {PHYSICAL_ADDRESS}__clair_merge_test"
+        f"DROP TABLE IF EXISTS {NEW_ROWS_TABLE}_test"
     )
 
 
