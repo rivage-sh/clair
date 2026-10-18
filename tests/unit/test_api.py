@@ -28,8 +28,8 @@ def project(simple_project: Path, tmp_path: Path) -> Path:
     trouve_file = destination / "analytics" / "revenue" / "daily_orders.py"
     source_text = trouve_file.read_text()
     source_text = source_text.replace(
-        "from clair import Column, ColumnType, Trouve, TrouveType",
-        "from clair import Column, ColumnType, TestNotNull, Trouve, TrouveType",
+        "from clair import Column, ColumnType, TrouveType",
+        "from clair import Column, ColumnType, TestNotNull, TrouveType",
     ).replace(
         "    columns=[",
         "    tests=[TestNotNull(column=\"order_date\")],\n    columns=[",

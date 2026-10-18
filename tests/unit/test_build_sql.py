@@ -17,7 +17,7 @@ from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.run_config import Append, DeleteInsert, Incremental, RunConfig, RunMode, Upsert
-from clair.trouves.trouve import BuildPlan, CompiledAttributes, ExecutionType, Trouve, TrouveType
+from clair.trouves.trouve import BuildPlan, CompiledAttributes, ExecutionType, Table, View
 
 # The three columns that the upsert tests share.
 UPSERT_SQL = "SELECT 1 AS id, 2 AS name, 3 AS value"
@@ -29,27 +29,25 @@ UPSERT_COLUMNS = [
 
 
 def make_compiled_trouve(
-    trouve_type: TrouveType = TrouveType.TABLE,
+    trouve_class: type[Table | View] = Table,
     sql: str = "SELECT 1 AS id",
     physical_address: str = "db.schema.my_table",
     columns: list[Column] | None = None,
     run_config: RunConfig | None = None,
-) -> Trouve:
-    """Make a compiled Trouve for a test."""
-    arguments: dict[str, Any] = {"type": trouve_type, "sql": sql}
+) -> Table | View:
+    """Make a compiled Table or View for a test. Only a Table takes a run_config."""
+    arguments: dict[str, Any] = {"sql": sql}
     if columns is not None:
         arguments["columns"] = columns
     if run_config is not None:
         arguments["run_config"] = run_config
-    if trouve_type == TrouveType.SOURCE:
-        arguments.pop("sql", None)
 
-    trouve = Trouve(**arguments)
+    trouve = trouve_class(**arguments)
     address = TrouveAddress.parse(physical_address)
     trouve.compiled = CompiledAttributes(
         physical_address=address,
         logical_address=address,
-        resolved_sql="" if trouve_type == TrouveType.SOURCE else sql,
+        resolved_sql=sql,
         file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
         module_name=physical_address,
         imports=[],
@@ -59,24 +57,26 @@ def make_compiled_trouve(
     return trouve
 
 
-def make_upsert_trouve(**strategy_arguments) -> Trouve:
-    """Make a compiled Trouve that runs in the UPSERT mode."""
-    return make_compiled_trouve(
+def make_upsert_trouve(**strategy_arguments) -> Table:
+    """Make a compiled Table that runs in the UPSERT mode."""
+    trouve = make_compiled_trouve(
         sql=UPSERT_SQL,
         columns=list(UPSERT_COLUMNS),
         run_config=Incremental(strategy=Upsert(**strategy_arguments)),
     )
+    assert isinstance(trouve, Table)
+    return trouve
 
 
 class TestFullRefresh:
     """A full refresh replaces the object each time."""
 
     @pytest.mark.parametrize(
-        ("trouve_type", "expected_object_type"),
-        [(TrouveType.TABLE, "TABLE"), (TrouveType.VIEW, "VIEW")],
+        ("trouve_class", "expected_object_type"),
+        [(Table, "TABLE"), (View, "VIEW")],
     )
-    def test_each_type_replaces_its_object(self, trouve_type, expected_object_type):
-        trouve = make_compiled_trouve(trouve_type=trouve_type)
+    def test_each_class_replaces_its_object(self, trouve_class, expected_object_type):
+        trouve = make_compiled_trouve(trouve_class=trouve_class)
         statements = trouve.build_sql(RunMode.FULL_REFRESH, run_id="abc").all_statements
         assert len(statements) == 1
         assert statements[0].startswith(
@@ -87,15 +87,18 @@ class TestFullRefresh:
         statements = make_compiled_trouve().build_sql(RunMode.FULL_REFRESH, run_id="abc").all_statements
         assert "SELECT 1 AS id" in statements[0]
 
-    def test_a_source_makes_no_statement(self):
-        """Clair reads a SOURCE, thus it never writes to one."""
-        trouve = make_compiled_trouve(trouve_type=TrouveType.SOURCE, sql="")
-        assert trouve.build_sql(RunMode.FULL_REFRESH, run_id="abc") == BuildPlan()
+    def test_a_view_has_no_incremental_plan(self):
+        """A View holds no run_config, thus each mode gives CREATE OR REPLACE VIEW."""
+        trouve = make_compiled_trouve(trouve_class=View)
+        statements = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc").all_statements
+        assert statements[0].startswith("CREATE OR REPLACE VIEW db.schema.my_table AS (")
 
-    def test_a_trouve_that_clair_did_not_compile_raises(self):
-        trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id")
+    @pytest.mark.parametrize("trouve_class", [Table, View])
+    @pytest.mark.parametrize("run_mode", list(RunMode))
+    def test_a_trouve_that_clair_did_not_compile_raises(self, trouve_class, run_mode):
+        trouve = trouve_class(sql="SELECT 1 AS id")
         with pytest.raises(RuntimeError, match=r"build_sql\(\) needs a compiled Trouve"):
-            trouve.build_sql(RunMode.FULL_REFRESH, run_id="abc")
+            trouve.build_sql(run_mode, run_id="abc")
 
 
 class TestAppend:
@@ -293,12 +296,14 @@ class TestUpsertStatements:
         assert "MERGE INTO db.schema.my_table__clair_stg AS target" in merge
 
 
-def make_delete_insert_trouve(**strategy_arguments) -> Trouve:
-    """Make a compiled Trouve that runs in the DELETE_INSERT mode. It declares no column."""
-    return make_compiled_trouve(
+def make_delete_insert_trouve(**strategy_arguments) -> Table:
+    """Make a compiled Table that runs in the DELETE_INSERT mode. It declares no column."""
+    trouve = make_compiled_trouve(
         sql=UPSERT_SQL,
         run_config=Incremental(strategy=DeleteInsert(**strategy_arguments)),
     )
+    assert isinstance(trouve, Table)
+    return trouve
 
 
 class TestDeleteInsertStatements:

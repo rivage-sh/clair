@@ -2,10 +2,9 @@ from example_2_database.refined.order_items import trouve as example_2_database_
 from example_2_database.refined.orders import trouve as example_2_database_refined_orders
 from example_2_database.refined.products import trouve as example_2_database_refined_products
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Monthly sales totals for each category.",
     sql=f"""
         select

@@ -6,8 +6,7 @@ import pandas as pd
 from pydantic import Field, model_validator
 
 from clair.trouves.dataframe_trouve import DataframeTrouve
-from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import TrouveAbc, TrouveType
+from clair.trouves.trouve import TrouveAbc
 
 # The artifact file of `clair compile` shows this number of rows maximum. A
 # seed with more rows keeps the first rows and the last rows.
@@ -66,12 +65,6 @@ class SeedTrouve(DataframeTrouve):
 
     @model_validator(mode="after")
     def _validate_dataframe(self) -> SeedTrouve:
-        if self.type != TrouveType.TABLE:
-            raise ValueError(
-                f"SeedTrouve must be TABLE type, got '{self.type.value}'"
-            )
-        if self.run_config.run_mode == RunMode.INCREMENTAL:
-            raise ValueError("SeedTrouve does not support incremental mode")
 
         column_names = list(self.dataframe.columns)
         if not column_names:

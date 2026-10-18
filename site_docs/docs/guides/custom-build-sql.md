@@ -59,10 +59,10 @@ holds Python that a Trouve file imports, and no Trouve.
 
 ```python
 # _replace_window_trouve.py
-from clair import BuildPlan, RunMode, Trouve, TrouveAddress
+from clair import BuildPlan, RunMode, Table, TrouveAddress
 
 
-class ReplaceWindowTrouve(Trouve):
+class ReplaceWindowTrouve(Table):
     """An incremental TABLE that replaces each row of a recent window.
 
     A full refresh builds the table in the same way as a Trouve. An incremental

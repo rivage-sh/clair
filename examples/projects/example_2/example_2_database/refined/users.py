@@ -1,9 +1,8 @@
 from example_2_database.source.users import trouve as example_2_database_source_users
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Refined users. Each row has the address in separate columns and the full name.",
     sql=f"""
         select

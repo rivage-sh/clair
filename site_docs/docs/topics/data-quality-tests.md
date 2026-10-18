@@ -6,12 +6,14 @@ Attach tests to any TABLE or VIEW Trouve. clair runs the tests after each succes
 
 ```python
 from clair import (
-    Trouve, TrouveType,
-    TestNotNull, TestRowCount, TestUnique, TestUniqueColumns,
+    Table,
+    TestNotNull,
+    TestRowCount,
+    TestUnique,
+    TestUniqueColumns,
 )
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"SELECT * FROM {upstream}",
     tests=[
         TestUnique(column="order_id"),

@@ -3,11 +3,11 @@
 Python-native data transformations for Snowflake.
 
 ```python
-from clair import Trouve
+from clair import Table
 from refined.products.catalog import trouve as catalog
 from refined.products.reviews import trouve as reviews
 
-trouve = Trouve(
+trouve = Table(
     sql=f"""
         SELECT
             c.product_id,

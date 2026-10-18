@@ -18,9 +18,9 @@ from clair.core.discovery import discover_project
 from tests.helpers import write_project_marker
 
 SOURCE_FILE = """\
-from clair import Trouve, TrouveType
+from clair import Source
 
-trouve = Trouve(type=TrouveType.SOURCE, sql="")
+trouve = Source(sql="")
 """
 
 
@@ -32,8 +32,8 @@ def write_project(project_root: Path, marker: str) -> Path:
     (project_root / "mydb" / "source" / "rows.py").write_text(SOURCE_FILE)
     (project_root / "mydb" / "refined" / "checked.py").write_text(
         "from mydb.source.rows import trouve as rows\n"
-        "from clair import Trouve\n"
-        f"trouve = Trouve(sql=f\"select '{marker}' from {{rows}}\")\n"
+        "from clair import Table\n"
+        f"trouve = Table(sql=f\"select '{marker}' from {{rows}}\")\n"
     )
     return project_root
 
@@ -72,8 +72,8 @@ class TestOneNameMeansOneThing:
         discover_project(project_root)
         (project_root / "mydb" / "refined" / "checked.py").write_text(
             "from mydb.source.rows import trouve as rows\n"
-            "from clair import Trouve\n"
-            'trouve = Trouve(sql=f"select \'AFTER\' from {rows}")\n'
+            "from clair import Table\n"
+            'trouve = Table(sql=f"select \'AFTER\' from {rows}")\n'
         )
         trouves = discover_project(project_root)
         assert "AFTER" in sql_of(trouves, "mydb.refined.checked")

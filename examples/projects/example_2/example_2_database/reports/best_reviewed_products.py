@@ -1,10 +1,9 @@
 from example_2_database.derived.product_review_summary import trouve as example_2_database_derived_product_review_summary
 from example_2_database.refined.products import trouve as example_2_database_refined_products
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="The products with a minimum of 10 reviews and an average rating of 4.5 or more.",
     sql=f"""
         select

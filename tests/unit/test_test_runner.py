@@ -23,8 +23,8 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
-from tests.helpers import RecordingAdapter, make_test_result
+from clair.trouves.trouve import CompiledAttributes, ExecutionType, TrouveAbc, TrouveType
+from tests.helpers import RecordingAdapter, make_test_result, make_trouve
 
 
 def _make_trouve_with_tests(
@@ -33,10 +33,10 @@ def _make_trouve_with_tests(
     tests: list,
     imports: list[str] | None = None,
     sql: str = "SELECT 1",
-) -> Trouve:
+) -> TrouveAbc:
     """Make a compiled Trouve that holds some tests."""
     raw_sql = "" if trouve_type == TrouveType.SOURCE else sql
-    t = Trouve(type=trouve_type, sql=raw_sql, tests=tests)
+    t = make_trouve(trouve_type, raw_sql, tests=tests)
     t.compiled = CompiledAttributes(
         physical_address=TrouveAddress.parse(physical_address),
         logical_address=TrouveAddress.parse(physical_address),

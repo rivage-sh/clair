@@ -33,7 +33,7 @@ You point to a different Trouve with an import and an f-string:
 ```python
 from mydb.refined.events import trouve as refined_events
 
-trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {refined_events}")
+trouve = Table(sql=f"SELECT * FROM {refined_events}")
 ```
 
 The f-string makes a token, and clair replaces the token with an address. If you write the
@@ -41,7 +41,7 @@ same address as text, you get no token:
 
 ```python
 # Wrong: clair reads no reference from this text.
-trouve = Trouve(type=TrouveType.TABLE, sql="SELECT * FROM mydb.refined.events")
+trouve = Table(sql="SELECT * FROM mydb.refined.events")
 ```
 
 Two faults follow, and Snowflake reports neither:

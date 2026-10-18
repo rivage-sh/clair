@@ -14,30 +14,8 @@ from clair.core.dag import (
 )
 from clair.core.discovery import discover_project
 from clair.exceptions import CyclicDependencyError, ProjectDiscoveryError
-from clair.trouves.address import TrouveAddress
-from clair.trouves.config import ResolvedConfig
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
-
-
-def _make_trouve(
-    physical_address: str,
-    trouve_type: TrouveType = TrouveType.TABLE,
-    imports: list[str] | None = None,
-) -> Trouve:
-    """Make a compiled Trouve for a test."""
-    sql = "select 1" if trouve_type != TrouveType.SOURCE else ""
-    t = Trouve(type=trouve_type, sql=sql)
-    t.compiled = CompiledAttributes(
-        physical_address=TrouveAddress.parse(physical_address),
-        logical_address=TrouveAddress.parse(physical_address),
-        resolved_sql=sql,
-        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
-        module_name=physical_address,
-        imports=imports or [],
-        config=ResolvedConfig(),
-        execution_type=ExecutionType.SNOWFLAKE,
-    )
-    return t
+from clair.trouves.trouve import TrouveType
+from tests.helpers import make_compiled_trouve
 
 
 class TestBuildDag:
@@ -86,8 +64,8 @@ class TestCycleDetection:
     def test_dag_level_cycle_detection(self):
         """A cycle that the test makes causes a CyclicDependencyError."""
         trouves = [
-            _make_trouve("db.s.a", imports=["db.s.b"]),
-            _make_trouve("db.s.b", imports=["db.s.a"]),
+            make_compiled_trouve("db.s.a", imports=["db.s.b"]),
+            make_compiled_trouve("db.s.b", imports=["db.s.a"]),
         ]
         with pytest.raises(CyclicDependencyError, match="cyclic dependency"):
             build_dag(trouves)
@@ -95,10 +73,10 @@ class TestCycleDetection:
 
 class TestDagWithSyntheticData:
     def test_diamond_dependency(self):
-        d = _make_trouve("db.s.d", TrouveType.SOURCE)
-        b = _make_trouve("db.s.b", imports=["db.s.d"])
-        c = _make_trouve("db.s.c", imports=["db.s.d"])
-        a = _make_trouve("db.s.a", imports=["db.s.b", "db.s.c"])
+        d = make_compiled_trouve("db.s.d", TrouveType.SOURCE)
+        b = make_compiled_trouve("db.s.b", imports=["db.s.d"])
+        c = make_compiled_trouve("db.s.c", imports=["db.s.d"])
+        a = make_compiled_trouve("db.s.a", imports=["db.s.b", "db.s.c"])
 
         dag = build_dag([a, b, c, d])
         order = get_execution_order(dag)
@@ -109,10 +87,10 @@ class TestDagWithSyntheticData:
         assert order.index("db.s.c") < order.index("db.s.a")
 
     def test_disconnected_components(self):
-        s1 = _make_trouve("db.s.s1", TrouveType.SOURCE)
-        t1 = _make_trouve("db.s.t1", imports=["db.s.s1"])
-        s2 = _make_trouve("db.s.s2", TrouveType.SOURCE)
-        t2 = _make_trouve("db.s.t2", imports=["db.s.s2"])
+        s1 = make_compiled_trouve("db.s.s1", TrouveType.SOURCE)
+        t1 = make_compiled_trouve("db.s.t1", imports=["db.s.s1"])
+        s2 = make_compiled_trouve("db.s.s2", TrouveType.SOURCE)
+        t2 = make_compiled_trouve("db.s.t2", imports=["db.s.s2"])
 
         dag = build_dag([s1, t1, s2, t2])
         assert len(dag.nodes) == 4
@@ -122,15 +100,15 @@ class TestDagWithSyntheticData:
 class TestClairDagValidate:
     def test_validate_passes_on_valid_dag(self):
         dag = ClairDag()
-        dag.add_trouve(_make_trouve("db.s.a", TrouveType.SOURCE))
-        dag.add_trouve(_make_trouve("db.s.b"))
+        dag.add_trouve(make_compiled_trouve("db.s.a", TrouveType.SOURCE))
+        dag.add_trouve(make_compiled_trouve("db.s.b"))
         dag.add_dependency("db.s.a", "db.s.b")
         dag.validate()
 
     def test_validate_raises_on_cycle(self):
         dag = ClairDag()
-        dag.add_trouve(_make_trouve("db.s.a"))
-        dag.add_trouve(_make_trouve("db.s.b"))
+        dag.add_trouve(make_compiled_trouve("db.s.a"))
+        dag.add_trouve(make_compiled_trouve("db.s.b"))
         dag.add_edge("db.s.a", "db.s.b")
         dag.add_edge("db.s.b", "db.s.a")
 
@@ -155,7 +133,7 @@ class TestClairDagValidate:
 class TestClairDagGetTrouve:
     def test_returns_trouve(self):
         dag = ClairDag()
-        t = _make_trouve("db.s.a")
+        t = make_compiled_trouve("db.s.a")
         dag.add_trouve(t)
 
         assert dag.get_trouve("db.s.a") is t
@@ -169,8 +147,8 @@ class TestClairDagGetTrouve:
 class TestClairDagTrouves:
     def test_returns_all_trouves(self):
         dag = ClairDag()
-        ta = _make_trouve("db.s.a", TrouveType.SOURCE)
-        tb = _make_trouve("db.s.b")
+        ta = make_compiled_trouve("db.s.a", TrouveType.SOURCE)
+        tb = make_compiled_trouve("db.s.b")
         dag.add_trouve(ta)
         dag.add_trouve(tb)
 

@@ -1,7 +1,7 @@
 # Trouve API
 
 ```python
-from clair import BuildPlan, PandasTrouve, SeedTrouve, Trouve, TrouveAbc, TrouveType
+from clair import BuildPlan, PandasTrouve, SeedTrouve, Table, TrouveAbc, TrouveType
 ```
 
 Clair has one Trouve class for each backend. `TrouveAbc` is the abstract base
@@ -60,7 +60,7 @@ Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any backend.
 The SQL backend. Snowflake materializes it.
 
 ```python
-class Trouve(TrouveAbc):
+class Table(TrouveAbc):
     sql: str = ""
 ```
 

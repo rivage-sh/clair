@@ -1,9 +1,8 @@
 from example_2_database.source.promotions import trouve as example_2_database_source_promotions
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Refined promotions. Each row has the rules in separate columns and an active flag.",
     sql=f"""
         select

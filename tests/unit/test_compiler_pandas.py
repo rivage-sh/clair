@@ -19,8 +19,8 @@ def _make_pandas_project(tmp_path: Path) -> Path:
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
     (tmp_path / "mydb" / "source" / "events.py").write_text(textwrap.dedent("""\
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.SOURCE)
+        from clair import Source
+        trouve = Source()
     """))
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
@@ -51,14 +51,14 @@ def _make_mixed_project(tmp_path: Path) -> Path:
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
     (tmp_path / "mydb" / "source" / "events.py").write_text(textwrap.dedent("""\
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.SOURCE)
+        from clair import Source
+        trouve = Source()
     """))
 
     (tmp_path / "mydb" / "refined" / "events.py").write_text(textwrap.dedent("""\
         from mydb.source.events import trouve as source_events
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {source_events}")
+        from clair import Table
+        trouve = Table(sql=f"SELECT * FROM {source_events}")
     """))
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
@@ -81,8 +81,8 @@ def _make_no_columns_project(tmp_path: Path) -> Path:
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
     (tmp_path / "mydb" / "source" / "events.py").write_text(textwrap.dedent("""\
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.SOURCE)
+        from clair import Source
+        trouve = Source()
     """))
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\

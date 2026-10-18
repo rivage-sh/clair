@@ -124,14 +124,14 @@ def project_with_trouves(tmp_path: Path) -> Path:
     (project_dir / "source" / "raw").mkdir(parents=True)
     write_routing(project_dir, PASSTHROUGH_ENTRY)
     (project_dir / "source" / "raw" / "orders.py").write_text(
-        "from clair import Trouve, TrouveType\n\n"
-        "trouve = Trouve(type=TrouveType.SOURCE)\n"
+        "from clair import Source, TrouveType\n\n"
+        "trouve = Source()\n"
     )
     for schema_name in ("finance", "reports"):
         (project_dir / "analytics" / schema_name).mkdir(parents=True)
         (project_dir / "analytics" / schema_name / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            'trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS x")\n'
+            "from clair import Table, TrouveType\n\n"
+            'trouve = Table(sql="SELECT 1 AS x")\n'
         )
     return project_dir
 
@@ -284,9 +284,8 @@ class TestTextReferences:
 
     def test_an_address_in_the_sql_is_a_problem(self, project_with_trouves: Path):
         (project_with_trouves / "analytics" / "finance" / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            "trouve = Trouve(\n"
-            "    type=TrouveType.TABLE,\n"
+            "from clair import Table, TrouveType\n\n"
+            "trouve = Table(\n"
             '    sql="SELECT * FROM source.raw.orders",\n'
             ")\n"
         )
@@ -309,9 +308,8 @@ class TestProblemCount:
     def test_the_count_adds_each_kind(self, project_with_trouves: Path):
         write_routing(project_with_trouves, COLLIDING_ENTRY)
         (project_with_trouves / "analytics" / "reports" / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            "trouve = Trouve(\n"
-            "    type=TrouveType.TABLE,\n"
+            "from clair import Table, TrouveType\n\n"
+            "trouve = Table(\n"
             '    sql="SELECT * FROM source.raw.orders",\n'
             ")\n"
         )
@@ -402,8 +400,8 @@ class TestBadInput:
         project_dir = tmp_path / "proj"
         (project_dir / "my-db" / "finance").mkdir(parents=True)
         (project_dir / "my-db" / "finance" / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            'trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS x")\n'
+            "from clair import Table, TrouveType\n\n"
+            'trouve = Table(sql="SELECT 1 AS x")\n'
         )
         with pytest.raises(ClairError):
             clair.validate(project_dir)

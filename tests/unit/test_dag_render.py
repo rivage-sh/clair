@@ -321,7 +321,6 @@ class TestRenderedText:
     def test_a_chain_draws_one_branch_at_each_level(self, chain_dag):
         assert render_dag(chain_dag).render() == (
             "=== Clair DAG: 2 models, 1 source ===\n"
-            "\n"
             "db.s.a  [SOURCE]\n"
             "└── db.s.b  [TABLE]\n"
             "    └── db.s.c  [TABLE]"
@@ -330,7 +329,6 @@ class TestRenderedText:
     def test_a_diamond_marks_the_second_place_of_the_shared_node(self, diamond_dag):
         assert render_dag(diamond_dag).render() == (
             "=== Clair DAG: 3 models, 1 source ===\n"
-            "\n"
             "db.s.a  [SOURCE]\n"
             "├── db.s.b  [TABLE]\n"
             "│   └── db.s.d  [TABLE]\n"
@@ -344,9 +342,7 @@ class TestRenderedText:
         )
         assert render_dag(dag).render() == (
             "=== Clair DAG: 0 models, 2 sources ===\n"
-            "\n"
             "db.s.a  [SOURCE]\n"
-            "\n"
             "db.s.x  [SOURCE]"
         )
 

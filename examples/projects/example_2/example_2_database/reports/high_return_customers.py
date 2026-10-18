@@ -2,10 +2,9 @@ from example_2_database.refined.order_items import trouve as example_2_database_
 from example_2_database.refined.returns import trouve as example_2_database_refined_returns
 from example_2_database.refined.users import trouve as example_2_database_refined_users
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Customers with return rates above 20 percent.",
     sql=f"""
         select

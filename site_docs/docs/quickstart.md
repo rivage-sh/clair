@@ -74,10 +74,9 @@ my_project/
 **`source/products/catalog.py`** — declares a Snowflake table that already exists:
 
 ```python
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Source
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
+trouve = Source(
     columns=[
         Column(name="product_id",   type=ColumnType.STRING),
         Column(name="name",         type=ColumnType.STRING),
@@ -90,11 +89,10 @@ trouve = Trouve(
 **`refined/products/catalog.py`** — cleans and standardises the source:
 
 ```python
-from clair import Trouve, TrouveType
+from clair import Table
 from source.products.catalog import trouve as source_catalog
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"""
         SELECT
             product_id,
@@ -110,11 +108,10 @@ trouve = Trouve(
 **`refined/products/reviews.py`** — cleans the reviews source:
 
 ```python
-from clair import Trouve, TrouveType
+from clair import Table
 from source.products.reviews import trouve as source_reviews
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"""
         SELECT
             review_id,
@@ -130,12 +127,11 @@ trouve = Trouve(
 **`derived/products/top_reviewed.py`** — joins and aggregates the refined layer:
 
 ```python
-from clair import Trouve, TrouveType
+from clair import Table
 from refined.products.catalog import trouve as catalog
 from refined.products.reviews import trouve as reviews
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"""
         SELECT
             c.product_id,

@@ -1,10 +1,9 @@
 from example_2_database.derived.product_sales_summary import trouve as example_2_database_derived_product_sales_summary
 from example_2_database.refined.products import trouve as example_2_database_refined_products
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Sales of each seller for each product category.",
     sql=f"""
         select

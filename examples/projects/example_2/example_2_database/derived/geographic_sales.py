@@ -2,10 +2,9 @@ from example_2_database.reference.country_regions import trouve as example_2_dat
 from example_2_database.refined.orders import trouve as example_2_database_refined_orders
 from example_2_database.refined.users import trouve as example_2_database_refined_users
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Sales totals for each country and each state, with the sales region.",
     sql=f"""
         select

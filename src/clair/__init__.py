@@ -2,7 +2,7 @@
 
 Public API exports. Users import from here in their Trouve files:
 
-    from clair import Trouve, TrouveType, Column, ColumnType
+    from clair import Column, ColumnType
 
 Operations
 ----------
@@ -39,7 +39,7 @@ modules. Import it to make feature flags that obey the active environment::
 
     import clair
 
-    trouve = Trouve(
+    trouve = Table(
         sql=f"SELECT * FROM {upstream} {'WHERE is_beta = 1' if clair.env.role == 'DEV' else ''}"
     )
 
@@ -50,7 +50,7 @@ it to make the SQL obey the run mode (the equivalent of dbt's ``is_incremental()
     import clair
     from clair import RunMode
 
-    trouve = Trouve(
+    trouve = Table(
         sql=f\"\"\"
             SELECT * FROM {upstream}
             {'WHERE created_at > dateadd(\\'day\\', -3, current_timestamp())' if clair.run_mode == RunMode.INCREMENTAL else ''}
@@ -96,7 +96,7 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import BuildPlan, Trouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import BuildPlan, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
 
 # discover_project() sets this before it loads the Trouve modules.
 # It stays None outside of a clair discovery run.
@@ -129,17 +129,20 @@ __all__ = [
     "RunMode",
     "SchemaDefaults",
     "SeedTrouve",
+    "Source",
+    "SqlTrouve",
+    "Table",
     "Test",
     "TestNotNull",
     "TestRowCount",
     "TestSql",
     "TestUnique",
     "TestUniqueColumns",
-    "Trouve",
     "TrouveAbc",
     "TrouveAddress",
     "TrouveType",
     "Upsert",
+    "View",
     "__version__",
     "catalog",
     "clean",

@@ -13,8 +13,7 @@ import pandas as pd
 from pydantic import Field, model_validator
 
 from clair.trouves.dataframe_trouve import DataframeTrouve
-from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import TrouveAbc, TrouveType
+from clair.trouves.trouve import TrouveAbc
 
 _VARIADIC_KINDS = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
 
@@ -75,12 +74,6 @@ class PandasTrouve(DataframeTrouve):
 
     @model_validator(mode="after")
     def _validate_transform(self) -> PandasTrouve:
-        if self.type != TrouveType.TABLE:
-            raise ValueError(
-                f"PandasTrouve must be TABLE type, got '{self.type.value}'"
-            )
-        if self.run_config.run_mode == RunMode.INCREMENTAL:
-            raise ValueError("PandasTrouve does not support incremental mode")
 
         parameters = list(inspect.signature(self.transform).parameters.values())
         variadic = [p.name for p in parameters if p.kind in _VARIADIC_KINDS]
@@ -93,7 +86,7 @@ class PandasTrouve(DataframeTrouve):
             parameter_names = ", ".join(p.name for p in parameters) or "(none)"
             raise ValueError(
                 f"transform takes {len(parameters)} parameter(s) but inputs has "
-                f"{len(self.inputs)} Trouve(s). Clair binds them by position. "
+                f"{len(self.inputs)} Table(s). Clair binds them by position. "
                 f"Parameters: {parameter_names}"
             )
         return self

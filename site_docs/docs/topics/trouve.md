@@ -17,8 +17,7 @@ Trouves reference each other in one way only. Write an f-string SQL query, then 
 ```python
 from source.products.catalog import trouve as source_catalog
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"SELECT * FROM {source_catalog}",
 )
 ```
@@ -38,10 +37,9 @@ A Snowflake table that already exists. No SQL — clair does not write to it.
 
 ```python
 # source/orders/raw.py  →  source.orders.raw
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Source
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
+trouve = Source(
     docs="Raw orders table. Fivetran loads it.",
     columns=[
         Column(name="order_id", type=ColumnType.STRING),
@@ -58,11 +56,10 @@ A table that clair controls. It imports an upstream Trouve and references it in 
 
 ```python
 # refined/orders/daily.py  →  refined.orders.daily
-from clair import Column, ColumnType, Trouve, TrouveType, TestNotNull
+from clair import Column, ColumnType, Table, TestNotNull
 from source.orders.raw import trouve as raw_orders
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"""
         SELECT
             order_id,
@@ -91,11 +88,10 @@ You can change the type of a Trouve. The next run stops, and tells you to drop t
 
 ```python
 # reports/orders/recent.py  →  reports.orders.recent
-from clair import Trouve, TrouveType
+from clair import View
 from refined.orders.daily import trouve as daily_orders
 
-trouve = Trouve(
-    type=TrouveType.VIEW,
+trouve = View(
     sql=f"""
         SELECT *
         FROM {daily_orders}

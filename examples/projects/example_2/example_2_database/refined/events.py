@@ -1,9 +1,8 @@
 from example_2_database.source.events import trouve as example_2_database_source_events
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Refined events. Each row has the properties in separate columns and the event date.",
     sql=f"""
         select

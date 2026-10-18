@@ -58,20 +58,15 @@ class TestSeedTrouveModel:
 
 
 class TestSeedTrouveValidation:
-    def test_a_view_is_rejected(self):
-        with pytest.raises(ValidationError, match="must be TABLE type"):
-            SeedTrouve(dataframe=_frame(), type=TrouveType.VIEW)
-
-    def test_a_source_is_rejected(self):
-        with pytest.raises(ValidationError, match="must be TABLE type"):
-            SeedTrouve(dataframe=_frame(), type=TrouveType.SOURCE)
-
-    def test_the_incremental_mode_is_rejected(self):
-        with pytest.raises(ValidationError, match="does not support incremental"):
-            SeedTrouve(
-                dataframe=_frame(),
-                run_config=Incremental(strategy=Append()),
-            )
+    @pytest.mark.parametrize(
+        "arguments",
+        [{"type": TrouveType.VIEW}, {"run_config": Incremental(strategy=Append())}],
+        ids=["a_type", "a_run_config"],
+    )
+    def test_a_keyword_of_a_different_class_is_rejected(self, arguments):
+        """A seed is always a table that clair makes again, thus it reads neither keyword."""
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            SeedTrouve(dataframe=_frame(), **arguments)
 
     def test_a_dataframe_with_no_column_is_rejected(self):
         with pytest.raises(ValidationError, match="one column minimum"):
@@ -121,10 +116,10 @@ def _make_seed_project(tmp_path: Path) -> Path:
     """))
 
     (tmp_path / "mydb" / "derived" / "orders.py").write_text(textwrap.dedent("""\
-        from clair import Trouve
+        from clair import Table
         from mydb.reference.tax_rates import trouve as tax_rates
 
-        trouve = Trouve(sql=f"SELECT * FROM {tax_rates}")
+        trouve = Table(sql=f"SELECT * FROM {tax_rates}")
     """))
 
     return tmp_path

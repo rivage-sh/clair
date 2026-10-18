@@ -12,11 +12,9 @@ from clair.environments.project_routing import ROUTING_FILE_NAME
 # ---------------------------------------------------------------------------
 
 _SOURCE_TROUVE_TEMPLATE = '''\
-from clair import Trouve, TrouveType
+from clair import Source
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
-)
+trouve = Source()
 '''
 
 _ROUTING_TEMPLATE = '''\

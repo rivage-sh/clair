@@ -22,7 +22,7 @@ from clair.trouves.run_config import Append, Incremental, RunMode, Upsert
 from clair.trouves.trouve import (
     CompiledAttributes,
     ExecutionType,
-    Trouve,
+    Table,
     TrouveAbc,
     TrouveType,
 )
@@ -135,14 +135,14 @@ class TestPromoteStatements:
 
 class TestBuildSqlStagingAddress:
     def test_full_refresh_writes_into_override(self):
-        trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
+        trouve = _compile(Table(sql="SELECT 1 AS id"), "db.s.orders")
         statements = trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID, staging_address=_address("db.s.staging")).all_statements
         assert "CREATE OR REPLACE TABLE db.s.staging" in statements[0]
         assert "db.s.orders" not in statements[0]
 
     def test_append_inserts_into_override(self):
         trouve = _compile(
-            Trouve(
+            Table(
                 sql="SELECT 1 AS id",
                 run_config=Incremental(strategy=Append()),
             ),
@@ -155,7 +155,7 @@ class TestBuildSqlStagingAddress:
         from clair.trouves.column import Column, ColumnType
 
         trouve = _compile(
-            Trouve(
+            Table(
                 sql="SELECT 1 AS id, 2 AS amount",
                 columns=[
                     Column(name="id", type=ColumnType.NUMBER),
@@ -172,7 +172,7 @@ class TestBuildSqlStagingAddress:
         assert f"db.s.orders__clair_new_rows_{RUN_ID}" in statements[0]
 
     def test_omitting_the_address_writes_to_the_physical_address(self):
-        trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
+        trouve = _compile(Table(sql="SELECT 1 AS id"), "db.s.orders")
         assert trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID) == trouve.build_sql(
             RunMode.FULL_REFRESH, RUN_ID, staging_address=None
         )
@@ -200,7 +200,7 @@ class TestStagingIsAlwaysOn:
 
 class TestStagingCompilePlan:
     def test_plan_shows_staging_build_test_checkpoint_and_promotion(self):
-        trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
+        trouve = _compile(Table(sql="SELECT 1 AS id"), "db.s.orders")
         statements = build_statements(trouve, RunMode.FULL_REFRESH, RUN_ID, use_staging=True)
 
         staging = _staging_name("db.s.orders", RUN_ID)
@@ -212,7 +212,7 @@ class TestStagingCompilePlan:
 
     def test_incremental_plan_starts_with_a_clone(self):
         trouve = _compile(
-            Trouve(
+            Table(
                 sql="SELECT 1 AS id",
                 run_config=Incremental(strategy=Append()),
             ),
@@ -225,7 +225,7 @@ class TestStagingCompilePlan:
         # The plan holds the build, and one comment in front of it. A run with
         # no staging writes the physical address directly, thus it can stop
         # before the build, and the comment tells the reader of the plan.
-        trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
+        trouve = _compile(Table(sql="SELECT 1 AS id"), "db.s.orders")
         statements = build_statements(
             trouve, RunMode.FULL_REFRESH, RUN_ID, use_staging=False
         )

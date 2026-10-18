@@ -8,7 +8,7 @@ from pathlib import Path
 from clair.core.discovery import discover_project
 from clair.core.references import recompile_for_selection
 from clair.trouves.pandas_trouve import PandasTrouve
-from clair.trouves.trouve import Trouve, TrouveAbc
+from clair.trouves.trouve import Table, TrouveAbc
 from tests.helpers import DatabaseOverrideRouting
 
 
@@ -23,8 +23,8 @@ def _make_pandas_project(tmp_path: Path) -> Path:
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
     (tmp_path / "mydb" / "source" / "events.py").write_text(textwrap.dedent("""\
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.SOURCE)
+        from clair import Source
+        trouve = Source()
     """))
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
@@ -62,14 +62,14 @@ def _make_mixed_project(tmp_path: Path) -> Path:
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
     (tmp_path / "mydb" / "source" / "events.py").write_text(textwrap.dedent("""\
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.SOURCE)
+        from clair import Source
+        trouve = Source()
     """))
 
     (tmp_path / "mydb" / "refined" / "events.py").write_text(textwrap.dedent("""\
         from mydb.source.events import trouve as source_events
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {source_events}")
+        from clair import Table
+        trouve = Table(sql=f"SELECT * FROM {source_events}")
     """))
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
@@ -98,8 +98,8 @@ def _make_chained_pandas_project(tmp_path: Path) -> Path:
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
     (tmp_path / "mydb" / "source" / "events.py").write_text(textwrap.dedent("""\
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.SOURCE)
+        from clair import Source
+        trouve = Source()
     """))
 
     (tmp_path / "mydb" / "derived" / "step_one.py").write_text(textwrap.dedent("""\
@@ -208,7 +208,7 @@ class TestMixedDag:
         project = _make_mixed_project(tmp_path)
         trouves = discover_project(project)
         refined = next(t for t in trouves if str(t.physical_address) == "mydb.refined.events")
-        assert isinstance(refined, Trouve)
+        assert isinstance(refined, Table)
         assert not isinstance(refined, PandasTrouve)
 
     def test_pandas_trouve_has_a_transform(self, tmp_path: Path):

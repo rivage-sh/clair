@@ -45,9 +45,8 @@ LOGICAL_NAME_TEMPLATE = "{database_name}.refined.switched"
 def _trouve_file(trouve_type: str) -> str:
     """Give the text of a Trouve file of one type. The SQL stays the same."""
     return (
-        "from clair import Trouve, TrouveType\n"
-        "\n"
-        "trouve = Trouve(\n"
+        "from clair import Table, TrouveType\n"
+        "trouve = Table(\n"
         f"    type=TrouveType.{trouve_type},\n"
         '    sql="SELECT 1 AS id, \'first\' AS label",\n'
         ")\n"

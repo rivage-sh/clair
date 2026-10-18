@@ -46,9 +46,9 @@ A SQL Trouve reads a seed with the usual f-string reference:
 from example_4_database.derived.daily_event_counts import trouve as daily_event_counts
 from example_4_database.reference.event_type_labels import trouve as event_type_labels
 
-from clair import Trouve
+from clair import Table
 
-trouve = Trouve(
+trouve = Table(
     sql=f"""
         select
             counts.event_type,

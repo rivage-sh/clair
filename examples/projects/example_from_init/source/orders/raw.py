@@ -1,5 +1,3 @@
-from clair import Trouve, TrouveType
+from clair import Source
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
-)
+trouve = Source()

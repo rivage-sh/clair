@@ -21,7 +21,7 @@ from clair.core.runner import RunResult, RunStatus, run_project
 from clair.environments.routing import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.run_config import DeleteInsert, Incremental, RunMode, Upsert
-from clair.trouves.trouve import BuildPlan, Trouve
+from clair.trouves.trouve import BuildPlan, Table
 from tests.helpers import RecordingAdapter, make_compiled_trouve
 
 PHYSICAL_ADDRESS = "db.s.planned"
@@ -31,7 +31,7 @@ STATEMENTS = ["select 'step one'", "select 'step two'", "select 'step three'"]
 CLEANUP_STATEMENTS = ["drop table if exists db.s.cleanup_one", "drop table if exists db.s.cleanup_two"]
 
 
-class PlannedTrouve(Trouve):
+class PlannedTrouve(Table):
     """A Trouve that gives the plan of the test, as a subclass of an author does."""
 
     build_plan: BuildPlan
@@ -124,7 +124,7 @@ NEW_ROWS_TABLE = f"{PHYSICAL_ADDRESS}__clair_new_rows"
 def test_a_staged_incremental_run_drops_the_new_rows_table_after_a_failure(
     strategy_type: type[Upsert | DeleteInsert], failed_text: str
 ) -> None:
-    trouve = Trouve(
+    trouve = Table(
         sql="select 1 as id, 'a' as name",
         columns=[
             Column(name="id", type=ColumnType.INTEGER),

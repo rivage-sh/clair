@@ -14,7 +14,7 @@ source string:
 * ``recompile_for_selection()`` renders again, and the selection now decides
   each address.
 
-Both calls read ``Trouve.sql``, which keeps its tokens. Thus the second call
+Both calls read ``SqlTrouve.sql``, which keeps its tokens. Thus the second call
 needs no text substitution on the result of the first, and an address that the
 author types as text stays as the author wrote it.
 
@@ -33,7 +33,7 @@ from clair.environments.routing import TrouveAddress
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import Trouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import SqlTrouve, TrouveAbc, TrouveType
 
 _PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 
@@ -174,7 +174,7 @@ def recompile_for_selection(
     ``_reference_addresses_for_selection`` for the rule.
 
     The function reads the placeholder tokens of the author, and not the
-    addresses that discovery wrote. ``Trouve.sql`` and ``TestSql.sql`` keep
+    addresses that discovery wrote. ``SqlTrouve.sql`` and ``TestSql.sql`` keep
     those tokens, thus clair renders the SQL again from the source. Only a token
     becomes an address. An address that the author types as text stays as it is,
     and it makes no DAG edge either.
@@ -204,7 +204,7 @@ def recompile_for_selection(
         # with the THIS marker.
         this_address = trouve.compiled.physical_address
 
-        if isinstance(trouve, Trouve):
+        if isinstance(trouve, SqlTrouve):
             trouve.compiled = trouve.compiled.model_copy(
                 update={
                     "resolved_sql": resolve_sql(

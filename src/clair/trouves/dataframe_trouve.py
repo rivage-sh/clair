@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import ClassVar
 
 import pandas as pd
 
-from clair.trouves.trouve import ExecutionType, TrouveAbc
+from clair.trouves.trouve import ExecutionType, TrouveAbc, TrouveType
 
 
 class DataframeTrouve(TrouveAbc, ABC):
@@ -20,6 +21,8 @@ class DataframeTrouve(TrouveAbc, ABC):
     ``PandasTrouve`` calls a function that you write. ``SeedTrouve`` holds its
     rows in the Python file.
     """
+
+    trouve_type: ClassVar[TrouveType] = TrouveType.TABLE
 
     @property
     def execution_type(self) -> ExecutionType:

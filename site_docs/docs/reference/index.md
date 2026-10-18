@@ -6,11 +6,21 @@ You import all the public types directly from `clair`:
 
 ```python
 from clair import (
-    Trouve, TrouveType,
-    Column, ColumnType,
-    RunConfig, FullRefresh, Incremental, Append, Upsert, DeleteInsert, RunMode,
-    TestUnique, TestNotNull, TestRowCount, TestUniqueColumns,
-    DatabaseDefaults, SchemaDefaults,
+    Append,
+    Column,
+    ColumnType,
+    DatabaseDefaults,
+    DeleteInsert,
+    FullRefresh,
+    Incremental,
+    RunConfig,
+    RunMode,
+    SchemaDefaults,
+    TestNotNull,
+    TestRowCount,
+    TestUnique,
+    TestUniqueColumns,
+    Upsert,
 )
 ```
 

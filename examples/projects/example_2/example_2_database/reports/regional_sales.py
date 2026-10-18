@@ -1,9 +1,8 @@
 from example_2_database.derived.geographic_sales import trouve as example_2_database_derived_geographic_sales
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="The sales totals of each region, in the sequence of the revenue.",
     sql=f"""
         select

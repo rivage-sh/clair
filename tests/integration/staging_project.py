@@ -122,10 +122,9 @@ def source_file() -> str:
     reads ``id`` only.
     """
     return '''\
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Source, Table, TrouveType
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
+trouve = Source(
     docs="The rows that the test inserts before it runs clair.",
     columns=[
         Column(name="id", type=ColumnType.STRING),
@@ -167,14 +166,12 @@ from clair import (
     ColumnType,
     DeleteInsert,
     Incremental,
+    Table,
     TestRowCount,
-    Trouve,
-    TrouveType,
     Upsert,
 )
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="The candidate of an incremental run. TestRowCount decides it.",
     sql=f"""
         select id, amount, amount::float / 3 as ratio from {{source_rows}}
@@ -195,10 +192,9 @@ def sql_checked_file(database_name: str, minimum_rows: int) -> str:
     return f'''\
 from {database_name}.source.rows import trouve as source_rows
 
-from clair import Column, ColumnType, TestRowCount, Trouve, TrouveType
+from clair import Column, ColumnType, Table, TestRowCount
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="The candidate. TestRowCount decides if clair promotes it.",
     sql=f"""
         select id from {{source_rows}}
@@ -241,10 +237,9 @@ def downstream_file(database_name: str) -> str:
     return f'''\
 from {database_name}.refined.checked import trouve as refined_checked
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="A dependent. Clair skips it when the test of refined.checked fails.",
     sql=f"""
         select id from {{refined_checked}}

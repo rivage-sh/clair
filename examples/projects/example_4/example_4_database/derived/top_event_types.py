@@ -1,9 +1,9 @@
 from example_4_database.derived.daily_event_counts import trouve as example_4_database_derived_daily_event_counts
 from example_4_database.reference.event_type_labels import trouve as example_4_database_reference_event_type_labels
 
-from clair import Column, ColumnType, Trouve
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
+trouve = Table(
     docs="The 10 event types with the highest total count for all time.",
     sql=f"""
         select

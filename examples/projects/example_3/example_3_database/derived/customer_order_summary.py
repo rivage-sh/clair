@@ -1,9 +1,8 @@
 from example_3_database.refined.orders import trouve as refined_orders
 
-from clair import Column, ColumnType, Incremental, Trouve, TrouveType, Upsert
+from clair import Column, ColumnType, Incremental, Table, Upsert
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="""
         Order statistics for each customer. clair merges the rows on customer_id.
 

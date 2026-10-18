@@ -24,7 +24,7 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import CompiledAttributes, ExecutionType, Source, Table, TrouveAbc, TrouveType, View
 
 # ---------------------------------------------------------------------------
 # The helper functions.
@@ -51,20 +51,18 @@ def _compiled_attrs(
 
 
 def _compiled_trouve(
-    trouve_type: TrouveType = TrouveType.TABLE,
+    trouve_class: type[Table] | type[View] = Table,
     sql: str = SAMPLE_SQL,
     physical_address: str = "db.schema.my_table",
     resolved_sql: str = SAMPLE_SQL,
     columns: list[Column] | None = None,
     run_config: RunConfig | None = None,
-) -> Trouve:
-    """Make a compiled Trouve for build_sql()."""
-    trouve = Trouve(
-        type=trouve_type,
-        sql=sql,
-        columns=columns or [],
-        run_config=run_config or FullRefresh(),
-    )
+) -> Table | View:
+    """Make a compiled Table or View for build_sql(). Only a Table takes a run_config."""
+    trouve = trouve_class(sql=sql, columns=columns or [])
+    if run_config is not None:
+        assert isinstance(trouve, Table)
+        trouve.run_config = run_config
     trouve.compiled = _compiled_attrs(
         physical_address=physical_address,
         resolved_sql=resolved_sql,
@@ -79,13 +77,11 @@ def _compiled_trouve(
 
 class TestTrouveConstruction:
     def test_source_trouve_valid(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         assert trouve.type == TrouveType.SOURCE
-        assert trouve.sql == ""
 
     def test_source_trouve_with_columns_and_docs(self):
-        trouve = Trouve(
-            type=TrouveType.SOURCE,
+        trouve = Source(
             columns=[Column(name="id", type=ColumnType.STRING)],
             docs="A source table.",
         )
@@ -94,43 +90,50 @@ class TestTrouveConstruction:
         assert trouve.docs == "A source table."
 
     def test_table_trouve_valid(self):
-        trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id")
+        trouve = Table(sql="SELECT 1 AS id")
         assert trouve.type == TrouveType.TABLE
         assert trouve.sql == "SELECT 1 AS id"
 
     def test_view_trouve_valid(self):
-        trouve = Trouve(type=TrouveType.VIEW, sql="SELECT 1 AS id")
+        trouve = View(sql="SELECT 1 AS id")
         assert trouve.type == TrouveType.VIEW
 
-    def test_default_type_is_table(self):
-        trouve = Trouve(sql="SELECT 1")
-        assert trouve.type == TrouveType.TABLE
-
     def test_default_run_config_is_full_refresh(self):
-        trouve = Trouve(sql="SELECT 1")
+        trouve = Table(sql="SELECT 1")
         assert trouve.run_config.run_mode == RunMode.FULL_REFRESH
         assert isinstance(trouve.run_config, FullRefresh)
 
     def test_table_rejects_empty_sql(self):
         with pytest.raises(ValueError, match="must have sql"):
-            Trouve(type=TrouveType.TABLE, sql="")
+            Table(sql="")
 
     def test_table_rejects_whitespace_only_sql(self):
         with pytest.raises(ValueError, match="must have sql"):
-            Trouve(type=TrouveType.TABLE, sql="   \n\t  ")
+            Table(sql="   \n\t  ")
 
     def test_view_rejects_empty_sql(self):
         with pytest.raises(ValueError, match="must have sql"):
-            Trouve(type=TrouveType.VIEW, sql="")
+            View(sql="")
 
-    def test_source_rejects_sql(self):
-        with pytest.raises(ValueError, match="a SOURCE Trouve must not have sql"):
-            Trouve(type=TrouveType.SOURCE, sql="SELECT 1")
-
-    def test_source_rejects_whitespace_sql(self):
-        """The code applies .strip() to the SQL of a source. Thus only spaces are correct."""
-        trouve = Trouve(type=TrouveType.SOURCE, sql="   ")
-        assert trouve.type == TrouveType.SOURCE
+    @pytest.mark.parametrize(
+        ("trouve_class", "arguments"),
+        [
+            pytest.param(Source, {"sql": "SELECT 1"}, id="sql_on_a_source"),
+            pytest.param(Source, {"run_config": Incremental(strategy=Append())}, id="run_config_on_a_source"),
+            pytest.param(View, {"sql": "SELECT 1", "run_config": Incremental(strategy=Append())}, id="run_config_on_a_view"),
+            pytest.param(Table, {"sql": "SELECT 1", "type": TrouveType.VIEW}, id="type_on_a_table"),
+            pytest.param(PandasTrouve, {"transform": lambda: pd.DataFrame(), "type": TrouveType.VIEW}, id="type_on_a_pandas_trouve"),
+            pytest.param(
+                PandasTrouve,
+                {"transform": lambda: pd.DataFrame(), "run_config": Incremental(strategy=Append())},
+                id="run_config_on_a_pandas_trouve",
+            ),
+        ],
+    )
+    def test_a_keyword_that_the_class_does_not_read_raises(self, trouve_class, arguments):
+        """The class decides the type, and only a Table holds a run_config."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            trouve_class(**arguments)
 
     def test_sample_returns_top_subquery(self):
         from pathlib import Path
@@ -138,7 +141,7 @@ class TestTrouveConstruction:
         from clair.trouves.config import ResolvedConfig
         from clair.trouves.trouve import CompiledAttributes, ExecutionType
 
-        t = Trouve(type=TrouveType.TABLE, sql="select 1")
+        t = Table(sql="select 1")
         t.compiled = CompiledAttributes(
             physical_address=TrouveAddress.parse("db.s.orders"),
             logical_address=TrouveAddress.parse("db.s.orders"),
@@ -158,7 +161,7 @@ class TestTrouveConstruction:
         from clair.trouves.config import ResolvedConfig
         from clair.trouves.trouve import CompiledAttributes, ExecutionType
 
-        t = Trouve(type=TrouveType.TABLE, sql="select 1")
+        t = Table(sql="select 1")
         t.compiled = CompiledAttributes(
             # The physical address, for example from a schema isolation policy.
             physical_address=TrouveAddress.parse("dev_omer.s.orders"),
@@ -176,13 +179,12 @@ class TestTrouveConstruction:
         assert "db.s.orders" not in result
 
     def test_sample_raises_when_not_compiled(self):
-        t = Trouve(type=TrouveType.TABLE, sql="select 1")
+        t = Table(sql="select 1")
         with pytest.raises(AssertionError, match="needs a compiled Trouve"):
             t.sample()
 
     def test_trouve_with_tests(self):
-        trouve = Trouve(
-            type=TrouveType.TABLE,
+        trouve = Table(
             sql="SELECT 1 AS id",
             tests=[TestUnique(column="id"), TestNotNull(column="id")],
         )
@@ -191,59 +193,37 @@ class TestTrouveConstruction:
         assert trouve.tests[1].type == "not_null"
 
     def test_is_compiled_false_by_default(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         assert trouve.is_compiled is False
 
     def test_is_compiled_true_after_setting_compiled(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         trouve.compiled = _compiled_attrs(resolved_sql="")
         assert trouve.is_compiled is True
 
     def test_address_raises_when_not_compiled(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         with pytest.raises(RuntimeError, match="physical_address is not set"):
             _ = trouve.physical_address
 
     def test_address_returns_compiled_value(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         trouve.compiled = _compiled_attrs(physical_address="prod.analytics.orders")
         assert str(trouve.physical_address) == "prod.analytics.orders"
 
 
-class TestTrouveIncrementalValidation:
-    """These tests show that only a TABLE Trouve accepts the incremental mode."""
-
-    def test_view_with_incremental_raises(self):
-        with pytest.raises(ValueError, match="only a TABLE Trouve can use the incremental mode"):
-            Trouve(
-                type=TrouveType.VIEW,
-                sql="SELECT 1",
-                run_config=Incremental(strategy=Append()),
-            )
-
-    def test_source_with_incremental_raises(self):
-        """A SOURCE with the incremental mode causes an error.
-
-        A SOURCE has no sql. Also, only a TABLE accepts the incremental mode.
-        The validator looks for run_mode == INCREMENTAL and a type that is not
-        TABLE."""
-        with pytest.raises(ValueError):
-            Trouve(
-                type=TrouveType.SOURCE,
-                run_config=Incremental(strategy=Append()),
-            )
+class TestTableIncremental:
+    """A Table accepts each incremental strategy."""
 
     def test_table_with_incremental_append_valid(self):
-        trouve = Trouve(
-            type=TrouveType.TABLE,
+        trouve = Table(
             sql="SELECT 1",
             run_config=Incremental(strategy=Append()),
         )
         assert trouve.run_config.run_mode == RunMode.INCREMENTAL
 
     def test_table_with_incremental_upsert_valid(self):
-        trouve = Trouve(
-            type=TrouveType.TABLE,
+        trouve = Table(
             sql="SELECT 1",
             run_config=Incremental(strategy=Upsert(primary_key_columns=["id"])),
         )
@@ -264,45 +244,45 @@ class TestRefsRegistration:
         clear()
 
     def test_format_returns_placeholder_token(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         token = f"{trouve}"
         assert token.startswith(TROUVE_PLACEHOLDER_PREFIX)
 
     def test_format_registers_trouve_in_registry(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         f"{trouve}"
         assert id(trouve) in _registry
         assert _registry[id(trouve)] is trouve
 
     def test_two_trouves_produce_different_tokens(self):
-        trouve_a = Trouve(type=TrouveType.SOURCE)
-        trouve_b = Trouve(type=TrouveType.SOURCE)
+        trouve_a = Source()
+        trouve_b = Source()
         token_a = f"{trouve_a}"
         token_b = f"{trouve_b}"
         assert token_a != token_b
         assert len(_registry) == 2
 
     def test_same_trouve_produces_same_token(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         token_first = f"{trouve}"
         token_second = f"{trouve}"
         assert token_first == token_second
 
     def test_format_in_fstring_sql(self):
         """This is the true use: an f-string in the SQL points to a Trouve."""
-        source = Trouve(type=TrouveType.SOURCE)
+        source = Source()
         sql = f"SELECT * FROM {source}"
         assert sql.startswith("SELECT * FROM " + TROUVE_PLACEHOLDER_PREFIX)
 
     def test_clear_empties_registry(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         f"{trouve}"
         assert len(_registry) == 1
         clear()
         assert len(_registry) == 0
 
     def test_after_clear_new_format_repopulates(self):
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         f"{trouve}"
         clear()
         token_after_clear = f"{trouve}"
@@ -311,7 +291,7 @@ class TestRefsRegistration:
 
     def test_format_spec_is_ignored(self):
         """__format__ gets _spec, but it ignores the value. Each value operates."""
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         token = format(trouve, "some_spec")
         assert token.startswith(TROUVE_PLACEHOLDER_PREFIX)
 
@@ -323,20 +303,9 @@ class TestRefsRegistration:
 
 class TestBuildSqlNotCompiled:
     def test_raises_runtime_error_when_not_compiled(self):
-        trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1")
+        trouve = Table(sql="SELECT 1")
         with pytest.raises(RuntimeError, match="build_sql\\(\\) needs a compiled Trouve"):
             trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
-
-
-class TestBuildSqlSource:
-    def test_source_returns_empty_list(self):
-        trouve = _compiled_trouve(
-            trouve_type=TrouveType.SOURCE,
-            sql="",
-            resolved_sql="",
-        )
-        result = trouve.build_sql(RunMode.FULL_REFRESH, "run_001").all_statements
-        assert result == []
 
 
 class TestBuildSqlFullRefresh:
@@ -355,7 +324,7 @@ class TestBuildSqlFullRefresh:
 
     def test_view_creates_view(self):
         trouve = _compiled_trouve(
-            trouve_type=TrouveType.VIEW,
+            trouve_class=View,
             physical_address="prod.analytics.orders_view",
             resolved_sql="SELECT * FROM raw.orders",
         )
@@ -883,9 +852,9 @@ class TestConfig:
 class TestPandasTrouve:
     """The tests of PandasTrouve, the pandas backend."""
 
-    def _make_upstream(self) -> Trouve:
+    def _make_upstream(self) -> Source:
         """Make a compiled SOURCE Trouve. A different Trouve can depend on it."""
-        source = Trouve(type=TrouveType.SOURCE)
+        source = Source()
         source.compiled = _compiled_attrs(physical_address="db.schema.upstream", resolved_sql="")
         return source
 
@@ -987,33 +956,9 @@ class TestPandasTrouve:
         with pytest.raises(ValueError, match="must not have \\*args or \\*\\*kwargs"):
             PandasTrouve(transform=my_fn, inputs=[])
 
-    def test_view_type_raises_value_error(self):
-        def my_fn():
-            return pd.DataFrame()
-
-        with pytest.raises(ValueError, match="PandasTrouve must be TABLE type"):
-            PandasTrouve(transform=my_fn, type=TrouveType.VIEW)
-
-    def test_source_type_raises_value_error(self):
-        def my_fn():
-            return pd.DataFrame()
-
-        with pytest.raises(ValueError, match="PandasTrouve must be TABLE type"):
-            PandasTrouve(transform=my_fn, type=TrouveType.SOURCE)
-
     def test_transform_not_callable_raises_value_error(self):
         with pytest.raises(ValueError, match="transform"):
             PandasTrouve(transform="not_a_function")
-
-    def test_incremental_raises_value_error(self):
-        def my_fn():
-            return pd.DataFrame()
-
-        with pytest.raises(ValueError, match="PandasTrouve does not support incremental mode"):
-            PandasTrouve(
-                transform=my_fn,
-                run_config=Incremental(strategy=Append()),
-            )
 
     def test_pandas_trouve_is_a_trouve_abc(self):
         """Discovery finds a node with isinstance(obj, TrouveAbc)."""
@@ -1033,7 +978,7 @@ class TestTrouveAbc:
 
     def test_sql_trouve_gives_no_upstream_trouves(self):
         """A SQL Trouve declares its dependencies with placeholder tokens."""
-        assert Trouve(sql="SELECT 1").upstream_trouves() == []
+        assert Table(sql="SELECT 1").upstream_trouves() == []
 
     def test_sql_trouve_execution_type(self):
-        assert Trouve(sql="SELECT 1").execution_type == ExecutionType.SNOWFLAKE
+        assert Table(sql="SELECT 1").execution_type == ExecutionType.SNOWFLAKE

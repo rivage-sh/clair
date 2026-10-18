@@ -1,9 +1,8 @@
 from example_2_database.derived.seller_performance import trouve as example_2_database_derived_seller_performance
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="The sellers with a total revenue in the 90th percentile or higher.",
     sql=f"""
         with p90 as (

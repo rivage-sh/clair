@@ -1,9 +1,8 @@
 from example_1_database.source.events import trouve as example_1_database_source_events
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="""
         The refined layer. It puts the semi-structured PROPERTIES VARIANT into typed columns
         and adds more fields. The downstream Trouves read this Trouve, not the raw source.

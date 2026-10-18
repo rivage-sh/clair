@@ -18,7 +18,7 @@ from clair.exceptions import ProjectDiscoveryError
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import CompiledAttributes, Trouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import CompiledAttributes, Table, TrouveAbc, TrouveType
 from tests.helpers import (
     DatabaseOverrideRouting,
     SchemaIsolationRouting,
@@ -76,7 +76,7 @@ class TestDiscovery:
     def test_raw_sql_contains_placeholder(self, simple_project: Path):
         trouves = discover_project(simple_project)
         table = next(t for t in trouves if str(t.physical_address) == "analytics.revenue.daily_orders")
-        assert isinstance(table, Trouve)
+        assert isinstance(table, Table)
         assert TROUVE_PLACEHOLDER_PREFIX in table.sql
 
     def test_config_resolution(self, simple_project: Path):
@@ -95,12 +95,12 @@ class TestDiscovery:
         db_dir = tmp_path / "mydb" / "myschema"
         db_dir.mkdir(parents=True)
         db_dir.joinpath("real_table.py").write_text(textwrap.dedent("""\
-            from clair import Trouve, TrouveType
-            trouve = Trouve(type=TrouveType.SOURCE)
+            from clair import Source
+            trouve = Source()
         """))
         db_dir.joinpath("_ignored_table.py").write_text(textwrap.dedent("""\
-            from clair import Trouve, TrouveType
-            trouve = Trouve(type=TrouveType.SOURCE)
+            from clair import Source
+            trouve = Source()
         """))
         trouves = discover_project(tmp_path)
         names = {str(t.compiled.logical_address) for t in trouves if t.compiled}
@@ -111,14 +111,14 @@ class TestDiscovery:
         normal_dir = tmp_path / "mydb" / "myschema"
         normal_dir.mkdir(parents=True)
         normal_dir.joinpath("real_table.py").write_text(textwrap.dedent("""\
-            from clair import Trouve, TrouveType
-            trouve = Trouve(type=TrouveType.SOURCE)
+            from clair import Source
+            trouve = Source()
         """))
         ignored_dir = tmp_path / "mydb" / "_ignored_schema"
         ignored_dir.mkdir(parents=True)
         ignored_dir.joinpath("also_ignored.py").write_text(textwrap.dedent("""\
-            from clair import Trouve, TrouveType
-            trouve = Trouve(type=TrouveType.SOURCE)
+            from clair import Source, TrouveType
+            trouve = Source()
         """))
         trouves = discover_project(tmp_path)
         names = {str(t.compiled.logical_address) for t in trouves if t.compiled}
@@ -204,10 +204,9 @@ class TestDiscoveryWithRouting:
         source_dir = tmp_path / "shared" / "raw"
         source_dir.mkdir(parents=True)
         source_dir.joinpath("data.py").write_text(textwrap.dedent("""\
-            from clair import Column, ColumnType, Trouve, TrouveType
+            from clair import Column, ColumnType, Source
 
-            trouve = Trouve(
-                type=TrouveType.SOURCE,
+            trouve = Source(
                 docs="Shared source.",
                 columns=[Column(name="id", type=ColumnType.STRING)],
             )
@@ -217,10 +216,9 @@ class TestDiscoveryWithRouting:
             table_dir = tmp_path / db_name / "finance"
             table_dir.mkdir(parents=True)
             table_dir.joinpath("orders.py").write_text(textwrap.dedent(f"""\
-                from clair import Column, ColumnType, Trouve, TrouveType
+                from clair import Column, ColumnType, Table
 
-                trouve = Trouve(
-                    type=TrouveType.TABLE,
+                trouve = Table(
                     docs="Orders from {db_name}.",
                     sql="select 1",
                     columns=[Column(name="id", type=ColumnType.STRING)],
@@ -255,26 +253,26 @@ def _make_chained_project(tmp_path: Path) -> Path:
         (tmp_path / dirs).mkdir(parents=True, exist_ok=True)
 
     (tmp_path / "mydb/source/events.py").write_text(textwrap.dedent("""\
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.SOURCE)
+        from clair import Source
+        trouve = Source()
     """))
 
     (tmp_path / "mydb/refined/events.py").write_text(textwrap.dedent("""\
         from mydb.source.events import trouve as source_events
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {source_events}")
+        from clair import Table
+        trouve = Table(sql=f"SELECT * FROM {source_events}")
     """))
 
     (tmp_path / "mydb/derived/daily.py").write_text(textwrap.dedent("""\
         from mydb.refined.events import trouve as refined_events
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {refined_events}")
+        from clair import Table
+        trouve = Table(sql=f"SELECT * FROM {refined_events}")
     """))
 
     (tmp_path / "mydb/derived/top.py").write_text(textwrap.dedent("""\
         from mydb.derived.daily import trouve as daily
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {daily}")
+        from clair import Table, TrouveType
+        trouve = Table(sql=f"SELECT * FROM {daily}")
     """))
 
     return tmp_path
@@ -380,19 +378,18 @@ class TestRecompileForSelection:
         (tmp_path / "mydb" / "refined").mkdir(parents=True)
 
         (tmp_path / "mydb" / "source" / "events.py").write_text(textwrap.dedent("""\
-            from clair import Trouve, TrouveType
-            trouve = Trouve(type=TrouveType.SOURCE)
+            from clair import Source
+            trouve = Source()
         """))
         (tmp_path / "mydb" / "refined" / "events.py").write_text(textwrap.dedent("""\
             from mydb.source.events import trouve as source_events
-            from clair import Trouve, TrouveType
-            trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {source_events}")
+            from clair import Table
+            trouve = Table(sql=f"SELECT * FROM {source_events}")
         """))
         (tmp_path / "mydb" / "refined" / "report.py").write_text(textwrap.dedent("""\
             from mydb.refined.events import trouve as refined_events
-            from clair import Trouve, TrouveType
-            trouve = Trouve(
-                type=TrouveType.TABLE,
+            from clair import Table, TrouveType
+            trouve = Table(
                 sql=f'''
                     -- The old name was mydb.refined.events.
                     SELECT '{"mydb.refined.events"}' AS source_name, *
@@ -479,16 +476,15 @@ class TestRecompileForSelectionTestSql:
             (tmp_path / dirs).mkdir(parents=True, exist_ok=True)
 
         (tmp_path / "mydb/source/customers.py").write_text(textwrap.dedent("""\
-            from clair import Trouve, TrouveType
-            trouve = Trouve(type=TrouveType.SOURCE)
+            from clair import Source
+            trouve = Source()
         """))
 
         # The TestSql of orders points to customers.
         (tmp_path / "mydb/refined/orders.py").write_text(textwrap.dedent("""\
             from mydb.source.customers import trouve as customers
-            from clair import Trouve, TrouveType, TestSql, THIS
-            trouve = Trouve(
-                type=TrouveType.TABLE,
+            from clair import THIS, Table, TestSql
+            trouve = Table(
                 sql="SELECT 1",
                 tests=[
                     TestSql(sql=f"SELECT * FROM {THIS} t LEFT JOIN {customers} c ON t.cid = c.id WHERE c.id IS NULL"),
@@ -541,19 +537,18 @@ class TestRecompileForSelectionTestSql:
             (tmp_path / dirs).mkdir(parents=True, exist_ok=True)
 
         (tmp_path / "mydb/source/raw.py").write_text(textwrap.dedent("""\
-            from clair import Trouve, TrouveType
-            trouve = Trouve(type=TrouveType.SOURCE)
+            from clair import Source
+            trouve = Source()
         """))
         (tmp_path / "mydb/refined/base.py").write_text(textwrap.dedent("""\
             from mydb.source.raw import trouve as raw
-            from clair import Trouve, TrouveType
-            trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {raw}")
+            from clair import Table
+            trouve = Table(sql=f"SELECT * FROM {raw}")
         """))
         (tmp_path / "mydb/derived/top.py").write_text(textwrap.dedent("""\
             from mydb.refined.base import trouve as base
-            from clair import Trouve, TrouveType, TestSql, THIS
-            trouve = Trouve(
-                type=TrouveType.TABLE,
+            from clair import THIS, Table, TestSql, TrouveType
+            trouve = Table(
                 sql=f"SELECT * FROM {base}",
                 tests=[
                     TestSql(sql=f"SELECT * FROM {THIS} t LEFT JOIN {base} b ON t.id = b.id WHERE b.id IS NULL"),
@@ -589,9 +584,9 @@ class TestDiscoveryRunMode:
         db_dir.mkdir(parents=True)
         (db_dir / "t.py").write_text(textwrap.dedent("""\
             import clair
-            from clair import Trouve, TrouveType
+            from clair import Source
             captured_run_mode = clair.run_mode
-            trouve = Trouve(type=TrouveType.SOURCE)
+            trouve = Source()
         """))
 
     def test_run_mode_set_to_incremental(self, tmp_path: Path):
@@ -628,18 +623,18 @@ class TestTwoProjectsInOneProcess:
         (root / "mydb" / "source").mkdir(parents=True)
         (root / "mydb" / "source" / "rows.py").write_text(
             textwrap.dedent("""
-                from clair import Trouve, TrouveType
+                from clair import Source
 
-                trouve = Trouve(type=TrouveType.SOURCE, sql="")
+                trouve = Source(sql="")
             """)
         )
         (schema_dir / "checked.py").write_text(
             textwrap.dedent(f"""
                 from mydb.source.rows import trouve as rows
 
-                from clair import Trouve, TrouveType
+                from clair import Table
 
-                trouve = Trouve(type=TrouveType.TABLE, sql=f"{sql}")
+                trouve = Table(sql=f"{sql}")
             """)
         )
         return root
@@ -675,9 +670,9 @@ class TestTwoProjectsInOneProcess:
 
 
 TROUVE_FILE = """
-from clair import Trouve, TrouveType
+from clair import Table
 
-trouve = Trouve(type=TrouveType.TABLE, sql="select 1 as n")
+trouve = Table(sql="select 1 as n")
 """
 
 DATABASE_CONFIG_FILE = """

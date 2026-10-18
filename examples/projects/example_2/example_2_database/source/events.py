@@ -1,7 +1,6 @@
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Source
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
+trouve = Source(
     docs="Raw clickstream events. Each row is one user interaction.",
     columns=[
         Column(name="event_id", type=ColumnType.STRING),

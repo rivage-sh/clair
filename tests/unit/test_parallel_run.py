@@ -177,9 +177,9 @@ def diamond_project(tmp_path: Path) -> Path:
     _write(
         project_root / "db" / "raw" / "orders.py",
         """
-        from clair import Trouve, TrouveType
+        from clair import Source
 
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         """,
     )
     _write(
@@ -187,10 +187,9 @@ def diamond_project(tmp_path: Path) -> Path:
         """
         from db.raw.orders import trouve as orders
 
-        from clair import Trouve, TrouveType
+        from clair import Table
 
-        trouve = Trouve(
-            type=TrouveType.TABLE,
+        trouve = Table(
             sql=f"select 1 as a from {orders}",
         )
         """,
@@ -200,10 +199,9 @@ def diamond_project(tmp_path: Path) -> Path:
         """
         from db.raw.orders import trouve as orders
 
-        from clair import Trouve, TrouveType
+        from clair import Table
 
-        trouve = Trouve(
-            type=TrouveType.TABLE,
+        trouve = Table(
             sql=f"select 2 as b from {orders}",
         )
         """,
@@ -214,10 +212,9 @@ def diamond_project(tmp_path: Path) -> Path:
         from db.marts.left import trouve as left
         from db.marts.right import trouve as right
 
-        from clair import Trouve, TrouveType
+        from clair import Table
 
-        trouve = Trouve(
-            type=TrouveType.TABLE,
+        trouve = Table(
             sql=f"select * from {left} join {right} on 1 = 1",
         )
         """,
@@ -234,9 +231,9 @@ def chain_project(tmp_path: Path) -> Path:
     _write(
         project_root / "db" / "raw" / "orders.py",
         """
-        from clair import Trouve, TrouveType
+        from clair import Source
 
-        trouve = Trouve(type=TrouveType.SOURCE)
+        trouve = Source()
         """,
     )
     _write(
@@ -244,9 +241,9 @@ def chain_project(tmp_path: Path) -> Path:
         """
         from db.raw.orders import trouve as orders
 
-        from clair import Trouve, TrouveType
+        from clair import Table
 
-        trouve = Trouve(type=TrouveType.TABLE, sql=f"select 1 as a from {orders}")
+        trouve = Table(sql=f"select 1 as a from {orders}")
         """,
     )
     _write(
@@ -254,9 +251,9 @@ def chain_project(tmp_path: Path) -> Path:
         """
         from db.marts.first import trouve as first
 
-        from clair import Trouve, TrouveType
+        from clair import Table
 
-        trouve = Trouve(type=TrouveType.TABLE, sql=f"select * from {first}")
+        trouve = Table(sql=f"select * from {first}")
         """,
     )
     _write(
@@ -264,9 +261,9 @@ def chain_project(tmp_path: Path) -> Path:
         """
         from db.marts.middle import trouve as middle
 
-        from clair import Trouve, TrouveType
+        from clair import Table
 
-        trouve = Trouve(type=TrouveType.TABLE, sql=f"select * from {middle}")
+        trouve = Table(sql=f"select * from {middle}")
         """,
     )
 
@@ -519,9 +516,9 @@ class TestParallelTests:
         _write(
             project_root / "db" / "raw" / "orders.py",
             """
-            from clair import Trouve, TrouveType
+            from clair import Source
 
-            trouve = Trouve(type=TrouveType.SOURCE)
+            trouve = Source()
             """,
         )
         for name in ("alpha", "beta", "gamma"):
@@ -530,10 +527,9 @@ class TestParallelTests:
                 """
                 from db.raw.orders import trouve as orders
 
-                from clair import TestNotNull, Trouve, TrouveType
+                from clair import Table, TestNotNull
 
-                trouve = Trouve(
-                    type=TrouveType.TABLE,
+                trouve = Table(
                     sql=f"select 1 as id from {orders}",
                     tests=[TestNotNull(column="id")],
                 )

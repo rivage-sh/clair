@@ -1,9 +1,8 @@
 from example_1_database.refined.events import trouve as example_1_database_refined_events
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Daily count of each event type. This Trouve reads the refined events.",
     sql=f"""
         select
