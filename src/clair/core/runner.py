@@ -633,8 +633,25 @@ def _run_node(
             logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_type_changed")
             effective_mode = RunMode.FULL_REFRESH
 
+    target_column_names = None
+    if effective_mode == RunMode.INCREMENTAL:
+        target_columns = adapter.describe_columns(addresses.physical)
+        if target_columns is None:
+            column_error = f"Clair cannot read the columns of {addresses.physical}."
+            logger.warning("run.node.failure", logical=logical_address, physical=name, error=column_error)
+            return _NodeOutcome(
+                RunResult(addresses=addresses, error=column_error),
+                downstream_ok=False,
+            )
+        target_column_names = [column.name for column in target_columns]
+
     logger.info("run.node.start", logical=logical_address, physical=name, effective_mode=effective_mode.value)
-    plan = trouve.build_sql(effective_mode, run_id, staging_address=staging_address)
+    plan = trouve.build_sql(
+        effective_mode,
+        run_id,
+        staging_address=staging_address,
+        target_column_names=target_column_names,
+    )
 
     # An incremental run changes data that already exists, so the staging
     # table needs that data first. A zero-copy clone gives it in constant time.

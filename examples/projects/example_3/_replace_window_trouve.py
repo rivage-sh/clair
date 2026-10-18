@@ -17,6 +17,7 @@ class ReplaceWindowTrouve(Table):
         effective_mode: RunMode,
         run_id: str,
         staging_address: TrouveAddress | None = None,
+        target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         if effective_mode == RunMode.FULL_REFRESH:
             return super().build_sql(effective_mode, run_id, staging_address)
@@ -31,7 +32,7 @@ class ReplaceWindowTrouve(Table):
             f"DELETE FROM {target}\n"
             f"WHERE {self.window_column} >= (SELECT MIN({self.window_column}) FROM {window_rows})"
         )
-        insert_window = f"INSERT INTO {target}\nSELECT * FROM {window_rows}"
+        insert_window = self.insert_statement(str(target), window_rows, target_column_names)
         return BuildPlan(
             statements=[create_window_rows, delete_window, insert_window],
             cleanup_statements=[f"DROP TABLE IF EXISTS {window_rows}"],

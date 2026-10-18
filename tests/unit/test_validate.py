@@ -306,7 +306,7 @@ from clair import BuildPlan, RunMode, Table, TrouveAddress
 class PhysicalOnlyTrouve(Table):
     """An override that writes to the physical address, also in a staged run."""
 
-    def build_sql(self, effective_mode, run_id, staging_address=None):
+    def build_sql(self, effective_mode, run_id, staging_address=None, target_column_names=None):
         if effective_mode == RunMode.FULL_REFRESH:
             return super().build_sql(effective_mode, run_id, staging_address)
         return BuildPlan(statements=[f"DELETE FROM {self.physical_address}"])
@@ -315,7 +315,7 @@ class PhysicalOnlyTrouve(Table):
 class RaisingTrouve(Table):
     """An override with a bug in its incremental branch."""
 
-    def build_sql(self, effective_mode, run_id, staging_address=None):
+    def build_sql(self, effective_mode, run_id, staging_address=None, target_column_names=None):
         if effective_mode == RunMode.FULL_REFRESH:
             return super().build_sql(effective_mode, run_id, staging_address)
         raise KeyError("window_column")

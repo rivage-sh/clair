@@ -38,6 +38,19 @@ class WarehouseObjectType(StrEnum):
     VIEW = "view"
 
 
+class WarehouseColumn(BaseModel):
+    """One column of an object in the warehouse.
+
+    Attributes:
+        name: The name that the warehouse stores. Snowflake stores an unquoted
+            name in upper case.
+        data_type: The type as DDL text, for example ``NUMBER(38,0)``.
+    """
+
+    name: str
+    data_type: str
+
+
 class Statement(BaseModel):
     """One SQL statement, and what the warehouse answered.
 
@@ -112,6 +125,16 @@ class WarehouseAdapter(ABC):
         warehouse replaces an object with an object of the same type only, so a
         Trouve that changes from a TABLE to a VIEW needs a drop first. The
         answer also tells the runner if an incremental Trouve has a base table.
+        """
+        ...
+
+    @abstractmethod
+    def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
+        """Give the columns of the object at the address in their order, or None if it holds none.
+
+        An incremental run inserts into a table that already exists. The
+        runner asks for its columns, thus the insert names each column, and a
+        new column order in the SQL cannot move a value into the wrong column.
         """
         ...
 

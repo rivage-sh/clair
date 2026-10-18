@@ -365,8 +365,9 @@ class TestDeleteInsertStatements:
     def test_the_insert_writes_the_new_rows_to_the_staging_address(self):
         """A staging run changes the candidate, thus production never shows the gap."""
         insert_new_rows = self.build_plan(primary_key_columns=["id"]).statements[2]
-        assert insert_new_rows.endswith(
+        assert (
             f"INSERT INTO db.schema.my_table__clair_stg\nSELECT * FROM {self.NEW_ROWS_ADDRESS}"
+            in insert_new_rows
         )
 
     def test_the_cleanup_drops_the_new_rows_table(self):

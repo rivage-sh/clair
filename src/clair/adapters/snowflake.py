@@ -10,7 +10,13 @@ import snowflake.connector
 from cryptography.hazmat.primitives import serialization
 from snowflake.connector.pandas_tools import write_pandas
 
-from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
+from clair.adapters.base import (
+    Statement,
+    StatementStatus,
+    WarehouseAdapter,
+    WarehouseColumn,
+    WarehouseObjectType,
+)
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey
 from clair.trouves.address import TrouveAddress
 
@@ -122,6 +128,34 @@ class SnowflakeAdapter(WarehouseAdapter):
         if row is None or row[0] is None:
             return None
         return WarehouseObjectType.VIEW if "VIEW" in str(row[0]).upper() else WarehouseObjectType.TABLE
+
+    def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
+        """Give the columns of the object at the address. Reads DESCRIBE TABLE.
+
+        DESCRIBE TABLE gives the type as DDL text, for example
+        ``VARCHAR(16777216)``, thus an ALTER can use it as it is. The method
+        gives None when the query fails, for example because the address holds
+        no object.
+        """
+        if self._conn is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(f"DESCRIBE TABLE {address}")
+            rows = cursor.fetchall()
+        except Exception:  # noqa: BLE001 — a query that fails means "clair sees no object"
+            return None
+        finally:
+            cursor.close()
+
+        # Each row is (name, type, kind, ...). A kind other than COLUMN, for
+        # example a virtual column, takes no value from an insert.
+        return [
+            WarehouseColumn(name=str(row[0]), data_type=str(row[1]))
+            for row in rows
+            if str(row[2]).upper() == "COLUMN"
+        ]
 
     def set_context(
         self,

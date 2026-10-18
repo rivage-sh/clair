@@ -28,6 +28,7 @@ def build_sql(
     effective_mode: RunMode,
     run_id: str,
     staging_address: TrouveAddress | None = None,
+    target_column_names: list[str] | None = None,
 ) -> BuildPlan: ...
 ```
 
@@ -36,6 +37,7 @@ def build_sql(
 | `effective_mode` | `FULL_REFRESH` or `INCREMENTAL`. clair decides it: a VIEW, a first run, and a run without `--run-mode incremental` all give `FULL_REFRESH`. |
 | `run_id` | The identifier of this run. Put it in the name of each object that the plan makes for one run, thus two runs never share a name. |
 | `staging_address` | The address to write. When it is `None`, write to `self.physical_address`. Write `staging_address or self.physical_address`. |
+| `target_column_names` | The columns of the target table, in the order of the warehouse. clair reads them before an incremental run. It is `None` in a full refresh and in `clair compile`. Give it to `self.insert_statement()`. |
 
 The method gives a `BuildPlan`:
 
@@ -78,6 +80,7 @@ class ReplaceWindowTrouve(Table):
         effective_mode: RunMode,
         run_id: str,
         staging_address: TrouveAddress | None = None,
+        target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         if effective_mode == RunMode.FULL_REFRESH:
             return super().build_sql(effective_mode, run_id, staging_address)
@@ -92,7 +95,7 @@ class ReplaceWindowTrouve(Table):
             f"DELETE FROM {target}\n"
             f"WHERE {self.window_column} >= (SELECT MIN({self.window_column}) FROM {window_rows})"
         )
-        insert_window = f"INSERT INTO {target}\nSELECT * FROM {window_rows}"
+        insert_window = self.insert_statement(str(target), window_rows, target_column_names)
         return BuildPlan(
             statements=[create_window_rows, delete_window, insert_window],
             cleanup_statements=[f"DROP TABLE IF EXISTS {window_rows}"],
@@ -104,7 +107,11 @@ field, thus clair validates it when the Trouve file runs.
 
 For a full refresh, `super().build_sql()` gives the normal `CREATE OR REPLACE TABLE`. For
 an incremental run, the plan writes the rows of the window to a table of their own, deletes
-the window from the target, and inserts the rows. The drop of the window table is a cleanup
+the window from the target, and inserts the rows.
+
+`self.insert_statement()` names each column of the target in the `INSERT`. Do not write
+`INSERT INTO target SELECT * FROM ...`. That statement matches the columns by position, thus
+two columns that change places in the SQL swap their values, and Snowflake gives no error. The drop of the window table is a cleanup
 statement, thus it runs when the `DELETE` or the `INSERT` fails too.
 
 The built-in `DeleteInsert(range_column=...)` deletes each row between the minimum and the

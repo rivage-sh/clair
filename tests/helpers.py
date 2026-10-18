@@ -13,23 +13,32 @@ from __future__ import annotations
 import threading
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, cast
 
 import pandas as pd
 
-from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
-from clair.core.dag import ClairDag
-from clair.core.runner import RunResult
+from clair.adapters.base import (
+    Statement,
+    StatementStatus,
+    WarehouseAdapter,
+    WarehouseColumn,
+    WarehouseObjectType,
+)
+from clair.adapters.snowflake import SnowflakeAdapter
+from clair.core.dag import ClairDag, build_dag, get_executable_nodes
+from clair.core.runner import RunResult, run_project
 from clair.core.test_runner import TestResult
 from clair.environments.environments import Authentication, Authenticator, Connection, Environment
 from clair.environments.routing import RoutingEntry, TrouveAddress
 from clair.trouves.address import NodeAddresses
 from clair.trouves.config import ResolvedConfig
+from clair.trouves.run_config import RunMode
 from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.trouve import (
     CompiledAttributes,
     ExecutionType,
     Source,
+    SqlTrouve,
     Table,
     TrouveAbc,
     TrouveType,
@@ -257,6 +266,10 @@ def make_test_result(
 # ---------------------------------------------------------------------------
 
 
+# The columns of each table in a RecordingAdapter, unless a test gives others.
+DEFAULT_TABLE_COLUMNS = (WarehouseColumn(name="ID", data_type="NUMBER(38,0)"),)
+
+
 class StatementRecord:
     """The shared record of each adapter of one run.
 
@@ -311,6 +324,8 @@ class RecordingAdapter(WarehouseAdapter):
             Statement. Use the name of a Trouve to fail that Trouve.
         existing_tables: The address of each table that the warehouse holds.
             None means that every table exists, which is the common case.
+        table_columns: The columns that describe_columns() gives for each
+            table that exists. None makes describe_columns() fail.
         existing_views: The address of each view that the warehouse holds. An
             address here answers VIEW, even when existing_tables holds it too.
             Use it to test a Trouve that changes its type.
@@ -331,6 +346,7 @@ class RecordingAdapter(WarehouseAdapter):
         *,
         fail_on: Sequence[str] = (),
         existing_tables: Sequence[str] | None = None,
+        table_columns: Sequence[WarehouseColumn] | None = DEFAULT_TABLE_COLUMNS,
         existing_views: Sequence[str] = (),
         dataframes: dict[str, pd.DataFrame] | None = None,
         default_dataframe: pd.DataFrame | None = None,
@@ -342,6 +358,7 @@ class RecordingAdapter(WarehouseAdapter):
     ) -> None:
         self.fail_on = list(fail_on)
         self.existing_tables = None if existing_tables is None else set(existing_tables)
+        self.table_columns = None if table_columns is None else list(table_columns)
         self.existing_views = set(existing_views)
         self.dataframes: dict[str, pd.DataFrame] = dict(dataframes or {})
         self.default_dataframe = default_dataframe
@@ -373,6 +390,7 @@ class RecordingAdapter(WarehouseAdapter):
             existing_tables=None
             if self.existing_tables is None
             else sorted(self.existing_tables),
+            table_columns=self.table_columns,
             existing_views=sorted(self.existing_views),
             dataframes=self.dataframes,
             default_dataframe=self.default_dataframe,
@@ -436,6 +454,11 @@ class RecordingAdapter(WarehouseAdapter):
             return WarehouseObjectType.TABLE
         return WarehouseObjectType.TABLE if str(address) in self.existing_tables else None
 
+    def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
+        if self.table_columns is None or self.object_type(address) != WarehouseObjectType.TABLE:
+            return None
+        return list(self.table_columns)
+
     # The DataFrames.
 
     def fetch_dataframe(self, address: TrouveAddress) -> pd.DataFrame:
@@ -454,3 +477,123 @@ class RecordingAdapter(WarehouseAdapter):
         self.dataframes[str(address)] = dataframe
         self.written_addresses.append(str(address))
         return self.execute(f"-- write_dataframe {address}")
+
+
+# ---------------------------------------------------------------------------
+# One Trouve through the runner.
+# ---------------------------------------------------------------------------
+
+TEST_RUN_ID = "0195aabbccddeeff0011223344556677"
+TEST_ADDRESS = "analytics.revenue.orders"
+
+AnyTrouve = TypeVar("AnyTrouve", bound=TrouveAbc)
+
+
+def compile_trouve(trouve: AnyTrouve, address: str = TEST_ADDRESS) -> AnyTrouve:
+    """Give the Trouve the compiled attributes that the runner needs."""
+    trouve.compiled = CompiledAttributes(
+        physical_address=TrouveAddress.parse(address),
+        logical_address=TrouveAddress.parse(address),
+        resolved_sql=getattr(trouve, "sql", ""),
+        file_path=Path(f"/fake/{address.replace('.', '/')}.py"),
+        module_name=address,
+        imports=[],
+        config=ResolvedConfig(),
+        execution_type=ExecutionType.SNOWFLAKE,
+    )
+    return trouve
+
+
+def run_one_trouve(
+    trouve: SqlTrouve,
+    adapter: RecordingAdapter,
+    *,
+    use_staging: bool = True,
+    run_mode: RunMode = RunMode.FULL_REFRESH,
+    tests_passed: bool = True,
+    tested_addresses: list[str] | None = None,
+) -> RunResult:
+    """Run one Trouve at TEST_ADDRESS, and give the single RunResult.
+
+    *tested_addresses* receives the address of each object that the data
+    quality tests examined.
+    """
+
+    def run_the_tests(name: str, address: str, _adapter: object) -> bool:
+        if tested_addresses is not None:
+            tested_addresses.append(address)
+        return tests_passed
+
+    dag = build_dag([compile_trouve(trouve)])
+    selected = get_executable_nodes(dag)
+    results = list(
+        run_project(
+            dag,
+            selected,
+            adapter,
+            run_mode=run_mode,
+            run_id=TEST_RUN_ID,
+            after_node_success=run_the_tests if use_staging else None,
+            use_staging=use_staging,
+        )
+    )
+    assert len(results) == 1
+    return results[0]
+
+
+def executed_sql(result: RunResult) -> list[str]:
+    """Give the SQL of each statement that clair sent to the warehouse."""
+    return [
+        statement.sql
+        for statement in result.statements
+        if statement.status != StatementStatus.NOT_RUN
+    ]
+
+
+# ---------------------------------------------------------------------------
+# A SnowflakeAdapter with no connection.
+# ---------------------------------------------------------------------------
+
+
+class FakeCursor:
+    """A cursor that gives fixed rows, or raises. It records the SQL that it got."""
+
+    def __init__(self, rows: list[tuple], error: Exception | None = None) -> None:
+        self.rows = rows
+        self.error = error
+        self.sql = ""
+        self.closed = False
+
+    def execute(self, sql: str) -> None:
+        self.sql = sql
+        if self.error is not None:
+            raise self.error
+
+    def fetchone(self) -> tuple | None:
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self) -> list[tuple]:
+        return list(self.rows)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeConnection:
+    def __init__(self, cursor: FakeCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self) -> FakeCursor:
+        return self._cursor
+
+
+def snowflake_adapter_that_answers(
+    rows: list[tuple], error: Exception | None = None
+) -> tuple[SnowflakeAdapter, FakeCursor]:
+    """Give a SnowflakeAdapter whose connection answers the rows."""
+    adapter = SnowflakeAdapter()
+    cursor = FakeCursor(rows, error)
+    # The adapter needs a connection object only to make a cursor, thus the
+    # fake gives one. cast keeps the type checker quiet about the narrow use.
+    adapter._conn = cast(Any, FakeConnection(cursor))
+    return adapter, cursor

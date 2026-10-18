@@ -121,6 +121,17 @@ class ExecutionType(StrEnum):
 NEW_ROWS_SUFFIX = "__clair_new_rows_"
 
 
+def quote_column_name(column_name: str) -> str:
+    """Give the column name as a quoted identifier.
+
+    The warehouse gives each name as it stores it, for example ``ORDER_DATE``.
+    A quoted identifier matches that name exactly, also when the name is a
+    reserved word or holds lower case letters.
+    """
+    escaped_name = column_name.replace('"', '""')
+    return f'"{escaped_name}"'
+
+
 class CompiledAttributes(BaseModel):
     """The attributes that discovery sets after it loads a Trouve.
 
@@ -283,6 +294,7 @@ class SqlTrouve(TrouveAbc, ABC):
         effective_mode: RunMode,
         run_id: str,
         staging_address: TrouveAddress | None = None,
+        target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         """Make the SQL statements that materialize this Trouve.
 
@@ -292,6 +304,10 @@ class SqlTrouve(TrouveAbc, ABC):
             staging_address: The staging address, if the run has a staging step.
                 The statements write there, and not to the physical address. A
                 reference to an upstream Trouve keeps its physical address.
+            target_column_names: The columns of the table that an incremental
+                run writes to, in the order of the warehouse. The runner reads
+                them before it calls this method. It is None in a full refresh,
+                and in ``clair compile``, which has no connection.
 
         Returns:
             The statements to execute, and the statements that clean up after
@@ -323,6 +339,7 @@ class View(SqlTrouve):
         effective_mode: RunMode,
         run_id: str,
         staging_address: TrouveAddress | None = None,
+        target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         """Give CREATE OR REPLACE VIEW. A view has no incremental mode."""
         return self._full_refresh_plan("VIEW", staging_address)
@@ -344,6 +361,7 @@ class Table(SqlTrouve):
         effective_mode: RunMode,
         run_id: str,
         staging_address: TrouveAddress | None = None,
+        target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         """Make the SQL statements that materialize this Table.
 
@@ -370,13 +388,46 @@ class Table(SqlTrouve):
             )
         if isinstance(strategy, Append):
             return BuildPlan(statements=[
-                f"INSERT INTO {address}\nSELECT * FROM (\n{resolved_sql}\n)"
+                self.insert_statement(address, f"(\n{resolved_sql}\n)", target_column_names)
             ])
         if isinstance(strategy, Upsert):
             return self._upsert_build_plan(address, resolved_sql, run_id)
         if isinstance(strategy, DeleteInsert):
-            return self._delete_insert_build_plan(strategy, address, resolved_sql, run_id)
+            return self._delete_insert_build_plan(
+                strategy, address, resolved_sql, run_id, target_column_names
+            )
         raise CompileError(f"No incremental plan for the strategy {strategy}.")
+
+    def insert_statement(
+        self, address: str, new_rows: str, target_column_names: list[str] | None
+    ) -> str:
+        """Give the INSERT that adds the new rows to the target, column by column name.
+
+        An INSERT without a column list matches the columns by position. Then
+        two columns that change places in the SQL swap their values with no
+        error. The column list matches each value to its column by name.
+
+        Args:
+            address: The table that receives the rows.
+            new_rows: The relation that holds the new rows: a table name, or a
+                subquery in parentheses.
+            target_column_names: The columns of the target, from the warehouse.
+                None uses the declared columns. With none of the two, the
+                statement matches by position, and a comment says that the run
+                names the columns.
+        """
+        if target_column_names is not None:
+            column_list = ", ".join(
+                quote_column_name(column_name) for column_name in target_column_names
+            )
+        elif self.columns:
+            column_list = ", ".join(column.name for column in self.columns)
+        else:
+            return (
+                f"INSERT INTO {address}\nSELECT * FROM {new_rows}\n"
+                "-- clair run names each column of the target table"
+            )
+        return f"INSERT INTO {address} ({column_list})\nSELECT {column_list} FROM {new_rows}"
 
     def incremental_strategy(self) -> Append | Upsert | DeleteInsert | None:
         """Give the built-in strategy of an incremental run_config, or None."""
@@ -411,7 +462,12 @@ class Table(SqlTrouve):
         )
 
     def _delete_insert_build_plan(
-        self, strategy: DeleteInsert, address: str, resolved_sql: str, run_id: str
+        self,
+        strategy: DeleteInsert,
+        address: str,
+        resolved_sql: str,
+        run_id: str,
+        target_column_names: list[str] | None,
     ) -> BuildPlan:
         """Make the plan that deletes the target rows of the new rows, then inserts the new rows.
 
@@ -444,7 +500,7 @@ class Table(SqlTrouve):
             )
         insert_new_rows = (
             f"-- [3/4] insert the new rows\n"
-            f"INSERT INTO {address}\nSELECT * FROM {new_rows_address}"
+            f"{self.insert_statement(address, new_rows_address, target_column_names)}"
         )
         drop_new_rows = (
             f"-- [4/4] drop the new rows table\n"
