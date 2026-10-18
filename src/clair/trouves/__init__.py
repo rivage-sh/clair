@@ -11,10 +11,11 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import Trouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import BuildPlan, Trouve, TrouveAbc, TrouveType
 
 __all__ = [
     "AnyTest",
+    "BuildPlan",
     "Column",
     "ColumnType",
     "DatabaseDefaults",
