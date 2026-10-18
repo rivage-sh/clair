@@ -22,10 +22,18 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from clair.exceptions import CompileError
 from clair.trouves._refs import register
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column
-from clair.trouves.run_config import SOURCE, TARGET, IncrementalMode, RunConfig, RunMode
+from clair.trouves.run_config import (
+    SOURCE,
+    TARGET,
+    IncrementalMode,
+    RunConfig,
+    RunMode,
+    match_condition,
+)
 from clair.trouves.test import AnyTest
 
 
@@ -75,12 +83,7 @@ class UpsertPlan(BaseModel):
     @property
     def join_condition(self) -> str:
         """Give the ON condition of the MERGE."""
-        if self.join_sql:
-            return self.join_sql
-        return " AND ".join(
-            f"{TARGET}.{column_name} = {SOURCE}.{column_name}"
-            for column_name in self.join_key_columns
-        )
+        return match_condition(self.join_sql, self.join_key_columns)
 
     @property
     def update_clause(self) -> str:
@@ -114,11 +117,11 @@ class ExecutionType(StrEnum):
     PANDAS = "pandas"
 
 
-# The MERGE of an UPSERT reads a table that holds the new rows. This suffix and
-# the run_id make the name of that table. It is not the staging suffix of
-# clair.core.staging: the two objects hold different data, and an incremental
-# run makes both.
-MERGE_SUFFIX = "__clair_merge_"
+# An UPSERT and a DELETE_INSERT first write the new rows to a table, and the
+# MERGE or the DELETE reads it. This suffix and the run_id make the name of that
+# table. It is not the staging suffix of clair.core.staging: the two objects
+# hold different data, and an incremental run makes both.
+NEW_ROWS_SUFFIX = "__clair_new_rows_"
 
 
 class CompiledAttributes(BaseModel):
@@ -291,7 +294,7 @@ class Trouve(TrouveAbc):
             return BuildPlan()
 
         resolved_sql = self.compiled.resolved_sql.strip()
-        address = str(staging_address) if staging_address else self.physical_address
+        address = str(staging_address or self.physical_address)
 
         if effective_mode == RunMode.FULL_REFRESH:
             object_type = "TABLE" if self.type == TrouveType.TABLE else "VIEW"
@@ -299,11 +302,19 @@ class Trouve(TrouveAbc):
                 f"CREATE OR REPLACE {object_type} {address} AS (\n{resolved_sql}\n)"
             ])
 
-        if self.run_config.incremental_mode == IncrementalMode.APPEND:
+        incremental_mode = self.run_config.incremental_mode
+        if incremental_mode == IncrementalMode.APPEND:
             return BuildPlan(statements=[
                 f"INSERT INTO {address}\nSELECT * FROM (\n{resolved_sql}\n)"
             ])
+        if incremental_mode == IncrementalMode.UPSERT:
+            return self._upsert_build_plan(address, resolved_sql, run_id)
+        if incremental_mode == IncrementalMode.DELETE_INSERT:
+            return self._delete_insert_build_plan(address, resolved_sql, run_id)
+        raise CompileError(f"No incremental plan for the mode {incremental_mode}.")
 
+    def _upsert_build_plan(self, address: str, resolved_sql: str, run_id: str) -> BuildPlan:
+        """Make the plan that merges the new rows into the target table."""
         plan = self.upsert_plan(run_id)
         create_merge_source = (
             f"-- [1/3] create the merge source table\n"
@@ -327,6 +338,53 @@ class Trouve(TrouveAbc):
             statements=[create_merge_source, merge],
             cleanup_statements=[drop_merge_source],
         )
+
+    def _delete_insert_build_plan(
+        self, address: str, resolved_sql: str, run_id: str
+    ) -> BuildPlan:
+        """Make the plan that replaces each target row that a new row matches.
+
+        A DELETE_INSERT keeps a duplicate key in the new rows, where a MERGE
+        fails. A key on a date column replaces each day that the new rows hold.
+        """
+        new_rows_address = self.new_rows_address(run_id)
+        condition = match_condition(
+            self.run_config.join_sql, list(self.run_config.primary_key_columns or [])
+        )
+        create_new_rows = (
+            f"-- [1/4] create the new rows table\n"
+            f"CREATE OR REPLACE TABLE {new_rows_address} AS (\n{resolved_sql}\n)"
+        )
+        delete_matched_rows = (
+            f"-- [2/4] delete each target row that a new row matches\n"
+            f"DELETE FROM {address} AS {TARGET}\n"
+            f"USING {new_rows_address} AS {SOURCE}\n"
+            f"WHERE {condition}"
+        )
+        insert_new_rows = (
+            f"-- [3/4] insert the new rows\n"
+            f"INSERT INTO {address}\nSELECT * FROM {new_rows_address}"
+        )
+        drop_new_rows = (
+            f"-- [4/4] drop the new rows table\n"
+            f"DROP TABLE IF EXISTS {new_rows_address}"
+        )
+        return BuildPlan(
+            statements=[create_new_rows, delete_matched_rows, insert_new_rows],
+            cleanup_statements=[drop_new_rows],
+        )
+
+    def new_rows_address(self, run_id: str) -> str:
+        """Give the table that holds the new rows of an UPSERT or a DELETE_INSERT.
+
+        It is not the staging address: it holds the new rows only. The name
+        comes from the physical address, thus the two suffixes do not go on top
+        of each other.
+
+        Args:
+            run_id: The unique identifier of this clair run.
+        """
+        return f"{self.physical_address}{NEW_ROWS_SUFFIX}{run_id}"
 
     def upsert_plan(self, run_id: str) -> UpsertPlan:
         """Give the decisions that the MERGE of an UPSERT run needs.
@@ -369,12 +427,8 @@ class Trouve(TrouveAbc):
         else:
             insert_column_names = all_column_names
 
-        # The MERGE needs a source table. It is not the staging address: it
-        # holds the new rows only, and the MERGE reads it. The name comes from
-        # the physical address, thus the two suffixes do not go on top of each
-        # other.
         return UpsertPlan(
-            merge_source_address=f"{self.physical_address}{MERGE_SUFFIX}{run_id}",
+            merge_source_address=self.new_rows_address(run_id),
             join_sql=self.run_config.join_sql,
             join_key_columns=primary_key_columns,
             update_column_names=update_column_names,

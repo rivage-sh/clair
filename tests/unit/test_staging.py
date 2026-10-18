@@ -175,7 +175,7 @@ class TestBuildSqlStagingAddress:
         assert "MERGE INTO db.s.candidate" in statements[1]
         # The merge source table derives from the real name, not the override,
         # so the two suffixes never stack.
-        assert f"db.s.orders__clair_merge_{RUN_ID}" in statements[0]
+        assert f"db.s.orders__clair_new_rows_{RUN_ID}" in statements[0]
 
     def test_omitting_the_address_writes_to_the_physical_address(self):
         trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")

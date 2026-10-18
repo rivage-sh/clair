@@ -524,14 +524,14 @@ class TestBuildSqlUpsertWithPrimaryKey:
 
     def test_stmt1_creates_staging_table_with_run_id(self):
         staging_stmt = self.statements[0]
-        assert "CREATE OR REPLACE TABLE db.schema.orders__clair_merge_abc123" in staging_stmt
+        assert "CREATE OR REPLACE TABLE db.schema.orders__clair_new_rows_abc123" in staging_stmt
         assert "SELECT id, name, amount FROM staging.orders" in staging_stmt
         assert "-- [1/3]" in staging_stmt
 
     def test_stmt2_merge_uses_primary_key_in_on_clause(self):
         merge_stmt = self.statements[1]
         assert "MERGE INTO db.schema.orders AS target" in merge_stmt
-        assert "USING db.schema.orders__clair_merge_abc123 AS source" in merge_stmt
+        assert "USING db.schema.orders__clair_new_rows_abc123 AS source" in merge_stmt
         assert "ON target.id = source.id" in merge_stmt
 
     def test_stmt2_update_set_excludes_primary_key(self):
@@ -547,7 +547,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
 
     def test_stmt3_drops_staging_table(self):
         drop_stmt = self.statements[2]
-        assert "DROP TABLE IF EXISTS db.schema.orders__clair_merge_abc123" in drop_stmt
+        assert "DROP TABLE IF EXISTS db.schema.orders__clair_new_rows_abc123" in drop_stmt
         assert "-- [3/3]" in drop_stmt
 
 
@@ -767,7 +767,7 @@ class TestBuildSqlStagingTableName:
         )
         statements = trouve.build_sql(RunMode.INCREMENTAL, "unique_run_42").all_statements
 
-        staging_name = "db.schema.target_table__clair_merge_unique_run_42"
+        staging_name = "db.schema.target_table__clair_new_rows_unique_run_42"
         assert staging_name in statements[0]
         assert staging_name in statements[1]
         assert staging_name in statements[2]

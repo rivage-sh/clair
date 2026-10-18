@@ -41,7 +41,7 @@ from pathlib import Path
 from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.trouves.run_config import IncrementalMode
-from clair.trouves.trouve import MERGE_SUFFIX, ExecutionType
+from clair.trouves.trouve import NEW_ROWS_SUFFIX, ExecutionType
 from tests.integration.projects import (
     CI_DATABASE_CONFIG_FILE,
     CI_ROUTING_FILE,
@@ -76,7 +76,7 @@ def merge_source_address(
     return TrouveAddress(
         database_name=physical.database_name,
         schema_name=schema_name,
-        table_name=f"{physical.table_name}{MERGE_SUFFIX}{run_id}",
+        table_name=f"{physical.table_name}{NEW_ROWS_SUFFIX}{run_id}",
     )
 
 
@@ -140,15 +140,15 @@ def incremental_checked_file(
 ) -> str:
     """Give the candidate Trouve that clair materializes incrementally.
 
-    An UPSERT matches on ``id``. An APPEND takes no primary key column, and
-    RunConfig rejects one.
+    An UPSERT and a DELETE_INSERT match on ``id``. An APPEND takes no primary
+    key column, and RunConfig rejects one.
 
     ``ratio`` is a FLOAT. `tables_are_equal` compares a float column inside a
     tolerance, and this column makes the integration job run that path against
     Snowflake. A cast to FLOAT is necessary, because a division of two NUMBER
     values gives a NUMBER.
     """
-    if incremental_mode == IncrementalMode.UPSERT:
+    if incremental_mode in (IncrementalMode.UPSERT, IncrementalMode.DELETE_INSERT):
         primary_key_line = '        primary_key_columns=["id"],\n'
     elif incremental_mode == IncrementalMode.APPEND:
         primary_key_line = ""
@@ -271,9 +271,10 @@ def write_probe_project(
         minimum_rows: The limit of TestRowCount on the refined Trouve.
         execution_type: SNOWFLAKE for a SQL candidate, PANDAS for a candidate
             that a transform function gives.
-        incremental_mode: APPEND or UPSERT for an incremental candidate. None
-            gives a full refresh candidate. A PandasTrouve always makes the
-            table again, so the two arguments do not go together.
+        incremental_mode: APPEND, UPSERT or DELETE_INSERT for an incremental
+            candidate. None gives a full refresh candidate. A PandasTrouve
+            always makes the table again, so the two arguments do not go
+            together.
 
     Returns:
         The path of the project root.

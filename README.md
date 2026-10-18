@@ -481,7 +481,7 @@ Example projects are included under `examples/projects/`:
 |---------|---------------------|
 | `example_1` | A minimal 4-Trouve events pipeline with VARIANT flattening |
 | `example_2` | A 52-Trouve e-commerce warehouse across 5 layers (source → refined → derived → reports), with a seed in `reference` |
-| `example_3` | Incremental APPEND and UPSERT strategies |
+| `example_3` | Incremental APPEND, UPSERT and DELETE_INSERT strategies |
 | `example_4` | A `PandasTrouve` that gives a DataFrame instead of SQL |
 | `example_from_init` | The files that `clair init` writes |
 

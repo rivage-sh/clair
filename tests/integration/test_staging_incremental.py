@@ -5,13 +5,14 @@ An incremental run adds two objects that a full refresh does not have:
 * The **staging table**, ``<table>__clair_<run_id>``. A zero copy clone of the
   physical table seeds it, because an incremental statement changes data that
   exists already.
-* The **merge source table**, ``<table>__clair_merge_<run_id>``. An UPSERT
-  writes the new rows there, and the MERGE reads them. An APPEND makes no such
-  table.
+* The **new rows table**, ``<table>__clair_new_rows_<run_id>``. An UPSERT and
+  a DELETE_INSERT write the new rows there, and the MERGE or the DELETE reads
+  them. An APPEND makes no such table.
 
-The order of the statements therefore is: clone, make the merge source, MERGE,
-drop the merge source, test, promote, drop the staging table. The tests below
-run each of those paths, and each one that fails.
+The order of the statements of an UPSERT therefore is: clone, make the merge
+source, MERGE, drop the merge source, test, promote, drop the staging table. A
+DELETE_INSERT puts a DELETE and an INSERT in the place of the MERGE. The tests
+below run each of those paths, and each one that fails.
 
 Each test calls `clair.run()`. The `RunSummary` gives the statements of the run
 and the index of the statement that failed, thus a test names the step that
@@ -160,6 +161,82 @@ class TestAnUpsertRunThatPasses:
         assert not table_exists(
             adapter, merge_source_address(checked, second.run_id, schema_name)
         )
+        assert staging_objects(adapter, schema_name, self.DATABASE_NAME) == []
+
+
+class TestADeleteInsertRunThatPasses:
+    """The DELETE and the INSERT write to the staging table, and the promotion follows."""
+
+    DATABASE_NAME = "staging_delete_insert_pass_database"
+
+    @pytest.fixture(scope="class")
+    def runs(
+        self,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
+        adapter: SnowflakeAdapter,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> tuple[RunSummary, RunSummary]:
+        """Build the table, then replace id_001 with two rows, and add id_003.
+
+        The new rows of the second run hold id_001 two times, and a MERGE
+        refuses that. They do not hold id_000 or id_002, thus those rows match
+        nothing and stay.
+        """
+        schema_name = clair_environment.schema_name
+        project_path = write_probe_project(
+            tmp_path_factory.mktemp("staging_delete_insert_pass"),
+            self.DATABASE_NAME,
+            minimum_rows=PASSING_LIMIT,
+            incremental_mode=IncrementalMode.DELETE_INSERT,
+        )
+
+        make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
+        first = clair.run(project_path, env=environment, run_mode=RunMode.INCREMENTAL)
+
+        make_source_rows(adapter, self.DATABASE_NAME, schema_name, {"id_001": 99, "id_003": 1})
+        insert_source_row(adapter, self.DATABASE_NAME, schema_name, "id_001", 98)
+        second = clair.run(project_path, env=environment, run_mode=RunMode.INCREMENTAL)
+        return first, second
+
+    def test_the_second_run_deletes_then_inserts(
+        self, runs: tuple[RunSummary, RunSummary]
+    ) -> None:
+        first, second = runs
+        first_result = first.result(f"{self.DATABASE_NAME}.refined.checked")
+        second_result = second.result(f"{self.DATABASE_NAME}.refined.checked")
+
+        assert first_result is not None
+        assert first_result.effective_run_mode == RunMode.FULL_REFRESH
+        assert second_result is not None
+        assert second_result.status == RunStatus.SUCCESS
+        assert second_result.effective_run_mode == RunMode.INCREMENTAL
+
+    def test_a_matched_row_is_replaced_and_an_unmatched_row_stays(
+        self,
+        runs: tuple[RunSummary, RunSummary],
+        clair_environment: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        schema_name = clair_environment.schema_name
+        checked = checked_address(self.DATABASE_NAME, schema_name)
+
+        rows = query_rows(adapter, f"select id, amount from {checked} order by id, amount")
+        assert [(str(row_id), int(str(amount))) for row_id, amount in rows] == [
+            ("id_000", 1),
+            ("id_001", 98),
+            ("id_001", 99),
+            ("id_002", 1),
+            ("id_003", 1),
+        ]
+
+    def test_clair_drops_the_staging_table_and_the_new_rows_table(
+        self,
+        runs: tuple[RunSummary, RunSummary],
+        clair_environment: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        schema_name = clair_environment.schema_name
         assert staging_objects(adapter, schema_name, self.DATABASE_NAME) == []
 
 

@@ -1,7 +1,7 @@
 # Example 3 — Incremental Materializations
 
-Integration test project for `run_mode` functionality. Demonstrates both incremental strategies:
-`APPEND` and `UPSERT`.
+Integration test project for `run_mode` functionality. Demonstrates the three incremental strategies:
+`APPEND`, `UPSERT` and `DELETE_INSERT`.
 
 ## Pipeline
 
@@ -9,7 +9,8 @@ Integration test project for `run_mode` functionality. Demonstrates both increme
 source.orders  (SOURCE)
     └── refined.orders             (TABLE, full refresh)
             ├── derived.recent_orders          (TABLE, INCREMENTAL APPEND)
-            └── derived.customer_order_summary (TABLE, INCREMENTAL UPSERT)
+            ├── derived.customer_order_summary (TABLE, INCREMENTAL UPSERT)
+            └── derived.daily_orders           (TABLE, INCREMENTAL DELETE_INSERT)
 ```
 
 | Trouve | Strategy | Description |
@@ -18,6 +19,7 @@ source.orders  (SOURCE)
 | `refined.orders` | Full refresh | Typed + date columns added |
 | `derived.recent_orders` | Incremental APPEND | Appends orders created in last 3 days |
 | `derived.customer_order_summary` | Incremental UPSERT on `customer_id` | Per-customer stats, merged in-place |
+| `derived.daily_orders` | Incremental DELETE_INSERT on `created_date` | Orders and revenue of each day; replaces the last 3 days |
 
 ## Prerequisites
 
@@ -126,6 +128,7 @@ Expected behaviour:
 - `refined.orders` — full refresh (no `run_config` set), rebuilds from source
 - `derived.recent_orders` — **APPEND**: the two new orders are inserted alongside existing rows
 - `derived.customer_order_summary` — **UPSERT**: `cust_c` stats are updated; `cust_d` is inserted as a new row
+- `derived.daily_orders` — **DELETE_INSERT**: clair deletes the rows of the last 3 days and inserts them again; today now counts ord_007 and ord_008
 
 Verify:
 

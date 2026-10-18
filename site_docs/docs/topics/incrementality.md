@@ -138,7 +138,7 @@ Generated SQL on an incremental run — 3 statements:
 
 ```sql
 -- [1/3] make the merge source table
-CREATE OR REPLACE TABLE example_3_database.derived.customer_order_summary__clair_merge_<run_id> AS (
+CREATE OR REPLACE TABLE example_3_database.derived.customer_order_summary__clair_new_rows_<run_id> AS (
     select customer_id, count(*) as total_orders, ...
     from example_3_database.refined.orders
     group by customer_id
@@ -146,7 +146,7 @@ CREATE OR REPLACE TABLE example_3_database.derived.customer_order_summary__clair
 
 -- [2/3] merge into the target
 MERGE INTO example_3_database.derived.customer_order_summary AS target
-USING example_3_database.derived.customer_order_summary__clair_merge_<run_id> AS source
+USING example_3_database.derived.customer_order_summary__clair_new_rows_<run_id> AS source
 ON target.customer_id = source.customer_id
 WHEN MATCHED THEN UPDATE SET
     total_orders = source.total_orders,
@@ -158,7 +158,7 @@ WHEN NOT MATCHED THEN INSERT (customer_id, total_orders, total_amount, first_ord
     VALUES (source.customer_id, source.total_orders, source.total_amount, source.first_order_at, source.last_order_at, source.last_updated_at)
 
 -- [3/3] drop the merge source table
-DROP TABLE IF EXISTS example_3_database.derived.customer_order_summary__clair_merge_<run_id>
+DROP TABLE IF EXISTS example_3_database.derived.customer_order_summary__clair_new_rows_<run_id>
 ```
 
 ## Your own join conditions
@@ -194,6 +194,101 @@ run_config=RunConfig(
 )
 ```
 
+## DELETE_INSERT
+
+DELETE_INSERT deletes each target row that a new row matches, then inserts all the new rows. Use it to replace a window of data, for example the last 3 days.
+
+Choose DELETE_INSERT in place of UPSERT for two reasons:
+
+- A MERGE fails when two new rows hold the same key. DELETE_INSERT inserts each new row, thus a duplicate key does not stop the run.
+- A key on a date column replaces each day that the new rows hold. One delete of a full day costs less than a match of each row.
+
+```python
+# example_3_database/derived/daily_orders.py
+from example_3_database.refined.orders import trouve as refined_orders
+
+import clair
+from clair import (
+    Column,
+    ColumnType,
+    IncrementalMode,
+    RunConfig,
+    RunMode,
+    TestUnique,
+    Trouve,
+    TrouveType,
+)
+
+sql = f"""
+    select
+        created_date,
+        count(*)    as order_count,
+        sum(amount) as revenue
+    from {refined_orders}
+"""
+if clair.run_mode == RunMode.INCREMENTAL:
+    sql += """
+        where created_date >= dateadd('day', -3, current_date())
+    """
+sql += """
+    group by created_date
+"""
+
+trouve = Trouve(
+    type=TrouveType.TABLE,
+    docs="""
+        The orders and the revenue of each day. In each incremental run, clair calculates
+        the last 3 days again and replaces them. Thus a late order changes the total of its
+        day, and the days before the window stay.
+    """,
+    sql=sql,
+    run_config=RunConfig(
+        run_mode=RunMode.INCREMENTAL,
+        incremental_mode=IncrementalMode.DELETE_INSERT,
+        primary_key_columns=["created_date"],
+    ),
+    columns=[
+        Column(name="created_date", type=ColumnType.DATE),
+        Column(name="order_count", type=ColumnType.INTEGER),
+        Column(name="revenue", type=ColumnType.FLOAT),
+    ],
+    tests=[TestUnique(column="created_date")],
+)
+```
+
+The key is `created_date`, thus each incremental run replaces each day of the last 3 days. A day before the window keeps its rows. DELETE_INSERT needs no `columns`: the INSERT copies each column of the new rows.
+
+Generated SQL on an incremental run — 3 statements and 1 cleanup:
+
+```sql
+-- [1/4] create the new rows table
+CREATE OR REPLACE TABLE example_3_database.derived.daily_orders__clair_new_rows_<run_id> AS (
+    select created_date, count(*) as order_count, sum(amount) as revenue
+    from example_3_database.refined.orders
+    where created_date >= dateadd('day', -3, current_date())
+    group by created_date
+)
+
+-- [2/4] delete each target row that a new row matches
+DELETE FROM example_3_database.derived.daily_orders AS target
+USING example_3_database.derived.daily_orders__clair_new_rows_<run_id> AS source
+WHERE target.created_date = source.created_date
+
+-- [3/4] insert the new rows
+INSERT INTO example_3_database.derived.daily_orders
+SELECT * FROM example_3_database.derived.daily_orders__clair_new_rows_<run_id>
+
+-- [4/4] drop the new rows table
+DROP TABLE IF EXISTS example_3_database.derived.daily_orders__clair_new_rows_<run_id>
+```
+
+The DELETE and the INSERT write to the staging table, and clair promotes it after the tests pass. Thus the physical table never shows the rows between the DELETE and the INSERT. Clair runs the drop of the new rows table after a failure too.
+
+`join_sql` also applies to DELETE_INSERT. It gives the `WHERE` condition of the DELETE, with the aliases `target` and `source`.
+
+!!! note
+    A day that the new rows do not hold keeps its old rows. If the source deletes all the orders of one day in the window, the old total of that day stays. Use a full refresh to remove it.
+
 ## Behavior of the first run
 
 On the first run, the target table does not exist. clair then does a full refresh, and it ignores your strategy. The runs after the first one use your incremental mode.
@@ -213,9 +308,9 @@ clair run --env=dev --run-mode=full_refresh
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `run_mode` | `RunMode` | `FULL_REFRESH` | `FULL_REFRESH` or `INCREMENTAL` |
-| `incremental_mode` | `IncrementalMode \| None` | `None` | `APPEND` or `UPSERT`. Necessary if `run_mode=INCREMENTAL`. |
-| `primary_key_columns` | `list[str] \| None` | `None` | The join columns for UPSERT. clair generates `ON target.col = source.col`. |
-| `join_sql` | `str \| None` | `None` | Your own `ON` clause for UPSERT. Use it in place of `primary_key_columns`. |
-| `upsert_config` | `UpsertConfig \| None` | `None` | Exact control of the columns in the MERGE |
+| `incremental_mode` | `IncrementalMode \| None` | `None` | `APPEND`, `UPSERT` or `DELETE_INSERT`. Necessary if `run_mode=INCREMENTAL`. |
+| `primary_key_columns` | `list[str] \| None` | `None` | The match columns for UPSERT and DELETE_INSERT. clair generates `target.col = source.col`. |
+| `join_sql` | `str \| None` | `None` | Your own match condition for UPSERT and DELETE_INSERT. Use it in place of `primary_key_columns`. |
+| `upsert_config` | `UpsertConfig \| None` | `None` | Exact control of the columns in the MERGE. UPSERT only. |
 
 See also: [`RunConfig` API reference](../reference/run-config-api.md).
