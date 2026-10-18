@@ -16,7 +16,7 @@ from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.run_config import IncrementalMode, RunConfig, RunMode, UpsertConfig
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
+from clair.trouves.trouve import BuildPlan, CompiledAttributes, ExecutionType, Trouve, TrouveType
 
 # The three columns that the upsert tests share.
 UPSERT_SQL = "SELECT 1 AS id, 2 AS name, 3 AS value"
@@ -80,20 +80,20 @@ class TestFullRefresh:
     )
     def test_each_type_replaces_its_object(self, trouve_type, expected_object_type):
         trouve = make_compiled_trouve(trouve_type=trouve_type)
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, run_id="abc")
+        statements = trouve.build_sql(RunMode.FULL_REFRESH, run_id="abc").all_statements
         assert len(statements) == 1
         assert statements[0].startswith(
             f"CREATE OR REPLACE {expected_object_type} db.schema.my_table AS ("
         )
 
     def test_the_statement_holds_the_sql_of_the_trouve(self):
-        statements = make_compiled_trouve().build_sql(RunMode.FULL_REFRESH, run_id="abc")
+        statements = make_compiled_trouve().build_sql(RunMode.FULL_REFRESH, run_id="abc").all_statements
         assert "SELECT 1 AS id" in statements[0]
 
     def test_a_source_makes_no_statement(self):
         """Clair reads a SOURCE, thus it never writes to one."""
         trouve = make_compiled_trouve(trouve_type=TrouveType.SOURCE, sql="")
-        assert trouve.build_sql(RunMode.FULL_REFRESH, run_id="abc") == []
+        assert trouve.build_sql(RunMode.FULL_REFRESH, run_id="abc") == BuildPlan()
 
     def test_a_trouve_that_clair_did_not_compile_raises(self):
         trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id")
@@ -111,7 +111,7 @@ class TestAppend:
                 incremental_mode=IncrementalMode.APPEND,
             ),
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc").all_statements
         assert len(statements) == 1
         assert statements[0].startswith("INSERT INTO db.schema.my_table")
 
@@ -247,21 +247,23 @@ class TestUpsertClauses:
 
 
 class TestUpsertStatements:
-    """The three statements that Snowflake runs for an UPSERT."""
+    """An UPSERT makes the merge source and merges it, then drops it as cleanup."""
 
-    def test_an_upsert_makes_three_statements(self):
+    def test_an_upsert_makes_two_statements_and_one_cleanup(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
-        assert len(trouve.build_sql(RunMode.INCREMENTAL, run_id="abc")) == 3
+        build_plan = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc")
+        assert len(build_plan.statements) == 2
+        assert len(build_plan.cleanup_statements) == 1
 
     def test_the_first_statement_makes_the_merge_source(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
-        statements = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc123")
+        statements = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc123").statements
         plan = trouve.upsert_plan("abc123")
         assert f"CREATE OR REPLACE TABLE {plan.merge_source_address}" in statements[0]
 
     def test_the_second_statement_holds_each_clause_of_the_plan(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
-        merge = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc123")[1]
+        merge = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc123").statements[1]
         plan = trouve.upsert_plan("abc123")
         assert f"ON {plan.join_condition}" in merge
         assert f"WHEN MATCHED THEN UPDATE SET {plan.update_clause}" in merge
@@ -270,11 +272,11 @@ class TestUpsertStatements:
             f"VALUES ({plan.insert_values_clause})" in merge
         )
 
-    def test_the_third_statement_drops_the_merge_source(self):
+    def test_the_cleanup_drops_the_merge_source(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
-        statements = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc123")
+        cleanup_statements = trouve.build_sql(RunMode.INCREMENTAL, run_id="abc123").cleanup_statements
         plan = trouve.upsert_plan("abc123")
-        assert statements[2].endswith(
+        assert cleanup_statements[0].endswith(
             f"DROP TABLE IF EXISTS {plan.merge_source_address}"
         )
 
@@ -284,5 +286,5 @@ class TestUpsertStatements:
         staging_address = TrouveAddress.parse("db.schema.my_table__clair_stg")
         merge = trouve.build_sql(
             RunMode.INCREMENTAL, run_id="abc", staging_address=staging_address
-        )[1]
+        ).statements[1]
         assert "MERGE INTO db.schema.my_table__clair_stg AS target" in merge

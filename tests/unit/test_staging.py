@@ -136,7 +136,7 @@ class TestPromoteStatements:
 class TestBuildSqlStagingAddress:
     def test_full_refresh_writes_into_override(self):
         trouve = _compile(Trouve(sql="SELECT 1 AS id"), "db.s.orders")
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID, staging_address=_address("db.s.staging"))
+        statements = trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID, staging_address=_address("db.s.staging")).all_statements
         assert "CREATE OR REPLACE TABLE db.s.staging" in statements[0]
         assert "db.s.orders" not in statements[0]
 
@@ -150,7 +150,7 @@ class TestBuildSqlStagingAddress:
             ),
             "db.s.orders",
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, staging_address=_address("db.s.staging"))
+        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, staging_address=_address("db.s.staging")).all_statements
         assert statements[0].startswith("INSERT INTO db.s.staging")
 
     def test_upsert_merges_into_override_without_stacking_staging_suffixes(self):
@@ -171,7 +171,7 @@ class TestBuildSqlStagingAddress:
             ),
             "db.s.orders",
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, staging_address=_address("db.s.candidate"))
+        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, staging_address=_address("db.s.candidate")).all_statements
         assert "MERGE INTO db.s.candidate" in statements[1]
         # The merge source table derives from the real name, not the override,
         # so the two suffixes never stack.
@@ -238,4 +238,4 @@ class TestStagingCompilePlan:
             trouve, RunMode.FULL_REFRESH, RUN_ID, use_staging=False
         )
         assert "is not a TABLE, clair stops here" in statements[0]
-        assert statements[1:] == trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID)
+        assert statements[1:] == trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID).all_statements
