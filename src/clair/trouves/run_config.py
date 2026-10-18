@@ -23,6 +23,20 @@ class RunMode(StrEnum):
     INCREMENTAL = "incremental"
 
 
+class OnSchemaChange(StrEnum):
+    """What an incremental run does when the SQL gives other columns than the table holds.
+
+    A column that the SQL no longer gives always stops the run, because only a
+    person can decide if its data must go.
+    """
+
+    # Stop the run, and name each column that differs. Clair writes nothing.
+    FAIL = "fail"
+    # Add each new column to the table, then insert. The rows that the table
+    # held get NULL in the new column. Only a full refresh fills it.
+    ADD_NEW_COLUMNS = "add_new_columns"
+
+
 class IncrementalMode(StrEnum):
     """The name of each built-in incremental strategy."""
     APPEND = "append"
@@ -150,10 +164,13 @@ class Incremental(_ConfigModel):
     Attributes:
         strategy: The built-in method that writes the new data. None tells
             clair that a ``build_sql()`` override writes the SQL.
+        on_schema_change: What the run does when the SQL gives a column that
+            the table does not hold, or no longer gives a column that it holds.
     """
 
     run_mode: Literal[RunMode.INCREMENTAL] = RunMode.INCREMENTAL
     strategy: IncrementalStrategy | None = None
+    on_schema_change: OnSchemaChange = OnSchemaChange.FAIL
 
 
 RunConfig = Annotated[FullRefresh | Incremental, Field(discriminator="run_mode")]

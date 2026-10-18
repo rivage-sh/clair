@@ -305,6 +305,37 @@ The other three statements are the same as with a key. Snowflake reads the two b
 
 The range comes from the new rows, and not from the filter of your SQL. If the new rows are empty, the bounds are `NULL`, and the DELETE removes no row. If your SQL gives one old day, for example a backfill, clair replaces that day only.
 
+## When the columns change
+
+Add a column to the SQL of an incremental Trouve, and the table does not hold it. Before
+each incremental run, clair compares the columns of the SQL with the columns of the
+table, by name. `on_schema_change` on `Incremental` tells clair what to do:
+
+```python
+Incremental(strategy=Append(), on_schema_change=OnSchemaChange.ADD_NEW_COLUMNS)
+```
+
+- **`FAIL`, the default.** The run stops before it writes, and the error names each
+  column that differs. Run `clair run --run-mode full_refresh` to make the table again
+  from the SQL.
+- **`ADD_NEW_COLUMNS`.** clair adds each new column with `ALTER TABLE ... ADD COLUMN`,
+  then inserts. The rows that the table held get `NULL` in the new column. Only a full
+  refresh fills it.
+
+A column that the SQL no longer gives always stops the run, with the two values. Only a
+person can decide if its data must go: drop the column from the table, or run a full
+refresh. A renamed column is a removed column and an added column, thus it stops the run
+too. Silence is the worst answer here: dbt drops a new column in silence by default, and
+`sync_all_columns` drops the data of a renamed column.
+
+clair adds each column to the staging clone, and not to the production table. The tests
+then run on the new shape. If a test fails, the production table keeps its old columns
+and its old data, and the candidate stays for you to examine. A run with `--no-test` has
+no staging, thus it alters the production table.
+
+`clair compile` makes no connection, thus it shows no `ALTER`. The run reads the two
+column lists from Snowflake.
+
 ## Behavior of the first run
 
 On the first run, the target table does not exist. clair then does a full refresh, and it ignores your strategy. The runs after the first one use your incremental mode.

@@ -17,11 +17,7 @@ from clair.core.runner import RunStatus, RunSummary
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
-from tests.integration.projects import (
-    CI_DATABASE_CONFIG_FILE,
-    CI_ROUTING_FILE,
-    physical_address,
-)
+from tests.integration.projects import physical_address, write_refined_project
 from tests.integration.warehouse import query_rows
 
 pytestmark = pytest.mark.integration
@@ -47,15 +43,14 @@ def trouve_file(sql: str, strategy: str) -> str:
 
 def write_project(destination: Path, sql: str) -> Path:
     """Write one Trouve for each strategy, each with the same SQL."""
-    project_path = destination / DATABASE_NAME
-    trouve_directory = project_path / DATABASE_NAME / "refined"
-    trouve_directory.mkdir(parents=True, exist_ok=True)
-    (project_path / "__routing__.py").write_text(CI_ROUTING_FILE)
-    (project_path / DATABASE_NAME / "__database_config__.py").write_text(CI_DATABASE_CONFIG_FILE)
-    for logical_name, strategy in STRATEGIES.items():
-        table_name = logical_name.rsplit(".", 1)[1]
-        (trouve_directory / f"{table_name}.py").write_text(trouve_file(sql, strategy))
-    return project_path
+    return write_refined_project(
+        destination,
+        DATABASE_NAME,
+        {
+            logical_name.rsplit(".", 1)[1]: trouve_file(sql, strategy)
+            for logical_name, strategy in STRATEGIES.items()
+        },
+    )
 
 
 class TestAReorderedSelect:

@@ -30,6 +30,7 @@ from clair.core.runner import RunResult, run_project
 from clair.core.test_runner import TestResult
 from clair.environments.environments import Authentication, Authenticator, Connection, Environment
 from clair.environments.routing import RoutingEntry, TrouveAddress
+from clair.exceptions import RunError
 from clair.trouves.address import NodeAddresses
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.run_config import RunMode
@@ -326,6 +327,9 @@ class RecordingAdapter(WarehouseAdapter):
             None means that every table exists, which is the common case.
         table_columns: The columns that describe_columns() gives for each
             table that exists. None makes describe_columns() fail.
+        query_columns: The columns that describe_query() gives for each SQL.
+            None gives table_columns, thus the SQL matches the table. A SQL that
+            holds a text of fail_on raises a RunError.
         existing_views: The address of each view that the warehouse holds. An
             address here answers VIEW, even when existing_tables holds it too.
             Use it to test a Trouve that changes its type.
@@ -347,6 +351,7 @@ class RecordingAdapter(WarehouseAdapter):
         fail_on: Sequence[str] = (),
         existing_tables: Sequence[str] | None = None,
         table_columns: Sequence[WarehouseColumn] | None = DEFAULT_TABLE_COLUMNS,
+        query_columns: Sequence[WarehouseColumn] | None = None,
         existing_views: Sequence[str] = (),
         dataframes: dict[str, pd.DataFrame] | None = None,
         default_dataframe: pd.DataFrame | None = None,
@@ -359,6 +364,7 @@ class RecordingAdapter(WarehouseAdapter):
         self.fail_on = list(fail_on)
         self.existing_tables = None if existing_tables is None else set(existing_tables)
         self.table_columns = None if table_columns is None else list(table_columns)
+        self.query_columns = None if query_columns is None else list(query_columns)
         self.existing_views = set(existing_views)
         self.dataframes: dict[str, pd.DataFrame] = dict(dataframes or {})
         self.default_dataframe = default_dataframe
@@ -391,6 +397,7 @@ class RecordingAdapter(WarehouseAdapter):
             if self.existing_tables is None
             else sorted(self.existing_tables),
             table_columns=self.table_columns,
+            query_columns=self.query_columns,
             existing_views=sorted(self.existing_views),
             dataframes=self.dataframes,
             default_dataframe=self.default_dataframe,
@@ -458,6 +465,12 @@ class RecordingAdapter(WarehouseAdapter):
         if self.table_columns is None or self.object_type(address) != WarehouseObjectType.TABLE:
             return None
         return list(self.table_columns)
+
+    def describe_query(self, sql: str) -> list[WarehouseColumn]:
+        failure = next((text for text in self.fail_on if text in sql), None)
+        if failure is not None:
+            raise RunError(f"the recording adapter fails a query that holds '{failure}'")
+        return list(self.query_columns or self.table_columns or [])
 
     # The DataFrames.
 
@@ -571,6 +584,9 @@ class FakeCursor:
 
     def fetchone(self) -> tuple | None:
         return self.rows[0] if self.rows else None
+
+    # The identifier of the last query, which DESCRIBE RESULT reads.
+    sfqid = "fake-query-id"
 
     def fetchall(self) -> list[tuple]:
         return list(self.rows)
