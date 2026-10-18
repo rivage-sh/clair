@@ -325,6 +325,8 @@ class RecordingAdapter(WarehouseAdapter):
             Statement. Use the name of a Trouve to fail that Trouve.
         transient_failures: The number of times that a statement which holds
             the text fails with a retryable fault, by the text. Then it passes.
+        concurrent_change: True makes each change_token() call give a new
+            value, as if another run changed each table between two calls.
         existing_tables: The address of each table that the warehouse holds.
             None means that every table exists, which is the common case.
         table_columns: The columns that describe_columns() gives for each
@@ -352,6 +354,7 @@ class RecordingAdapter(WarehouseAdapter):
         *,
         fail_on: Sequence[str] = (),
         transient_failures: dict[str, int] | None = None,
+        concurrent_change: bool = False,
         existing_tables: Sequence[str] | None = None,
         table_columns: Sequence[WarehouseColumn] | None = DEFAULT_TABLE_COLUMNS,
         query_columns: Sequence[WarehouseColumn] | None = None,
@@ -367,6 +370,8 @@ class RecordingAdapter(WarehouseAdapter):
         self.fail_on = list(fail_on)
         # Shared with each new connection, thus the count holds for the run.
         self.transient_failures = transient_failures if transient_failures is not None else {}
+        self.concurrent_change = concurrent_change
+        self.change_token_reads = 0
         self.existing_tables = None if existing_tables is None else set(existing_tables)
         self.table_columns = None if table_columns is None else list(table_columns)
         self.query_columns = None if query_columns is None else list(query_columns)
@@ -400,6 +405,7 @@ class RecordingAdapter(WarehouseAdapter):
         return RecordingAdapter(
             fail_on=self.fail_on,
             transient_failures=self.transient_failures,
+            concurrent_change=self.concurrent_change,
             existing_tables=None
             if self.existing_tables is None
             else sorted(self.existing_tables),
@@ -489,6 +495,12 @@ class RecordingAdapter(WarehouseAdapter):
         if self.table_columns is None or self.object_type(address) != WarehouseObjectType.TABLE:
             return None
         return list(self.table_columns)
+
+    def change_token(self, address: TrouveAddress) -> str | None:
+        self.change_token_reads += 1
+        if self.concurrent_change:
+            return f"token-{self.change_token_reads}"
+        return "token"
 
     def describe_query(self, sql: str) -> list[WarehouseColumn]:
         failure = next((text for text in self.fail_on if text in sql), None)

@@ -166,6 +166,9 @@ class RecordingAdapter(WarehouseAdapter):
     def describe_query(self, sql: str) -> list[WarehouseColumn]:
         return list(DEFAULT_TABLE_COLUMNS)
 
+    def change_token(self, address: TrouveAddress) -> str | None:
+        return None
+
     def close(self) -> None:
         self.closed = True
 

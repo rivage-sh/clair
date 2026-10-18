@@ -153,6 +153,29 @@ class SnowflakeAdapter(WarehouseAdapter):
 
         return _columns_of(rows)
 
+    def change_token(self, address: TrouveAddress) -> str | None:
+        """Give SYSTEM$LAST_CHANGE_COMMIT_TIME of the table.
+
+        Snowflake documents the value as a change indicator, and not as a time:
+        each DML commit on the table makes it larger. The method gives None
+        when the query fails.
+        """
+        if self._conn is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(f"SELECT SYSTEM$LAST_CHANGE_COMMIT_TIME('{address}')")
+            row = cursor.fetchone()
+        except Exception:  # noqa: BLE001 — no value means "clair makes no comparison"
+            return None
+        finally:
+            cursor.close()
+
+        if row is None or row[0] is None:
+            return None
+        return str(row[0])
+
     def describe_query(self, sql: str) -> list[WarehouseColumn]:
         """Give the columns of a SELECT. Reads DESCRIBE RESULT of the query with LIMIT 0.
 

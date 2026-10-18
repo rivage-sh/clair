@@ -167,6 +167,17 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
+    def change_token(self, address: TrouveAddress) -> str | None:
+        """Give a value that changes when a statement changes the data of the object.
+
+        An incremental run reads it before the clone and before the promotion.
+        A different value means that another run changed the table between
+        the two, and a promotion would remove the rows of that run. None means
+        that the warehouse gave no value, and clair then makes no comparison.
+        """
+        ...
+
+    @abstractmethod
     def close(self) -> None:
         """Close the connection."""
         ...

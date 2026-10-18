@@ -385,6 +385,7 @@ def _promote_or_keep(
     adapter: WarehouseAdapter,
     addresses: NodeAddresses,
     tests_passed: bool,
+    change_token: str | None = None,
 ) -> tuple[list[Statement], str]:
     """Complete a node: promote the staging object, or keep it for an examination.
 
@@ -394,6 +395,10 @@ def _promote_or_keep(
         addresses: The addresses of the node. The staging address holds the
             candidate data, and the physical address must receive it.
         tests_passed: The result of the data quality tests on the staging object.
+        change_token: The change token of the physical table before the clone
+            of an incremental run. None makes no comparison: a full refresh
+            makes the complete table from the SQL, thus it loses no row of
+            another run that the SQL does not make again.
 
     Returns:
         The statements that clair executed, and an error message. The error
@@ -419,6 +424,17 @@ def _promote_or_keep(
     if type_error is not None:
         return statements, (
             f"the tests passed, but clair does not promote: {type_error}. "
+            f"The tested candidate stays at {staging_address}"
+        )
+
+    # Two incremental runs of one table each clone it, add their rows, and
+    # promote. The second promotion replaces the table, and the rows of the
+    # first run disappear. A token that changed after the clone shows that run.
+    if change_token is not None and adapter.change_token(physical_address) != change_token:
+        return statements, (
+            f"the tests passed, but clair does not promote: another run changed "
+            f"{physical_address} after this run cloned it, and the promotion would "
+            f"remove the rows of that run. Run the Trouve again. "
             f"The tested candidate stays at {staging_address}"
         )
 
@@ -719,6 +735,11 @@ def _run_node(
     if not plan.statements:
         return _NodeOutcome(None, downstream_ok=True)
 
+    # Read before the clone, thus a change of another run during this node shows.
+    change_token = None
+    if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
+        change_token = adapter.change_token(addresses.physical)
+
     start = time.monotonic()
     statements: list[Statement] = []
     failed_at = None
@@ -751,7 +772,7 @@ def _run_node(
         assert after_node_success is not None
         tests_passed = after_node_success(name, str(staging_address), adapter)
         promote_statements, staging_error = _promote_or_keep(
-            trouve, adapter, addresses, tests_passed
+            trouve, adapter, addresses, tests_passed, change_token
         )
         statements.extend(promote_statements)
 
