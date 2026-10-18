@@ -12,7 +12,7 @@ from clair.core.runner import RunStatus
 from clair.environments.environments import Environment
 from clair.exceptions import ResultNotFoundError
 from clair.trouves.run_config import RunMode
-from tests.helpers import RecordingAdapter
+from tests.helpers import RecordingAdapter, make_environment
 
 DAILY_ORDERS = "analytics.revenue.daily_orders"
 
@@ -45,8 +45,7 @@ def environment() -> Environment:
     The API functions read no file, thus the test makes the object. A notebook
     or a service does the same thing.
     """
-    return Environment(
-        name="dev",
+    return make_environment(
         account="test-account",
         user="test-user",
         warehouse="test_wh",

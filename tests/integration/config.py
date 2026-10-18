@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from clair.environments.environments import Environment
+from clair.environments.environments import Connection, Environment, Password, PrivateKey
 
 DATABASE_NAME = "clair_pr_testing"
 
@@ -46,25 +46,7 @@ class IntegrationConfig:
     role: str
     warehouse: str
     schema_name: str
-    private_key_path: str | None
-    private_key_passphrase: str | None
-    password: str | None
-
-    def to_connection_dict(self) -> dict[str, str | None]:
-        """Give the dict that SnowflakeAdapter.connect() accepts."""
-        connection: dict[str, str | None] = {
-            "account": self.account,
-            "user": self.user,
-            "role": self.role,
-            "warehouse": self.warehouse,
-        }
-        if self.private_key_path:
-            connection["private_key_path"] = self.private_key_path
-            if self.private_key_passphrase:
-                connection["private_key_passphrase"] = self.private_key_passphrase
-        else:
-            connection["password"] = self.password
-        return connection
+    authentication: PrivateKey | Password
 
     def to_environment(self) -> Environment:
         """Give the Environment that the Python API accepts.
@@ -74,13 +56,10 @@ class IntegrationConfig:
         """
         return Environment(
             name=ENVIRONMENT_NAME,
-            account=self.account,
-            user=self.user,
-            role=self.role,
-            warehouse=self.warehouse,
-            private_key_path=self.private_key_path,
-            private_key_passphrase=self.private_key_passphrase,
-            password=self.password,
+            connection=Connection(
+                account=self.account, user=self.user, role=self.role, warehouse=self.warehouse
+            ),
+            authentication=self.authentication,
         )
 
 
@@ -133,6 +112,18 @@ def load_config(schema_name: str | None = None) -> IntegrationConfig:
         raise IntegrationConfigError(
             f"The private key file {private_key_path} does not exist."
         )
+    # The key wins when the environment holds both variables.
+    authentication: PrivateKey | Password = (
+        PrivateKey(
+            private_key_path=private_key_path,
+            private_key_passphrase=os.environ.get(
+                "CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"
+            )
+            or None,
+        )
+        if private_key_path
+        else Password(password=password)
+    )
 
     selected_schema_name = (
         schema_name
@@ -155,10 +146,5 @@ def load_config(schema_name: str | None = None) -> IntegrationConfig:
             "CLAIR_PR_TESTING_SNOWFLAKE_WAREHOUSE", DEFAULT_WAREHOUSE
         ).strip(),
         schema_name=normalise_schema_name(selected_schema_name),
-        private_key_path=private_key_path or None,
-        private_key_passphrase=os.environ.get(
-            "CLAIR_PR_TESTING_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"
-        )
-        or None,
-        password=password or None,
+        authentication=authentication,
     )

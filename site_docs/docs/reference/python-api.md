@@ -2,10 +2,12 @@
 
 ```python
 import clair
-from clair import Environment
+from clair import Authenticator, Connection, Environment
 
 environment = Environment(
-    name="dev", account="myorg-myaccount", user="analyst", warehouse="compute_wh"
+    name="dev",
+    connection=Connection(account="myorg-myaccount", user="analyst", warehouse="compute_wh"),
+    authentication=Authenticator(authenticator="externalbrowser"),
 )
 summary = clair.run("~/projects/analytics", env=environment)
 print(summary.succeeded_count, summary.failed_count)
@@ -23,15 +25,14 @@ orchestrator, a service that keeps its secrets in a vault — makes the object,
 and writes no YAML file:
 
 ```python
-from clair import Environment
+from clair import Connection, Environment, Password
 
 environment = Environment(
     name="prod",
-    account="myorg-myaccount",
-    user="analyst",
-    warehouse="compute_wh",
-    role="transformer",
-    password=os.environ["SNOWFLAKE_PASSWORD"],
+    connection=Connection(
+        account="myorg-myaccount", user="analyst", warehouse="compute_wh", role="transformer"
+    ),
+    authentication=Password(password=os.environ["SNOWFLAKE_PASSWORD"]),
 )
 ```
 

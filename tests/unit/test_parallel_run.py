@@ -17,6 +17,7 @@ from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
 from clair.core.runner import RunStatus, run_project
 from clair.core.test_runner import run_tests
+from clair.environments.environments import Environment
 from clair.trouves.address import TrouveAddress
 from tests.helpers import write_project_marker
 
@@ -98,7 +99,7 @@ class RecordingAdapter(WarehouseAdapter):
         recorder.adapters_made += 1
         self.closed = False
 
-    def connect(self, profile: dict[str, Any]) -> None:
+    def connect(self, environment: Environment) -> None:
         return None
 
     def new_connection(self) -> RecordingAdapter:

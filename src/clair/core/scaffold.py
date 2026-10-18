@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+import yaml
+
+from clair.environments.environments import Environment
 from clair.environments.project_routing import ROUTING_FILE_NAME
 
 # ---------------------------------------------------------------------------
@@ -70,24 +72,29 @@ _ENVIRONMENTS_TEMPLATE = '''\
 # Reference: https://github.com/rivage-sh/clair
 
 dev:
-  account: your-org-your-account   # for example, myorg-myaccount
-  user: your@email.com
-  authenticator: externalbrowser   # SSO authentication in a browser
-  warehouse: your_warehouse
-  threads: 4                       # Trouves that run at one time
-  # region: us-east-1              # necessary for the query URLs
-  # account_locator: abc12345      # necessary for the query URLs
+  connection:
+    account: your-org-your-account   # for example, myorg-myaccount
+    user: your@email.com
+    warehouse: your_warehouse
+    # role: your_role                # the default role of the user, if you omit it
+    # region: us-east-1              # necessary for the query URLs
+    # account_locator: abc12345      # necessary for the query URLs
+  authentication:
+    authenticator: externalbrowser   # SSO authentication in a browser
+  threads: 4                         # Trouves that run at one time
 
 # A production environment with key pair authentication:
 # prod:
-#   account: your-org-your-account
-#   user: ci_service_user
-#   private_key_path: ~/.clair/snowflake_key.p8
-#   # private_key_passphrase: your-passphrase   # only if the key is encrypted
-#   warehouse: your_warehouse
+#   connection:
+#     account: your-org-your-account
+#     user: ci_service_user
+#     warehouse: your_warehouse
+#     region: us-east-1
+#     account_locator: abc12345
+#   authentication:
+#     private_key_path: ~/.clair/snowflake_key.p8
+#     # private_key_passphrase: your-passphrase   # only if the key is encrypted
 #   threads: 8
-#   region: us-east-1
-#   account_locator: abc12345
 '''
 
 
@@ -155,17 +162,14 @@ def scaffold_project(
 
 
 def write_environments_yml(
-    env_data: dict[str, Any],
-    env_name: str = "dev",
+    environment: Environment,
     *,
     home_dir: Path | None = None,
 ) -> Path:
-    """Write an environments.yml file from the data that the user gave.
+    """Write an environments.yml file that holds one environment.
 
     Args:
-        env_data: The key and value pairs of the environment, such as the
-            account and the user.
-        env_name: The name of the environment section.
+        environment: The environment to write. Its name becomes the top-level key.
         home_dir: A replacement for ``Path.home()``. The tests use it.
 
     Returns:
@@ -174,16 +178,10 @@ def write_environments_yml(
     effective_home = home_dir if home_dir is not None else Path.home()
     environments_path = effective_home / ".clair" / "environments.yml"
 
-    lines = [
-        "# The Clair environments. Each environment has its own connection settings.",
-        "",
-        f"{env_name}:",
-    ]
-    for key, value in env_data.items():
-        lines.append(f"  {key}: {value}")
-
-    lines.append("")
+    settings = environment.model_dump(exclude={"name"}, exclude_none=True)
+    header = "# The Clair environments. Each environment has its own connection settings.\n\n"
+    body = yaml.safe_dump({environment.name: settings}, sort_keys=False)
 
     environments_path.parent.mkdir(parents=True, exist_ok=True)
-    environments_path.write_text("\n".join(lines))
+    environments_path.write_text(header + body)
     return environments_path
