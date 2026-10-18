@@ -152,6 +152,11 @@ class RecordingAdapter(WarehouseAdapter):
     ) -> None:
         return None
 
+    def set_session_parameters(
+        self, query_tag: str, statement_timeout_seconds: int | None
+    ) -> None:
+        return None
+
     def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
         return WarehouseObjectType.TABLE
 

@@ -47,7 +47,7 @@ The abstract base of each Trouve. It holds the fields that each class shares.
 You do not instantiate it directly.
 
 ```python
-class TrouveAbc(BaseModel, ABC):
+class TrouveAbc(SessionConfig, ABC):
     columns:  list[Column] = []
     tests:    list[AnyTest] = []
     docs:     str = ""
@@ -72,6 +72,7 @@ Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any class.
 | `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](tests-api.md). |
 | `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
 | `compiled` | `CompiledAttributes \| None` | `None` | Discovery sets this. Do not set it manually. |
+| `warehouse`, `role`, `query_tags`, `statement_timeout_seconds` | | `None`, `None`, `{}`, `None` | The session of this Trouve. A value here replaces the value of the schema and the database. See [Per-Database & Schema Config](../topics/per-database-schema-config.md). |
 
 ### Properties
 

@@ -160,6 +160,8 @@ def _resolve_config(
     2. __database_config__.py
     3. __schema_config__.py
 
+    The Trouve is the last level. ``_compile_trouve`` applies it.
+
     The function starts at the file and moves up, in the same direction as
     ``compute_logical_address``. The schema directory is the parent of the file,
     and the database directory is the parent of the schema directory. Thus a
@@ -178,17 +180,11 @@ def _resolve_config(
 
     db_defaults = _load_config_file(database_directory / "__database_config__.py")
     if isinstance(db_defaults, DatabaseDefaults):
-        if db_defaults.warehouse and db_defaults.warehouse.strip():
-            config.warehouse = db_defaults.warehouse
-        if db_defaults.role and db_defaults.role.strip():
-            config.role = db_defaults.role
+        config = config.apply(db_defaults)
 
     schema_defaults = _load_config_file(schema_directory / "__schema_config__.py")
     if isinstance(schema_defaults, SchemaDefaults):
-        if schema_defaults.warehouse and schema_defaults.warehouse.strip():
-            config.warehouse = schema_defaults.warehouse
-        if schema_defaults.role and schema_defaults.role.strip():
-            config.role = schema_defaults.role
+        config = config.apply(schema_defaults)
 
     return config
 
@@ -237,7 +233,7 @@ def _compile_trouve(
     logical = logical_addresses[id(trouve_obj)]
     physical = physical_addresses[id(trouve_obj)]
     relative_file_path = file_path.relative_to(project_root)
-    config = _resolve_config(file_path, profile_defaults)
+    config = _resolve_config(file_path, profile_defaults).apply(trouve_obj)
 
     if trouve_obj.execution_type == ExecutionType.PANDAS:
         assert isinstance(trouve_obj, DataframeTrouve)

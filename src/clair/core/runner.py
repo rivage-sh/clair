@@ -504,6 +504,7 @@ def _run_node(
     run_id: str,
     after_node_success: Callable[[str, str, WarehouseAdapter], bool] | None,
     use_staging: bool,
+    environment_name: str,
 ) -> _NodeOutcome:
     """Materialize one Trouve in the warehouse.
 
@@ -518,6 +519,7 @@ def _run_node(
         run_id: The identifier of the run. A staging address holds it.
         after_node_success: The callback that runs the data quality tests.
         use_staging: True if clair writes to a staging address first.
+        environment_name: The environment of the run. The query tag holds it.
 
     Returns:
         A _NodeOutcome. It holds the result, and it tells you if clair can
@@ -531,20 +533,23 @@ def _run_node(
     trouve = dag.get_trouve(name)
     assert trouve.compiled is not None
 
-    context_warehouse = trouve.compiled.config.warehouse if trouve.compiled.config.warehouse and trouve.compiled.config.warehouse.strip() else None
-    context_role = trouve.compiled.config.role if trouve.compiled.config.role and trouve.compiled.config.role.strip() else None
-    if context_warehouse or context_role:
-        try:
-            adapter.set_context(warehouse=context_warehouse, role=context_role)
-        except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
-            logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=context_warehouse, role=context_role, error=str(e))
-            return _NodeOutcome(
-                RunResult(
-                    addresses=addresses,
-                    error=f"Clair cannot set the session context: {e}",
-                ),
-                downstream_ok=False,
-            )
+    config = trouve.compiled.config
+    try:
+        adapter.set_session_parameters(
+            query_tag=config.query_tag(run_id, environment_name, logical_address),
+            statement_timeout_seconds=config.statement_timeout_seconds,
+        )
+        if config.warehouse or config.role:
+            adapter.set_context(warehouse=config.warehouse, role=config.role)
+    except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
+        logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=config.warehouse, role=config.role, error=str(e))
+        return _NodeOutcome(
+            RunResult(
+                addresses=addresses,
+                error=f"Clair cannot set the session context: {e}",
+            ),
+            downstream_ok=False,
+        )
 
     # A staged run materializes the Trouve at a run-scoped address beside the
     # physical one. Clair writes the physical address only after the tests on
@@ -763,6 +768,7 @@ def run_project(
     after_node_success: Callable[[str, str, WarehouseAdapter], bool] | None = None,
     use_staging: bool = False,
     threads: int = 1,
+    environment_name: str = "",
 ) -> Iterator[RunResult]:
     """Execute the selected Trouves. Give each result when the Trouve completes.
 
@@ -854,6 +860,7 @@ def run_project(
             run_id,
             after_node_success,
             use_staging,
+            environment_name,
         )
 
     try:

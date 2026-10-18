@@ -376,6 +376,7 @@ class RecordingAdapter(WarehouseAdapter):
 
         self.environment: Environment | None = None
         self.contexts: list[dict[str, str | None]] = []
+        self.session_parameters: list[tuple[str, int | None]] = []
         self.is_open = True
         self.written_addresses: list[str] = []
         self.fetched_addresses: list[str] = []
@@ -454,6 +455,11 @@ class RecordingAdapter(WarehouseAdapter):
         finally:
             self.record.leave()
 
+    def set_session_parameters(
+        self, query_tag: str, statement_timeout_seconds: int | None
+    ) -> None:
+        self.session_parameters.append((query_tag, statement_timeout_seconds))
+
     def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
         if str(address) in self.existing_views:
             return WarehouseObjectType.VIEW
@@ -511,7 +517,7 @@ def compile_trouve(trouve: AnyTrouve, address: str = TEST_ADDRESS) -> AnyTrouve:
         file_path=Path(f"/fake/{address.replace('.', '/')}.py"),
         module_name=address,
         imports=[],
-        config=ResolvedConfig(),
+        config=ResolvedConfig().apply(trouve),
         execution_type=ExecutionType.SNOWFLAKE,
     )
     return trouve
@@ -575,10 +581,12 @@ class FakeCursor:
         self.rows = rows
         self.error = error
         self.sql = ""
+        self.executed: list[str] = []
         self.closed = False
 
     def execute(self, sql: str) -> None:
         self.sql = sql
+        self.executed.append(sql)
         if self.error is not None:
             raise self.error
 

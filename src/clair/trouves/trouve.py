@@ -20,7 +20,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
@@ -28,6 +28,7 @@ from clair.exceptions import CompileError
 from clair.trouves._refs import register
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column
+from clair.trouves.config import ResolvedConfig, SessionConfig
 from clair.trouves.run_config import (
     SOURCE,
     TARGET,
@@ -151,11 +152,11 @@ class CompiledAttributes(BaseModel):
     file_path: Path
     module_name: str
     imports: list[str]
-    config: Any  # A ResolvedConfig. The type is Any, to prevent a circular import.
+    config: ResolvedConfig
     execution_type: ExecutionType
 
 
-class TrouveAbc(BaseModel, ABC):
+class TrouveAbc(SessionConfig, ABC):
     """The base class of every Trouve.
 
     Each concrete class is one kind of object. ``Source`` is a table that clair
@@ -163,6 +164,10 @@ class TrouveAbc(BaseModel, ABC):
     makes from SQL. ``PandasTrouve`` and ``SeedTrouve`` are tables that clair
     writes from a DataFrame. Each class gives its own ``trouve_type``,
     ``execution_type`` and ``upstream_trouves``.
+
+    ``SessionConfig`` gives the session fields: ``warehouse``, ``role``,
+    ``query_tags`` and ``statement_timeout_seconds``. A value here replaces the
+    value of ``__schema_config__.py`` and ``__database_config__.py``.
 
     Attributes:
         columns: The column definitions, for the docs and for future checks.
@@ -175,8 +180,8 @@ class TrouveAbc(BaseModel, ABC):
     # The kind of object. Each concrete class sets it, and no author passes it.
     trouve_type: ClassVar[TrouveType]
 
-    columns: list[Column] = []
-    tests: list[AnyTest] = []
+    columns: list[Column] = Field(default_factory=list)
+    tests: list[AnyTest] = Field(default_factory=list)
     docs: str = ""
     compiled: CompiledAttributes | None = None
 
