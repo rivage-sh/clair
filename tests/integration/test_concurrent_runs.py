@@ -45,7 +45,7 @@ class SecondRunAdapter(SnowflakeAdapter):
     def change_token(self, address: TrouveAddress) -> str | None:
         self.token_read_count += 1
         if self.token_read_count == 2:
-            inserted = self.execute(f"INSERT INTO {self.table_address} SELECT 99 AS id")
+            inserted = self.execute(f"INSERT INTO {self.table_address} SELECT 9 AS id")
             assert inserted.success, inserted.error
         return super().change_token(address)
 
@@ -86,4 +86,4 @@ class TestASecondRun:
         self, runs: tuple[RunSummary, TrouveAddress], adapter: SnowflakeAdapter
     ) -> None:
         _, address = runs
-        assert query_rows(adapter, f"SELECT id FROM {address} ORDER BY id") == [(1,), (99,)]
+        assert query_rows(adapter, f"SELECT id FROM {address} ORDER BY id") == [(1,), (9,)]
