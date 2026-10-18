@@ -27,8 +27,10 @@ from tests.integration.warehouse import query_rows
 pytestmark = pytest.mark.integration
 
 DATABASE_NAME = "insert_columns"
-FIRST_SQL = "SELECT 1 AS id, 'first label' AS label, 'first code' AS code"
-REORDERED_SQL = "SELECT 2 AS id, 'second code' AS code, 'second label' AS label"
+# Each text has the same length. Thus a swap fits the VARCHAR(n) of each column,
+# and only the values show it.
+FIRST_SQL = "SELECT 1 AS id, 'label_1' AS label, 'code__1' AS code"
+REORDERED_SQL = "SELECT 2 AS id, 'code__2' AS code, 'label_2' AS label"
 # Each logical name, and the strategy of its Trouve.
 STRATEGIES = {
     f"{DATABASE_NAME}.refined.appended": "Append()",
@@ -87,4 +89,4 @@ class TestAReorderedSelect:
 
         address = physical_address(logical_name, clair_environment.schema_name)
         rows = query_rows(adapter, f"SELECT id, label, code FROM {address} ORDER BY id")
-        assert rows == [(1, "first label", "first code"), (2, "second label", "second code")]
+        assert rows == [(1, "label_1", "code__1"), (2, "label_2", "code__2")]
