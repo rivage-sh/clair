@@ -169,3 +169,13 @@ clair compile --run-mode incremental --select example_3_database.derived.daily_r
 
 The compiled file shows the clone, the three statements, the cleanup, the test step, and
 the promotion, in the order that clair executes them.
+
+## 4. Validate the override
+
+```bash
+clair validate
+```
+
+`clair validate` calls `build_sql()` for each run mode, with a staging address and without
+one, and needs no connection. It reports an override that raises, and an override that
+ignores `staging_address`. See [`clair validate`](../cli/validate.md#a-build-plan-that-clair-cannot-make).

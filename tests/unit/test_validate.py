@@ -8,6 +8,7 @@ text. One class at the end covers the exit code of the CLI.
 from __future__ import annotations
 
 import contextlib
+import shutil
 import textwrap
 from pathlib import Path
 
@@ -298,6 +299,108 @@ class TestTextReferences:
         assert reference.logical_address == "analytics.finance.revenue"
         assert reference.text_address == "source.raw.orders"
         assert reference.location == TextReferenceLocation.SQL
+
+
+_OVERRIDE_MODULE = '''\
+from clair import BuildPlan, RunMode, Trouve, TrouveAddress
+
+
+class PhysicalOnlyTrouve(Trouve):
+    """An override that writes to the physical address, also in a staged run."""
+
+    def build_sql(self, effective_mode, run_id, staging_address=None):
+        if effective_mode == RunMode.FULL_REFRESH:
+            return super().build_sql(effective_mode, run_id, staging_address)
+        return BuildPlan(statements=[f"DELETE FROM {self.physical_address}"])
+
+
+class RaisingTrouve(Trouve):
+    """An override with a bug in its incremental branch."""
+
+    def build_sql(self, effective_mode, run_id, staging_address=None):
+        if effective_mode == RunMode.FULL_REFRESH:
+            return super().build_sql(effective_mode, run_id, staging_address)
+        raise KeyError("window_column")
+'''
+
+
+def write_revenue(project_dir: Path, trouve_source: str) -> None:
+    """Replace analytics.finance.revenue with an incremental Trouve."""
+    (project_dir / "_overrides.py").write_text(_OVERRIDE_MODULE)
+    (project_dir / "analytics" / "finance" / "revenue.py").write_text(
+        "from _overrides import PhysicalOnlyTrouve, RaisingTrouve\n"
+        "from clair import Incremental, Trouve, TrouveType\n\n"
+        f"trouve = {trouve_source}\n"
+    )
+
+
+def build_plan_faults(report: ValidationReport) -> list[tuple[str, str, bool]]:
+    """Give the Trouve, the run mode, and the staging flag of each build plan problem."""
+    return sorted(
+        (problem.logical_address, problem.run_mode, problem.staged)
+        for problem in report.build_plan_problems
+    )
+
+
+# The incremental plan of revenue fails, with staging and without it.
+INCREMENTAL_FAULTS = [
+    ("analytics.finance.revenue", "incremental", False),
+    ("analytics.finance.revenue", "incremental", True),
+]
+
+
+class TestBuildPlans:
+    """clair validate makes each build plan offline, also the plan of an override."""
+
+    def test_an_incremental_trouve_with_no_strategy_is_a_problem(
+        self, project_with_trouves: Path
+    ):
+        write_revenue(
+            project_with_trouves,
+            'Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS x", run_config=Incremental())',
+        )
+        report = clair.validate(project_with_trouves)
+
+        assert build_plan_faults(report) == INCREMENTAL_FAULTS
+        assert "names no strategy" in report.build_plan_problems[0].detail
+
+    def test_an_override_that_raises_is_a_problem(self, project_with_trouves: Path):
+        write_revenue(
+            project_with_trouves,
+            'RaisingTrouve(type=TrouveType.TABLE, sql="SELECT 1 AS x", run_config=Incremental())',
+        )
+        report = clair.validate(project_with_trouves)
+
+        assert build_plan_faults(report) == INCREMENTAL_FAULTS
+        assert "KeyError" in report.build_plan_problems[0].detail
+
+    def test_an_override_that_ignores_the_staging_address_is_a_problem(
+        self, project_with_trouves: Path
+    ):
+        """Without staging, the physical address is correct. With staging, the tests come too late."""
+        write_revenue(
+            project_with_trouves,
+            'PhysicalOnlyTrouve(type=TrouveType.TABLE, sql="SELECT 1 AS x", run_config=Incremental())',
+        )
+        report = clair.validate(project_with_trouves)
+
+        assert build_plan_faults(report) == [("analytics.finance.revenue", "incremental", True)]
+
+    def test_a_full_refresh_trouve_makes_no_incremental_plan(self, project_with_trouves: Path):
+        """A Trouve gets only the modes that resolve_effective_mode() can give it."""
+        write_revenue(project_with_trouves, 'RaisingTrouve(type=TrouveType.TABLE, sql="SELECT 1 AS x")')
+        assert clair.validate(project_with_trouves).build_plan_problems == []
+
+    def test_the_example_override_is_correct(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """examples/projects/example_3 holds the override of the build_sql() guide."""
+        monkeypatch.setenv("CLAIR_USER", "tester")
+        example_3 = Path(__file__).parents[2] / "examples" / "projects" / "example_3"
+        project_root = tmp_path / "example_3"
+        shutil.copytree(example_3, project_root)
+
+        assert clair.validate(project_root).build_plan_problems == []
 
 
 class TestProblemCount:
