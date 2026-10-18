@@ -70,18 +70,14 @@ my_project/
         └── reviews.py   →   source.products.reviews
 ```
 
-Clair has one Trouve class for each backend. Both derive from `TrouveAbc`:
+Clair has one Trouve class for each kind of object. Each one derives from `TrouveAbc`:
 
-- **`Trouve`** — compiles `sql` to a Snowflake `TABLE` or `VIEW`. Runs inside Snowflake.
-- **`PandasTrouve`** — runs a Python function on the machine executing clair, then writes the result back to Snowflake.
-
-`Trouve` has three types:
-
-| Type | What it is |
-|------|-----------|
-| `SOURCE` | A Snowflake table that contains unprocessed data loaded into Snowflake by external tools. |
-| `TABLE` | A Snowflake table that clair creates and populates. |
-| `VIEW` | A Snowflake view that clair creates. |
+| Class | What it is |
+|-------|-----------|
+| `Source` | A Snowflake table that external tools load. Clair reads it, and never writes it. |
+| `Table` | A Snowflake table that clair makes from `sql`. Runs inside Snowflake. |
+| `View` | A Snowflake view that clair makes from `sql`. |
+| `PandasTrouve` | A table that a Python function makes on the clair machine. Clair writes the result to Snowflake. |
 
 ### DAG
 
@@ -369,9 +365,10 @@ trouve = Table(
 run_config=Incremental(strategy=Upsert(primary_key_columns=["user_id"]))
 ```
 
-**DeleteInsert** — deletes each row that a new row matches, then inserts the new rows:
+**DeleteInsert** — deletes each row that a new row matches, or each row in the range of the new rows, then inserts the new rows:
 ```python
 run_config=Incremental(strategy=DeleteInsert(primary_key_columns=["event_date"]))
+run_config=Incremental(strategy=DeleteInsert(range_column="event_date"))
 ```
 
 If the target table doesn't exist yet, clair runs a full refresh automatically regardless of the configured strategy.

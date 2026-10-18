@@ -12,7 +12,7 @@ from clair.core.runner import RunStatus
 from clair.environments.environments import Environment
 from clair.exceptions import ResultNotFoundError
 from clair.trouves.run_config import RunMode
-from tests.helpers import RecordingAdapter
+from tests.helpers import RecordingAdapter, make_environment
 
 DAILY_ORDERS = "analytics.revenue.daily_orders"
 
@@ -28,8 +28,8 @@ def project(simple_project: Path, tmp_path: Path) -> Path:
     trouve_file = destination / "analytics" / "revenue" / "daily_orders.py"
     source_text = trouve_file.read_text()
     source_text = source_text.replace(
-        "from clair import Column, ColumnType, TrouveType",
-        "from clair import Column, ColumnType, TestNotNull, TrouveType",
+        "from clair import Column, ColumnType, Table",
+        "from clair import Column, ColumnType, Table, TestNotNull",
     ).replace(
         "    columns=[",
         "    tests=[TestNotNull(column=\"order_date\")],\n    columns=[",
@@ -45,8 +45,7 @@ def environment() -> Environment:
     The API functions read no file, thus the test makes the object. A notebook
     or a service does the same thing.
     """
-    return Environment(
-        name="dev",
+    return make_environment(
         account="test-account",
         user="test-user",
         warehouse="test_wh",

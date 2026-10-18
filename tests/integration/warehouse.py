@@ -14,7 +14,7 @@ STAGING_MARKER = "__CLAIR_"
 def connect(config: IntegrationConfig) -> SnowflakeAdapter:
     """Open one connection with the settings of the run."""
     adapter = SnowflakeAdapter()
-    adapter.connect(config.to_connection_dict())
+    adapter.connect(config.to_environment())
     return adapter
 
 

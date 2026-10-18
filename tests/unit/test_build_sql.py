@@ -196,6 +196,7 @@ class TestUpsertPlanColumns:
             columns=[],
             run_config=Incremental(strategy=Upsert(primary_key_columns=["id"])),
         )
+        assert isinstance(trouve, Table)
         with pytest.raises(ValueError, match="the upsert strategy needs columns"):
             trouve.upsert_plan("abc")
 
@@ -203,27 +204,18 @@ class TestUpsertPlanColumns:
 class TestUpsertPlanJoin:
     """The join comes from the key columns, or from the author."""
 
-    def test_one_key_column_makes_one_condition(self):
-        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan("abc")
-        assert plan.join_key_columns == ["id"]
-        assert plan.join_condition == "target.id = source.id"
-
-    def test_two_key_columns_join_with_and(self):
-        plan = make_upsert_trouve(
-            primary_key_columns=["id", "region"]
-        ).upsert_plan("abc")
-        assert plan.join_condition == (
-            "target.id = source.id AND target.region = source.region"
-        )
-
-    def test_a_join_of_the_author_is_the_condition(self):
-        plan = make_upsert_trouve(join_sql="target.a = source.b").upsert_plan("abc")
-        assert plan.join_sql == "target.a = source.b"
-        assert plan.join_condition == "target.a = source.b"
+    @pytest.mark.parametrize(
+        "match_arguments",
+        [{"primary_key_columns": ["id", "region"]}, {"join_sql": "target.a = source.b"}],
+    )
+    def test_the_plan_holds_the_condition_of_the_strategy(self, match_arguments):
+        """test_run_config.py covers each form of the condition."""
+        trouve = make_upsert_trouve(**match_arguments)
+        assert trouve.upsert_plan("abc").join_condition == Upsert(**match_arguments).match_condition
 
     def test_a_key_column_and_a_join_together_raise(self):
         """Upsert makes the illegal state impossible, thus the plan never sees it."""
-        with pytest.raises(ValueError, match="but not both"):
+        with pytest.raises(ValueError, match="takes only one of"):
             make_upsert_trouve(
                 primary_key_columns=["id"], join_sql="target.a = source.b"
             )
@@ -348,6 +340,27 @@ class TestDeleteInsertStatements:
             f"USING {self.NEW_ROWS_ADDRESS} AS source\n"
             f"WHERE {expected_condition}"
         )
+
+    def test_a_range_column_deletes_each_target_row_between_the_bounds_of_the_new_rows(self):
+        """The bounds are scalar subqueries, thus the DELETE joins no table, and Snowflake prunes on them."""
+        delete_replaced_rows = self.build_plan(range_column="day").statements[1]
+        assert delete_replaced_rows.endswith(
+            "DELETE FROM db.schema.my_table__clair_stg AS target\n"
+            "WHERE target.day BETWEEN "
+            f"(SELECT MIN(day) FROM {self.NEW_ROWS_ADDRESS}) "
+            f"AND (SELECT MAX(day) FROM {self.NEW_ROWS_ADDRESS})"
+        )
+
+    @pytest.mark.parametrize(
+        "match_arguments", [{"primary_key_columns": ["id"]}, {"range_column": "day"}]
+    )
+    def test_the_key_and_the_range_differ_in_the_delete_only(self, match_arguments):
+        """A range column changes the DELETE, and keeps the new rows table, the INSERT and the cleanup."""
+        build_plan = self.build_plan(**match_arguments)
+        key_plan = self.build_plan(primary_key_columns=["id"])
+        assert build_plan.statements[0] == key_plan.statements[0]
+        assert build_plan.statements[2:] == key_plan.statements[2:]
+        assert build_plan.cleanup_statements == key_plan.cleanup_statements
 
     def test_the_insert_writes_the_new_rows_to_the_staging_address(self):
         """A staging run changes the candidate, thus production never shows the gap."""

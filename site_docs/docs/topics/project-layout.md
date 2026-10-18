@@ -114,7 +114,7 @@ A clair project in production usually has 3 or 4 layers:
 my_project/
 ├── __routing__.py                   # The routing entry of each environment
 │
-├── source/                          # Tables that already exist — TrouveType.SOURCE
+├── source/                          # Tables that already exist — Source
 │   ├── orders/
 │   │   ├── raw.py                   # source.orders.raw
 │   │   └── customers.py             # source.orders.customers

@@ -6,82 +6,91 @@ The CLI reads this file. The Python API does not: `clair.run()` and `clair.test(
 
 ## `~/.clair/environments.yml`
 
+Each environment holds two blocks. `connection` holds the account and the session defaults. `authentication` holds one login method.
+
 ```yaml
 dev:
-  account: myorg-myaccount
-  user: alice@example.com
-  authenticator: externalbrowser
-  warehouse: dev_warehouse
-  role: analyst
-  region: us-east-1
-  account_locator: abc12345
+  connection:
+    account: myorg-myaccount
+    user: alice@example.com
+    warehouse: dev_warehouse
+    role: analyst
+    region: us-east-1
+    account_locator: abc12345
+  authentication:
+    authenticator: externalbrowser
   threads: 4
 
 prod:
-  account: myorg-myaccount
-  user: ci_service_user
-  private_key_path: ~/.clair/snowflake_key.p8
-  warehouse: prod_warehouse
-  role: transformer
-  region: us-east-1
-  account_locator: abc12345
+  connection:
+    account: myorg-myaccount
+    user: ci_service_user
+    warehouse: prod_warehouse
+    role: transformer
+    region: us-east-1
+    account_locator: abc12345
+  authentication:
+    private_key_path: ~/.clair/snowflake_key.p8
   threads: 16
 ```
 
 ## Authentication methods
 
+The key in the `authentication` block selects the method. A block that holds the keys of two methods is an error, and so is a block that holds no method. clair stops before it connects, and it names the key.
+
 === "Private key (recommended for CI)"
 
     ```yaml
-    dev:
-      account: myorg-myaccount
-      user: alice@example.com
+    authentication:
       private_key_path: ~/.clair/snowflake_key.p8
-      warehouse: my_warehouse
-    ```
-
-    For an encrypted key, add:
-
-    ```yaml
-      private_key_passphrase: your-passphrase
+      private_key_passphrase: your-passphrase   # only for an encrypted key
     ```
 
 === "Password"
 
     ```yaml
-    dev:
-      account: myorg-myaccount
-      user: alice@example.com
+    authentication:
       password: your-password
-      warehouse: my_warehouse
     ```
 
 === "SSO (externalbrowser)"
 
     ```yaml
-    dev:
-      account: myorg-myaccount
-      user: alice@example.com
+    authentication:
       authenticator: externalbrowser
-      warehouse: my_warehouse
     ```
 
     This method opens a browser window for the Okta/SSO login. Do not use it in CI.
 
+    `authenticator` accepts each value of the Snowflake connector, for example `oauth`.
+
 ## Field reference
+
+`connection`:
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `account` | Yes | Snowflake account identifier (e.g. `myorg-myaccount`) |
 | `user` | Yes | Snowflake username |
 | `warehouse` | Yes | Default warehouse |
-| `authenticator` | — | Set to `externalbrowser` for SSO |
-| `password` | — | Plain-text password |
-| `private_key_path` | — | Path to PEM private key file |
-| `private_key_passphrase` | — | Passphrase for encrypted private keys |
 | `role` | — | Default role. If you omit it, Snowflake uses the default role of the user. |
 | `region` | — | AWS/Azure region. clair needs it for the query URLs in the logs. |
 | `account_locator` | — | Classic account locator. clair needs it for the query URLs. |
+
+`authentication`, one of:
+
+| Method | Fields |
+|--------|--------|
+| Private key | `private_key_path` (required), `private_key_passphrase` (only for an encrypted key) |
+| Password | `password` |
+| Authenticator | `authenticator`, for example `externalbrowser` |
+
+Top level:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `connection` | Yes | See above. |
+| `authentication` | Yes | See above. |
 | `threads` | — | The number of Trouves that clair runs at one time. The default is `4`. See [Parallel execution](#parallel-execution). |
 
 ## Parallel execution
@@ -118,7 +127,7 @@ prod:
 ```
 
 clair opens each connection before the first Trouve starts. With SSO
-(`authenticator: externalbrowser`), clair asks the Snowflake connector to keep
+(`authentication: {authenticator: externalbrowser}`), clair asks the Snowflake connector to keep
 the login token in the credential store of your operating system. The second
 connection reads that token, thus clair opens one browser window and not one for
 each thread.

@@ -50,7 +50,7 @@ class DataframeTrouve(TrouveAbc, ABC):
 
         Discovery keeps this text in ``resolved_transform``, and ``clair
         compile`` writes it to the artifact file. It is the counterpart of the
-        SQL of a ``Trouve``.
+        SQL of a ``Table``.
         """
         return repr(self)
 

@@ -25,6 +25,7 @@ clair validate
 - Every address that the entry gives is a valid Snowflake identifier.
 - No two Trouves go to one physical target.
 - No Trouve names a different Trouve as text. See below.
+- clair can make the build plan of each Trouve, for each run mode that it can get. See below.
 
 ## An address that is text
 
@@ -63,6 +64,26 @@ name only when that name is the logical address of a Trouve in your project. A t
 clair does not hold is correct SQL. SQL that the parser cannot read gives no report,
 because Snowflake owns the SQL syntax.
 
+## A build plan that clair cannot make
+
+`build_sql()` needs no connection, thus `clair validate` calls it on each SQL Trouve. It
+calls it for a full refresh, and for an incremental run if the `run_config` is
+`Incremental`. It calls it with a staging address and without one, because `clair run`
+stages a Trouve only when it runs the tests. Two faults are problems:
+
+- `build_sql()` raises. Example: `Incremental()` with no strategy on a `Table` that does
+  not override `build_sql()`, or a bug in an override.
+- `build_sql()` gets a staging address, and no statement names it. The plan then writes to
+  the physical object before the tests run, and a test that fails comes too late.
+
+This is how a [`build_sql()` override](../guides/custom-build-sql.md) gets the same
+offline test as a built-in strategy.
+
+```
+  ✗ analytics.finance.revenue
+    The incremental plan, with staging: build_sql() got the staging address analytics.finance.revenue__clair_validate, and no statement names it. The plan then writes to the physical object before the tests run. Write to `staging_address or self.physical_address`.
+```
+
 ## Output
 
 A project with no problems:
@@ -73,7 +94,7 @@ A project with no problems:
   entry: DeveloperRouting(environment_name='dev', user_variable='CLAIR_USER')
   Trouves to route: 12
 
-  ✓ Every physical address is valid. No collisions. Each reference is a Trouve.
+  ✓ Every physical address is valid. No collisions. Each reference is a Trouve. Each build plan is correct.
 ```
 
 A project with a problem gives exit code 1:
@@ -96,7 +117,7 @@ A project with a problem gives exit code 1:
 
 | Code | Meaning |
 |------|---------|
-| 0 | Every physical address is valid, no two Trouves collide, and each reference is a Trouve. |
+| 0 | Every physical address is valid, no two Trouves collide, each reference is a Trouve, and each build plan is correct. |
 | 1 | clair found one problem or more. |
 
 ## In CI

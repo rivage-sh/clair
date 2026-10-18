@@ -36,6 +36,19 @@ def cyclic_project() -> Path:
 
 
 @pytest.fixture(autouse=True)
+def no_home_environments_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the default environments.yml at a file that does not exist.
+
+    A unit test must not read ~/.clair/environments.yml of the developer. A test
+    that needs the file writes one, and gives its path.
+    """
+    monkeypatch.setattr(
+        "clair.environments.environments.DEFAULT_ENVIRONMENTS_PATH",
+        tmp_path / "no_home" / "environments.yml",
+    )
+
+
+@pytest.fixture(autouse=True)
 def clean_sys_modules():
     """Delete each fixture module from sys.modules after each test.
 
@@ -58,50 +71,6 @@ def clean_sys_modules():
             )
         ):
             del sys.modules[mod_name]
-
-
-@pytest.fixture
-def tmp_environments(tmp_path: Path) -> Path:
-    """Make a temporary environments.yml file for a test."""
-    environments_content = """
-dev:
-  account: test-account
-  user: test-user
-  authenticator: externalbrowser
-  warehouse: test_wh
-  role: test_role
-
-ci:
-  account: test-account
-  user: ci-user
-  password: ci-password
-  warehouse: ci_wh
-  role: ci_role
-
-key_auth:
-  account: test-account
-  user: key-user
-  private_key_path: /secrets/snowflake_key.p8
-  warehouse: key_wh
-
-key_auth_encrypted:
-  account: test-account
-  user: key-user
-  private_key_path: /secrets/snowflake_key_enc.p8
-  private_key_passphrase: s3cr3t
-  warehouse: key_wh
-
-unknown_key:
-  account: test-account
-  user: test-user
-  authenticator: externalbrowser
-  warehouse: test_wh
-  routing:
-    policy: database_override
-"""
-    environments_file = tmp_path / "environments.yml"
-    environments_file.write_text(environments_content)
-    return environments_file
 
 
 @pytest.fixture

@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives import serialization
 from snowflake.connector.pandas_tools import write_pandas
 
 from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
+from clair.environments.environments import Authenticator, Environment, Password, PrivateKey
 from clair.trouves.address import TrouveAddress
 
 
@@ -19,74 +20,45 @@ class SnowflakeAdapter(WarehouseAdapter):
 
     def __init__(self) -> None:
         self._conn: snowflake.connector.SnowflakeConnection | None = None
-        self._region: str = ""
-        self._account_locator: str = ""
-        self._profile: dict[str, Any] | None = None
+        self._environment: Environment | None = None
 
-    def connect(self, profile: dict[str, Any]) -> None:
-        """Connect to Snowflake with the credentials from the profile.
-
-        The method accepts these authentication methods:
-        - SSO, with authenticator=externalbrowser
-        - Key pair, with private_key_path
-        - The usual user name and password
-        """
-        self._region = profile.get("region", "")
-        self._account_locator = profile.get("account_locator", "")
-        self._profile = dict(profile)
+    def connect(self, environment: Environment) -> None:
+        """Connect to Snowflake with the connection and the authentication of the environment."""
+        connection = environment.connection
+        authentication = environment.authentication
+        self._environment = environment
 
         connect_args: dict[str, Any] = {
-            "account": profile["account"],
-            "user": profile["user"],
+            "account": connection.account,
+            "user": connection.user,
+            "warehouse": connection.warehouse,
         }
+        if connection.role:
+            connect_args["role"] = connection.role
 
-        # The authentication method.
-        if "authenticator" in profile:
-            connect_args["authenticator"] = profile["authenticator"]
-            if profile["authenticator"] == "externalbrowser":
+        if isinstance(authentication, Authenticator):
+            connect_args["authenticator"] = authentication.authenticator
+            if authentication.authenticator == "externalbrowser":
                 # A parallel run opens one connection for each thread. Without
                 # this cache, SSO opens one browser window for each connection.
                 # The connector keeps the token in the credential store of the
                 # operating system, and the second connection reads it.
                 connect_args["client_store_temporary_credential"] = True
-        elif "private_key_pem" in profile:
-            pem_content = profile["private_key_pem"]
-            passphrase = profile.get("private_key_passphrase")
-            password = passphrase.encode() if isinstance(passphrase, str) else passphrase
-            pem_bytes = pem_content.encode() if isinstance(pem_content, str) else pem_content
-            p_key = serialization.load_pem_private_key(pem_bytes, password=password)
-            connect_args["private_key"] = p_key.private_bytes(
-                encoding=serialization.Encoding.DER,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        elif "private_key_path" in profile:
-            key_path = Path(profile["private_key_path"]).expanduser()
-            passphrase = profile.get("private_key_passphrase")
-            password = passphrase.encode() if isinstance(passphrase, str) else passphrase
-            with open(key_path, "rb") as f:
-                p_key = serialization.load_pem_private_key(f.read(), password=password)
-                connect_args["private_key"] = p_key.private_bytes(
-                    encoding=serialization.Encoding.DER,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=serialization.NoEncryption(),
-                )
-        elif "password" in profile:
-            connect_args["password"] = profile["password"]
-
-        # The optional session context.
-        for key in ("warehouse", "role", "database"):
-            if key in profile:
-                connect_args[key] = profile[key]
+        elif isinstance(authentication, PrivateKey):
+            connect_args["private_key"] = _read_private_key(authentication)
+        elif isinstance(authentication, Password):
+            connect_args["password"] = authentication.password
+        else:
+            raise TypeError(f"No connection for the authentication {authentication!r}.")
 
         self._conn = snowflake.connector.connect(**connect_args)
 
     def new_connection(self) -> SnowflakeAdapter:
-        """Make a second SnowflakeAdapter with the same profile, and connect it."""
-        if self._profile is None:
+        """Make a second SnowflakeAdapter with the same environment, and connect it."""
+        if self._environment is None:
             raise RuntimeError("Not connected. Call connect() first.")
         adapter = SnowflakeAdapter()
-        adapter.connect(self._profile)
+        adapter.connect(self._environment)
         return adapter
 
     def execute(self, sql: str) -> Statement:
@@ -230,7 +202,23 @@ class SnowflakeAdapter(WarehouseAdapter):
 
     def _build_query_url(self, query_id: str) -> str:
         """Make the Snowflake console URL for a query ID."""
+        assert self._environment is not None
+        connection = self._environment.connection
         return (
-            f"https://app.snowflake.com/{self._region}/{self._account_locator}"
+            f"https://app.snowflake.com/{connection.region or ''}/{connection.account_locator or ''}"
             f"/#/compute/history/queries/{query_id}/detail"
         )
+
+
+def _read_private_key(authentication: PrivateKey) -> bytes:
+    """Read the PEM key file, and give the key in the DER format that the connector reads."""
+    key_path = Path(authentication.private_key_path).expanduser()
+    passphrase = authentication.private_key_passphrase
+    private_key = serialization.load_pem_private_key(
+        key_path.read_bytes(), password=passphrase.encode() if passphrase else None
+    )
+    return private_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )

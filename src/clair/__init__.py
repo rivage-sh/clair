@@ -21,10 +21,12 @@ gives a result object with the complete data of the operation::
 :class:`~clair.environments.environments.Environment`, and they read no file. A
 notebook, a test, or a service that holds the settings makes the object::
 
-    from clair import Environment
+    from clair import Authenticator, Connection, Environment
 
     environment = Environment(
-        name="dev", account="ab12345", user="analyst", warehouse="compute_wh"
+        name="dev",
+        connection=Connection(account="ab12345", user="analyst", warehouse="compute_wh"),
+        authentication=Authenticator(authenticator="externalbrowser"),
     )
     summary = clair.run("~/projects/analytics", env=environment)
 
@@ -40,7 +42,7 @@ modules. Import it to make feature flags that obey the active environment::
     import clair
 
     trouve = Table(
-        sql=f"SELECT * FROM {upstream} {'WHERE is_beta = 1' if clair.env.role == 'DEV' else ''}"
+        sql=f"SELECT * FROM {upstream} {'WHERE is_beta = 1' if clair.env.connection.role == 'DEV' else ''}"
     )
 
 Discovery also sets ``clair.run_mode`` to the active
@@ -67,7 +69,13 @@ from __future__ import annotations
 
 from clair._version import __version__
 from clair.api import catalog, clean, compile, docs, run, test, validate
-from clair.environments.environments import Environment
+from clair.environments.environments import (
+    Authenticator,
+    Connection,
+    Environment,
+    Password,
+    PrivateKey,
+)
 from clair.environments.routing import RoutingEntry, RoutingTable
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.column import Column, ColumnType
@@ -112,9 +120,11 @@ __all__ = [
     "THIS",
     "AnyTest",
     "Append",
+    "Authenticator",
     "BuildPlan",
     "Column",
     "ColumnType",
+    "Connection",
     "DatabaseDefaults",
     "DataframeTrouve",
     "DeleteInsert",
@@ -123,6 +133,8 @@ __all__ = [
     "Incremental",
     "NodeAddresses",
     "PandasTrouve",
+    "Password",
+    "PrivateKey",
     "RoutingEntry",
     "RoutingTable",
     "RunConfig",

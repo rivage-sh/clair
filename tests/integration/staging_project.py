@@ -40,7 +40,6 @@ from pathlib import Path
 
 from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.trouves.run_config import IncrementalMode
 from clair.trouves.trouve import NEW_ROWS_SUFFIX, ExecutionType
 from tests.integration.projects import (
     CI_DATABASE_CONFIG_FILE,
@@ -134,29 +133,25 @@ trouve = Source(
 '''
 
 
-def incremental_checked_file(
-    database_name: str, minimum_rows: int, incremental_mode: IncrementalMode
-) -> str:
+# The source of each strategy that the incremental candidate can use. An UPSERT
+# and a DELETE_INSERT match on ``id``, or replace the range of ``id``.
+APPEND_STRATEGY = "Append()"
+UPSERT_STRATEGY = 'Upsert(primary_key_columns=["id"])'
+DELETE_INSERT_KEY_STRATEGY = 'DeleteInsert(primary_key_columns=["id"])'
+DELETE_INSERT_RANGE_STRATEGY = 'DeleteInsert(range_column="id")'
+
+
+def incremental_checked_file(database_name: str, minimum_rows: int, strategy: str) -> str:
     """Give the candidate Trouve that clair materializes incrementally.
 
-    An UPSERT and a DELETE_INSERT match on ``id``. An APPEND takes no primary
-    key column, and Append rejects one.
+    ``strategy`` is the Python source of the strategy, for example
+    UPSERT_STRATEGY.
 
     ``ratio`` is a FLOAT. `tables_are_equal` compares a float column inside a
     tolerance, and this column makes the integration job run that path against
     Snowflake. A cast to FLOAT is necessary, because a division of two NUMBER
     values gives a NUMBER.
     """
-    strategy = None
-    if incremental_mode == IncrementalMode.APPEND:
-        strategy = "Append()"
-    elif incremental_mode == IncrementalMode.UPSERT:
-        strategy = 'Upsert(primary_key_columns=["id"])'
-    elif incremental_mode == IncrementalMode.DELETE_INSERT:
-        strategy = 'DeleteInsert(primary_key_columns=["id"])'
-    else:
-        raise ValueError(f"The probe project has no Trouve for {incremental_mode}.")
-
     return f'''\
 from {database_name}.source.rows import trouve as source_rows
 
@@ -256,7 +251,7 @@ def write_probe_project(
     database_name: str,
     minimum_rows: int,
     execution_type: ExecutionType = ExecutionType.SNOWFLAKE,
-    incremental_mode: IncrementalMode | None = None,
+    strategy: str | None = None,
 ) -> Path:
     """Write the project, and give the path of its root.
 
@@ -267,10 +262,10 @@ def write_probe_project(
         minimum_rows: The limit of TestRowCount on the refined Trouve.
         execution_type: SNOWFLAKE for a SQL candidate, PANDAS for a candidate
             that a transform function gives.
-        incremental_mode: APPEND, UPSERT or DELETE_INSERT for an incremental
-            candidate. None gives a full refresh candidate. A PandasTrouve
-            always makes the table again, so the two arguments do not go
-            together.
+        strategy: The Python source of the strategy of an incremental
+            candidate, for example UPSERT_STRATEGY. None gives a full refresh
+            candidate. A PandasTrouve always makes the table again, so the two
+            arguments do not go together.
 
     Returns:
         The path of the project root.
@@ -279,7 +274,7 @@ def write_probe_project(
         ValueError: If the execution type has no Trouve here, or if a pandas
             candidate asks for an incremental mode.
     """
-    if incremental_mode is not None and execution_type == ExecutionType.PANDAS:
+    if strategy is not None and execution_type == ExecutionType.PANDAS:
         raise ValueError("A pandas candidate has no incremental mode.")
 
     project_path = destination / database_name
@@ -291,10 +286,8 @@ def write_probe_project(
     (database_path / "__database_config__.py").write_text(CI_DATABASE_CONFIG_FILE)
 
     checked_file = None
-    if incremental_mode is not None:
-        checked_file = incremental_checked_file(
-            database_name, minimum_rows, incremental_mode
-        )
+    if strategy is not None:
+        checked_file = incremental_checked_file(database_name, minimum_rows, strategy)
     elif execution_type == ExecutionType.PANDAS:
         checked_file = pandas_checked_file(database_name, minimum_rows)
     elif execution_type == ExecutionType.SNOWFLAKE:

@@ -1,20 +1,26 @@
 # Trouve API
 
 ```python
-from clair import BuildPlan, PandasTrouve, SeedTrouve, Table, TrouveAbc, TrouveType
+from clair import BuildPlan, PandasTrouve, SeedTrouve, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
 ```
 
-Clair has one Trouve class for each backend. `TrouveAbc` is the abstract base
-that they share. `Trouve` runs SQL in Snowflake. `PandasTrouve` and `SeedTrouve`
-both give a DataFrame, which clair writes to Snowflake.
+Clair has one class for each kind of object. The class gives the type, thus no
+Trouve takes a `type` argument. `TrouveAbc` is the abstract base that each class
+shares.
 
-| Class | Backend | Declares dependencies with |
-|-------|---------|----------------------------|
-| `TrouveAbc` | none — abstract base | — |
-| `Trouve` | Snowflake SQL | f-string references in `sql` |
-| `DataframeTrouve` | none — abstract base | — |
-| `PandasTrouve` | pandas | the `inputs` list |
-| `SeedTrouve` | pandas | none — a seed reads no Trouve |
+| Class | Type | Backend | Declares dependencies with |
+|-------|------|---------|----------------------------|
+| `TrouveAbc` | — | none — abstract base | — |
+| `Source` | SOURCE | none — clair reads it, and never writes it | — |
+| `SqlTrouve` | — | none — abstract base of `Table` and `View` | — |
+| `Table` | TABLE | Snowflake SQL | f-string references in `sql` |
+| `View` | VIEW | Snowflake SQL | f-string references in `sql` |
+| `DataframeTrouve` | TABLE | none — abstract base | — |
+| `PandasTrouve` | TABLE | pandas | the `inputs` list |
+| `SeedTrouve` | TABLE | pandas | none — a seed reads no Trouve |
+
+Each class rejects a field that it does not read. For example, `View(run_config=...)`
+raises `ValueError`, because a view has no incremental mode.
 
 ## `TrouveType`
 
@@ -24,6 +30,8 @@ class TrouveType(StrEnum):
     TABLE  = "table"
     VIEW   = "view"
 ```
+
+Read it from `trouve.type`. Routing gets it as the `trouve_type` argument.
 
 ## `ExecutionType`
 
@@ -35,69 +43,97 @@ class ExecutionType(StrEnum):
 
 ## `TrouveAbc`
 
-The abstract base of every backend. It holds the fields that each backend
-shares. You do not instantiate it directly — a subclass supplies the backend.
+The abstract base of each Trouve. It holds the fields that each class shares.
+You do not instantiate it directly.
 
 ```python
 class TrouveAbc(BaseModel, ABC):
-    type:       TrouveType = TrouveType.TABLE
-    columns:    list[Column] = []
-    tests:      list[AnyTest] = []
-    docs:       str = ""
-    run_config: RunConfig = FullRefresh()
-    compiled:   CompiledAttributes | None = None
+    columns:  list[Column] = []
+    tests:    list[AnyTest] = []
+    docs:     str = ""
+    compiled: CompiledAttributes | None = None
 
     @property
-    def execution_type(self) -> ExecutionType: ...   # each subclass supplies it
+    def type(self) -> TrouveType: ...                   # the class gives it
+
+    @property
+    def execution_type(self) -> ExecutionType: ...      # each subclass supplies it
 
     def upstream_trouves(self) -> list[TrouveAbc]: ...  # each subclass supplies it
 ```
 
-Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any backend.
-
-## `Trouve`
-
-The SQL backend. Snowflake materializes it.
-
-```python
-class Table(TrouveAbc):
-    sql: str = ""
-```
+Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any class.
 
 ### Fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | `TrouveType` | `TABLE` | Tells you if this is a SOURCE, a TABLE, or a VIEW |
-| `sql` | `str` | `""` | SQL query. Required for TABLE/VIEW. Must be empty for SOURCE. Use f-strings to reference other Trouves. |
-| `columns` | `list[Column]` | `[]` | Column definitions. Optional for TABLE/VIEW. Required for UPSERT. |
+| `columns` | `list[Column]` | `[]` | Column definitions. Required for UPSERT. |
 | `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](tests-api.md). |
 | `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
-| `run_config` | `RunConfig` | full refresh | Materialization strategy. See [RunConfig](run-config-api.md). |
 | `compiled` | `CompiledAttributes \| None` | `None` | Discovery sets this. Do not set it manually. |
 
 ### Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
+| `type` | `TrouveType` | SOURCE, TABLE, or VIEW. The class gives it. |
 | `is_compiled` | `bool` | `True` after clair discovers the project |
 | `physical_address` | `TrouveAddress` | The address that clair writes to. `str()` gives `database.schema.table`. Raises `RuntimeError` if not compiled. |
 
-### Methods
+## `Source`
+
+A table that another tool loads. Clair reads it, and never writes it. It takes
+only the fields of `TrouveAbc`.
+
+```python
+from clair import Source
+
+trouve = Source(docs="The raw orders. The ingestion job loads them.")
+```
+
+## `SqlTrouve`
+
+The abstract base of `Table` and `View`. Snowflake materializes each one from SQL.
+
+```python
+class SqlTrouve(TrouveAbc, ABC):
+    sql: str
+
+    def build_sql(self, effective_mode, run_id, staging_address=None) -> BuildPlan: ...
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `sql` | `str` | required | The SQL query. It must not be empty. Use f-strings to reference other Trouves. |
 
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `build_sql(effective_mode, run_id, staging_address=None)` | `BuildPlan` | The statements that write the object. Raises `RuntimeError` if not compiled. A subclass can override it. See [Write your own build](../guides/custom-build-sql.md). |
 
-### Validation rules
+Write `isinstance(obj, SqlTrouve)` to accept a `Table` or a `View`.
 
-- TABLE and VIEW: `sql` must be non-empty
-- SOURCE: `sql` must be empty
-- INCREMENTAL mode: only TABLE supports it (not VIEW)
+## `Table`
+
+A table that Snowflake makes from the SQL.
+
+```python
+class Table(SqlTrouve):
+    run_config: RunConfig = FullRefresh()
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `run_config` | `RunConfig` | full refresh | Materialization strategy. See [RunConfig](run-config-api.md). |
+
+## `View`
+
+A view that Snowflake makes from the SQL. Each run makes it again. A `View` has
+no `run_config`, because a view has no incremental mode.
 
 ## `BuildPlan`
 
-The statements that `Trouve.build_sql()` gives for one Trouve.
+The statements that `SqlTrouve.build_sql()` gives for one Trouve.
 
 ```python
 class BuildPlan(BaseModel):
@@ -114,19 +150,18 @@ class BuildPlan(BaseModel):
 | `cleanup_statements` | `list[str]` | The statements that remove each object that the plan makes for one run. clair executes them after `statements`, when they pass and when one of them fails. A failed cleanup statement does not fail the Trouve. |
 | `all_statements` | `list[str]` | Property. Each statement in the order of a run that passes. |
 
-A SOURCE gives an empty `BuildPlan`. UPSERT puts the drop of its merge source in
-`cleanup_statements`.
+UPSERT puts the drop of its merge source in `cleanup_statements`.
 
 ## `CompiledAttributes`
 
-Discovery sets these attributes on `Trouve.compiled`. They are available after `clair compile` or `clair run`.
+Discovery sets these attributes on `trouve.compiled`. They are available after `clair compile` or `clair run`.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `physical_address` | `TrouveAddress` | The address that routing gives. clair uses it in the SQL and the DDL. |
 | `logical_address` | `TrouveAddress` | The address that the file system gives. clair uses it for the DAG edges and the selectors. |
 | `resolved_sql` | `str` | The SQL. clair replaced each placeholder token with a real logical address. It is empty for a `PandasTrouve`. |
-| `resolved_transform` | `str` | The source text of the transform function. It is empty for a SQL `Trouve`. |
+| `resolved_transform` | `str` | The source text of the transform function. It is empty for a `Table` or a `View`. |
 | `file_path` | `Path` | Absolute path to the Trouve file |
 | `imports` | `list[str]` | The logical addresses of the upstream Trouves |
 | `execution_type` | `ExecutionType` | SNOWFLAKE or PANDAS |
@@ -170,7 +205,7 @@ from clair import PandasTrouve
 | `transform` | `Callable[..., pd.DataFrame]` | required | The function that gives the output DataFrame. |
 | `inputs` | `list[TrouveAbc]` | `[]` | The upstream Trouves. Clair binds them to the transform parameters by position. |
 
-`TrouveAbc` holds the other fields: `columns`, `tests`, `docs`, `run_config`.
+`TrouveAbc` holds the other fields: `columns`, `tests`, `docs`.
 
 ### Methods
 
@@ -193,8 +228,7 @@ from clair import PandasTrouve
 
 - The count of `inputs` must equal the count of transform parameters.
 - The transform must not use `*args` or `**kwargs`.
-- A `PandasTrouve` must be `TrouveType.TABLE`. A VIEW or a SOURCE raises `ValueError`.
-- A `PandasTrouve` does not support incremental run modes.
+- A `PandasTrouve` is always a TABLE, and it has no `run_config`. Each run replaces the table.
 
 ### Example
 
@@ -248,7 +282,7 @@ from clair import SeedTrouve
 |-------|------|---------|-------------|
 | `dataframe` | `pd.DataFrame` | required | The rows that clair writes. Clair reads it when it imports the file. |
 
-`TrouveAbc` holds the other fields: `columns`, `tests`, `docs`, `run_config`.
+`TrouveAbc` holds the other fields: `columns`, `tests`, `docs`.
 
 ### Methods
 
@@ -270,8 +304,7 @@ from clair import SeedTrouve
 
 ### Constraints
 
-- A `SeedTrouve` must be `TrouveType.TABLE`. A VIEW or a SOURCE raises `ValueError`.
-- A `SeedTrouve` does not support incremental run modes.
+- A `SeedTrouve` is always a TABLE, and it has no `run_config`. Each run replaces the table.
 - Each column name of the DataFrame must be a string, and the names must be unique.
 - The DataFrame needs one column minimum. A seed with no row is valid.
 
@@ -307,7 +340,7 @@ When you reference a Trouve in an f-string:
 sql=f"SELECT * FROM {other_trouve}"
 ```
 
-Python calls `Trouve.__format__`, which:
+Python calls `TrouveAbc.__format__`, which:
 
 1. Registers `other_trouve` in a global registry
 2. Returns a placeholder token, such as `__CLAIR_TROUVE_140234567890__`

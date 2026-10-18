@@ -20,7 +20,7 @@ from tests.helpers import write_project_marker
 SOURCE_FILE = """\
 from clair import Source
 
-trouve = Source(sql="")
+trouve = Source()
 """
 
 

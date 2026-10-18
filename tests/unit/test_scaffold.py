@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from clair.core.discovery import discover_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
+from clair.environments.environments import Authenticator, load_environment
 from clair.environments.project_routing import load_project_routing
 from clair.environments.routing import route
 from clair.trouves.trouve import TrouveType
+from tests.helpers import make_environment
 
 # ---------------------------------------------------------------------------
 # The helper functions.
@@ -72,19 +75,17 @@ class TestFileContents:
         project_dir = tmp_path / "proj"
         scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
 
-        content = (project_dir / "source/raw/orders.py").read_text()
-        assert "TrouveType.SOURCE" in content
+        (orders,) = discover_project(project_dir)
+        assert orders.type == TrouveType.SOURCE
 
     def test_environments_yml_has_dev_environment(self, tmp_path: Path) -> None:
         fake_home = tmp_path / "home"
         scaffold_project(tmp_path / "proj", **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
 
-        content = (fake_home / ".clair" / "environments.yml").read_text()
-        assert "dev:" in content
-        assert "account:" in content
-        assert "externalbrowser" in content
-        # Routing lives in the project __routing__.py, never in environments.yml.
-        assert "  routing:" not in content
+        _name, environment = load_environment(
+            environments_path=fake_home / ".clair" / "environments.yml"
+        )
+        assert environment.authentication == Authenticator(authenticator="externalbrowser")
 
     def test_routing_file_gives_a_passthrough_entry_for_dev(self, tmp_path: Path) -> None:
         """The file that clair init writes loads, and it changes no address."""
@@ -151,37 +152,8 @@ class TestCustomSourceDbName:
 
 
 class TestWriteEnvironmentsYml:
-    def test_writes_env_with_connection_fields(self, tmp_path: Path) -> None:
-        env_data = {
-            "account": "myorg-myaccount",
-            "user": "me@example.com",
-            "authenticator": "externalbrowser",
-            "warehouse": "COMPUTE_WH",
-            "role": "ANALYST",
-        }
-        path = write_environments_yml(
-            env_data, env_name="dev", home_dir=tmp_path
-        )
+    """test_environments.py proves that the loader reads back what the writer writes."""
 
-        assert path.exists()
-        content = path.read_text()
-        assert "dev:" in content
-        assert "  account: myorg-myaccount" in content
-        assert "  user: me@example.com" in content
-        assert "  warehouse: COMPUTE_WH" in content
-        assert "  role: ANALYST" in content
-
-    def test_omits_routing(self, tmp_path: Path) -> None:
-        env_data = {
-            "account": "myorg-myaccount",
-            "user": "me@example.com",
-            "warehouse": "COMPUTE_WH",
-        }
-        path = write_environments_yml(env_data, home_dir=tmp_path)
-        content = path.read_text()
-        assert "  routing:" not in content
-
-    def test_writes_to_correct_location(self, tmp_path: Path) -> None:
-        env_data = {"account": "x", "user": "y", "warehouse": "z"}
-        path = write_environments_yml(env_data, home_dir=tmp_path)
+    def test_the_file_goes_to_the_clair_directory_of_the_home(self, tmp_path: Path) -> None:
+        path = write_environments_yml(make_environment(), home_dir=tmp_path)
         assert path == tmp_path / ".clair" / "environments.yml"

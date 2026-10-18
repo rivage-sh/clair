@@ -182,7 +182,7 @@ run_config=Incremental(
 
 ## `DeleteInsert`
 
-`DeleteInsert` deletes each target row that a new row matches, then inserts all the new rows. Use it to replace a window of data, for example the last 3 days.
+`DeleteInsert` deletes the target rows that the new rows replace, then inserts all the new rows. Use it to replace a window of data, for example the last 3 days.
 
 Choose `DeleteInsert` in place of `Upsert` for two reasons:
 
@@ -267,7 +267,29 @@ The DELETE and the INSERT write to the staging table, and clair promotes it afte
 `DeleteInsert` also takes `join_sql`. It gives the `WHERE` condition of the DELETE, with the aliases `target` and `source`.
 
 !!! note
-    A day that the new rows do not hold keeps its old rows. If the source deletes all the orders of one day in the window, the old total of that day stays. Use a full refresh to remove it.
+    With a key, a day that the new rows do not hold keeps its old rows. If the source deletes all the orders of one day in the window, the old total of that day stays. Use `range_column` to remove it.
+
+### Replace a range
+
+Give `range_column` in place of the key. Clair then deletes each target row between the minimum and the maximum of the new rows, and a day that the new rows do not hold goes too:
+
+```python
+run_config=Incremental(strategy=DeleteInsert(range_column="created_date"))
+```
+
+The DELETE of an incremental run:
+
+```sql
+-- [2/4] delete each target row in the range of the new rows
+DELETE FROM example_3_database.derived.daily_orders AS target
+WHERE target.created_date BETWEEN
+    (SELECT MIN(created_date) FROM example_3_database.derived.daily_orders__clair_new_rows_<run_id>)
+    AND (SELECT MAX(created_date) FROM example_3_database.derived.daily_orders__clair_new_rows_<run_id>)
+```
+
+The other three statements are the same as with a key. Snowflake reads the two bounds when it compiles the DELETE, and it skips each micro-partition of the target outside them. Thus the DELETE reads only the range, when the target is in the order of `range_column`.
+
+The range comes from the new rows, and not from the filter of your SQL. If the new rows are empty, the bounds are `NULL`, and the DELETE removes no row. If your SQL gives one old day, for example a backfill, clair replaces that day only.
 
 ## Behavior of the first run
 

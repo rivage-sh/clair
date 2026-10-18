@@ -625,7 +625,7 @@ class TestTwoProjectsInOneProcess:
             textwrap.dedent("""
                 from clair import Source
 
-                trouve = Source(sql="")
+                trouve = Source()
             """)
         )
         (schema_dir / "checked.py").write_text(

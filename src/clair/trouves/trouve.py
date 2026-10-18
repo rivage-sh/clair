@@ -4,13 +4,15 @@ One Trouve maps to one object in Snowflake that you can query: a source table,
 a transformed table, or a view. Each Trouve stays in its own .py file. The
 framework finds each Trouve automatically.
 
-This module holds two classes:
+This module holds the base class and the classes of the SQL backend:
 
-* ``TrouveAbc`` -- the abstract base. It holds the attributes that every backend
+* ``TrouveAbc`` -- the abstract base. It holds the attributes that every Trouve
   shares: the columns, the tests, the docs, and the compiled attributes.
-* ``Trouve`` -- the SQL backend. Snowflake materializes it from SQL.
+* ``Source`` -- a table that clair reads, and never writes.
+* ``SqlTrouve`` -- the base of ``Table`` and ``View``. Snowflake materializes
+  each one from SQL.
 
-The pandas backend, ``PandasTrouve``, stays in ``pandas_trouve.py``.
+The DataFrame backends stay in ``pandas_trouve.py`` and ``seed_trouve.py``.
 """
 
 from __future__ import annotations
@@ -36,7 +38,6 @@ from clair.trouves.run_config import (
     RunConfig,
     RunMode,
     Upsert,
-    match_condition,
 )
 from clair.trouves.test import AnyTest
 
@@ -71,23 +72,15 @@ class UpsertPlan(BaseModel):
 
     Attributes:
         merge_source_address: The table that holds the new rows of this run.
-        join_sql: The join condition that the author wrote, or None.
-        join_key_columns: The key columns that make the join, when the author
-            wrote no join_sql.
+        join_condition: The ON condition of the MERGE.
         update_column_names: The columns that a row that matches receives.
         insert_column_names: The columns that a row that does not match gets.
     """
 
     merge_source_address: str
-    join_sql: str | None
-    join_key_columns: list[str]
+    join_condition: str
     update_column_names: list[str]
     insert_column_names: list[str]
-
-    @property
-    def join_condition(self) -> str:
-        """Give the ON condition of the MERGE."""
-        return match_condition(self.join_sql, self.join_key_columns)
 
     @property
     def update_clause(self) -> str:
@@ -420,22 +413,35 @@ class Table(SqlTrouve):
     def _delete_insert_build_plan(
         self, strategy: DeleteInsert, address: str, resolved_sql: str, run_id: str
     ) -> BuildPlan:
-        """Make the plan that replaces each target row that a new row matches.
+        """Make the plan that deletes the target rows of the new rows, then inserts the new rows.
 
         A DELETE_INSERT keeps a duplicate key in the new rows, where a MERGE
         fails. A key on a date column replaces each day that the new rows hold.
+        A range column replaces each day from the first to the last day of the
+        new rows. Its bounds are scalar subqueries, and Snowflake prunes the
+        micro-partitions of the target on them when it compiles the DELETE.
         """
         new_rows_address = self.new_rows_address(run_id)
         create_new_rows = (
             f"-- [1/4] create the new rows table\n"
             f"CREATE OR REPLACE TABLE {new_rows_address} AS (\n{resolved_sql}\n)"
         )
-        delete_matched_rows = (
-            f"-- [2/4] delete each target row that a new row matches\n"
-            f"DELETE FROM {address} AS {TARGET}\n"
-            f"USING {new_rows_address} AS {SOURCE}\n"
-            f"WHERE {strategy.match_condition}"
-        )
+        if strategy.range_column is not None:
+            range_column = strategy.range_column
+            delete_replaced_rows = (
+                f"-- [2/4] delete each target row in the range of the new rows\n"
+                f"DELETE FROM {address} AS {TARGET}\n"
+                f"WHERE {TARGET}.{range_column} BETWEEN "
+                f"(SELECT MIN({range_column}) FROM {new_rows_address}) "
+                f"AND (SELECT MAX({range_column}) FROM {new_rows_address})"
+            )
+        else:
+            delete_replaced_rows = (
+                f"-- [2/4] delete each target row that a new row matches\n"
+                f"DELETE FROM {address} AS {TARGET}\n"
+                f"USING {new_rows_address} AS {SOURCE}\n"
+                f"WHERE {strategy.match_condition}"
+            )
         insert_new_rows = (
             f"-- [3/4] insert the new rows\n"
             f"INSERT INTO {address}\nSELECT * FROM {new_rows_address}"
@@ -445,7 +451,7 @@ class Table(SqlTrouve):
             f"DROP TABLE IF EXISTS {new_rows_address}"
         )
         return BuildPlan(
-            statements=[create_new_rows, delete_matched_rows, insert_new_rows],
+            statements=[create_new_rows, delete_replaced_rows, insert_new_rows],
             cleanup_statements=[drop_new_rows],
         )
 
@@ -507,8 +513,7 @@ class Table(SqlTrouve):
 
         return UpsertPlan(
             merge_source_address=self.new_rows_address(run_id),
-            join_sql=strategy.join_sql,
-            join_key_columns=primary_key_columns,
+            join_condition=strategy.match_condition,
             update_column_names=update_column_names,
             insert_column_names=insert_column_names,
         )

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
 
 import click
 import structlog
@@ -23,7 +22,11 @@ from clair.core.discovery import (
 from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.environments.environments import (
     DEFAULT_THREADS,
+    Authenticator,
+    Connection,
     Environment,
+    Password,
+    PrivateKey,
     load_environment,
     resolve_env_name,
 )
@@ -190,47 +193,40 @@ def _prompt_and_write_environment() -> None:
     click.echo("  1. Private key")
     click.echo("  2. Password")
     click.echo("  3. SSO (externalbrowser)")
-    auth_choice = click.prompt("Enter choice", default="1", type=str)
+    auth_choice = click.prompt("Enter choice", default="1", type=click.Choice(["1", "2", "3"]))
 
-    env_data: dict[str, Any] = {
-        "account": account,
-        "user": user,
-    }
-
+    authentication = None
     if auth_choice == "1":
         private_key_path = _require("Private key path")
-        env_data["private_key_path"] = private_key_path
-        key_encrypted = click.confirm("Is the key encrypted?", default=False)
-        if key_encrypted:
-            passphrase = click.prompt(
-                "Private key passphrase", hide_input=True, type=str
-            )
-            env_data["private_key_passphrase"] = passphrase
+        passphrase = None
+        if click.confirm("Is the key encrypted?", default=False):
+            passphrase = click.prompt("Private key passphrase", hide_input=True, type=str)
+        authentication = PrivateKey(
+            private_key_path=private_key_path, private_key_passphrase=passphrase
+        )
     elif auth_choice == "2":
-        password = click.prompt("Password", hide_input=True, type=str)
-        env_data["password"] = password
+        authentication = Password(
+            password=click.prompt("Password", hide_input=True, type=str)
+        )
     elif auth_choice == "3":
-        env_data["authenticator"] = "externalbrowser"
+        authentication = Authenticator(authenticator="externalbrowser")
+    else:
+        raise click.UsageError(f"No authentication method for the choice {auth_choice}.")
 
     click.echo("")
     _hint("current_warehouse() as warehouse")
     warehouse = _require("Warehouse")
-    env_data["warehouse"] = warehouse
 
     click.echo("")
     role = click.prompt("Role (leave empty to use the default role of the user)", default="", type=str, show_default=False)
-    if role:
-        env_data["role"] = role
 
     click.echo("")
     _hint("current_region() as region")
     region = _require("Region (e.g. us-east-1)")
-    env_data["region"] = region
 
     click.echo("")
     _hint("current_account() as account_locator")
     account_locator = _require("Account locator (e.g. abc12345)")
-    env_data["account_locator"] = account_locator
 
     click.echo("")
     threads = click.prompt(
@@ -238,10 +234,22 @@ def _prompt_and_write_environment() -> None:
         default=DEFAULT_THREADS,
         type=click.IntRange(min=1),
     )
-    env_data["threads"] = threads
 
+    environment = Environment(
+        name=env_name,
+        connection=Connection(
+            account=account,
+            user=user,
+            warehouse=warehouse,
+            role=role or None,
+            region=region,
+            account_locator=account_locator,
+        ),
+        authentication=authentication,
+        threads=threads,
+    )
     click.echo("")
-    write_environments_yml(env_data, env_name=env_name)
+    write_environments_yml(environment)
 
 
 @cli.command(name="compile")

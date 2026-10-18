@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, ValidationError
 
 from clair.exceptions import (
     EnvironmentNotFoundError,
@@ -30,66 +30,127 @@ def _first_error_message(exc: ValidationError) -> str:
     errors = exc.errors()
     if not errors:
         return str(exc)
+    # A misspelt key gives a missing key and an unknown key. The unknown key
+    # names the text that the user wrote, thus it comes first.
+    errors = sorted(errors, key=lambda error: error["type"] != "extra_forbidden")
     first = errors[0]
     key_name = ".".join(str(part) for part in first.get("loc", ()))
     message = str(first.get("msg", ""))
     return f"'{key_name}': {message}" if key_name else message
 
 
-class Environment(BaseModel):
-    """One environment from environments.yml.
+class _SettingsModel(BaseModel):
+    # "forbid" makes an unknown key an error. A misspelt key, or a key of a
+    # different authentication method, would otherwise disappear without a word.
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    An environment holds connection settings only. Routing lives in the project
-    ``__routing__.py``, under the same environment name.
+
+class Connection(_SettingsModel):
+    """The Snowflake account, and the session defaults of each connection.
+
+    Attributes:
+        account: The account identifier, for example ``myorg-myaccount``.
+        user: The Snowflake user.
+        warehouse: The warehouse of the session.
+        role: The role of the session. None uses the default role of the user.
+        region: The region of the account. The query URLs need it.
+        account_locator: The account locator. The query URLs need it.
     """
 
-    # "forbid" makes an unknown key an error. A leftover routing block, or a
-    # misspelt key, would otherwise disappear without a word.
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
-
-    # The identity of the environment.
-    name: str
-
-    # The connection fields. Each one is mandatory.
     account: str
     user: str
     warehouse: str
-
-    # The authentication fields. Clair uses one group when it connects.
-    authenticator: str | None = None
-    password: str | None = None
-    private_key_path: str | None = None
-    private_key_passphrase: str | None = None
-
-    # The optional connection fields.
     role: str | None = None
     region: str | None = None
     account_locator: str | None = None
 
-    # The number of Trouves that clair runs at one time. Each thread holds a
-    # private warehouse connection, so this is also the connection count.
-    # `clair run --threads` and `clair test --threads` replace this value.
-    threads: int = Field(default=DEFAULT_THREADS, ge=1)
 
-    def to_connection_dict(self) -> dict[str, Any]:
-        """Give the connection dict that SnowflakeAdapter.connect() needs."""
-        d: dict[str, Any] = {
-            "account": self.account,
-            "user": self.user,
-            "warehouse": self.warehouse,
-            "role": self.role,
-            "region": self.region,
-            "account_locator": self.account_locator,
-        }
-        if self.authenticator:
-            d["authenticator"] = self.authenticator
-        if self.password:
-            d["password"] = self.password
-        if self.private_key_path:
-            d["private_key_path"] = self.private_key_path
-        if self.private_key_passphrase:
-            d["private_key_passphrase"] = self.private_key_passphrase
-        return d
+class Password(_SettingsModel):
+    """Log in with the password of the user."""
+
+    password: str
+
+
+class PrivateKey(_SettingsModel):
+    """Log in with a key pair.
+
+    Attributes:
+        private_key_path: The path of the private key file, in PEM format.
+        private_key_passphrase: The passphrase of an encrypted key, or None.
+    """
+
+    private_key_path: str
+    private_key_passphrase: str | None = None
+
+
+class Authenticator(_SettingsModel):
+    """Log in with a Snowflake authenticator.
+
+    Attributes:
+        authenticator: The value that the Snowflake connector reads, for example
+            ``externalbrowser`` for SSO in a browser.
+    """
+
+    authenticator: str
+
+
+# The key that names each authentication method in environments.yml. A block
+# that holds two of these keys goes to the first method, and the extra key of
+# the other method is an error.
+_AUTHENTICATION_KEYS = {
+    "password": "password",
+    "private_key_path": "private_key",
+    "authenticator": "authenticator",
+}
+_AUTHENTICATION_TAGS = {
+    Password: "password",
+    PrivateKey: "private_key",
+    Authenticator: "authenticator",
+}
+
+
+def _authentication_tag(value: Any) -> str | None:
+    """Give the tag of the authentication method that a block or an object holds."""
+    if isinstance(value, dict):
+        for key, tag in _AUTHENTICATION_KEYS.items():
+            if key in value:
+                return tag
+        return None
+    return _AUTHENTICATION_TAGS.get(type(value))
+
+
+Authentication = Annotated[
+    Annotated[Password, Tag("password")]
+    | Annotated[PrivateKey, Tag("private_key")]
+    | Annotated[Authenticator, Tag("authenticator")],
+    Discriminator(
+        _authentication_tag,
+        custom_error_type="authentication_method",
+        custom_error_message="give one of password, private_key_path or authenticator",
+    ),
+]
+
+
+class Environment(_SettingsModel):
+    """One environment from environments.yml.
+
+    An environment holds connection settings only. Routing lives in the project
+    ``__routing__.py``, under the same environment name.
+
+    Attributes:
+        name: The environment name. It matches a top-level key in
+            environments.yml, and an entry in ``__routing__.py``.
+        connection: The account, and the session defaults.
+        authentication: One method: Password, PrivateKey, or Authenticator.
+        threads: The number of Trouves that clair runs at one time. Each thread
+            holds a private warehouse connection, so this is also the connection
+            count. ``clair run --threads`` and ``clair test --threads`` replace it.
+    """
+
+    name: str
+    connection: Connection
+    authentication: Authentication
+    threads: int = Field(default=DEFAULT_THREADS, ge=1)
 
 
 def resolve_env_name(env_name: str | None = None) -> str:

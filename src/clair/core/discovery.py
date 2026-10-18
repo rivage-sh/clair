@@ -343,7 +343,7 @@ def discover_project(
 
     # Put the active environment and the run mode on the clair package. Thus a
     # Trouve module can read them at load time, for example with
-    # ``import clair; clair.env.role``.
+    # ``import clair; clair.env.connection.role``.
     _clair_pkg.env = environment
     _clair_pkg.run_mode = run_mode
 

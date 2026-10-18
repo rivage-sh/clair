@@ -242,7 +242,7 @@ Each node does the same steps. The run mode decides only if the clone is necessa
 
 *Source: [`core/staging.py`][staging-py], and [`trouves/trouve.py`][trouve-py] — `build_sql()`*
 
-Step 2 comes from `Trouve.build_sql()`. A subclass can override it and give its own
+Step 2 comes from `SqlTrouve.build_sql()`. A subclass can override it and give its own
 statements, and clair keeps each other step. See [Write your own build](../guides/custom-build-sql.md).
 
 clair promotes a node before it releases the Trouves downstream of it. A dependent thus
@@ -274,7 +274,7 @@ no flag from you.
 
 An `upsert` node makes three statements: it builds a new rows table, it merges that
 table into the staging table, and it drops the new rows table. A `delete_insert` node
-builds the same table, deletes each staging row that a new row matches, inserts the new
+builds the same table, deletes each staging row that the new rows replace, inserts the new
 rows, and drops the table. The drop is a cleanup statement. clair runs it after the other statements, when they pass and when one of them
 fails. A failure leaves you the staging candidate to examine, and no clutter that you did
 not ask for. See [Incrementality](incrementality.md).

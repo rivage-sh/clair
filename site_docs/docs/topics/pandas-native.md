@@ -11,7 +11,7 @@ Use it if SQL is the incorrect tool for the task:
 - Aggregations of many steps that depend on Python state between the steps
 - Logic that you already have as pandas code
 
-For all other work, use a `Trouve` with a `sql` string. The SQL runs in Snowflake, and the data does not move on the network.
+For all other work, use a `Table` with a `sql` string. The SQL runs in Snowflake, and the data does not move on the network.
 
 ## Installation
 

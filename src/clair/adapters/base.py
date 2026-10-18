@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import StrEnum
-from typing import Any
 
 import pandas as pd
 from pydantic import BaseModel
 
+from clair.environments.environments import Environment
 from clair.trouves.address import TrouveAddress
 
 
@@ -72,13 +72,13 @@ class WarehouseAdapter(ABC):
     """The abstract interface for a warehouse connection."""
 
     @abstractmethod
-    def connect(self, profile: dict[str, Any]) -> None:
-        """Open a connection with the credentials from the profile."""
+    def connect(self, environment: Environment) -> None:
+        """Open a connection with the connection and the authentication of the environment."""
         ...
 
     @abstractmethod
     def new_connection(self) -> WarehouseAdapter:
-        """Make a second adapter with the same profile, and open its connection.
+        """Make a second adapter with the same environment, and open its connection.
 
         A parallel run gives one connection to each thread. Two threads that
         share one connection change the session context of each other, because

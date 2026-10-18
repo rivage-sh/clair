@@ -31,10 +31,14 @@ from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunStatus, RunSummary
 from clair.core.staging import make_staging_address
 from clair.environments.environments import Environment
-from clair.trouves.run_config import IncrementalMode, RunMode
+from clair.trouves.run_config import RunMode
 from tests.integration.comparison import tables_are_equal
 from tests.integration.config import IntegrationConfig
 from tests.integration.staging_project import (
+    APPEND_STRATEGY,
+    DELETE_INSERT_KEY_STRATEGY,
+    DELETE_INSERT_RANGE_STRATEGY,
+    UPSERT_STRATEGY,
     checked_address,
     insert_source_row,
     make_source_rows,
@@ -92,7 +96,7 @@ class TestAnUpsertRunThatPasses:
             tmp_path_factory.mktemp("staging_upsert_pass"),
             self.DATABASE_NAME,
             minimum_rows=PASSING_LIMIT,
-            incremental_mode=IncrementalMode.UPSERT,
+            strategy=UPSERT_STRATEGY,
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
@@ -164,10 +168,16 @@ class TestAnUpsertRunThatPasses:
         assert staging_objects(adapter, schema_name, self.DATABASE_NAME) == []
 
 
-class TestADeleteInsertRunThatPasses:
-    """The DELETE and the INSERT write to the staging table, and the promotion follows."""
+class _DeleteInsertRunThatPasses:
+    """The DELETE and the INSERT write to the staging table, and the promotion follows.
 
-    DATABASE_NAME = "staging_delete_insert_pass_database"
+    A subclass names the strategy, and the rows that the table holds after the
+    second run.
+    """
+
+    DATABASE_NAME: ClassVar[str]
+    STRATEGY: ClassVar[str]
+    EXPECTED_ROWS: ClassVar[list[tuple[str, int]]]
 
     @pytest.fixture(scope="class")
     def runs(
@@ -177,18 +187,17 @@ class TestADeleteInsertRunThatPasses:
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> tuple[RunSummary, RunSummary]:
-        """Build the table, then replace id_001 with two rows, and add id_003.
+        """Build the table, then give id_001 two rows, and add id_003.
 
         The new rows of the second run hold id_001 two times, and a MERGE
-        refuses that. They do not hold id_000 or id_002, thus those rows match
-        nothing and stay.
+        refuses that. They do not hold id_000 or id_002.
         """
         schema_name = clair_environment.schema_name
         project_path = write_probe_project(
             tmp_path_factory.mktemp("staging_delete_insert_pass"),
             self.DATABASE_NAME,
             minimum_rows=PASSING_LIMIT,
-            incremental_mode=IncrementalMode.DELETE_INSERT,
+            strategy=self.STRATEGY,
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
@@ -212,7 +221,7 @@ class TestADeleteInsertRunThatPasses:
         assert second_result.status == RunStatus.SUCCESS
         assert second_result.effective_run_mode == RunMode.INCREMENTAL
 
-    def test_a_matched_row_is_replaced_and_an_unmatched_row_stays(
+    def test_the_new_rows_replace_the_deleted_rows(
         self,
         runs: tuple[RunSummary, RunSummary],
         clair_environment: IntegrationConfig,
@@ -222,13 +231,7 @@ class TestADeleteInsertRunThatPasses:
         checked = checked_address(self.DATABASE_NAME, schema_name)
 
         rows = query_rows(adapter, f"select id, amount from {checked} order by id, amount")
-        assert [(str(row_id), int(str(amount))) for row_id, amount in rows] == [
-            ("id_000", 1),
-            ("id_001", 98),
-            ("id_001", 99),
-            ("id_002", 1),
-            ("id_003", 1),
-        ]
+        assert [(str(row_id), int(str(amount))) for row_id, amount in rows] == self.EXPECTED_ROWS
 
     def test_clair_drops_the_staging_table_and_the_new_rows_table(
         self,
@@ -238,6 +241,33 @@ class TestADeleteInsertRunThatPasses:
     ) -> None:
         schema_name = clair_environment.schema_name
         assert staging_objects(adapter, schema_name, self.DATABASE_NAME) == []
+
+
+class TestADeleteInsertByKeyRunThatPasses(_DeleteInsertRunThatPasses):
+    """id_000 and id_002 match no new row, thus they stay."""
+
+    DATABASE_NAME = "staging_delete_insert_pass_database"
+    STRATEGY = DELETE_INSERT_KEY_STRATEGY
+    EXPECTED_ROWS: ClassVar[list[tuple[str, int]]] = [
+        ("id_000", 1),
+        ("id_001", 98),
+        ("id_001", 99),
+        ("id_002", 1),
+        ("id_003", 1),
+    ]
+
+
+class TestADeleteInsertByRangeRunThatPasses(_DeleteInsertRunThatPasses):
+    """The new rows span id_001 to id_003, thus clair deletes id_002 and keeps id_000."""
+
+    DATABASE_NAME = "staging_delete_insert_range_pass_database"
+    STRATEGY = DELETE_INSERT_RANGE_STRATEGY
+    EXPECTED_ROWS: ClassVar[list[tuple[str, int]]] = [
+        ("id_000", 1),
+        ("id_001", 98),
+        ("id_001", 99),
+        ("id_003", 1),
+    ]
 
 
 class TestAnUpsertRunWhoseTestFails:
@@ -262,7 +292,7 @@ class TestAnUpsertRunWhoseTestFails:
             destination / "good",
             self.DATABASE_NAME,
             minimum_rows=PASSING_LIMIT,
-            incremental_mode=IncrementalMode.UPSERT,
+            strategy=UPSERT_STRATEGY,
         )
         clair.run(good_project, env=environment, run_mode=RunMode.INCREMENTAL)
 
@@ -271,7 +301,7 @@ class TestAnUpsertRunWhoseTestFails:
             destination / "bad",
             self.DATABASE_NAME,
             minimum_rows=FAILING_LIMIT,
-            incremental_mode=IncrementalMode.UPSERT,
+            strategy=UPSERT_STRATEGY,
         )
         return clair.run(bad_project, env=environment, run_mode=RunMode.INCREMENTAL)
 
@@ -349,7 +379,7 @@ class TestAMergeThatFails:
             tmp_path_factory.mktemp("staging_merge_error"),
             self.DATABASE_NAME,
             minimum_rows=PASSING_LIMIT,
-            incremental_mode=IncrementalMode.UPSERT,
+            strategy=UPSERT_STRATEGY,
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
@@ -429,7 +459,7 @@ class TestAnAppendRun:
             tmp_path_factory.mktemp("staging_append"),
             self.DATABASE_NAME,
             minimum_rows=PASSING_LIMIT,
-            incremental_mode=IncrementalMode.APPEND,
+            strategy=APPEND_STRATEGY,
         )
 
         make_source_rows(adapter, self.DATABASE_NAME, schema_name, FIRST_ROWS)
@@ -514,13 +544,13 @@ class TestTheFallbackGivesTheDataOfAFullRefresh:
             tmp_path_factory.mktemp("staging_fallback"),
             self.FALLBACK_DATABASE_NAME,
             minimum_rows=PASSING_LIMIT,
-            incremental_mode=IncrementalMode.UPSERT,
+            strategy=UPSERT_STRATEGY,
         )
         reference_path = write_probe_project(
             tmp_path_factory.mktemp("staging_reference"),
             self.FULL_REFRESH_DATABASE_NAME,
             minimum_rows=PASSING_LIMIT,
-            incremental_mode=IncrementalMode.UPSERT,
+            strategy=UPSERT_STRATEGY,
         )
 
         make_source_rows(
