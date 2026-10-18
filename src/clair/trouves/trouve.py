@@ -36,7 +36,6 @@ from clair.trouves.run_config import (
     RunConfig,
     RunMode,
     Upsert,
-    match_condition,
 )
 from clair.trouves.test import AnyTest
 
@@ -71,23 +70,15 @@ class UpsertPlan(BaseModel):
 
     Attributes:
         merge_source_address: The table that holds the new rows of this run.
-        join_sql: The join condition that the author wrote, or None.
-        join_key_columns: The key columns that make the join, when the author
-            wrote no join_sql.
+        join_condition: The ON condition of the MERGE.
         update_column_names: The columns that a row that matches receives.
         insert_column_names: The columns that a row that does not match gets.
     """
 
     merge_source_address: str
-    join_sql: str | None
-    join_key_columns: list[str]
+    join_condition: str
     update_column_names: list[str]
     insert_column_names: list[str]
-
-    @property
-    def join_condition(self) -> str:
-        """Give the ON condition of the MERGE."""
-        return match_condition(self.join_sql, self.join_key_columns)
 
     @property
     def update_clause(self) -> str:
@@ -446,8 +437,7 @@ class Trouve(TrouveAbc):
 
         return UpsertPlan(
             merge_source_address=self.new_rows_address(run_id),
-            join_sql=strategy.join_sql,
-            join_key_columns=primary_key_columns,
+            join_condition=strategy.match_condition,
             update_column_names=update_column_names,
             insert_column_names=insert_column_names,
         )

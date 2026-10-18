@@ -35,24 +35,6 @@ TARGET = "target"
 SOURCE = "source"
 
 
-def match_condition(join_sql: str | None, key_columns: list[str]) -> str:
-    """Give the condition that matches a target row to a source row.
-
-    Args:
-        join_sql: The condition that the author wrote, or None.
-        key_columns: The key columns that make the condition, when the author
-            wrote no join_sql.
-
-    Returns:
-        The join_sql of the author, or an equality on each key column.
-    """
-    if join_sql:
-        return join_sql
-    return " AND ".join(
-        f"{TARGET}.{column_name} = {SOURCE}.{column_name}" for column_name in key_columns
-    )
-
-
 class _ConfigModel(BaseModel):
     # A field name of the old flat RunConfig, for example incremental_mode,
     # must fail, and not disappear in silence.
@@ -91,8 +73,13 @@ class _MatchingStrategy(_ConfigModel):
 
     @property
     def match_condition(self) -> str:
-        """Give the condition that matches a target row to a new row."""
-        return match_condition(self.join_sql, list(self.primary_key_columns or []))
+        """Give the join_sql of the author, or an equality on each key column."""
+        if self.join_sql:
+            return self.join_sql
+        return " AND ".join(
+            f"{TARGET}.{column_name} = {SOURCE}.{column_name}"
+            for column_name in self.primary_key_columns or []
+        )
 
 
 class Upsert(_MatchingStrategy):
