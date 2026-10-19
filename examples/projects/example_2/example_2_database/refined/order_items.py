@@ -1,9 +1,8 @@
 from example_2_database.source.order_items import trouve as example_2_database_source_order_items
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Refined order items. Each row has the gross total and the net total.",
     sql=f"""
         select

@@ -1,9 +1,8 @@
 from example_2_database.refined.orders import trouve as example_2_database_refined_orders
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Monthly count of the orders and monthly total cost, for each user.",
     sql=f"""
         select

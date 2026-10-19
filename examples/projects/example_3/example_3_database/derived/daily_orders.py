@@ -7,9 +7,8 @@ from clair import (
     DeleteInsert,
     Incremental,
     RunMode,
+    Table,
     TestUnique,
-    Trouve,
-    TrouveType,
 )
 
 sql = f"""
@@ -27,8 +26,7 @@ sql += """
     group by created_date
 """
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="""
         The orders and the revenue of each day. In each incremental run, clair calculates
         the last 3 days again and replaces them. Thus a late order changes the total of its

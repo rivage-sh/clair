@@ -22,7 +22,7 @@ from clair.exceptions import CompileError
 from clair.trouves.address import NodeAddresses
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
+from clair.trouves.trouve import ExecutionType, SqlTrouve, TrouveType
 
 
 class CompiledNodeInfo(BaseModel):
@@ -135,7 +135,7 @@ class CompileOutput(BaseModel):
 
 
 def build_statements(
-    trouve: Trouve,
+    trouve: SqlTrouve,
     run_mode: RunMode,
     run_id: str,
     use_staging: bool = True,
@@ -292,7 +292,7 @@ def write_compile_output(
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text(artifact_content)
         elif trouve.compiled.execution_type == ExecutionType.SNOWFLAKE:
-            assert isinstance(trouve, Trouve)
+            assert isinstance(trouve, SqlTrouve)
             statements = build_statements(
                 trouve, run_mode, run_id, use_staging=use_staging
             )

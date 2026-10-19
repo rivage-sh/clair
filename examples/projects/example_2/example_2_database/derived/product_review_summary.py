@@ -1,9 +1,8 @@
 from example_2_database.refined.reviews import trouve as example_2_database_refined_reviews
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Review totals for each product, with the sentiment of the reviews.",
     sql=f"""
         select

@@ -13,7 +13,7 @@ from clair.exceptions import InvalidTrouveAddressError
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.pandas_trouve import PandasTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveType
+from clair.trouves.trouve import CompiledAttributes, ExecutionType, Source
 from tests.helpers import RecordingAdapter, addresses_of_text
 
 
@@ -44,8 +44,8 @@ def _compile_pandas(trouve: PandasTrouve, physical_address: str) -> None:
     ]
 
 
-def _make_source(physical_address: str = "db.schema.source") -> Trouve:
-    source = Trouve(type=TrouveType.SOURCE)
+def _make_source(physical_address: str = "db.schema.source") -> Source:
+    source = Source()
     source.compiled = _make_compiled(physical_address)
     return source
 

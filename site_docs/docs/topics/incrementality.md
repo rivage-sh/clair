@@ -5,8 +5,7 @@ By default, clair makes every Trouve again on each run with `CREATE OR REPLACE T
 ## Default: full refresh
 
 ```python
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"SELECT * FROM {upstream}",
     # No run_config — clair does a full refresh
 )
@@ -31,7 +30,7 @@ Read `clair.run_mode` to change the SQL between a full refresh and an incrementa
 from example_3_database.refined.orders import trouve as refined_orders
 
 import clair
-from clair import Append, Column, ColumnType, Incremental, RunMode, Trouve, TrouveType
+from clair import Append, Column, ColumnType, Incremental, RunMode, Table
 
 sql = f"""
     select
@@ -48,8 +47,7 @@ if clair.run_mode == RunMode.INCREMENTAL:
         where created_at > dateadd('day', -3, current_timestamp())
     """
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="""
         Incremental append of the recent orders. In each incremental run, clair adds the
         orders from the last 3 days. Thus the table keeps a log of the recent activity.
@@ -89,10 +87,9 @@ SELECT * FROM (
 # example_3_database/derived/customer_order_summary.py
 from example_3_database.refined.orders import trouve as refined_orders
 
-from clair import Column, ColumnType, Incremental, Trouve, TrouveType, Upsert
+from clair import Column, ColumnType, Incremental, Table, TrouveType, Upsert
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="""
         Order statistics for each customer. clair merges the rows on customer_id.
 
@@ -203,9 +200,8 @@ from clair import (
     DeleteInsert,
     Incremental,
     RunMode,
+    Table,
     TestUnique,
-    Trouve,
-    TrouveType,
 )
 
 sql = f"""
@@ -223,8 +219,7 @@ sql += """
     group by created_date
 """
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="""
         The orders and the revenue of each day. In each incremental run, clair calculates
         the last 3 days again and replaces them. Thus a late order changes the total of its

@@ -1,9 +1,8 @@
 from example_2_database.derived.category_sales_summary import trouve as example_2_database_derived_category_sales_summary
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="The categories in the sequence of their monthly revenue increase.",
     sql=f"""
         with this_month as (

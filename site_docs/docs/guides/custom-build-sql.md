@@ -1,6 +1,6 @@
 # Write your own build with `build_sql()`
 
-clair makes the SQL of a Trouve with `Trouve.build_sql()`. A subclass of `Trouve` can
+clair makes the SQL of a Trouve with `Table.build_sql()`. A subclass of `Table` can
 override it, and give each statement that it wants. Use it when the built-in strategies —
 `Append`, `Upsert`, and `DeleteInsert` — do not do what the table needs.
 
@@ -59,10 +59,10 @@ holds Python that a Trouve file imports, and no Trouve.
 
 ```python
 # _replace_window_trouve.py
-from clair import BuildPlan, RunMode, Trouve, TrouveAddress
+from clair import BuildPlan, RunMode, Table, TrouveAddress
 
 
-class ReplaceWindowTrouve(Trouve):
+class ReplaceWindowTrouve(Table):
     """An incremental TABLE that replaces each row of a recent window.
 
     A full refresh builds the table in the same way as a Trouve. An incremental
@@ -125,7 +125,6 @@ from clair import (
     Incremental,
     RunMode,
     TestUnique,
-    TrouveType,
 )
 
 sql = f"""
@@ -144,7 +143,6 @@ sql += """
 """
 
 trouve = ReplaceWindowTrouve(
-    type=TrouveType.TABLE,
     docs="""
         The revenue of each day. In each incremental run, clair replaces the last 3 days,
         thus a late order changes the total of its day. ReplaceWindowTrouve overrides
@@ -163,7 +161,7 @@ trouve = ReplaceWindowTrouve(
 ```
 
 `Incremental()` names no strategy, because the override writes the incremental SQL. A
-`Trouve` with no override and no strategy raises a `CompileError` on an incremental run.
+`Table` with no override and no strategy raises a `CompileError` on an incremental run.
 
 ## 3. Read the plan
 

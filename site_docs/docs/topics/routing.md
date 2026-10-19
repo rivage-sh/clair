@@ -23,7 +23,7 @@ The routing file holds no credentials, so you commit it and your team reviews it
 ## The three types
 
 ```python
-from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
+from clair import RoutingEntry, RoutingTable, TrouveAddress
 ```
 
 `TrouveAddress` holds a `database_name`, a `schema_name`, and a `table_name`. It validates each name when you make it, so an address that exists is a valid Snowflake identifier.

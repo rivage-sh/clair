@@ -44,10 +44,9 @@ def deduplicated(upstream) -> str:
 
 def source_file() -> str:
     return """\
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Source
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
+trouve = Source(
     columns=[Column(name="id", type=ColumnType.INTEGER)],
 )
 """
@@ -59,9 +58,9 @@ from {upstream_module} import trouve as upstream
 from {source_module} import trouve as source
 from _shared_sql import deduplicated
 
-from clair import THIS, Column, ColumnType, TestSql, TestUnique, Trouve
+from clair import THIS, Column, ColumnType, Table, TestSql, TestUnique
 
-trouve = Trouve(
+trouve = Table(
     sql=f"select u.id from ({{deduplicated(upstream)}}) u join {{source}} s on u.id = s.id",
     columns=[Column(name="id", type=ColumnType.INTEGER)],
     tests=[

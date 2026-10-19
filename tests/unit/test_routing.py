@@ -313,8 +313,8 @@ class TestLogicalNameValidation:
 
         (tmp_path / "my-db" / "finance").mkdir(parents=True)
         (tmp_path / "my-db" / "finance" / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            'trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS x")\n'
+            "from clair import Table, TrouveType\n\n"
+            'trouve = Table(sql="SELECT 1 AS x")\n'
         )
         with pytest.raises(InvalidTrouveAddressError, match="my-db"):
             discover_project(tmp_path, routing=None)
@@ -324,8 +324,8 @@ class TestLogicalNameValidation:
 
         (tmp_path / "my_db" / "finance").mkdir(parents=True)
         (tmp_path / "my_db" / "finance" / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            'trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS x")\n'
+            "from clair import Table, TrouveType\n\n"
+            'trouve = Table(sql="SELECT 1 AS x")\n'
         )
         trouves = discover_project(tmp_path, routing=None)
         assert collect_routing_problems(trouves, None) == []

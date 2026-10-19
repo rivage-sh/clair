@@ -1,9 +1,8 @@
 from example_2_database.source.reviews import trouve as example_2_database_source_reviews
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Refined reviews. Each row has a class for the sentiment.",
     sql=f"""
         select

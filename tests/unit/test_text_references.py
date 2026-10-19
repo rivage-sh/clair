@@ -12,8 +12,8 @@ from clair.core.text_references import TextReferenceLocation, find_text_referenc
 def _write_source(root: Path) -> None:
     (root / "mydb" / "source").mkdir(parents=True, exist_ok=True)
     (root / "mydb" / "source" / "events.py").write_text(textwrap.dedent("""\
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.SOURCE)
+        from clair import Source
+        trouve = Source()
     """))
 
 
@@ -22,8 +22,8 @@ def _write_refined(root: Path, sql_literal: str) -> None:
     (root / "mydb" / "refined").mkdir(parents=True, exist_ok=True)
     (root / "mydb" / "refined" / "report.py").write_text(textwrap.dedent(f"""\
         from mydb.source.events import trouve as source_events
-        from clair import Trouve, TrouveType
-        trouve = Trouve(type=TrouveType.TABLE, sql={sql_literal})
+        from clair import Table
+        trouve = Table(sql={sql_literal})
     """))
 
 
@@ -117,9 +117,8 @@ class TestFindTextReferences:
         (tmp_path / "mydb" / "refined").mkdir(parents=True, exist_ok=True)
         (tmp_path / "mydb" / "refined" / "report.py").write_text(textwrap.dedent("""\
             from mydb.source.events import trouve as source_events
-            from clair import Trouve, TrouveType, TestSql, THIS
-            trouve = Trouve(
-                type=TrouveType.TABLE,
+            from clair import THIS, Table, TestSql
+            trouve = Table(
                 sql=f"SELECT * FROM {source_events}",
                 tests=[TestSql(sql=f"SELECT * FROM {THIS} WHERE id NOT IN (SELECT id FROM mydb.source.events)")],
             )

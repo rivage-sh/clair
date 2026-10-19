@@ -15,11 +15,11 @@ Define your pipelines as Python files. Clair compiles them to SQL, builds a DAG,
 SQL-only tools make it hard to express dependencies clearly. With clair, each table or view is a Python file that references its upstreams by import. And if SQL isn't the right tool — write pandas instead:
 
 ```python
-from clair import Trouve
+from clair import Table
 from refined.products.catalog import trouve as catalog
 from refined.products.reviews import trouve as reviews
 
-trouve = Trouve(
+trouve = Table(
     sql=f"""
         SELECT
             c.product_id,
@@ -70,18 +70,14 @@ my_project/
         └── reviews.py   →   source.products.reviews
 ```
 
-Clair has one Trouve class for each backend. Both derive from `TrouveAbc`:
+Clair has one Trouve class for each kind of object. Each one derives from `TrouveAbc`:
 
-- **`Trouve`** — compiles `sql` to a Snowflake `TABLE` or `VIEW`. Runs inside Snowflake.
-- **`PandasTrouve`** — runs a Python function on the machine executing clair, then writes the result back to Snowflake.
-
-`Trouve` has three types:
-
-| Type | What it is |
-|------|-----------|
-| `SOURCE` | A Snowflake table that contains unprocessed data loaded into Snowflake by external tools. |
-| `TABLE` | A Snowflake table that clair creates and populates. |
-| `VIEW` | A Snowflake view that clair creates. |
+| Class | What it is |
+|-------|-----------|
+| `Source` | A Snowflake table that external tools load. Clair reads it, and never writes it. |
+| `Table` | A Snowflake table that clair makes from `sql`. Runs inside Snowflake. |
+| `View` | A Snowflake view that clair makes from `sql`. |
+| `PandasTrouve` | A table that a Python function makes on the clair machine. Clair writes the result to Snowflake. |
 
 ### DAG
 
@@ -159,10 +155,9 @@ my_project/
 
 **`source/products/catalog.py`** — declares a pre-existing Snowflake table
 ```python
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Source
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
+trouve = Source(
     columns=[
         Column(name="product_id",   type=ColumnType.STRING),
         Column(name="name",         type=ColumnType.STRING),
@@ -174,11 +169,10 @@ trouve = Trouve(
 
 **`refined/products/catalog.py`** — cleans and standardises the source
 ```python
-from clair import Trouve, TrouveType
+from clair import Table
 from source.products.catalog import trouve as source_catalog
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"""
         SELECT
             product_id,
@@ -193,11 +187,10 @@ trouve = Trouve(
 
 **`refined/products/reviews.py`** — cleans the reviews source
 ```python
-from clair import Trouve, TrouveType
+from clair import Table
 from source.products.reviews import trouve as source_reviews
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"""
         SELECT
             review_id,
@@ -212,12 +205,11 @@ trouve = Trouve(
 
 **`derived/products/top_reviewed.py`** — joins and aggregates the refined layer
 ```python
-from clair import Trouve, TrouveType
+from clair import Table
 from refined.products.catalog import trouve as catalog
 from refined.products.reviews import trouve as reviews
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"""
         SELECT
             c.product_id,
@@ -308,10 +300,9 @@ clair clean --dry-run            # preview only
 Attach tests to any TABLE or VIEW Trouve. They run against the live table in Snowflake.
 
 ```python
-from clair import Trouve, TrouveType, TestUnique, TestNotNull, TestRowCount
+from clair import Table, TestNotNull, TestRowCount, TestUnique
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"SELECT event_id, user_id, event_type FROM {source_events}",
     tests=[
         TestUnique(column="event_id"),
@@ -332,11 +323,10 @@ trouve = Trouve(
 `TestSql` lets you write any SQL assertion. Use `THIS` as a placeholder for the owning Trouve's table name, and reference other Trouves via import exactly as you would in `Trouve.sql`:
 
 ```python
-from clair import THIS, TestSql, Trouve, TrouveType
+from clair import THIS, Table, TestSql
 from source.payments.transactions import trouve as transactions
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"SELECT * FROM {transactions}",
     tests=[
         TestSql(sql=f"SELECT * FROM {THIS} WHERE amount < 0"),
@@ -359,10 +349,9 @@ By default, every run does a full refresh. To process only new data, give a Trou
 
 **Append** — inserts new rows, never updates existing ones:
 ```python
-from clair import Append, Incremental, Trouve, TrouveType
+from clair import Append, Incremental, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"""
         SELECT * FROM {source_events}
         WHERE occurred_at > dateadd('day', -3, current_timestamp())

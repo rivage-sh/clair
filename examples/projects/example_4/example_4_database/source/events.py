@@ -1,7 +1,6 @@
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Source
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
+trouve = Source(
     docs="An events table that exists before clair runs. It holds the raw user interactions.",
     columns=[
         Column(name="event_id", type=ColumnType.STRING),

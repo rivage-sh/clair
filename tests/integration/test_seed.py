@@ -94,10 +94,8 @@ def _downstream_file(database_name: str) -> str:
     """
     return (
         f"from {database_name}.reference.labels import trouve as labels\n"
-        "\n"
-        "from clair import Trouve\n"
-        "\n"
-        "trouve = Trouve(\n"
+        "from clair import Table\n"
+        "trouve = Table(\n"
         '    sql=f"SELECT code, quantity FROM {labels} WHERE is_active",\n'
         ")\n"
     )

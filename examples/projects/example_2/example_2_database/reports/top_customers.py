@@ -1,10 +1,9 @@
 from example_2_database.derived.user_order_stats import trouve as example_2_database_derived_user_order_stats
 from example_2_database.refined.users import trouve as example_2_database_refined_users
 
-from clair import Column, ColumnType, TestRowCount, TestUnique, Trouve, TrouveType
+from clair import Column, ColumnType, Table, TestRowCount, TestUnique
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="The customers with a lifetime value in the 90th percentile or higher.",
     sql=f"""
         with p90 as (

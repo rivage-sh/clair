@@ -5,7 +5,7 @@ parameter. An incremental run takes a strategy, and each strategy holds only the
 parameters that it reads. Thus an illegal combination, for example a key column
 on an APPEND, has no way to exist.
 
-A subclass of ``Trouve`` that overrides ``build_sql()`` writes its own
+A subclass of ``Table`` that overrides ``build_sql()`` writes its own
 incremental SQL. It gives ``Incremental()`` with no strategy.
 """
 

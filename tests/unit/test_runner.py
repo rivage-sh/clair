@@ -16,6 +16,7 @@ from tests.helpers import (
     RecordingAdapter,
     make_run_result,
     make_statement,
+    make_trouve,
 )
 
 
@@ -114,7 +115,6 @@ class TestRunnerFailureHandling:
         from clair.trouves.trouve import (
             CompiledAttributes,
             ExecutionType,
-            Trouve,
             TrouveType,
         )
 
@@ -124,7 +124,7 @@ class TestRunnerFailureHandling:
             ("db.s.staging", TrouveType.TABLE, ["db.s.source"], "select * from db.s.source"),
             ("db.s.mart", TrouveType.TABLE, ["db.s.staging"], "select * from db.s.staging"),
         ]:
-            t = Trouve(type=ttype, sql=sql) if sql else Trouve(type=ttype)
+            t = make_trouve(ttype, sql)
             t.compiled = CompiledAttributes(
                 physical_address=TrouveAddress.parse(name),
                 logical_address=TrouveAddress.parse(name),

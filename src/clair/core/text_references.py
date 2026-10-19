@@ -3,14 +3,14 @@
 An author points to a different Trouve with an f-string::
 
     from mydb.refined.events import trouve as refined_events
-    trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {refined_events}")
+    trouve = Table(sql=f"SELECT * FROM {refined_events}")
 
 The f-string makes a placeholder token, and clair replaces the token with an
 address. See ``clair.core.discovery``.
 
 An author who writes the same address as text gets no token::
 
-    trouve = Trouve(type=TrouveType.TABLE, sql="SELECT * FROM mydb.refined.events")
+    trouve = Table(sql="SELECT * FROM mydb.refined.events")
 
 Two faults follow, and both are silent:
 
@@ -35,7 +35,7 @@ from pydantic import BaseModel
 from sqlglot import exp
 
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import Trouve, TrouveAbc
+from clair.trouves.trouve import SqlTrouve, TrouveAbc
 
 logger = structlog.get_logger()
 
@@ -127,7 +127,7 @@ def find_text_references(trouves: Sequence[TrouveAbc]) -> list[TextReference]:
         own_address = str(trouve.compiled.logical_address)
 
         sources: list[tuple[TextReferenceLocation, str]] = []
-        if isinstance(trouve, Trouve):
+        if isinstance(trouve, SqlTrouve):
             sources.append((TextReferenceLocation.SQL, trouve.sql))
         for test in trouve.tests:
             if isinstance(test, TestSql):

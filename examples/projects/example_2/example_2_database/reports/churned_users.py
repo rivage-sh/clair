@@ -1,10 +1,9 @@
 from example_2_database.derived.user_order_stats import trouve as example_2_database_derived_user_order_stats
 from example_2_database.refined.users import trouve as example_2_database_refined_users
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="The users with no order in the last 90 days. These users possibly left.",
     sql=f"""
         select

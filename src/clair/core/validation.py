@@ -37,7 +37,7 @@ from clair.environments.routing import (
 )
 from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import Trouve, TrouveAbc
+from clair.trouves.trouve import SqlTrouve, TrouveAbc
 
 # The run_id of each plan that validation makes. No statement runs, thus the
 # value only needs to make a valid staging address.
@@ -94,7 +94,7 @@ def collect_build_plan_problems(trouves: list[TrouveAbc]) -> list[BuildPlanProbl
     """
     problems: list[BuildPlanProblem] = []
     for trouve in trouves:
-        if not isinstance(trouve, Trouve) or trouve.compiled is None:
+        if not isinstance(trouve, SqlTrouve) or trouve.compiled is None:
             continue
         logical_address = str(trouve.compiled.logical_address)
         effective_modes = sorted(
@@ -121,7 +121,7 @@ def collect_build_plan_problems(trouves: list[TrouveAbc]) -> list[BuildPlanProbl
 
 
 def _build_plan_fault(
-    trouve: Trouve, effective_mode: RunMode, staging_address: TrouveAddress | None
+    trouve: SqlTrouve, effective_mode: RunMode, staging_address: TrouveAddress | None
 ) -> str | None:
     """Give the fault of one plan, or None if the plan is correct."""
     try:

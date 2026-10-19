@@ -32,9 +32,9 @@ def compiled_of(trouves: list[TrouveAbc], logical_address: str) -> CompiledAttri
     raise AssertionError(f"the project holds no Trouve at {logical_address}")
 
 SOURCE_FILE = """\
-from clair import Trouve, TrouveType
+from clair import Source
 
-trouve = Trouve(type=TrouveType.SOURCE)
+trouve = Source()
 """
 
 
@@ -50,8 +50,8 @@ def write_flat_project(project_root: Path) -> None:
     (project_root / "shop" / "source" / "orders.py").write_text(SOURCE_FILE)
     (project_root / "shop" / "refined" / "daily.py").write_text(
         "from shop.source.orders import trouve as orders\n"
-        "from clair import Trouve\n"
-        'trouve = Trouve(sql=f"SELECT * FROM {orders}")\n'
+        "from clair import Table\n"
+        'trouve = Table(sql=f"SELECT * FROM {orders}")\n'
     )
 
 
@@ -122,8 +122,8 @@ class TestOneModulePerFile:
         (project_root / "shop" / "source" / "orders.py").write_text(SOURCE_FILE)
         (project_root / "shop" / "refined" / "daily.py").write_text(
             "from clair_projects.analytics.shop.source.orders import trouve as orders\n"
-            "from clair import Trouve\n"
-            'trouve = Trouve(sql=f"SELECT * FROM {orders}")\n'
+            "from clair import Table\n"
+            'trouve = Table(sql=f"SELECT * FROM {orders}")\n'
         )
         monkeypatch.syspath_prepend(str(monorepo))
         return project_root
@@ -169,8 +169,8 @@ class TestOneModulePerFile:
         (project_root / "shop" / "source" / "orders.py").write_text(SOURCE_FILE)
         (project_root / "shop" / "refined" / "daily.py").write_text(
             "from clair_projects.analytics.shop.source.orders import trouve as orders\n"
-            "from clair import Trouve\n"
-            'trouve = Trouve(sql=f"SELECT * FROM {orders}")\n'
+            "from clair import Table\n"
+            'trouve = Table(sql=f"SELECT * FROM {orders}")\n'
         )
 
         trouves = discover_project(project_root)
@@ -198,8 +198,8 @@ class TestOneModulePerFile:
         (project_root / "shop" / "a_source" / "orders.py").write_text(SOURCE_FILE)
         (project_root / "shop" / "b_derived" / "daily.py").write_text(
             "from clair_projects.analytics.shop.a_source.orders import trouve as orders\n"
-            "from clair import Trouve\n"
-            'trouve = Trouve(sql=f"SELECT * FROM {orders}")\n'
+            "from clair import Table\n"
+            'trouve = Table(sql=f"SELECT * FROM {orders}")\n'
         )
         monkeypatch.syspath_prepend(str(monorepo))
 
@@ -241,8 +241,8 @@ class TestOneModulePerFile:
             "import toolkit\n"
             "from toolkit.sql_helper import active_rows\n"
             "from shop.source.orders import trouve as orders\n"
-            "from clair import Trouve\n"
-            'trouve = Trouve(sql=f"SELECT * FROM {orders} {active_rows()}")\n'
+            "from clair import Table\n"
+            'trouve = Table(sql=f"SELECT * FROM {orders} {active_rows()}")\n'
         )
         monkeypatch.syspath_prepend(str(project_root))
         # The helper package loads before discovery, thus discovery meets a
@@ -284,8 +284,8 @@ class TestTheTokenGuard:
         (project_root / "shop" / "refined").mkdir(parents=True)
         (project_root / "shop" / "refined" / "daily.py").write_text(
             "from foreign_trouve_module import trouve as foreign\n"
-            "from clair import Trouve\n"
-            'trouve = Trouve(sql=f"SELECT * FROM {foreign}")\n'
+            "from clair import Table\n"
+            'trouve = Table(sql=f"SELECT * FROM {foreign}")\n'
         )
 
         with pytest.raises(ProjectDiscoveryError) as error:

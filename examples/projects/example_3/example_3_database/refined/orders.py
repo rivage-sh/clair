@@ -1,9 +1,8 @@
 from example_3_database.source.orders import trouve as source_orders
 
-from clair import Column, ColumnType, TestNotNull, TestUnique, Trouve, TrouveType
+from clair import Column, ColumnType, Table, TestNotNull, TestUnique
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Refined orders. Each row has correct types, clean values, and date columns. Clair always makes this table again.",
     sql=f"""
         select

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from clair.core.discovery import discover_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.environments.environments import Authenticator, load_environment
 from clair.environments.project_routing import load_project_routing
@@ -74,8 +75,8 @@ class TestFileContents:
         project_dir = tmp_path / "proj"
         scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
 
-        content = (project_dir / "source/raw/orders.py").read_text()
-        assert "TrouveType.SOURCE" in content
+        (orders,) = discover_project(project_dir)
+        assert orders.type == TrouveType.SOURCE
 
     def test_environments_yml_has_dev_environment(self, tmp_path: Path) -> None:
         fake_home = tmp_path / "home"

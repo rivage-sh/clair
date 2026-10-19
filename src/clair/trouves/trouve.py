@@ -4,13 +4,15 @@ One Trouve maps to one object in Snowflake that you can query: a source table,
 a transformed table, or a view. Each Trouve stays in its own .py file. The
 framework finds each Trouve automatically.
 
-This module holds two classes:
+This module holds the base class and the classes of the SQL backend:
 
-* ``TrouveAbc`` -- the abstract base. It holds the attributes that every backend
+* ``TrouveAbc`` -- the abstract base. It holds the attributes that every Trouve
   shares: the columns, the tests, the docs, and the compiled attributes.
-* ``Trouve`` -- the SQL backend. Snowflake materializes it from SQL.
+* ``Source`` -- a table that clair reads, and never writes.
+* ``SqlTrouve`` -- the base of ``Table`` and ``View``. Snowflake materializes
+  each one from SQL.
 
-The pandas backend, ``PandasTrouve``, stays in ``pandas_trouve.py``.
+The DataFrame backends stay in ``pandas_trouve.py`` and ``seed_trouve.py``.
 """
 
 from __future__ import annotations
@@ -18,9 +20,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from clair.exceptions import CompileError
 from clair.trouves._refs import register
@@ -143,30 +145,39 @@ class CompiledAttributes(BaseModel):
 
 
 class TrouveAbc(BaseModel, ABC):
-    """The base class of every Trouve backend.
+    """The base class of every Trouve.
 
-    A subclass supplies the backend. ``Trouve`` runs SQL in Snowflake.
-    ``PandasTrouve`` runs a Python function on the clair machine. Each subclass
-    gives its own ``execution_type`` and its own ``upstream_trouves``.
+    Each concrete class is one kind of object. ``Source`` is a table that clair
+    reads and never writes. ``Table`` and ``View`` are objects that Snowflake
+    makes from SQL. ``PandasTrouve`` and ``SeedTrouve`` are tables that clair
+    writes from a DataFrame. Each class gives its own ``trouve_type``,
+    ``execution_type`` and ``upstream_trouves``.
 
     Attributes:
-        type: SOURCE, TABLE, or VIEW.
         columns: The column definitions, for the docs and for future checks.
         tests: The data quality tests.
         docs: The documentation text for this Trouve.
-        run_config: FullRefresh, or Incremental with its strategy.
         compiled: Discovery sets this. It stays None until discovery reads the
              project.
     """
 
-    type: TrouveType = Field(default=TrouveType.TABLE)
+    # The kind of object. Each concrete class sets it, and no author passes it.
+    trouve_type: ClassVar[TrouveType]
+
     columns: list[Column] = []
     tests: list[AnyTest] = []
     docs: str = ""
-    run_config: RunConfig = Field(default_factory=FullRefresh)
     compiled: CompiledAttributes | None = None
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # "forbid" makes a keyword that the class does not read an error, for
+    # example a run_config on a View.
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def type(self) -> TrouveType:
+        """Give SOURCE, TABLE, or VIEW. The class decides it."""
+        return self.trouve_type
 
     @property
     @abstractmethod
@@ -224,19 +235,33 @@ class TrouveAbc(BaseModel, ABC):
         return str(self.physical_address)
 
 
-class Trouve(TrouveAbc):
-    """A Trouve that Snowflake materializes from SQL.
+class Source(TrouveAbc):
+    """A table that clair reads, and never writes.
 
-    Attributes:
-        sql: The SQL query. A TABLE or a VIEW needs it. A SOURCE must leave it
-             empty. To point to a different Trouve, write
-             ``f"SELECT * FROM {other_trouve}"``. Discovery replaces the
-             f-string placeholder with the true physical_address.
-
-    ``TrouveAbc`` holds the attributes that every backend shares.
+    Another tool loads it. A Trouve reads it with ``f"SELECT * FROM {source}"``.
     """
 
-    sql: str = Field(default="", exclude=True)
+    trouve_type: ClassVar[TrouveType] = TrouveType.SOURCE
+
+    @property
+    def execution_type(self) -> ExecutionType:
+        return ExecutionType.SNOWFLAKE
+
+    def upstream_trouves(self) -> list[TrouveAbc]:
+        """Give an empty list. A Source reads nothing."""
+        return []
+
+
+class SqlTrouve(TrouveAbc, ABC):
+    """The base of each Trouve that Snowflake materializes from SQL: a Table or a View.
+
+    Attributes:
+        sql: The SQL query. To point to a different Trouve, write
+             ``f"SELECT * FROM {other_trouve}"``. Discovery replaces the
+             f-string placeholder with the true physical_address.
+    """
+
+    sql: str = Field(exclude=True)
 
     @property
     def execution_type(self) -> ExecutionType:
@@ -247,17 +272,12 @@ class Trouve(TrouveAbc):
         return []
 
     @model_validator(mode="after")
-    def _validate_sql(self) -> Trouve:
-        if self.type in (TrouveType.TABLE, TrouveType.VIEW) and not self.sql.strip():
-            raise ValueError(
-                f"a Trouve with the type '{self.type.value}' must have sql"
-            )
-        if self.type == TrouveType.SOURCE and self.sql.strip():
-            raise ValueError("a SOURCE Trouve must not have sql")
-        if self.run_config.run_mode == RunMode.INCREMENTAL and self.type != TrouveType.TABLE:
-            raise ValueError("only a TABLE Trouve can use the incremental mode")
+    def _require_sql(self) -> SqlTrouve:
+        if not self.sql.strip():
+            raise ValueError(f"a {type(self).__name__} must have sql")
         return self
 
+    @abstractmethod
     def build_sql(
         self,
         effective_mode: RunMode,
@@ -275,31 +295,74 @@ class Trouve(TrouveAbc):
 
         Returns:
             The statements to execute, and the statements that clean up after
-            them. The plan is empty for a SOURCE Trouve.
+            them.
+        """
+
+    def resolved_sql(self) -> str:
+        """Give the SQL with each reference resolved. It needs a compiled Trouve."""
+        if self.compiled is None:
+            raise RuntimeError("build_sql() needs a compiled Trouve")
+        return self.compiled.resolved_sql.strip()
+
+    def _full_refresh_plan(self, object_type: str, staging_address: TrouveAddress | None) -> BuildPlan:
+        """Give the plan that makes the object again from the SQL."""
+        resolved_sql = self.resolved_sql()
+        address = staging_address or self.physical_address
+        return BuildPlan(statements=[
+            f"CREATE OR REPLACE {object_type} {address} AS (\n{resolved_sql}\n)"
+        ])
+
+
+class View(SqlTrouve):
+    """A view that Snowflake makes from the SQL. Each run makes it again."""
+
+    trouve_type: ClassVar[TrouveType] = TrouveType.VIEW
+
+    def build_sql(
+        self,
+        effective_mode: RunMode,
+        run_id: str,
+        staging_address: TrouveAddress | None = None,
+    ) -> BuildPlan:
+        """Give CREATE OR REPLACE VIEW. A view has no incremental mode."""
+        return self._full_refresh_plan("VIEW", staging_address)
+
+
+class Table(SqlTrouve):
+    """A table that Snowflake makes from the SQL.
+
+    Attributes:
+        run_config: FullRefresh, or Incremental with its strategy.
+    """
+
+    trouve_type: ClassVar[TrouveType] = TrouveType.TABLE
+
+    run_config: RunConfig = Field(default_factory=FullRefresh)
+
+    def build_sql(
+        self,
+        effective_mode: RunMode,
+        run_id: str,
+        staging_address: TrouveAddress | None = None,
+    ) -> BuildPlan:
+        """Make the SQL statements that materialize this Table.
+
+        See ``SqlTrouve.build_sql`` for the arguments.
 
         Raises:
             RuntimeError: If clair did not compile the Trouve.
             CompileError: If an incremental run has no built-in strategy.
             ValueError: If the config asks for UPSERT but has no columns.
         """
-        if not self.is_compiled:
-            raise RuntimeError("build_sql() needs a compiled Trouve")
-        assert self.compiled is not None
-
-        if self.type == TrouveType.SOURCE:
-            return BuildPlan()
-
-        resolved_sql = self.compiled.resolved_sql.strip()
-        address = str(staging_address or self.physical_address)
-
         if effective_mode == RunMode.FULL_REFRESH:
-            object_type = "TABLE" if self.type == TrouveType.TABLE else "VIEW"
-            return BuildPlan(statements=[
-                f"CREATE OR REPLACE {object_type} {address} AS (\n{resolved_sql}\n)"
-            ])
+            return self._full_refresh_plan("TABLE", staging_address)
+
+        resolved_sql = self.resolved_sql()
+        address = str(staging_address or self.physical_address)
 
         strategy = self.incremental_strategy()
         if strategy is None:
+            assert self.compiled is not None
             raise CompileError(
                 f"{self.compiled.logical_address} runs in the incremental mode, but its "
                 "run_config names no strategy. Give Incremental(strategy=...), or "

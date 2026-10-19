@@ -1,9 +1,8 @@
 from example_2_database.source.products import trouve as example_2_database_source_products
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Refined products. Each row has the attributes in separate columns.",
     sql=f"""
         select

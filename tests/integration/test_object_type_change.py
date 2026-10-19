@@ -40,15 +40,15 @@ from tests.integration.warehouse import execute
 pytestmark = pytest.mark.integration
 
 LOGICAL_NAME_TEMPLATE = "{database_name}.refined.switched"
+TROUVE_CLASS_NAMES = {"TABLE": "Table", "VIEW": "View"}
 
 
 def _trouve_file(trouve_type: str) -> str:
     """Give the text of a Trouve file of one type. The SQL stays the same."""
+    class_name = TROUVE_CLASS_NAMES[trouve_type]
     return (
-        "from clair import Trouve, TrouveType\n"
-        "\n"
-        "trouve = Trouve(\n"
-        f"    type=TrouveType.{trouve_type},\n"
+        f"from clair import {class_name}\n"
+        f"trouve = {class_name}(\n"
         '    sql="SELECT 1 AS id, \'first\' AS label",\n'
         ")\n"
     )

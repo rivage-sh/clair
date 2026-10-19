@@ -1,8 +1,7 @@
 from db.schema.b import trouve as b
 
-from clair import Trouve, TrouveType
+from clair import Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     sql=f"select * from {b}",
 )

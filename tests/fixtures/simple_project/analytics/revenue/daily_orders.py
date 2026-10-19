@@ -1,9 +1,8 @@
 from source.raw.orders import trouve as raw_orders
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Daily totals for the orders. This Trouve reads the raw orders.",
     sql=f"""
         select

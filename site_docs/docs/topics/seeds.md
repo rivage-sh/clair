@@ -46,9 +46,9 @@ A SQL Trouve reads a seed with the usual f-string reference:
 from example_4_database.derived.daily_event_counts import trouve as daily_event_counts
 from example_4_database.reference.event_type_labels import trouve as event_type_labels
 
-from clair import Trouve
+from clair import Table
 
-trouve = Trouve(
+trouve = Table(
     sql=f"""
         select
             counts.event_type,
@@ -176,8 +176,7 @@ that work, and it lives in the Python file.
 
 ## Constraints
 
-- A seed is always `TrouveType.TABLE`. A VIEW or a SOURCE raises `ValueError`.
-- A seed does not support the incremental run modes. clair replaces the table each run.
+- A seed is always a TABLE, and it has no `run_config`. clair replaces the table each run.
 - Each column name of the DataFrame must be a string, and the names must be unique.
 - The DataFrame needs one column minimum. A seed with no row is valid.
 

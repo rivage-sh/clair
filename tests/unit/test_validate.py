@@ -124,14 +124,14 @@ def project_with_trouves(tmp_path: Path) -> Path:
     (project_dir / "source" / "raw").mkdir(parents=True)
     write_routing(project_dir, PASSTHROUGH_ENTRY)
     (project_dir / "source" / "raw" / "orders.py").write_text(
-        "from clair import Trouve, TrouveType\n\n"
-        "trouve = Trouve(type=TrouveType.SOURCE)\n"
+        "from clair import Source, TrouveType\n\n"
+        "trouve = Source()\n"
     )
     for schema_name in ("finance", "reports"):
         (project_dir / "analytics" / schema_name).mkdir(parents=True)
         (project_dir / "analytics" / schema_name / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            'trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS x")\n'
+            "from clair import Table, TrouveType\n\n"
+            'trouve = Table(sql="SELECT 1 AS x")\n'
         )
     return project_dir
 
@@ -284,9 +284,8 @@ class TestTextReferences:
 
     def test_an_address_in_the_sql_is_a_problem(self, project_with_trouves: Path):
         (project_with_trouves / "analytics" / "finance" / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            "trouve = Trouve(\n"
-            "    type=TrouveType.TABLE,\n"
+            "from clair import Table, TrouveType\n\n"
+            "trouve = Table(\n"
             '    sql="SELECT * FROM source.raw.orders",\n'
             ")\n"
         )
@@ -301,10 +300,10 @@ class TestTextReferences:
 
 
 _OVERRIDE_MODULE = '''\
-from clair import BuildPlan, RunMode, Trouve, TrouveAddress
+from clair import BuildPlan, RunMode, Table, TrouveAddress
 
 
-class PhysicalOnlyTrouve(Trouve):
+class PhysicalOnlyTrouve(Table):
     """An override that writes to the physical address, also in a staged run."""
 
     def build_sql(self, effective_mode, run_id, staging_address=None):
@@ -313,7 +312,7 @@ class PhysicalOnlyTrouve(Trouve):
         return BuildPlan(statements=[f"DELETE FROM {self.physical_address}"])
 
 
-class RaisingTrouve(Trouve):
+class RaisingTrouve(Table):
     """An override with a bug in its incremental branch."""
 
     def build_sql(self, effective_mode, run_id, staging_address=None):
@@ -328,7 +327,7 @@ def write_revenue(project_dir: Path, trouve_source: str) -> None:
     (project_dir / "_overrides.py").write_text(_OVERRIDE_MODULE)
     (project_dir / "analytics" / "finance" / "revenue.py").write_text(
         "from _overrides import PhysicalOnlyTrouve, RaisingTrouve\n"
-        "from clair import Incremental, Trouve, TrouveType\n\n"
+        "from clair import Incremental, Table\n\n"
         f"trouve = {trouve_source}\n"
     )
 
@@ -356,7 +355,7 @@ class TestBuildPlans:
     ):
         write_revenue(
             project_with_trouves,
-            'Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS x", run_config=Incremental())',
+            'Table(sql="SELECT 1 AS x", run_config=Incremental())',
         )
         report = clair.validate(project_with_trouves)
 
@@ -366,7 +365,7 @@ class TestBuildPlans:
     def test_an_override_that_raises_is_a_problem(self, project_with_trouves: Path):
         write_revenue(
             project_with_trouves,
-            'RaisingTrouve(type=TrouveType.TABLE, sql="SELECT 1 AS x", run_config=Incremental())',
+            'RaisingTrouve(sql="SELECT 1 AS x", run_config=Incremental())',
         )
         report = clair.validate(project_with_trouves)
 
@@ -379,7 +378,7 @@ class TestBuildPlans:
         """Without staging, the physical address is correct. With staging, the tests come too late."""
         write_revenue(
             project_with_trouves,
-            'PhysicalOnlyTrouve(type=TrouveType.TABLE, sql="SELECT 1 AS x", run_config=Incremental())',
+            'PhysicalOnlyTrouve(sql="SELECT 1 AS x", run_config=Incremental())',
         )
         report = clair.validate(project_with_trouves)
 
@@ -387,7 +386,7 @@ class TestBuildPlans:
 
     def test_a_full_refresh_trouve_makes_no_incremental_plan(self, project_with_trouves: Path):
         """A Trouve gets only the modes that resolve_effective_mode() can give it."""
-        write_revenue(project_with_trouves, 'RaisingTrouve(type=TrouveType.TABLE, sql="SELECT 1 AS x")')
+        write_revenue(project_with_trouves, 'RaisingTrouve(sql="SELECT 1 AS x")')
         assert clair.validate(project_with_trouves).build_plan_problems == []
 
     def test_the_example_override_is_correct(
@@ -411,9 +410,8 @@ class TestProblemCount:
     def test_the_count_adds_each_kind(self, project_with_trouves: Path):
         write_routing(project_with_trouves, COLLIDING_ENTRY)
         (project_with_trouves / "analytics" / "reports" / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            "trouve = Trouve(\n"
-            "    type=TrouveType.TABLE,\n"
+            "from clair import Table, TrouveType\n\n"
+            "trouve = Table(\n"
             '    sql="SELECT * FROM source.raw.orders",\n'
             ")\n"
         )
@@ -502,8 +500,8 @@ class TestBadInput:
         project_dir = tmp_path / "proj"
         (project_dir / "my-db" / "finance").mkdir(parents=True)
         (project_dir / "my-db" / "finance" / "revenue.py").write_text(
-            "from clair import Trouve, TrouveType\n\n"
-            'trouve = Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS x")\n'
+            "from clair import Table, TrouveType\n\n"
+            'trouve = Table(sql="SELECT 1 AS x")\n'
         )
         with pytest.raises(ClairError):
             clair.validate(project_dir)

@@ -242,7 +242,7 @@ Each node does the same steps. The run mode decides only if the clone is necessa
 
 *Source: [`core/staging.py`][staging-py], and [`trouves/trouve.py`][trouve-py] — `build_sql()`*
 
-Step 2 comes from `Trouve.build_sql()`. A subclass can override it and give its own
+Step 2 comes from `SqlTrouve.build_sql()`. A subclass can override it and give its own
 statements, and clair keeps each other step. See [Write your own build](../guides/custom-build-sql.md).
 
 clair promotes a node before it releases the Trouves downstream of it. A dependent thus

@@ -26,9 +26,11 @@ from clair.trouves.run_config import Append, Incremental, RunMode
 from clair.trouves.trouve import (
     CompiledAttributes,
     ExecutionType,
-    Trouve,
+    SqlTrouve,
+    Table,
     TrouveAbc,
     TrouveType,
+    View,
 )
 from tests.helpers import RecordingAdapter
 
@@ -65,7 +67,7 @@ def _staging_address(address: str = ADDRESS) -> str:
 
 
 def _run(
-    trouve: Trouve,
+    trouve: SqlTrouve,
     adapter: RecordingAdapter,
     *,
     use_staging: bool = True,
@@ -132,7 +134,7 @@ class TestStagedRun:
         # RecordingAdapter answers TABLE for each address, thus the physical
         # address holds a table and the Trouve asks for a view.
         adapter = RecordingAdapter()
-        result = _run(Trouve(type=TrouveType.VIEW, sql="SELECT 1 AS id"), adapter)
+        result = _run(View(sql="SELECT 1 AS id"), adapter)
 
         assert result.status == RunStatus.FAILURE
         assert f"{ADDRESS} holds a TABLE, and the Trouve is now a VIEW" in result.error
@@ -142,7 +144,7 @@ class TestStagedRun:
 
     def test_a_view_that_becomes_a_table_stops_before_the_promotion(self):
         adapter = RecordingAdapter(existing_views=[ADDRESS])
-        result = _run(Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"), adapter)
+        result = _run(Table(sql="SELECT 1 AS id"), adapter)
 
         assert result.status == RunStatus.FAILURE
         assert f"{ADDRESS} holds a VIEW, and the Trouve is now a TABLE" in result.error
@@ -156,7 +158,7 @@ class TestStagedRun:
         adapter = RecordingAdapter(existing_views=[ADDRESS])
         tested_addresses: list[str] = []
         result = _run(
-            Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"),
+            Table(sql="SELECT 1 AS id"),
             adapter,
             tested_addresses=tested_addresses,
         )
@@ -172,7 +174,7 @@ class TestStagedRun:
         # to fix, and the type of the address does not matter yet.
         adapter = RecordingAdapter()
         result = _run(
-            Trouve(type=TrouveType.VIEW, sql="SELECT 1 AS id"),
+            View(sql="SELECT 1 AS id"),
             adapter,
             tests_passed=False,
         )
@@ -183,7 +185,7 @@ class TestStagedRun:
 
     def test_a_type_that_does_not_change_promotes(self):
         adapter = RecordingAdapter()
-        result = _run(Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"), adapter)
+        result = _run(Table(sql="SELECT 1 AS id"), adapter)
 
         assert result.status == RunStatus.SUCCESS
         assert [sql for sql in _executed_sql(result) if PROMOTE_TABLE in sql]
@@ -191,7 +193,7 @@ class TestStagedRun:
     def test_an_address_that_holds_nothing_promotes(self):
         # After the person drops the old object, the next run takes this path.
         adapter = RecordingAdapter(existing_tables=[])
-        result = _run(Trouve(type=TrouveType.VIEW, sql="SELECT 1 AS id"), adapter)
+        result = _run(View(sql="SELECT 1 AS id"), adapter)
 
         assert result.status == RunStatus.SUCCESS
         assert [sql for sql in _executed_sql(result) if PROMOTE_VIEW in sql]
@@ -199,7 +201,7 @@ class TestStagedRun:
     def test_the_failure_is_in_the_log(self):
         adapter = RecordingAdapter()
         with capture_logs() as log_entries:
-            _run(Trouve(type=TrouveType.VIEW, sql="SELECT 1 AS id"), adapter)
+            _run(View(sql="SELECT 1 AS id"), adapter)
 
         failures = [e for e in log_entries if e["event"] == "run.node.failure"]
         assert len(failures) == 1
@@ -210,7 +212,7 @@ class TestRunWithNoStaging:
     def test_a_type_change_stops_before_any_write(self):
         adapter = RecordingAdapter(existing_views=[ADDRESS])
         result = _run(
-            Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"),
+            Table(sql="SELECT 1 AS id"),
             adapter,
             use_staging=False,
         )
@@ -224,7 +226,7 @@ class TestRunWithNoStaging:
     def test_a_type_that_does_not_change_builds(self):
         adapter = RecordingAdapter()
         result = _run(
-            Trouve(type=TrouveType.TABLE, sql="SELECT 1 AS id"),
+            Table(sql="SELECT 1 AS id"),
             adapter,
             use_staging=False,
         )
@@ -234,9 +236,8 @@ class TestRunWithNoStaging:
 
 
 class TestIncrementalFallback:
-    def _incremental_trouve(self) -> Trouve:
-        return Trouve(
-            type=TrouveType.TABLE,
+    def _incremental_trouve(self) -> Table:
+        return Table(
             sql="SELECT 1 AS id",
             run_config=Incremental(strategy=Append()),
         )

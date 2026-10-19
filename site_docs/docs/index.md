@@ -3,11 +3,11 @@
 Python-native data transformations for Snowflake.
 
 ```python
-from clair import Trouve
+from clair import Table
 from refined.products.catalog import trouve as catalog
 from refined.products.reviews import trouve as reviews
 
-trouve = Trouve(
+trouve = Table(
     sql=f"""
         SELECT
             c.product_id,
@@ -27,7 +27,7 @@ Import the upstream Trouve and use it in the f-string. clair does the rest.
 
 - **Dependencies are Python imports.** clair reads the lineage from the import graph, not from a separate metadata layer.
 - **Compile first, run second.** `clair compile` resolves the full DAG and writes SQL to `_clairtifacts/` before it connects to Snowflake.
-- **clair includes incremental strategies.** Use APPEND and UPSERT modes with no boilerplate. Attach a [`RunConfig`](reference/run-config-api.md) to any [`Trouve`](topics/trouve.md).
+- **clair includes incremental strategies.** Use APPEND and UPSERT modes with no boilerplate. Attach a [`RunConfig`](reference/run-config-api.md) to any [`Table`](topics/trouve.md).
 - **Data quality as code.** Tests are Pydantic objects on the Trouve itself, not a separate test file.
 - **Pandas-native transformations.** Use a [`PandasTrouve`](topics/pandas-native.md) to write any step as a Python function. clair reads the upstream tables as DataFrames, runs your code on your machine, then writes the result to Snowflake.
 - **Seeds in Python.** Use a [`SeedTrouve`](topics/seeds.md) for a small table that a person maintains by hand. The rows live in the Python file, and clair builds the table in the same run as every other Trouve.

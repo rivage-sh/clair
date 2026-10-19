@@ -29,8 +29,11 @@ from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.trouve import (
     CompiledAttributes,
     ExecutionType,
-    Trouve,
+    Source,
+    Table,
+    TrouveAbc,
     TrouveType,
+    View,
 )
 
 PASSTHROUGH_ROUTING_FILE = """\
@@ -111,6 +114,25 @@ class SourceAwareRouting(RoutingEntry):
 # ---------------------------------------------------------------------------
 
 
+def make_trouve(
+    trouve_type: TrouveType, sql: str = "select 1", **fields: Any
+) -> Source | Table | View:
+    """Make a Source, a Table or a View. A Source takes no sql.
+
+    Args:
+        trouve_type: The type that selects the class.
+        sql: The SQL of a Table or a View.
+        **fields: The other fields, for example tests.
+    """
+    if trouve_type == TrouveType.SOURCE:
+        return Source(**fields)
+    if trouve_type == TrouveType.TABLE:
+        return Table(sql=sql, **fields)
+    if trouve_type == TrouveType.VIEW:
+        return View(sql=sql, **fields)
+    raise ValueError(f"No Trouve class for the type {trouve_type}.")
+
+
 def make_environment(
     name: str = "dev",
     authentication: Authentication | None = None,
@@ -136,10 +158,10 @@ def make_compiled_trouve(
     trouve_type: TrouveType = TrouveType.TABLE,
     execution_type: ExecutionType = ExecutionType.SNOWFLAKE,
     imports: list[str] | None = None,
-) -> Trouve:
-    """Make one compiled Trouve, with no file on the disk."""
+) -> TrouveAbc:
+    """Make one compiled Trouve of the class that the type names, with no file on the disk."""
     sql = "" if trouve_type == TrouveType.SOURCE else "select 1"
-    trouve = Trouve(type=trouve_type, sql=sql)
+    trouve = make_trouve(trouve_type, sql)
     address = TrouveAddress.parse(physical_address)
     trouve.compiled = CompiledAttributes(
         physical_address=address,

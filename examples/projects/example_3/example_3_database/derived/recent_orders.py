@@ -1,7 +1,7 @@
 from example_3_database.refined.orders import trouve as refined_orders
 
 import clair
-from clair import Append, Column, ColumnType, Incremental, RunMode, Trouve, TrouveType
+from clair import Append, Column, ColumnType, Incremental, RunMode, Table
 
 sql = f"""
     select
@@ -18,8 +18,7 @@ if clair.run_mode == RunMode.INCREMENTAL:
         where created_at > dateadd('day', -3, current_timestamp())
     """
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="""
         Incremental append of the recent orders. In each incremental run, clair adds the
         orders from the last 3 days. Thus the table keeps a log of the recent activity.

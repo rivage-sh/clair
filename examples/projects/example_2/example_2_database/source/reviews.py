@@ -1,7 +1,6 @@
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Source
 
-trouve = Trouve(
-    type=TrouveType.SOURCE,
+trouve = Source(
     docs="Raw product reviews. The customers write these reviews.",
     columns=[
         Column(name="review_id", type=ColumnType.STRING),

@@ -34,7 +34,7 @@ You point to a different Trouve with an import and an f-string:
 ```python
 from mydb.refined.events import trouve as refined_events
 
-trouve = Trouve(type=TrouveType.TABLE, sql=f"SELECT * FROM {refined_events}")
+trouve = Table(sql=f"SELECT * FROM {refined_events}")
 ```
 
 The f-string makes a token, and clair replaces the token with an address. If you write the
@@ -42,7 +42,7 @@ same address as text, you get no token:
 
 ```python
 # Wrong: clair reads no reference from this text.
-trouve = Trouve(type=TrouveType.TABLE, sql="SELECT * FROM mydb.refined.events")
+trouve = Table(sql="SELECT * FROM mydb.refined.events")
 ```
 
 Two faults follow, and Snowflake reports neither:
@@ -71,7 +71,7 @@ calls it for a full refresh, and for an incremental run if the `run_config` is
 `Incremental`. It calls it with a staging address and without one, because `clair run`
 stages a Trouve only when it runs the tests. Two faults are problems:
 
-- `build_sql()` raises. Example: `Incremental()` with no strategy on a `Trouve` that does
+- `build_sql()` raises. Example: `Incremental()` with no strategy on a `Table` that does
   not override `build_sql()`, or a bug in an override.
 - `build_sql()` gets a staging address, and no statement names it. The plan then writes to
   the physical object before the tests run, and a test that fails comes too late.

@@ -33,7 +33,7 @@ class Incremental(BaseModel):
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `strategy` | `None` | The built-in method that writes the new data. `None` tells clair that a [`build_sql()` override](../guides/custom-build-sql.md) writes the incremental SQL. A `Trouve` with no override and no strategy raises a `CompileError` on an incremental run. |
+| `strategy` | `None` | The built-in method that writes the new data. `None` tells clair that a [`build_sql()` override](../guides/custom-build-sql.md) writes the incremental SQL. A `Table` with no override and no strategy raises a `CompileError` on an incremental run. |
 
 ## Strategies
 

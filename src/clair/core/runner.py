@@ -29,7 +29,7 @@ from clair.exceptions import ClairError, ResultNotFoundError, RunError
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, Trouve, TrouveType
+from clair.trouves.trouve import ExecutionType, SqlTrouve, Table, TrouveAbc, TrouveType
 
 
 class RunStatus(StrEnum):
@@ -224,16 +224,16 @@ class RunSummary(BaseModel):
 logger = structlog.get_logger()
 
 
-def resolve_effective_mode(trouve: Trouve, cli_run_mode: RunMode) -> RunMode:
+def resolve_effective_mode(trouve: TrouveAbc, cli_run_mode: RunMode) -> RunMode:
     """Find the effective run mode of a Trouve. This function needs no adapter.
 
     The compiler and the runner both call it. The compiler has no connection.
     The runner also asks the warehouse if the table exists, before it accepts
     the incremental mode.
     """
-    if trouve.type == TrouveType.VIEW:
-        return RunMode.FULL_REFRESH
-    if trouve.run_config.run_mode != RunMode.INCREMENTAL:
+    # Only a Table holds a run_config. A View, a Source and a DataFrame Trouve
+    # always make the object again.
+    if not isinstance(trouve, Table) or trouve.run_config.run_mode != RunMode.INCREMENTAL:
         return RunMode.FULL_REFRESH
     if cli_run_mode != RunMode.INCREMENTAL:
         return RunMode.FULL_REFRESH
@@ -377,7 +377,7 @@ def type_change_error(
 
 
 def _promote_or_keep(
-    trouve: Trouve | DataframeTrouve,
+    trouve: SqlTrouve | DataframeTrouve,
     adapter: WarehouseAdapter,
     addresses: NodeAddresses,
     tests_passed: bool,
@@ -616,7 +616,7 @@ def _run_node(
 
         return _NodeOutcome(result, downstream_ok)
 
-    assert isinstance(trouve, Trouve)
+    assert isinstance(trouve, SqlTrouve)
     effective_mode = resolve_effective_mode(trouve, run_mode)
     # An incremental run adds to the rows that the target table holds, thus it
     # needs a target table. Two conditions give it none: the address holds

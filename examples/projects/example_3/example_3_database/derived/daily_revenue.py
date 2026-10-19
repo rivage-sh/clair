@@ -8,7 +8,6 @@ from clair import (
     Incremental,
     RunMode,
     TestUnique,
-    TrouveType,
 )
 
 sql = f"""
@@ -27,7 +26,6 @@ sql += """
 """
 
 trouve = ReplaceWindowTrouve(
-    type=TrouveType.TABLE,
     docs="""
         The revenue of each day. In each incremental run, clair replaces the last 3 days,
         thus a late order changes the total of its day. ReplaceWindowTrouve overrides

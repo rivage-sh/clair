@@ -49,7 +49,7 @@ from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefault
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Trouve, TrouveAbc
+from clair.trouves.trouve import CompiledAttributes, ExecutionType, SqlTrouve, TrouveAbc
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
 _SKIP_DIRS = {"clair", "tests", ARTIFACTS_DIR_NAME, "__pycache__", ".git", ".venv", "node_modules"}
@@ -264,16 +264,15 @@ def _compile_trouve(
             execution_type=ExecutionType.PANDAS,
         )
     elif trouve_obj.execution_type == ExecutionType.SNOWFLAKE:
-        assert isinstance(trouve_obj, Trouve)
+        # A Source holds no SQL, thus it reads nothing and imports nothing.
+        sql = trouve_obj.sql if isinstance(trouve_obj, SqlTrouve) else ""
         trouve_obj.compiled = CompiledAttributes(
             physical_address=physical,
             logical_address=logical,
-            resolved_sql=resolve_sql(
-                trouve_obj.sql, logical_addresses, this_address=logical
-            ),
+            resolved_sql=resolve_sql(sql, logical_addresses, this_address=logical),
             file_path=relative_file_path,
             module_name=module_name,
-            imports=detect_imports(trouve_obj.sql, logical_addresses, logical),
+            imports=detect_imports(sql, logical_addresses, logical),
             config=config,
             execution_type=ExecutionType.SNOWFLAKE,
         )

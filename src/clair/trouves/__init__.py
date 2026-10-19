@@ -11,7 +11,7 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import BuildPlan, Trouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import BuildPlan, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
 
 __all__ = [
     "AnyTest",
@@ -23,12 +23,15 @@ __all__ = [
     "PandasTrouve",
     "SchemaDefaults",
     "SeedTrouve",
+    "Source",
+    "SqlTrouve",
+    "Table",
     "Test",
     "TestNotNull",
     "TestRowCount",
     "TestUnique",
     "TestUniqueColumns",
-    "Trouve",
     "TrouveAbc",
     "TrouveType",
+    "View",
 ]

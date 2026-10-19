@@ -58,7 +58,7 @@ Snowflake makes a clone in the metadata, so this step takes constant time for a 
 
 ## A Trouve that changes its type
 
-Change `type=TrouveType.TABLE` to `type=TrouveType.VIEW`, or the reverse, and the next run stops before the promotion. You drop the old object, and the run after that makes the new one.
+Change a `Table` to a `View`, or the reverse, and the next run stops before the promotion. You drop the old object, and the run after that makes the new one.
 
 Snowflake replaces an object with an object of the same type only. `CREATE OR REPLACE VIEW` against a name that holds a table raises `Object '<name>' already exists.` The only repair is a drop, and a drop removes each grant on the object. The role that runs clair often cannot grant them again — for example in a managed access schema. Clair therefore does not drop the object. The person who changed the type decides about the grants.
 

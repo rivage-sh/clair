@@ -1,9 +1,8 @@
 from example_2_database.source.sellers import trouve as example_2_database_source_sellers
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Refined sellers. Each row has the contact data in separate columns.",
     sql=f"""
         select

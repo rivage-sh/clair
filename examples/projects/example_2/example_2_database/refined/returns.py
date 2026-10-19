@@ -1,9 +1,8 @@
 from example_2_database.source.returns import trouve as example_2_database_source_returns
 
-from clair import Column, ColumnType, Trouve, TrouveType
+from clair import Column, ColumnType, Table
 
-trouve = Trouve(
-    type=TrouveType.TABLE,
+trouve = Table(
     docs="Refined returns. Each row has a class for the reason.",
     sql=f"""
         select
