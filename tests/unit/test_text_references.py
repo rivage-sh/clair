@@ -130,19 +130,19 @@ class TestFindTextReferences:
         assert references[0].location == TextReferenceLocation.TEST_SQL
         assert references[0].text_address == "mydb.source.events"
 
-    def test_a_pandas_trouve_has_no_sql_to_read(self, tmp_path: Path):
+    def test_a_pandas_table_has_no_sql_to_read(self, tmp_path: Path):
         """A pandas Trouve names its inputs in a list, thus this lint skips it."""
         _write_source(tmp_path)
         (tmp_path / "mydb" / "derived").mkdir(parents=True, exist_ok=True)
         (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
             import pandas as pd
-            from clair import PandasTrouve
+            from clair import PandasTable
             from mydb.source.events import trouve as source_events
 
             def summarize(events: pd.DataFrame) -> pd.DataFrame:
                 return events
 
-            trouve = PandasTrouve(transform=summarize, inputs=[source_events])
+            trouve = PandasTable(transform=summarize, inputs=[source_events])
         """))
 
         assert find_text_references(discover_project(tmp_path)) == []

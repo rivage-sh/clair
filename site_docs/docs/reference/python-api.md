@@ -408,4 +408,4 @@ them opens a warehouse connection:
 | `01_python_api_tour.ipynb` | `compile()`, `validate()`, `catalog()` and `clean()`, with the selectors and the run modes |
 | `02_lineage_and_impact.ipynb` | the DAG as a networkx graph: the blast radius of a source, the build order, and the parallel groups |
 | `03_run_without_snowflake.ipynb` | `run()` against a `WarehouseAdapter` that holds its tables in memory |
-| `04_author_trouves.ipynb` | a `PandasTrouve` transform under test, a `SeedTrouve`, and a project that the notebook writes |
+| `04_author_trouves.ipynb` | a `PandasTable` transform under test, a `SeedTrouve`, and a project that the notebook writes |

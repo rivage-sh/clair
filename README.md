@@ -42,7 +42,7 @@ import pandas as pd
 from refined.products.catalog import trouve as catalog_trouve
 from refined.products.reviews import trouve as reviews_trouve
 
-from clair import PandasTrouve
+from clair import PandasTable
 
 
 def summarize(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
@@ -50,7 +50,7 @@ def summarize(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
     return merged.groupby("name", as_index=False).agg(rating=("rating", "mean"))
 
 
-trouve = PandasTrouve(transform=summarize, inputs=[catalog_trouve, reviews_trouve])
+trouve = PandasTable(transform=summarize, inputs=[catalog_trouve, reviews_trouve])
 ```
 
 clair fetches the upstream tables from Snowflake, runs your function locally, then writes the result back. The DAG, lineage, `--select` filters, and data quality tests all work unchanged.
@@ -77,7 +77,7 @@ Clair has one Trouve class for each kind of object. Each one derives from `Trouv
 | `Source` | A Snowflake table that external tools load. Clair reads it, and never writes it. |
 | `Table` | A Snowflake table that clair makes from `sql`. Runs inside Snowflake. |
 | `View` | A Snowflake view that clair makes from `sql`. |
-| `PandasTrouve` | A table that a Python function makes on the clair machine. Clair writes the result to Snowflake. |
+| `PandasTable` | A table that a Python function makes on the clair machine. Clair writes the result to Snowflake. |
 
 ### DAG
 
@@ -379,14 +379,14 @@ Pass `--run-mode full_refresh` on the CLI to force a full rebuild of everything 
 
 ## Pandas-native transformations
 
-When SQL isn't the right tool — complex reshaping, ML feature engineering, multi-step aggregations — use a `PandasTrouve` in place of a `Trouve`. Your function receives upstream tables as DataFrames, runs locally on the machine executing clair, and clair writes the result back to Snowflake.
+When SQL isn't the right tool — complex reshaping, ML feature engineering, multi-step aggregations — use a `PandasTable` in place of a `Trouve`. Your function receives upstream tables as DataFrames, runs locally on the machine executing clair, and clair writes the result back to Snowflake.
 
 ```python
 import pandas as pd
 from refined.products.catalog import trouve as catalog_trouve
 from refined.products.reviews import trouve as reviews_trouve
 
-from clair import Column, ColumnType, PandasTrouve, TestNotNull
+from clair import Column, ColumnType, PandasTable, TestNotNull
 
 
 def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
@@ -398,7 +398,7 @@ def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-trouve = PandasTrouve(
+trouve = PandasTable(
     transform=top_rated,
     inputs=[catalog_trouve, reviews_trouve],
     columns=[
@@ -470,7 +470,7 @@ Example projects are included under `examples/projects/`:
 | `example_1` | A minimal 4-Trouve events pipeline with VARIANT flattening |
 | `example_2` | A 52-Trouve e-commerce warehouse across 5 layers (source → refined → derived → reports), with a seed in `reference` |
 | `example_3` | Incremental APPEND, UPSERT and DELETE_INSERT strategies |
-| `example_4` | A `PandasTrouve` that gives a DataFrame instead of SQL |
+| `example_4` | A `PandasTable` that gives a DataFrame instead of SQL |
 | `example_from_init` | The files that `clair init` writes |
 
 Each numbered project holds a `__routing__.py` with a `dev` entry and a `prod` entry. The

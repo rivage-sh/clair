@@ -12,7 +12,7 @@ This module holds the base class and the classes of the SQL backend:
 * ``SqlTrouve`` -- the base of ``Table`` and ``View``. Snowflake materializes
   each one from SQL.
 
-The DataFrame backends stay in ``pandas_trouve.py`` and ``seed_trouve.py``.
+The DataFrame backends stay in ``pandas_table.py`` and ``seed_trouve.py``.
 """
 
 from __future__ import annotations
@@ -161,7 +161,7 @@ class TrouveAbc(SessionConfig, ABC):
 
     Each concrete class is one kind of object. ``Source`` is a table that clair
     reads and never writes. ``Table`` and ``View`` are objects that Snowflake
-    makes from SQL. ``PandasTrouve`` and ``SeedTrouve`` are tables that clair
+    makes from SQL. ``PandasTable`` and ``SeedTrouve`` are tables that clair
     writes from a DataFrame. Each class gives its own ``trouve_type``,
     ``execution_type`` and ``upstream_trouves``.
 

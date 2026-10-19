@@ -281,7 +281,7 @@ class TestNodeTag:
         assert node_a.is_seed is False
 
     def test_the_tree_marks_a_seed(self):
-        """A seed and a PandasTrouve both execute in pandas. The tags differ."""
+        """A seed and a PandasTable both execute in pandas. The tags differ."""
         dag = build_dag_of([("db.s.a", TrouveType.TABLE)])
         dag.add_trouve(make_compiled_seed_trouve("db.s.countries"))
 

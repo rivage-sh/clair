@@ -1,7 +1,7 @@
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
 from clair.trouves.dataframe_trouve import DataframeTrouve
-from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.pandas_table import PandasTable
 from clair.trouves.seed_trouve import SeedTrouve
 from clair.trouves.test import (
     AnyTest,
@@ -20,7 +20,7 @@ __all__ = [
     "ColumnType",
     "DatabaseDefaults",
     "DataframeTrouve",
-    "PandasTrouve",
+    "PandasTable",
     "SchemaDefaults",
     "SeedTrouve",
     "Source",

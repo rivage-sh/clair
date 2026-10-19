@@ -100,9 +100,9 @@ trouve = View(
 )
 ```
 
-## Pandas execution (`PandasTrouve`)
+## Pandas execution (`PandasTable`)
 
-If SQL is not the correct tool, use a `PandasTrouve` in place of a `Trouve`. You supply a Python function. clair reads the upstream tables from Snowflake as DataFrames. Then it calls your function on the machine that runs clair, and writes the result to Snowflake.
+If SQL is not the correct tool, use a `PandasTable` in place of a `Trouve`. You supply a Python function. clair reads the upstream tables from Snowflake as DataFrames. Then it calls your function on the machine that runs clair, and writes the result to Snowflake.
 
 ```python
 # derived/products/top_rated.py
@@ -110,7 +110,7 @@ import pandas as pd
 from refined.products.catalog import trouve as catalog_trouve
 from refined.products.reviews import trouve as reviews_trouve
 
-from clair import PandasTrouve
+from clair import PandasTable
 
 
 def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
@@ -122,7 +122,7 @@ def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-trouve = PandasTrouve(
+trouve = PandasTable(
     transform=top_rated,
     inputs=[catalog_trouve, reviews_trouve],
 )
@@ -132,7 +132,7 @@ clair binds each item of `inputs` to a transform parameter by position. The tran
 
 The two backends have these differences:
 
-| | `Trouve` | `PandasTrouve` |
+| | `Trouve` | `PandasTable` |
 |---|---|---|
 | Runs | In Snowflake | On the clair machine |
 | Output type | TABLE or VIEW | TABLE only |
