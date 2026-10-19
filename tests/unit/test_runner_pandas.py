@@ -11,7 +11,7 @@ from clair.core.runner import RunStatus, _run_dataframe_trouve
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import InvalidTrouveAddressError
 from clair.trouves.config import ResolvedConfig
-from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import CompiledAttributes, ExecutionType, Source
 from tests.helpers import RecordingAdapter, addresses_of_text
@@ -30,8 +30,8 @@ def _make_compiled(physical_address: str = "db.schema.table") -> CompiledAttribu
     )
 
 
-def _compile_pandas(trouve: PandasTrouve, physical_address: str) -> None:
-    """Compile a PandasTrouve, as discovery does.
+def _compile_pandas(trouve: PandasTable, physical_address: str) -> None:
+    """Compile a PandasTable, as discovery does.
 
     input_addresses holds the address that each input reads. Discovery writes
     the logical address, and recompile_for_selection() changes it to a physical
@@ -50,7 +50,7 @@ def _make_source(physical_address: str = "db.schema.source") -> Source:
     return source
 
 
-class TestRunPandasTrouveHappyPath:
+class TestRunPandasTableHappyPath:
     def test_transform_called_and_result_written(self):
         source = _make_source("db.schema.events")
         input_df = pd.DataFrame({"event_type": ["a", "b"], "count": [1, 2]})
@@ -59,7 +59,7 @@ class TestRunPandasTrouveHappyPath:
         def my_fn(events: pd.DataFrame) -> pd.DataFrame:
             return result_df
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[source])
+        trouve = PandasTable(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(dataframes={"db.schema.events": input_df})
@@ -83,7 +83,7 @@ class TestRunPandasTrouveHappyPath:
         def my_fn(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame({"z": [3]})
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[source_a, source_b])
+        trouve = PandasTable(transform=my_fn, inputs=[source_a, source_b])
         _compile_pandas(trouve, "db.schema.output")
 
         adapter = RecordingAdapter(
@@ -106,7 +106,7 @@ class TestRunPandasTrouveHappyPath:
             received_kwargs["events"] = events
             return pd.DataFrame({"out": [1]})
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[source])
+        trouve = PandasTable(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(dataframes={"db.schema.events": input_df})
@@ -118,14 +118,14 @@ class TestRunPandasTrouveHappyPath:
         pd.testing.assert_frame_equal(received_kwargs["events"], input_df)
 
 
-class TestRunPandasTrouveAddress:
+class TestRunPandasTableAddress:
     def test_database_schema_table_parsed_correctly(self):
         source = _make_source("db.schema.events")
 
         def my_fn(events: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame({"x": [1]})
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[source])
+        trouve = PandasTable(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "mydb.myschema.mytable")
 
         adapter = RecordingAdapter(
@@ -145,14 +145,14 @@ class TestRunPandasTrouveAddress:
             TrouveAddress.parse("only_two_parts.table")
 
 
-class TestRunPandasTrouveTransformErrors:
+class TestRunPandasTableTransformErrors:
     def test_transform_raises_results_in_failure(self):
         source = _make_source("db.schema.events")
 
         def bad_fn(events: pd.DataFrame) -> pd.DataFrame:
             raise ValueError("something went wrong")
 
-        trouve = PandasTrouve(transform=bad_fn, inputs=[source])
+        trouve = PandasTable(transform=bad_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(
@@ -173,7 +173,7 @@ class TestRunPandasTrouveTransformErrors:
         def bad_fn(events: pd.DataFrame) -> pd.DataFrame:
             return {"not": "a dataframe"}  # type: ignore
 
-        trouve = PandasTrouve(transform=bad_fn, inputs=[source])
+        trouve = PandasTable(transform=bad_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(
@@ -194,7 +194,7 @@ class TestRunPandasTrouveTransformErrors:
         def bad_fn(events: pd.DataFrame) -> pd.DataFrame:
             return None  # type: ignore
 
-        trouve = PandasTrouve(transform=bad_fn, inputs=[source])
+        trouve = PandasTable(transform=bad_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(
@@ -209,14 +209,14 @@ class TestRunPandasTrouveTransformErrors:
         assert "must give a pandas DataFrame" in result.error
 
 
-class TestRunPandasTrouveFetchErrors:
+class TestRunPandasTableFetchErrors:
     def test_fetch_failure_results_in_failure(self):
         source = _make_source("db.schema.events")
 
         def my_fn(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[source])
+        trouve = PandasTable(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(
@@ -232,14 +232,14 @@ class TestRunPandasTrouveFetchErrors:
         assert "events" in result.error
 
 
-class TestRunPandasTrouveWriteErrors:
+class TestRunPandasTableWriteErrors:
     def test_write_exception_results_in_failure(self):
         source = _make_source("db.schema.events")
 
         def my_fn(events: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame({"x": [1]})
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[source])
+        trouve = PandasTable(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(
@@ -260,7 +260,7 @@ class TestRunPandasTrouveWriteErrors:
         def my_fn(events: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame({"x": [1]})
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[source])
+        trouve = PandasTable(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(
@@ -277,14 +277,14 @@ class TestRunPandasTrouveWriteErrors:
 
 
 
-class TestRunPandasTrouveResultFields:
+class TestRunPandasTableResultFields:
     def test_success_result_has_duration(self):
         source = _make_source("db.schema.events")
 
         def my_fn(events: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame({"x": [1]})
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[source])
+        trouve = PandasTable(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(
@@ -304,7 +304,7 @@ class TestRunPandasTrouveResultFields:
         def my_fn(events: pd.DataFrame) -> pd.DataFrame:
             raise ValueError("oops")
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[source])
+        trouve = PandasTable(transform=my_fn, inputs=[source])
         _compile_pandas(trouve, "db.schema.summary")
 
         adapter = RecordingAdapter(

@@ -1,4 +1,4 @@
-"""The tests of the compiler output for a PandasTrouve node."""
+"""The tests of the compiler output for a PandasTable node."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ FAKE_RUN_ID = "0" * 32
 
 
 def _make_pandas_project(tmp_path: Path) -> Path:
-    """Make a project with a SOURCE and a PandasTrouve that has columns."""
+    """Make a project with a SOURCE and a PandasTable that has columns."""
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
@@ -25,13 +25,13 @@ def _make_pandas_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import PandasTrouve, Column, ColumnType
+        from clair import PandasTable, Column, ColumnType
         from mydb.source.events import trouve as source_events
 
         def summarize(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = PandasTrouve(
+        trouve = PandasTable(
             transform=summarize,
             inputs=[source_events],
             columns=[
@@ -45,7 +45,7 @@ def _make_pandas_project(tmp_path: Path) -> Path:
 
 
 def _make_mixed_project(tmp_path: Path) -> Path:
-    """Make a project with a SQL Trouve and a PandasTrouve."""
+    """Make a project with a SQL Trouve and a PandasTable."""
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "refined").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
@@ -63,20 +63,20 @@ def _make_mixed_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import PandasTrouve
+        from clair import PandasTable
         from mydb.refined.events import trouve as refined_events
 
         def summarize(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = PandasTrouve(transform=summarize, inputs=[refined_events])
+        trouve = PandasTable(transform=summarize, inputs=[refined_events])
     """))
 
     return tmp_path
 
 
 def _make_no_columns_project(tmp_path: Path) -> Path:
-    """Make a project with a PandasTrouve that has no columns."""
+    """Make a project with a PandasTable that has no columns."""
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
 
@@ -87,19 +87,19 @@ def _make_no_columns_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import PandasTrouve
+        from clair import PandasTable
         from mydb.source.events import trouve as source_events
 
         def summarize(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = PandasTrouve(transform=summarize, inputs=[refined_events])
+        trouve = PandasTable(transform=summarize, inputs=[refined_events])
     """))
 
     return tmp_path
 
 
-class TestPandasTrouveArtifactFile:
+class TestPandasTableArtifactFile:
     def test_artifact_file_ends_in_py(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
@@ -109,7 +109,7 @@ class TestPandasTrouveArtifactFile:
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         assert py_file.exists()
 
-    def test_no_sql_file_for_pandas_trouve(self, tmp_path: Path):
+    def test_no_sql_file_for_pandas_table(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
@@ -118,7 +118,7 @@ class TestPandasTrouveArtifactFile:
         sql_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.sql"
         assert not sql_file.exists()
 
-    def test_no_json_file_for_pandas_trouve(self, tmp_path: Path):
+    def test_no_json_file_for_pandas_table(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
@@ -128,7 +128,7 @@ class TestPandasTrouveArtifactFile:
         assert not json_file.exists()
 
 
-class TestPandasTrouveArtifactContent:
+class TestPandasTableArtifactContent:
     def _get_artifact_content(self, tmp_path: Path) -> str:
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
@@ -156,7 +156,7 @@ class TestPandasTrouveArtifactContent:
         assert "def summarize" in content
 
 
-class TestPandasTrouveCompiledNodeInfo:
+class TestPandasTableCompiledNodeInfo:
     def test_compiled_node_type_is_pandas(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))

@@ -1,4 +1,4 @@
-"""The tests of the discovery of a PandasTrouve node."""
+"""The tests of the discovery of a PandasTable node."""
 
 from __future__ import annotations
 
@@ -7,17 +7,17 @@ from pathlib import Path
 
 from clair.core.discovery import discover_project
 from clair.core.references import recompile_for_selection
-from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.pandas_table import PandasTable
 from clair.trouves.trouve import Table, TrouveAbc
 from tests.helpers import DatabaseOverrideRouting
 
 
 def _make_pandas_project(tmp_path: Path) -> Path:
-    """Make a small project with a SOURCE and a PandasTrouve.
+    """Make a small project with a SOURCE and a PandasTable.
 
     The structure is:
         mydb/source/events.py       [SOURCE]
-        mydb/derived/summary.py     [a PandasTrouve] reads source.events
+        mydb/derived/summary.py     [a PandasTable] reads source.events
     """
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
@@ -29,13 +29,13 @@ def _make_pandas_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import PandasTrouve, Column, ColumnType
+        from clair import PandasTable, Column, ColumnType
         from mydb.source.events import trouve as source_events
 
         def summarize(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = PandasTrouve(
+        trouve = PandasTable(
             transform=summarize,
             inputs=[source_events],
             columns=[
@@ -50,12 +50,12 @@ def _make_pandas_project(tmp_path: Path) -> Path:
 
 
 def _make_mixed_project(tmp_path: Path) -> Path:
-    """Make a project with a SQL Trouve and a PandasTrouve.
+    """Make a project with a SQL Trouve and a PandasTable.
 
     The structure is:
         mydb/source/events.py       [SOURCE]
         mydb/refined/events.py      [a TABLE with SQL] reads source.events
-        mydb/derived/summary.py     [a PandasTrouve] reads refined.events
+        mydb/derived/summary.py     [a PandasTable] reads refined.events
     """
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "refined").mkdir(parents=True)
@@ -74,25 +74,25 @@ def _make_mixed_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "derived" / "summary.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import PandasTrouve
+        from clair import PandasTable
         from mydb.refined.events import trouve as refined_events
 
         def summarize(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = PandasTrouve(transform=summarize, inputs=[refined_events])
+        trouve = PandasTable(transform=summarize, inputs=[refined_events])
     """))
 
     return tmp_path
 
 
 def _make_chained_pandas_project(tmp_path: Path) -> Path:
-    """Make a project where one PandasTrouve depends on a different PandasTrouve.
+    """Make a project where one PandasTable depends on a different PandasTable.
 
     The structure is:
         mydb/source/events.py       [SOURCE]
-        mydb/derived/step_one.py    [a PandasTrouve] reads source.events
-        mydb/derived/step_two.py    [a PandasTrouve] reads derived.step_one
+        mydb/derived/step_one.py    [a PandasTable] reads source.events
+        mydb/derived/step_two.py    [a PandasTable] reads derived.step_one
     """
     (tmp_path / "mydb" / "source").mkdir(parents=True)
     (tmp_path / "mydb" / "derived").mkdir(parents=True)
@@ -104,51 +104,51 @@ def _make_chained_pandas_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "derived" / "step_one.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import PandasTrouve
+        from clair import PandasTable
         from mydb.source.events import trouve as source_events
 
         def transform_one(events: pd.DataFrame) -> pd.DataFrame:
             return events
 
-        trouve = PandasTrouve(transform=transform_one, inputs=[source_events])
+        trouve = PandasTable(transform=transform_one, inputs=[source_events])
     """))
 
     (tmp_path / "mydb" / "derived" / "step_two.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import PandasTrouve
+        from clair import PandasTable
         from mydb.derived.step_one import trouve as step_one
 
         def transform_two(step_one_data: pd.DataFrame) -> pd.DataFrame:
             return step_one_data
 
-        trouve = PandasTrouve(transform=transform_two, inputs=[step_one])
+        trouve = PandasTable(transform=transform_two, inputs=[step_one])
     """))
 
     return tmp_path
 
 
-class TestPandasTrouveDetection:
-    def test_pandas_trouve_is_discovered(self, tmp_path: Path):
+class TestPandasTableDetection:
+    def test_pandas_table_is_discovered(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
         names = {str(t.physical_address) for t in trouves}
         assert "mydb.derived.summary" in names
 
-    def test_pandas_trouve_is_a_pandas_trouve_instance(self, tmp_path: Path):
+    def test_pandas_table_is_a_pandas_table_instance(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
         summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
-        assert isinstance(summary, PandasTrouve)
+        assert isinstance(summary, PandasTable)
         assert summary.transform is not None
 
-    def test_pandas_trouve_is_compiled(self, tmp_path: Path):
+    def test_pandas_table_is_compiled(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
         summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
         assert summary.is_compiled
 
 
-class TestPandasTrouveDependencyExtraction:
+class TestPandasTableDependencyExtraction:
     def test_imports_contain_upstream(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
@@ -156,7 +156,7 @@ class TestPandasTrouveDependencyExtraction:
         assert summary.compiled is not None
         assert "mydb.source.events" in summary.compiled.imports
 
-    def test_chained_pandas_trouve_has_correct_imports(self, tmp_path: Path):
+    def test_chained_pandas_table_has_correct_imports(self, tmp_path: Path):
         project = _make_chained_pandas_project(tmp_path)
         trouves = discover_project(project)
         step_two = next(t for t in trouves if str(t.physical_address) == "mydb.derived.step_two")
@@ -164,7 +164,7 @@ class TestPandasTrouveDependencyExtraction:
         assert "mydb.derived.step_one" in step_two.compiled.imports
 
 
-class TestPandasTrouveCompiledAttributes:
+class TestPandasTableCompiledAttributes:
     def test_logical_address_set_correctly(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
@@ -186,7 +186,7 @@ class TestPandasTrouveCompiledAttributes:
         assert summary.compiled is not None
         assert summary.compiled.file_path == Path("mydb/derived/summary.py")
 
-    def test_resolved_sql_is_empty_for_pandas_trouve(self, tmp_path: Path):
+    def test_resolved_sql_is_empty_for_pandas_table(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
         summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
@@ -209,16 +209,16 @@ class TestMixedDag:
         trouves = discover_project(project)
         refined = next(t for t in trouves if str(t.physical_address) == "mydb.refined.events")
         assert isinstance(refined, Table)
-        assert not isinstance(refined, PandasTrouve)
+        assert not isinstance(refined, PandasTable)
 
-    def test_pandas_trouve_has_a_transform(self, tmp_path: Path):
+    def test_pandas_table_has_a_transform(self, tmp_path: Path):
         project = _make_mixed_project(tmp_path)
         trouves = discover_project(project)
         summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
-        assert isinstance(summary, PandasTrouve)
+        assert isinstance(summary, PandasTable)
         assert summary.transform is not None
 
-    def test_pandas_trouve_depends_on_sql_trouve(self, tmp_path: Path):
+    def test_pandas_table_depends_on_sql_trouve(self, tmp_path: Path):
         project = _make_mixed_project(tmp_path)
         trouves = discover_project(project)
         summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")

@@ -1,7 +1,7 @@
 import pandas as pd
 from example_4_database.refined.events import trouve as example_4_database_refined_events
 
-from clair import Column, ColumnType, PandasTrouve, TestNotNull, TestUniqueColumns
+from clair import Column, ColumnType, PandasTable, TestNotNull, TestUniqueColumns
 
 
 def daily_event_counts(refined_events: pd.DataFrame) -> pd.DataFrame:
@@ -10,7 +10,7 @@ def daily_event_counts(refined_events: pd.DataFrame) -> pd.DataFrame:
     ).agg(event_count=("event_type", "size"))
 
 
-trouve = PandasTrouve(
+trouve = PandasTable(
     transform=daily_event_counts,
     inputs=[example_4_database_refined_events],
     docs="Daily count of each event type. This Trouve reads the refined events.",

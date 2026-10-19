@@ -9,7 +9,7 @@ from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX, _registry, clear
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
-from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import (
     Append,
     FullRefresh,
@@ -122,11 +122,11 @@ class TestTrouveConstruction:
             pytest.param(Source, {"run_config": Incremental(strategy=Append())}, id="run_config_on_a_source"),
             pytest.param(View, {"sql": "SELECT 1", "run_config": Incremental(strategy=Append())}, id="run_config_on_a_view"),
             pytest.param(Table, {"sql": "SELECT 1", "type": TrouveType.VIEW}, id="type_on_a_table"),
-            pytest.param(PandasTrouve, {"transform": lambda: pd.DataFrame(), "type": TrouveType.VIEW}, id="type_on_a_pandas_trouve"),
+            pytest.param(PandasTable, {"transform": lambda: pd.DataFrame(), "type": TrouveType.VIEW}, id="type_on_a_pandas_table"),
             pytest.param(
-                PandasTrouve,
+                PandasTable,
                 {"transform": lambda: pd.DataFrame(), "run_config": Incremental(strategy=Append())},
-                id="run_config_on_a_pandas_trouve",
+                id="run_config_on_a_pandas_table",
             ),
         ],
     )
@@ -845,12 +845,12 @@ class TestConfig:
 
 
 # ---------------------------------------------------------------------------
-# PandasTrouve and the abstract base
+# PandasTable and the abstract base
 # ---------------------------------------------------------------------------
 
 
-class TestPandasTrouve:
-    """The tests of PandasTrouve, the pandas backend."""
+class TestPandasTable:
+    """The tests of PandasTable, the pandas backend."""
 
     def _make_upstream(self) -> Source:
         """Make a compiled SOURCE Trouve. A different Trouve can depend on it."""
@@ -864,7 +864,7 @@ class TestPandasTrouve:
         def my_fn(events):
             return events
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[upstream])
+        trouve = PandasTable(transform=my_fn, inputs=[upstream])
         assert trouve.transform is my_fn
         assert trouve.type == TrouveType.TABLE
         assert trouve.execution_type == ExecutionType.PANDAS
@@ -876,7 +876,7 @@ class TestPandasTrouve:
         def my_fn(events):
             return events
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[upstream])
+        trouve = PandasTable(transform=my_fn, inputs=[upstream])
         assert trouve.inputs[0] is upstream
         assert trouve.upstream_trouves()[0] is upstream
 
@@ -887,7 +887,7 @@ class TestPandasTrouve:
         def my_fn(a, b):
             return a
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[first, second])
+        trouve = PandasTable(transform=my_fn, inputs=[first, second])
         assert trouve.upstream_trouves() == [first, second]
 
     def test_parameter_names_gives_the_signature_order(self):
@@ -897,7 +897,7 @@ class TestPandasTrouve:
         def my_fn(catalog, reviews):
             return catalog
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[first, second])
+        trouve = PandasTable(transform=my_fn, inputs=[first, second])
         assert trouve.parameter_names() == ["catalog", "reviews"]
 
     def test_transform_stays_directly_callable(self):
@@ -907,7 +907,7 @@ class TestPandasTrouve:
         def my_fn(events):
             return events
 
-        trouve = PandasTrouve(transform=my_fn, inputs=[upstream])
+        trouve = PandasTable(transform=my_fn, inputs=[upstream])
         frame = pd.DataFrame({"a": [1, 2]})
         assert trouve.transform(frame) is frame
 
@@ -915,7 +915,7 @@ class TestPandasTrouve:
         def my_fn():
             return pd.DataFrame()
 
-        trouve = PandasTrouve(transform=my_fn)
+        trouve = PandasTable(transform=my_fn)
         assert trouve.inputs == []
 
     def test_too_few_inputs_raises_value_error(self):
@@ -923,14 +923,14 @@ class TestPandasTrouve:
             return a
 
         with pytest.raises(ValueError, match="takes 2 parameter\\(s\\) but inputs has 1"):
-            PandasTrouve(transform=my_fn, inputs=[self._make_upstream()])
+            PandasTable(transform=my_fn, inputs=[self._make_upstream()])
 
     def test_too_many_inputs_raises_value_error(self):
         def my_fn(a):
             return a
 
         with pytest.raises(ValueError, match="takes 1 parameter\\(s\\) but inputs has 2"):
-            PandasTrouve(
+            PandasTable(
                 transform=my_fn,
                 inputs=[self._make_upstream(), self._make_upstream()],
             )
@@ -940,32 +940,32 @@ class TestPandasTrouve:
             return catalog
 
         with pytest.raises(ValueError, match="Parameters: catalog, reviews"):
-            PandasTrouve(transform=my_fn, inputs=[])
+            PandasTable(transform=my_fn, inputs=[])
 
     def test_var_positional_raises_value_error(self):
         def my_fn(*frames):
             return frames
 
         with pytest.raises(ValueError, match="must not have \\*args or \\*\\*kwargs"):
-            PandasTrouve(transform=my_fn, inputs=[self._make_upstream()])
+            PandasTable(transform=my_fn, inputs=[self._make_upstream()])
 
     def test_var_keyword_raises_value_error(self):
         def my_fn(**frames):
             return frames
 
         with pytest.raises(ValueError, match="must not have \\*args or \\*\\*kwargs"):
-            PandasTrouve(transform=my_fn, inputs=[])
+            PandasTable(transform=my_fn, inputs=[])
 
     def test_transform_not_callable_raises_value_error(self):
         with pytest.raises(ValueError, match="transform"):
-            PandasTrouve(transform="not_a_function")
+            PandasTable(transform="not_a_function")
 
-    def test_pandas_trouve_is_a_trouve_abc(self):
+    def test_pandas_table_is_a_trouve_abc(self):
         """Discovery finds a node with isinstance(obj, TrouveAbc)."""
         def my_fn():
             return pd.DataFrame()
 
-        assert isinstance(PandasTrouve(transform=my_fn), TrouveAbc)
+        assert isinstance(PandasTable(transform=my_fn), TrouveAbc)
 
 
 class TestTrouveAbc:

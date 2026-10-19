@@ -1,4 +1,4 @@
-"""PandasTrouve -- a Trouve that a Python function materializes.
+"""PandasTable -- a Trouve that a Python function materializes.
 
 Clair reads each upstream Trouve from Snowflake into a DataFrame, gives the
 DataFrames to your function, and writes the result back to Snowflake.
@@ -18,7 +18,7 @@ from clair.trouves.trouve import TrouveAbc
 _VARIADIC_KINDS = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
 
 
-class PandasTrouve(DataframeTrouve):
+class PandasTable(DataframeTrouve):
     """A Trouve that a pandas function materializes.
 
     Clair binds ``inputs`` to the parameters of ``transform`` by position. Thus
@@ -29,7 +29,7 @@ class PandasTrouve(DataframeTrouve):
     Example:
         >>> def daily_counts(events: pd.DataFrame) -> pd.DataFrame:
         ...     return events.groupby("day", as_index=False).agg(n=("day", "size"))
-        >>> trouve = PandasTrouve(transform=daily_counts, inputs=[events_trouve])
+        >>> trouve = PandasTable(transform=daily_counts, inputs=[events_trouve])
 
     Attributes:
         transform: The function that gives the output DataFrame.
@@ -73,7 +73,7 @@ class PandasTrouve(DataframeTrouve):
             return None
 
     @model_validator(mode="after")
-    def _validate_transform(self) -> PandasTrouve:
+    def _validate_transform(self) -> PandasTable:
 
         parameters = list(inspect.signature(self.transform).parameters.values())
         variadic = [p.name for p in parameters if p.kind in _VARIADIC_KINDS]

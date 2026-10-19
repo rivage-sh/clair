@@ -208,14 +208,14 @@ def pandas_checked_file(database_name: str, minimum_rows: int) -> str:
 import pandas as pd
 from {database_name}.source.rows import trouve as source_rows
 
-from clair import Column, ColumnType, PandasTrouve, TestRowCount
+from clair import Column, ColumnType, PandasTable, TestRowCount
 
 
 def keep_each_row(rows: pd.DataFrame) -> pd.DataFrame:
     return rows
 
 
-trouve = PandasTrouve(
+trouve = PandasTable(
     transform=keep_each_row,
     inputs=[source_rows],
     docs="The candidate that write_pandas makes. TestRowCount decides it.",
@@ -264,7 +264,7 @@ def write_probe_project(
             that a transform function gives.
         strategy: The Python source of the strategy of an incremental
             candidate, for example UPSERT_STRATEGY. None gives a full refresh
-            candidate. A PandasTrouve always makes the table again, so the two
+            candidate. A PandasTable always makes the table again, so the two
             arguments do not go together.
 
     Returns:

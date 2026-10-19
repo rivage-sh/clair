@@ -81,7 +81,7 @@ from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
 from clair.trouves.dataframe_trouve import DataframeTrouve
-from clair.trouves.pandas_trouve import PandasTrouve
+from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import (
     SOURCE,
     TARGET,
@@ -134,7 +134,7 @@ __all__ = [
     "Incremental",
     "NodeAddresses",
     "OnSchemaChange",
-    "PandasTrouve",
+    "PandasTable",
     "Password",
     "PrivateKey",
     "RoutingEntry",
