@@ -381,6 +381,7 @@ def run(
             after_node_success=on_node_success if test else None,
             use_staging=use_staging,
             threads=thread_count,
+            environment_name=env_name,
         ):
             results.append(
                 result.model_copy(

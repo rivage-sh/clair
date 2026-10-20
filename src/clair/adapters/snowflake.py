@@ -203,6 +203,29 @@ class SnowflakeAdapter(WarehouseAdapter):
         finally:
             cursor.close()
 
+    def set_session_parameters(
+        self, query_tag: str, statement_timeout_seconds: int | None
+    ) -> None:
+        """Set QUERY_TAG and STATEMENT_TIMEOUT_IN_SECONDS with ALTER SESSION.
+
+        UNSET gives the timeout of the account or the user back.
+        """
+        if self._conn is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+
+        escaped_tag = query_tag.replace("\\", "\\\\").replace("'", "\\'")
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(f"ALTER SESSION SET QUERY_TAG = '{escaped_tag}'")
+            if statement_timeout_seconds is None:
+                cursor.execute("ALTER SESSION UNSET STATEMENT_TIMEOUT_IN_SECONDS")
+            else:
+                cursor.execute(
+                    f"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = {statement_timeout_seconds}"
+                )
+        finally:
+            cursor.close()
+
     def fetch_dataframe(self, address: TrouveAddress) -> pd.DataFrame:
         """Read a complete Snowflake table into a pandas DataFrame."""
         if self._conn is None:

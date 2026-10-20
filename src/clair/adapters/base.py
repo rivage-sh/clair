@@ -118,6 +118,17 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
+    def set_session_parameters(
+        self, query_tag: str, statement_timeout_seconds: int | None
+    ) -> None:
+        """Set the query tag and the statement timeout of the session.
+
+        One thread runs many Trouves on one session, thus each call sets both
+        values. A timeout of None removes the timeout of the Trouve before it.
+        """
+        ...
+
+    @abstractmethod
     def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
         """Give the type of the object at the address, or None if it holds none.
 
