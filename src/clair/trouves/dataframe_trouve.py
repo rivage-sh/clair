@@ -7,10 +7,10 @@ from typing import ClassVar
 
 import pandas as pd
 
-from clair.trouves.trouve import ExecutionType, TrouveAbc, TrouveType
+from clair.trouves.trouve import ExecutionType, TableOptions, TrouveAbc, TrouveType
 
 
-class DataframeTrouve(TrouveAbc, ABC):
+class DataframeTrouve(TrouveAbc, TableOptions, ABC):
     """The base of each Trouve that clair materializes from a DataFrame.
 
     Clair reads each upstream Trouve into a DataFrame, calls
@@ -19,7 +19,7 @@ class DataframeTrouve(TrouveAbc, ABC):
     comes from the dtype of that column.
 
     ``PandasTable`` calls a function that you write. ``SeedTable`` holds its
-    rows in the Python file.
+    rows in the Python file. ``TableOptions`` gives ``transient``.
     """
 
     trouve_type: ClassVar[TrouveType] = TrouveType.TABLE

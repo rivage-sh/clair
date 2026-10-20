@@ -22,7 +22,7 @@ from clair.exceptions import CompileError
 from clair.trouves.address import NodeAddresses
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, SqlTrouve, TrouveType
+from clair.trouves.trouve import ExecutionType, SqlTrouve, TrouveType, is_transient
 
 
 class CompiledNodeInfo(BaseModel):
@@ -162,7 +162,9 @@ def build_statements(
 
     statements: list[str] = []
     if effective_mode == RunMode.INCREMENTAL:
-        statements.append(build_clone_statement(physical_address, staging_address))
+        statements.append(
+            build_clone_statement(physical_address, staging_address, transient=is_transient(trouve))
+        )
     statements.extend(
         trouve.build_sql(
             effective_mode, run_id=run_id, staging_address=staging_address
@@ -177,6 +179,7 @@ def build_statements(
             staging_address=staging_address,
             physical_address=physical_address,
             resolved_sql=trouve.compiled.resolved_sql,
+            transient=is_transient(trouve),
         )
     )
     statements.append(build_drop_staging_statement(trouve.type, staging_address))

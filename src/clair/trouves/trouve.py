@@ -133,6 +133,29 @@ def quote_column_name(column_name: str) -> str:
     return f'"{escaped_name}"'
 
 
+def table_keyword(transient: bool) -> str:
+    """Give the object keyword of a CREATE statement: ``TABLE`` or ``TRANSIENT TABLE``."""
+    return "TRANSIENT TABLE" if transient else "TABLE"
+
+
+class TableOptions(BaseModel):
+    """The options of each Trouve that makes a TABLE: ``Table``, ``PandasTable``, ``SeedTable``.
+
+    Attributes:
+        transient: True makes a TRANSIENT table. Snowflake keeps no Fail-safe
+            copy of it, and its Time Travel lasts one day maximum. The table
+            costs less storage, and it can lose data that a permanent table
+            keeps. ``clair.core.staging`` tells how a run changes the kind.
+    """
+
+    transient: bool = False
+
+
+def is_transient(trouve: TrouveAbc) -> bool:
+    """Tell you if the Trouve makes a TRANSIENT table. A View and a Source never do."""
+    return isinstance(trouve, TableOptions) and trouve.transient
+
+
 class CompiledAttributes(BaseModel):
     """The attributes that discovery sets after it loads a Trouve.
 
@@ -325,12 +348,12 @@ class SqlTrouve(TrouveAbc, ABC):
             raise RuntimeError("build_sql() needs a compiled Trouve")
         return self.compiled.resolved_sql.strip()
 
-    def _full_refresh_plan(self, object_type: str, staging_address: TrouveAddress | None) -> BuildPlan:
+    def _full_refresh_plan(self, object_keyword: str, staging_address: TrouveAddress | None) -> BuildPlan:
         """Give the plan that makes the object again from the SQL."""
         resolved_sql = self.resolved_sql()
         address = staging_address or self.physical_address
         return BuildPlan(statements=[
-            f"CREATE OR REPLACE {object_type} {address} AS (\n{resolved_sql}\n)"
+            f"CREATE OR REPLACE {object_keyword} {address} AS (\n{resolved_sql}\n)"
         ])
 
 
@@ -350,11 +373,13 @@ class View(SqlTrouve):
         return self._full_refresh_plan("VIEW", staging_address)
 
 
-class Table(SqlTrouve):
+class Table(SqlTrouve, TableOptions):
     """A table that Snowflake makes from the SQL.
 
     Attributes:
         run_config: FullRefresh, or Incremental with its strategy.
+
+    ``TableOptions`` gives ``transient``.
     """
 
     trouve_type: ClassVar[TrouveType] = TrouveType.TABLE
@@ -378,7 +403,7 @@ class Table(SqlTrouve):
             ValueError: If the config asks for UPSERT but has no columns.
         """
         if effective_mode == RunMode.FULL_REFRESH:
-            return self._full_refresh_plan("TABLE", staging_address)
+            return self._full_refresh_plan(table_keyword(self.transient), staging_address)
 
         resolved_sql = self.resolved_sql()
         address = str(staging_address or self.physical_address)

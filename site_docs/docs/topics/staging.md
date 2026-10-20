@@ -83,6 +83,38 @@ A run with no data quality tests has no staging step, thus it has no candidate t
 
 `clair compile` opens no warehouse connection, thus it cannot know the type that the address holds. The plan shows the condition as a comment: `-- object type: if <address> holds an object that is not a TABLE, clair stops here and writes nothing to it`.
 
+## A transient table
+
+`transient=True` on a `Table`, a `PandasTable` or a `SeedTable` makes a TRANSIENT table. Snowflake keeps no Fail-safe copy of a transient table, and its Time Travel lasts one day maximum. The table costs less storage, but Snowflake cannot recover it after that day. Use it for a table that clair can make again from its inputs.
+
+```python
+trouve = Table(
+    sql=f"SELECT ... FROM {events}",
+    transient=True,
+)
+```
+
+Snowflake cannot clone a transient table into a permanent one. Thus each `CREATE` of the Trouve says `TRANSIENT`: the build at the staging address, the clone of an incremental run, and the promotion.
+
+When you change the option of a table that exists:
+
+| The change | A full refresh | An incremental run |
+|------------|----------------|--------------------|
+| Permanent to transient | The table becomes transient. | The table becomes transient, and keeps its rows. |
+| Transient to permanent | The table becomes permanent. | The run stops at the clone, and writes nothing. |
+
+The promotion uses `COPY GRANTS`, thus each change keeps the grants.
+
+The incremental run that stops gives `Transient object cannot be cloned to a permanent object.` Run a full refresh, if the SQL can make each row again. If it cannot, make the table permanent yourself, and keep its rows and its grants:
+
+```sql
+CREATE OR REPLACE TABLE db.schema.events COPY GRANTS AS SELECT * FROM db.schema.events
+```
+
+Then run clair again. The incremental run clones a permanent table into a permanent one.
+
+A run with `--no-test` has no staging step. An incremental run then adds the rows to the table as it is, and the kind of the table does not change. A full refresh makes the table again, with the new kind.
+
 ## The plan
 
 `clair compile` writes the complete plan to `_clairtifacts/`: the clone, the build at the staging address, a comment that marks the test step, and the promotion.

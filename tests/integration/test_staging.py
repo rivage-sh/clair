@@ -35,7 +35,7 @@ from tests.integration.staging_project import (
 )
 from tests.integration.warehouse import (
     execute,
-    query_rows,
+    privileges_on,
     row_count,
     staging_objects,
     table_exists,
@@ -448,11 +448,11 @@ class TestThePromotionKeepsTheGrants:
         clair.run(project_path, env=environment)
 
         execute(adapter, f"grant insert on table {checked} to role {role}")
-        assert "INSERT" in _privileges_on(adapter, checked)
+        assert "INSERT" in privileges_on(adapter, checked)
 
         clair.run(project_path, env=environment)
 
-        assert "INSERT" in _privileges_on(adapter, checked)
+        assert "INSERT" in privileges_on(adapter, checked)
 
 
 class TestTheTestFalseFlag:
@@ -487,13 +487,3 @@ class TestTheTestFalseFlag:
         assert result.addresses.staging is None
         assert row_count(adapter, checked) == 3
         assert staging_objects(adapter, schema_name, self.DATABASE_NAME) == []
-
-
-def _privileges_on(adapter: SnowflakeAdapter, address: TrouveAddress) -> set[str]:
-    """Give the privilege names that one object holds now.
-
-    ``SHOW GRANTS ON TABLE`` gives one row for each privilege. The privilege is
-    the second column.
-    """
-    rows = query_rows(adapter, f"show grants on table {address}")
-    return {str(row[1]).upper() for row in rows}

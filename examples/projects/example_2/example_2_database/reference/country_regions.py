@@ -33,4 +33,7 @@ trouve = SeedTable(
         Column(name="region", type=ColumnType.STRING),
         Column(name="is_domestic", type=ColumnType.BOOLEAN),
     ],
+    # Each run makes the table again from this file, thus a Fail-safe copy
+    # protects nothing.
+    transient=True,
 )

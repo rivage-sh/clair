@@ -173,7 +173,7 @@ class RecordingAdapter(WarehouseAdapter):
         return pd.DataFrame()
 
     def write_dataframe(
-        self, dataframe: pd.DataFrame, address: TrouveAddress
+        self, dataframe: pd.DataFrame, address: TrouveAddress, transient: bool
     ) -> Statement:
         return Statement(status=StatementStatus.SUCCESS, query_id="qid", query_url="url")
 

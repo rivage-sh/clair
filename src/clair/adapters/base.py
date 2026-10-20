@@ -174,7 +174,10 @@ class WarehouseAdapter(ABC):
 
     @abstractmethod
     def write_dataframe(
-        self, dataframe: pd.DataFrame, address: TrouveAddress
+        self, dataframe: pd.DataFrame, address: TrouveAddress, transient: bool
     ) -> Statement:
-        """Write a DataFrame to the warehouse. This makes or replaces the table."""
+        """Write a DataFrame to the warehouse. This makes or replaces the table.
+
+        *transient* True makes a TRANSIENT table.
+        """
         ...

@@ -241,7 +241,7 @@ class SnowflakeAdapter(WarehouseAdapter):
             cursor.close()
 
     def write_dataframe(
-        self, dataframe: pd.DataFrame, address: TrouveAddress
+        self, dataframe: pd.DataFrame, address: TrouveAddress, transient: bool
     ) -> Statement:
         """Write a DataFrame to Snowflake. This makes or replaces the table."""
         if self._conn is None:
@@ -255,6 +255,8 @@ class SnowflakeAdapter(WarehouseAdapter):
             schema=address.schema_name.upper(),
             auto_create_table=True,
             overwrite=True,
+            # An empty table type makes a permanent table.
+            table_type="transient" if transient else "",
             quote_identifiers=False,
             # write_pandas sends the rows as a Parquet file, and Snowflake reads
             # the type of each column from that file. Parquet holds a timestamp

@@ -80,6 +80,8 @@ trouve = Table(
 )
 ```
 
+Give `transient=True` to make a TRANSIENT table, with no Fail-safe storage. See [A transient table](staging.md#a-transient-table).
+
 ### VIEW
 
 A VIEW is the same as a TABLE, but clair runs `CREATE OR REPLACE VIEW`. A VIEW cannot use incremental strategies.

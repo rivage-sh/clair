@@ -30,7 +30,14 @@ from clair.exceptions import ClairError, ResultNotFoundError, RunError
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, SqlTrouve, Table, TrouveAbc, TrouveType
+from clair.trouves.trouve import (
+    ExecutionType,
+    SqlTrouve,
+    Table,
+    TrouveAbc,
+    TrouveType,
+    is_transient,
+)
 
 
 class RunStatus(StrEnum):
@@ -309,7 +316,9 @@ def _run_dataframe_trouve(
     address = addresses.target
 
     try:
-        statement = adapter.write_dataframe(dataframe=result_dataframe, address=address)
+        statement = adapter.write_dataframe(
+            dataframe=result_dataframe, address=address, transient=trouve.transient
+        )
     except Exception as write_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
         return failure(f"Clair cannot write the DataFrame to {address}: {write_error}")
 
@@ -425,6 +434,7 @@ def _promote_or_keep(
             staging_address=staging_address,
             physical_address=physical_address,
             resolved_sql=trouve.compiled.resolved_sql,
+            transient=is_transient(trouve),
         )
     )
     statements.append(promotion)
@@ -672,7 +682,11 @@ def _run_node(
     # physical table as it was.
     prefix_statements: list[str] = []
     if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
-        prefix_statements.append(build_clone_statement(addresses.physical, staging_address))
+        prefix_statements.append(
+            build_clone_statement(
+                addresses.physical, staging_address, transient=is_transient(trouve)
+            )
+        )
     if incremental_columns is not None:
         prefix_statements.extend(incremental_columns.alter_statements)
     if prefix_statements:
