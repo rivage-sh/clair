@@ -71,13 +71,27 @@ trouve = Table(
 Generated SQL on an incremental run:
 
 ```sql
-INSERT INTO example_3_database.derived.recent_orders
-SELECT * FROM (
+INSERT INTO example_3_database.derived.recent_orders ("ORDER_ID", "CUSTOMER_ID", "ORDER_STATUS", "AMOUNT", "CREATED_AT", "CREATED_DATE")
+SELECT "ORDER_ID", "CUSTOMER_ID", "ORDER_STATUS", "AMOUNT", "CREATED_AT", "CREATED_DATE" FROM (
     select order_id, customer_id, order_status, amount, created_at, created_date
     from example_3_database.refined.orders
     where created_at > dateadd('day', -3, current_timestamp())
 )
 ```
+
+### clair inserts each column by its name
+
+Before an incremental run, clair reads the columns of the target table from Snowflake. The
+`INSERT` names each one. Thus the order of the columns in your SQL does not matter: move
+`amount` above `order_status`, and each value still lands in its own column.
+
+An `INSERT` with no column list matches the columns by position. Then two columns of one
+type that change places swap their values, and Snowflake gives no error. clair never
+writes that statement in a run.
+
+`clair compile` has no connection, thus it names the declared `columns` of the Trouve. A
+Trouve with no declared columns shows `SELECT *`, and a comment says that the run names the
+columns.
 
 ## `Upsert`
 

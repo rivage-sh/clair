@@ -100,7 +100,7 @@ The abstract base of `Table` and `View`. Snowflake materializes each one from SQ
 class SqlTrouve(TrouveAbc, ABC):
     sql: str
 
-    def build_sql(self, effective_mode, run_id, staging_address=None) -> BuildPlan: ...
+    def build_sql(self, effective_mode, run_id, staging_address=None, target_column_names=None) -> BuildPlan: ...
 ```
 
 | Field | Type | Default | Description |
@@ -109,7 +109,7 @@ class SqlTrouve(TrouveAbc, ABC):
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `build_sql(effective_mode, run_id, staging_address=None)` | `BuildPlan` | The statements that write the object. Raises `RuntimeError` if not compiled. A subclass can override it. See [Write your own build](../guides/custom-build-sql.md). |
+| `build_sql(effective_mode, run_id, staging_address=None, target_column_names=None)` | `BuildPlan` | The statements that write the object. Raises `RuntimeError` if not compiled. A subclass can override it. See [Write your own build](../guides/custom-build-sql.md). |
 
 Write `isinstance(obj, SqlTrouve)` to accept a `Table` or a `View`.
 
@@ -125,6 +125,10 @@ class Table(SqlTrouve):
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `run_config` | `RunConfig` | full refresh | Materialization strategy. See [RunConfig](run-config-api.md). |
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `insert_statement(address, new_rows, target_column_names)` | `str` | An `INSERT` that names each column of the target. `new_rows` is a table name, or a subquery in parentheses. With no `target_column_names`, it names the declared `columns`. Use it in a `build_sql()` override. |
 
 ## `View`
 

@@ -11,7 +11,13 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
+from clair.adapters.base import (
+    Statement,
+    StatementStatus,
+    WarehouseAdapter,
+    WarehouseColumn,
+    WarehouseObjectType,
+)
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
@@ -19,7 +25,7 @@ from clair.core.runner import RunStatus, run_project
 from clair.core.test_runner import run_tests
 from clair.environments.environments import Environment
 from clair.trouves.address import TrouveAddress
-from tests.helpers import write_project_marker
+from tests.helpers import DEFAULT_TABLE_COLUMNS, write_project_marker
 
 
 class CallRecorder:
@@ -148,6 +154,9 @@ class RecordingAdapter(WarehouseAdapter):
 
     def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
         return WarehouseObjectType.TABLE
+
+    def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
+        return list(DEFAULT_TABLE_COLUMNS)
 
     def close(self) -> None:
         self.closed = True

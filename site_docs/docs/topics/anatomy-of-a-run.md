@@ -272,6 +272,11 @@ thus clair changes that node to the full refresh mode and writes
 `run.node.incremental_fallback` to the log. The first run of a new incremental Trouve needs
 no flag from you.
 
+For a table that exists, the runner then reads its columns with
+`WarehouseAdapter.describe_columns()`, and gives their names to `build_sql()` as data. The
+`INSERT` names each column, thus a new column order in the SQL cannot move a value into
+the wrong column. `build_sql()` itself takes no connection.
+
 An `upsert` node makes three statements: it builds a new rows table, it merges that
 table into the staging table, and it drops the new rows table. A `delete_insert` node
 builds the same table, deletes each staging row that the new rows replace, inserts the new

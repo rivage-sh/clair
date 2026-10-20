@@ -41,6 +41,7 @@ class PlannedTrouve(Table):
         effective_mode: RunMode,
         run_id: str,
         staging_address: TrouveAddress | None = None,
+        target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         return self.build_plan
 
