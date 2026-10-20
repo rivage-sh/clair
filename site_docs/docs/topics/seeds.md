@@ -81,8 +81,8 @@ example_4_database.source.events  [SOURCE]
         └── example_4_database.derived.top_event_types  [TABLE]  (^)
 ```
 
-A seed executes in pandas, the same as a `PandasTrouve`. The tag is different, because the
-rows of a seed come from the file, and the rows of a `PandasTrouve` come from your
+A seed executes in pandas, the same as a `PandasTable`. The tag is different, because the
+rows of a seed come from the file, and the rows of a `PandasTable` come from your
 function.
 
 ## The dtype gives the Snowflake type

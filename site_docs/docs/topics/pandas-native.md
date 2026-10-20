@@ -1,8 +1,8 @@
 # Pandas-Native Transformations
 
-A `PandasTrouve` lets you write a pipeline step as a plain Python function. clair reads your upstream tables from Snowflake as DataFrames. Then it calls your function on the machine that runs clair, and writes the result to Snowflake. The DAG, the lineage, the selectors, and the data quality tests all apply.
+A `PandasTable` lets you write a pipeline step as a plain Python function. clair reads your upstream tables from Snowflake as DataFrames. Then it calls your function on the machine that runs clair, and writes the result to Snowflake. The DAG, the lineage, the selectors, and the data quality tests all apply.
 
-## When to use `PandasTrouve`
+## When to use `PandasTable`
 
 Use it if SQL is the incorrect tool for the task:
 
@@ -15,7 +15,7 @@ For all other work, use a `Table` with a `sql` string. The SQL runs in Snowflake
 
 ## Installation
 
-`PandasTrouve` needs no extra installation. pandas is a dependency of clair.
+`PandasTable` needs no extra installation. pandas is a dependency of clair.
 
 ## Basic example
 
@@ -25,7 +25,7 @@ import pandas as pd
 from refined.products.catalog import trouve as catalog_trouve
 from refined.products.reviews import trouve as reviews_trouve
 
-from clair import PandasTrouve
+from clair import PandasTable
 
 
 def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
@@ -37,7 +37,7 @@ def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-trouve = PandasTrouve(
+trouve = PandasTable(
     transform=top_rated,
     inputs=[catalog_trouve, reviews_trouve],
 )
@@ -58,9 +58,9 @@ result = top_rated(my_catalog_dataframe, my_reviews_dataframe)
 `columns` and `tests` work the same as they do for SQL Trouves:
 
 ```python
-from clair import Column, ColumnType, PandasTrouve, TestNotNull, TestRowCount
+from clair import Column, ColumnType, PandasTable, TestNotNull, TestRowCount
 
-trouve = PandasTrouve(
+trouve = PandasTable(
     transform=top_rated,
     inputs=[catalog_trouve, reviews_trouve],
     columns=[
@@ -78,7 +78,7 @@ trouve = PandasTrouve(
 
 ## How it runs
 
-`clair run` gives a `PandasTrouve` these four steps:
+`clair run` gives a `PandasTable` these four steps:
 
 1. **Read** — for each Trouve in `inputs`, run `SELECT * FROM <physical_address>` and load the result into a DataFrame. Column names become lowercase.
 2. **Transform** — call your function locally on the clair machine, with one DataFrame for each parameter, in the order of `inputs`.
@@ -126,7 +126,7 @@ example_4_database.source.events  [SOURCE]
 A seed also executes in pandas, and it shows a `[SEED]` tag. The [Seeds](seeds.md) page
 describes it.
 
-A SQL `Trouve` can depend on the output of a `PandasTrouve`, and a `PandasTrouve` can depend on other `PandasTrouve` nodes. The tree above shows both: a pandas node reads a SQL table, and a SQL table reads the pandas output.
+A SQL `Trouve` can depend on the output of a `PandasTable`, and a `PandasTable` can depend on other `PandasTable` nodes. The tree above shows both: a pandas node reads a SQL table, and a SQL table reads the pandas output.
 
 ## Selectors
 
@@ -138,7 +138,7 @@ clair run --env=dev --select='derived.products.top_rated'
 
 ## Compile output
 
-`clair compile` writes a `.py` artifact for a `PandasTrouve`, in place of the `.sql` file it writes for a SQL Trouve. The artifact holds a header, the imports of the source module, and the source of your function. The header shows which upstream Trouve clair binds to each parameter:
+`clair compile` writes a `.py` artifact for a `PandasTable`, in place of the `.sql` file it writes for a SQL Trouve. The artifact holds a header, the imports of the source module, and the source of your function. The header shows which upstream Trouve clair binds to each parameter:
 
 ```python
 # clair compiled: derived.products.top_rated
@@ -155,13 +155,13 @@ def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
 
 ## Limitations
 
-- **Full-refresh only.** Incremental strategies are not available. A `PandasTrouve` always replaces the table. An `Incremental` run_config raises an error.
+- **Full-refresh only.** Incremental strategies are not available. A `PandasTable` always replaces the table. An `Incremental` run_config raises an error.
 - **TABLE output only.** Views and sources are not available.
 - **A full table read.** clair reads all the upstream rows into memory. Chunked reads are not available.
 
 ## Field reference
 
-These are the `PandasTrouve` fields. See the [Trouve API reference](../reference/trouve-api.md) for the full list.
+These are the `PandasTable` fields. See the [Trouve API reference](../reference/trouve-api.md) for the full list.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -173,4 +173,4 @@ These are the `PandasTrouve` fields. See the [Trouve API reference](../reference
 
 ## Complete example
 
-`examples/projects/example_4/` in the repository is a runnable project that uses `PandasTrouve`. See `example_4_database/derived/daily_event_counts.py`.
+`examples/projects/example_4/` in the repository is a runnable project that uses `PandasTable`. See `example_4_database/derived/daily_event_counts.py`.

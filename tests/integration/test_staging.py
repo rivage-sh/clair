@@ -270,7 +270,7 @@ class TestAFailedDataQualityTest:
         assert row_count(adapter, downstream) == 3
 
 
-class TestAPandasTrouveThatPasses:
+class TestAPandasTableThatPasses:
     """A pandas Trouve takes a different path to the staging address.
 
     A SQL Trouve runs ``CREATE OR REPLACE TABLE`` there. A pandas Trouve calls
@@ -341,7 +341,7 @@ class TestAPandasTrouveThatPasses:
         )
 
 
-class TestAPandasTrouveThatFails:
+class TestAPandasTableThatFails:
     """The physical table keeps its rows when the test of a DataFrame fails."""
 
     DATABASE_NAME = "staging_pandas_fail_database"

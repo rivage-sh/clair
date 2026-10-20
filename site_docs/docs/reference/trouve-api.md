@@ -1,7 +1,7 @@
 # Trouve API
 
 ```python
-from clair import BuildPlan, PandasTrouve, SeedTrouve, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
+from clair import BuildPlan, PandasTable, SeedTrouve, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
 ```
 
 Clair has one class for each kind of object. The class gives the type, thus no
@@ -16,7 +16,7 @@ shares.
 | `Table` | TABLE | Snowflake SQL | f-string references in `sql` |
 | `View` | VIEW | Snowflake SQL | f-string references in `sql` |
 | `DataframeTrouve` | TABLE | none — abstract base | — |
-| `PandasTrouve` | TABLE | pandas | the `inputs` list |
+| `PandasTable` | TABLE | pandas | the `inputs` list |
 | `SeedTrouve` | TABLE | pandas | none — a seed reads no Trouve |
 
 Each class rejects a field that it does not read. For example, `View(run_config=...)`
@@ -165,7 +165,7 @@ Discovery sets these attributes on `trouve.compiled`. They are available after `
 |-----------|------|-------------|
 | `physical_address` | `TrouveAddress` | The address that routing gives. clair uses it in the SQL and the DDL. |
 | `logical_address` | `TrouveAddress` | The address that the file system gives. clair uses it for the DAG edges and the selectors. |
-| `resolved_sql` | `str` | The SQL. clair replaced each placeholder token with a real logical address. It is empty for a `PandasTrouve`. |
+| `resolved_sql` | `str` | The SQL. clair replaced each placeholder token with a real logical address. It is empty for a `PandasTable`. |
 | `resolved_transform` | `str` | The source text of the transform function. It is empty for a `Table` or a `View`. |
 | `file_path` | `Path` | Absolute path to the Trouve file |
 | `imports` | `list[str]` | The logical addresses of the upstream Trouves |
@@ -186,21 +186,21 @@ class DataframeTrouve(TrouveAbc, ABC):
     def source_file(self) -> str | None: ...     # the file of the import section
 ```
 
-Write `isinstance(obj, DataframeTrouve)` to accept a `PandasTrouve` or a
+Write `isinstance(obj, DataframeTrouve)` to accept a `PandasTable` or a
 `SeedTrouve`.
 
-## `PandasTrouve`
+## `PandasTable`
 
 The pandas backend. A Python function materializes it.
 
 ```python
-class PandasTrouve(DataframeTrouve):
+class PandasTable(DataframeTrouve):
     transform: Callable[..., pd.DataFrame]
     inputs:    list[TrouveAbc] = []
 ```
 
 ```python
-from clair import PandasTrouve
+from clair import PandasTable
 ```
 
 ### Fields
@@ -233,7 +233,7 @@ from clair import PandasTrouve
 
 - The count of `inputs` must equal the count of transform parameters.
 - The transform must not use `*args` or `**kwargs`.
-- A `PandasTrouve` is always a TABLE, and it has no `run_config`. Each run replaces the table.
+- A `PandasTable` is always a TABLE, and it has no `run_config`. Each run replaces the table.
 
 ### Example
 
@@ -242,7 +242,7 @@ import pandas as pd
 from refined.products.catalog import trouve as catalog_trouve
 from refined.products.reviews import trouve as reviews_trouve
 
-from clair import Column, ColumnType, PandasTrouve, TestNotNull
+from clair import Column, ColumnType, PandasTable, TestNotNull
 
 
 def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
@@ -254,7 +254,7 @@ def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-trouve = PandasTrouve(
+trouve = PandasTable(
     transform=top_rated,
     inputs=[catalog_trouve, reviews_trouve],
     columns=[
