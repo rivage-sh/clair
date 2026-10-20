@@ -1,4 +1,4 @@
-"""Prove SeedTrouve against a real Snowflake account.
+"""Prove SeedTable against a real Snowflake account.
 
 A seed holds its rows in the Python file, and the dtype of each column gives the
 Snowflake type. Only the warehouse can prove that claim: clair sends no DDL for
@@ -47,7 +47,7 @@ pytestmark = pytest.mark.integration
 SEED_FILE = '''\
 import pandas as pd
 
-from clair import Column, ColumnType, SeedTrouve
+from clair import Column, ColumnType, SeedTable
 
 labels = pd.DataFrame(
     {
@@ -62,7 +62,7 @@ labels["code"] = labels["code"].astype("string")
 labels["quantity"] = labels["quantity"].astype("Int64")
 labels["valid_from"] = pd.to_datetime(labels["valid_from"])
 
-trouve = SeedTrouve(
+trouve = SeedTable(
     dataframe=labels,
     docs="The tax rate of each country.",
     columns=[Column(name="code", type=ColumnType.STRING)],
@@ -119,7 +119,7 @@ def write_seed_project(
     """Write a project with one seed and one Trouve that reads it.
 
     The structure is:
-        <database_name>/reference/labels.py        [a SeedTrouve]
+        <database_name>/reference/labels.py        [a SeedTable]
         <database_name>/derived/active_codes.py    [a Trouve] reads the seed
 
     Args:
@@ -397,11 +397,11 @@ class TestASeedWithNoRow:
         (database_path / "reference" / "labels.py").write_text(textwrap.dedent("""\
             import pandas as pd
 
-            from clair import SeedTrouve
+            from clair import SeedTable
 
             frame = pd.DataFrame({"code": pd.Series(dtype="string")})
 
-            trouve = SeedTrouve(dataframe=frame)
+            trouve = SeedTable(dataframe=frame)
         """))
 
         summary = clair.run(project_path, env=environment)

@@ -1,4 +1,4 @@
-"""SeedTrouve -- a Trouve that holds its rows in the Python file."""
+"""SeedTable -- a Trouve that holds its rows in the Python file."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from clair.trouves.trouve import TrouveAbc
 _ARTIFACT_MAX_ROWS = 50
 
 
-class SeedTrouve(DataframeTrouve):
+class SeedTable(DataframeTrouve):
     """A Trouve that holds its rows in the Python file.
 
     Use it for a small table that a person maintains by hand: country codes,
@@ -31,7 +31,7 @@ class SeedTrouve(DataframeTrouve):
 
     Example:
         >>> frame = pd.DataFrame({"code": ["US", "FR"], "rate": [0.0, 0.20]})
-        >>> trouve = SeedTrouve(dataframe=frame)
+        >>> trouve = SeedTable(dataframe=frame)
 
     Attributes:
         dataframe: The rows that clair writes. Clair reads this attribute when
@@ -64,11 +64,11 @@ class SeedTrouve(DataframeTrouve):
         )
 
     @model_validator(mode="after")
-    def _validate_dataframe(self) -> SeedTrouve:
+    def _validate_dataframe(self) -> SeedTable:
 
         column_names = list(self.dataframe.columns)
         if not column_names:
-            raise ValueError("SeedTrouve needs a DataFrame with one column minimum")
+            raise ValueError("SeedTable needs a DataFrame with one column minimum")
 
         not_text = [name for name in column_names if not isinstance(name, str)]
         if not_text:

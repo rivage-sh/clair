@@ -22,7 +22,7 @@ from clair.core.dag_render import (
 )
 from clair.exceptions import ClairError
 from clair.trouves.trouve import ExecutionType, TrouveType
-from tests.helpers import build_dag_of, make_compiled_seed_trouve
+from tests.helpers import build_dag_of, make_compiled_seed_table
 
 # The shapes that the tests share. A name says what the shape proves.
 CHAIN_NODES = [
@@ -283,7 +283,7 @@ class TestNodeTag:
     def test_the_tree_marks_a_seed(self):
         """A seed and a PandasTable both execute in pandas. The tags differ."""
         dag = build_dag_of([("db.s.a", TrouveType.TABLE)])
-        dag.add_trouve(make_compiled_seed_trouve("db.s.countries"))
+        dag.add_trouve(make_compiled_seed_table("db.s.countries"))
 
         output = render_dag(dag)
         seed_node = output.find("db.s.countries")

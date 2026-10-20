@@ -1,7 +1,7 @@
 # Trouve API
 
 ```python
-from clair import BuildPlan, PandasTable, SeedTrouve, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
+from clair import BuildPlan, PandasTable, SeedTable, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
 ```
 
 Clair has one class for each kind of object. The class gives the type, thus no
@@ -17,7 +17,7 @@ shares.
 | `View` | VIEW | Snowflake SQL | f-string references in `sql` |
 | `DataframeTrouve` | TABLE | none — abstract base | — |
 | `PandasTable` | TABLE | pandas | the `inputs` list |
-| `SeedTrouve` | TABLE | pandas | none — a seed reads no Trouve |
+| `SeedTable` | TABLE | pandas | none — a seed reads no Trouve |
 
 Each class rejects a field that it does not read. For example, `View(run_config=...)`
 raises `ValueError`, because a view has no incremental mode.
@@ -187,7 +187,7 @@ class DataframeTrouve(TrouveAbc, ABC):
 ```
 
 Write `isinstance(obj, DataframeTrouve)` to accept a `PandasTable` or a
-`SeedTrouve`.
+`SeedTable`.
 
 ## `PandasTable`
 
@@ -268,17 +268,17 @@ trouve = PandasTable(
 
 See the [Pandas-Native Transformations](../topics/pandas-native.md) for a full example.
 
-## `SeedTrouve`
+## `SeedTable`
 
 A table that holds its rows in the Python file.
 
 ```python
-class SeedTrouve(DataframeTrouve):
+class SeedTable(DataframeTrouve):
     dataframe: pd.DataFrame
 ```
 
 ```python
-from clair import SeedTrouve
+from clair import SeedTable
 ```
 
 ### Fields
@@ -309,7 +309,7 @@ from clair import SeedTrouve
 
 ### Constraints
 
-- A `SeedTrouve` is always a TABLE, and it has no `run_config`. Each run replaces the table.
+- A `SeedTable` is always a TABLE, and it has no `run_config`. Each run replaces the table.
 - Each column name of the DataFrame must be a string, and the names must be unique.
 - The DataFrame needs one column minimum. A seed with no row is valid.
 
@@ -318,14 +318,14 @@ from clair import SeedTrouve
 ```python
 import pandas as pd
 
-from clair import Column, ColumnType, SeedTrouve
+from clair import Column, ColumnType, SeedTable
 
 frame = pd.DataFrame(
     {"country_code": ["US", "FR"], "tax_rate": [0.0, 0.20]}
 )
 frame["country_code"] = frame["country_code"].astype("string")
 
-trouve = SeedTrouve(
+trouve = SeedTable(
     dataframe=frame,
     docs="The tax rate of each country.",
     columns=[

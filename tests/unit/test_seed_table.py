@@ -1,4 +1,4 @@
-"""The tests of SeedTrouve: the model, the discovery, and the compiler."""
+"""The tests of SeedTable: the model, the discovery, and the compiler."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from clair.core.compiler import write_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
 from clair.trouves.run_config import Append, Incremental
-from clair.trouves.seed_trouve import SeedTrouve
+from clair.trouves.seed_table import SeedTable
 from clair.trouves.trouve import ExecutionType, TrouveType
 
 FAKE_RUN_ID = "0" * 32
@@ -23,27 +23,27 @@ def _frame() -> pd.DataFrame:
     return pd.DataFrame({"code": ["US", "FR"], "rate": [0.0, 0.20]})
 
 
-class TestSeedTrouveModel:
+class TestSeedTableModel:
     def test_the_seed_gives_its_own_dataframe(self):
         frame = _frame()
-        trouve = SeedTrouve(dataframe=frame)
+        trouve = SeedTable(dataframe=frame)
 
         pd.testing.assert_frame_equal(trouve.build_dataframe(), frame)
 
     def test_the_seed_reads_no_other_trouve(self):
-        trouve = SeedTrouve(dataframe=_frame())
+        trouve = SeedTable(dataframe=_frame())
 
         assert trouve.upstream_trouves() == []
         assert trouve.parameter_names() == []
 
     def test_the_seed_runs_on_the_dataframe_backend(self):
-        trouve = SeedTrouve(dataframe=_frame())
+        trouve = SeedTable(dataframe=_frame())
 
         assert trouve.execution_type == ExecutionType.PANDAS
         assert trouve.type == TrouveType.TABLE
 
     def test_the_source_text_holds_the_dtypes_and_the_rows(self):
-        trouve = SeedTrouve(dataframe=_frame())
+        trouve = SeedTable(dataframe=_frame())
 
         source_text = trouve.source_text()
 
@@ -54,10 +54,10 @@ class TestSeedTrouveModel:
 
     def test_the_source_file_is_none(self):
         """A seed has no function, thus the artifact needs no import section."""
-        assert SeedTrouve(dataframe=_frame()).source_file() is None
+        assert SeedTable(dataframe=_frame()).source_file() is None
 
 
-class TestSeedTrouveValidation:
+class TestSeedTableValidation:
     @pytest.mark.parametrize(
         "arguments",
         [{"type": TrouveType.VIEW}, {"run_config": Incremental(strategy=Append())}],
@@ -66,27 +66,27 @@ class TestSeedTrouveValidation:
     def test_a_keyword_of_a_different_class_is_rejected(self, arguments):
         """A seed is always a table that clair makes again, thus it reads neither keyword."""
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            SeedTrouve(dataframe=_frame(), **arguments)
+            SeedTable(dataframe=_frame(), **arguments)
 
     def test_a_dataframe_with_no_column_is_rejected(self):
         with pytest.raises(ValidationError, match="one column minimum"):
-            SeedTrouve(dataframe=pd.DataFrame())
+            SeedTable(dataframe=pd.DataFrame())
 
     def test_a_column_name_that_is_not_text_is_rejected(self):
         with pytest.raises(ValidationError, match="must be a string"):
-            SeedTrouve(dataframe=pd.DataFrame({0: [1], "code": ["US"]}))
+            SeedTable(dataframe=pd.DataFrame({0: [1], "code": ["US"]}))
 
     def test_a_duplicate_column_name_is_rejected(self):
         frame = pd.DataFrame([[1, 2]], columns=pd.Index(["code", "code"]))
 
         with pytest.raises(ValidationError, match="duplicate column name"):
-            SeedTrouve(dataframe=frame)
+            SeedTable(dataframe=frame)
 
     def test_a_seed_with_no_row_is_accepted(self):
         """A seed with no row is valid. The table exists, and it holds no row."""
         frame = pd.DataFrame({"code": pd.Series(dtype="string")})
 
-        trouve = SeedTrouve(dataframe=frame)
+        trouve = SeedTable(dataframe=frame)
 
         assert len(trouve.build_dataframe()) == 0
 
@@ -95,7 +95,7 @@ def _make_seed_project(tmp_path: Path) -> Path:
     """Make a project with a seed and a SQL Trouve that reads the seed.
 
     The structure is:
-        mydb/reference/tax_rates.py    [a SeedTrouve]
+        mydb/reference/tax_rates.py    [a SeedTable]
         mydb/derived/orders.py         [a Trouve] reads reference.tax_rates
     """
     (tmp_path / "mydb" / "reference").mkdir(parents=True)
@@ -103,12 +103,12 @@ def _make_seed_project(tmp_path: Path) -> Path:
 
     (tmp_path / "mydb" / "reference" / "tax_rates.py").write_text(textwrap.dedent("""\
         import pandas as pd
-        from clair import Column, ColumnType, SeedTrouve
+        from clair import Column, ColumnType, SeedTable
 
         rates = pd.DataFrame({"country_code": ["US", "FR"], "tax_rate": [0.0, 0.20]})
         rates["country_code"] = rates["country_code"].astype("string")
 
-        trouve = SeedTrouve(
+        trouve = SeedTable(
             dataframe=rates,
             docs="The tax rate of each country.",
             columns=[Column(name="country_code", type=ColumnType.VARCHAR)],
@@ -125,13 +125,13 @@ def _make_seed_project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-class TestSeedTrouveDiscovery:
+class TestSeedTableDiscovery:
     def test_discovery_finds_the_seed(self, tmp_path: Path):
         project_root = _make_seed_project(tmp_path)
 
         trouves = discover_project(project_root)
 
-        seeds = [trouve for trouve in trouves if isinstance(trouve, SeedTrouve)]
+        seeds = [trouve for trouve in trouves if isinstance(trouve, SeedTable)]
         assert len(seeds) == 1
         assert seeds[0].compiled is not None
         assert str(seeds[0].compiled.logical_address) == "mydb.reference.tax_rates"
@@ -140,7 +140,7 @@ class TestSeedTrouveDiscovery:
         project_root = _make_seed_project(tmp_path)
 
         trouves = discover_project(project_root)
-        seed = next(trouve for trouve in trouves if isinstance(trouve, SeedTrouve))
+        seed = next(trouve for trouve in trouves if isinstance(trouve, SeedTable))
 
         assert seed.compiled is not None
         assert seed.compiled.execution_type == ExecutionType.PANDAS
@@ -163,7 +163,7 @@ class TestSeedTrouveDiscovery:
         assert "mydb.reference.tax_rates" in orders.compiled.resolved_sql
 
 
-class TestSeedTrouveCompiler:
+class TestSeedTableCompiler:
     def test_compile_writes_the_rows_to_the_artifact(self, tmp_path: Path):
         project_root = _make_seed_project(tmp_path)
 
