@@ -158,6 +158,9 @@ class RecordingAdapter(WarehouseAdapter):
     def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
         return list(DEFAULT_TABLE_COLUMNS)
 
+    def describe_query(self, sql: str) -> list[WarehouseColumn]:
+        return list(DEFAULT_TABLE_COLUMNS)
+
     def close(self) -> None:
         self.closed = True
 

@@ -1,7 +1,7 @@
 # RunConfig API
 
 ```python
-from clair import Append, DeleteInsert, FullRefresh, Incremental, RunConfig, RunMode, Upsert
+from clair import Append, DeleteInsert, FullRefresh, Incremental, OnSchemaChange, RunConfig, RunMode, Upsert
 ```
 
 `RunConfig` is the type of `Trouve.run_config`. It is one of two classes:
@@ -29,11 +29,30 @@ Apply the new data only, to the object that exists.
 class Incremental(BaseModel):
     run_mode: Literal[RunMode.INCREMENTAL] = RunMode.INCREMENTAL
     strategy: Append | Upsert | DeleteInsert | None = None
+    on_schema_change: OnSchemaChange = OnSchemaChange.FAIL
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `strategy` | `None` | The built-in method that writes the new data. `None` tells clair that a [`build_sql()` override](../guides/custom-build-sql.md) writes the incremental SQL. A `Table` with no override and no strategy raises a `CompileError` on an incremental run. |
+| `on_schema_change` | `FAIL` | What the run does when the SQL gives a column that the table does not hold. See [`OnSchemaChange`](#onschemachange). |
+
+## `OnSchemaChange`
+
+```python
+class OnSchemaChange(StrEnum):
+    FAIL            = "fail"
+    ADD_NEW_COLUMNS = "add_new_columns"
+```
+
+Before an incremental run, clair compares the columns of the SQL with the columns of the table, by name. A new column order is no change.
+
+| Value | A column that the SQL adds | A column that the SQL removes |
+|-------|----------------------------|-------------------------------|
+| `FAIL` | The run stops, names the column, and writes nothing. | The run stops, names the column, and writes nothing. |
+| `ADD_NEW_COLUMNS` | `ALTER TABLE ... ADD COLUMN`, then the insert. The rows that the table held get `NULL`. | The run stops, names the column, and writes nothing. |
+
+A renamed column is a removed column and an added column, thus it always stops the run. See [When the columns change](../topics/incrementality.md#when-the-columns-change).
 
 ## Strategies
 

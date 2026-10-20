@@ -18,6 +18,7 @@ from clair.adapters.base import (
     WarehouseObjectType,
 )
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey
+from clair.exceptions import RunError
 from clair.trouves.address import TrouveAddress
 
 
@@ -149,13 +150,32 @@ class SnowflakeAdapter(WarehouseAdapter):
         finally:
             cursor.close()
 
-        # Each row is (name, type, kind, ...). A kind other than COLUMN, for
-        # example a virtual column, takes no value from an insert.
-        return [
-            WarehouseColumn(name=str(row[0]), data_type=str(row[1]))
-            for row in rows
-            if str(row[2]).upper() == "COLUMN"
-        ]
+        return _columns_of(rows)
+
+    def describe_query(self, sql: str) -> list[WarehouseColumn]:
+        """Give the columns of a SELECT. Reads DESCRIBE RESULT of the query with LIMIT 0.
+
+        ``LIMIT 0`` makes Snowflake compile the query and read no row.
+        DESCRIBE RESULT then gives each column with its type as DDL text, in the
+        same form as DESCRIBE TABLE.
+
+        Raises:
+            RunError: If Snowflake cannot compile the query.
+        """
+        if self._conn is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(f"SELECT * FROM (\n{sql}\n) LIMIT 0")
+            cursor.execute(f"DESCRIBE RESULT '{cursor.sfqid}'")
+            rows = cursor.fetchall()
+        except Exception as error:
+            raise RunError(f"Snowflake cannot read the columns of the SQL: {error}") from error
+        finally:
+            cursor.close()
+
+        return _columns_of(rows)
 
     def set_context(
         self,
@@ -256,3 +276,16 @@ def _read_private_key(authentication: PrivateKey) -> bytes:
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+
+
+def _columns_of(rows: list[tuple]) -> list[WarehouseColumn]:
+    """Give the columns of the rows of DESCRIBE TABLE or DESCRIBE RESULT.
+
+    Each row is (name, type, kind, ...). A kind other than COLUMN, for example a
+    virtual column, takes no value from an insert.
+    """
+    return [
+        WarehouseColumn(name=str(row[0]), data_type=str(row[1]))
+        for row in rows
+        if str(row[2]).upper() == "COLUMN"
+    ]

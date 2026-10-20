@@ -18,6 +18,7 @@ from pydantic import BaseModel, computed_field
 from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
+from clair.core.schema_change import read_incremental_columns
 from clair.core.staging import (
     build_clone_statement,
     build_drop_staging_statement,
@@ -633,31 +634,44 @@ def _run_node(
             logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_type_changed")
             effective_mode = RunMode.FULL_REFRESH
 
-    target_column_names = None
+    # The INSERT names each column of the target, and the SQL must give the
+    # same columns. read_incremental_columns() compares the two lists.
+    incremental_columns = None
     if effective_mode == RunMode.INCREMENTAL:
-        target_columns = adapter.describe_columns(addresses.physical)
-        if target_columns is None:
-            column_error = f"Clair cannot read the columns of {addresses.physical}."
-            logger.warning("run.node.failure", logical=logical_address, physical=name, error=column_error)
+        assert isinstance(trouve, Table)
+        try:
+            incremental_columns = read_incremental_columns(
+                trouve, adapter, addresses.physical, addresses.target
+            )
+        except ClairError as column_error:
+            logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(column_error))
             return _NodeOutcome(
-                RunResult(addresses=addresses, error=column_error),
+                RunResult(addresses=addresses, error=str(column_error)),
                 downstream_ok=False,
             )
-        target_column_names = [column.name for column in target_columns]
+        if not incremental_columns.change.is_empty:
+            added_names = [column.name for column in incremental_columns.change.added_columns]
+            logger.info("run.node.schema_change", logical=logical_address, physical=name, added_columns=added_names)
 
     logger.info("run.node.start", logical=logical_address, physical=name, effective_mode=effective_mode.value)
     plan = trouve.build_sql(
         effective_mode,
         run_id,
         staging_address=staging_address,
-        target_column_names=target_column_names,
+        target_column_names=incremental_columns.target_column_names if incremental_columns else None,
     )
 
     # An incremental run changes data that already exists, so the staging
     # table needs that data first. A zero-copy clone gives it in constant time.
+    # Each new column goes onto the clone, thus a test that fails leaves the
+    # physical table as it was.
+    prefix_statements: list[str] = []
     if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
-        clone_statement = build_clone_statement(addresses.physical, staging_address)
-        plan = plan.model_copy(update={"statements": [clone_statement, *plan.statements]})
+        prefix_statements.append(build_clone_statement(addresses.physical, staging_address))
+    if incremental_columns is not None:
+        prefix_statements.extend(incremental_columns.alter_statements)
+    if prefix_statements:
+        plan = plan.model_copy(update={"statements": [*prefix_statements, *plan.statements]})
 
     if not plan.statements:
         return _NodeOutcome(None, downstream_ok=True)

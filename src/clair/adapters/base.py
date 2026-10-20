@@ -139,6 +139,19 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
+    def describe_query(self, sql: str) -> list[WarehouseColumn]:
+        """Give the columns that a SELECT gives, in their order. The warehouse reads no row.
+
+        An incremental run compares these columns with the columns of the
+        target table before it writes.
+
+        Raises:
+            RunError: If the warehouse cannot compile the query. The message
+                holds the error of the warehouse.
+        """
+        ...
+
+    @abstractmethod
     def close(self) -> None:
         """Close the connection."""
         ...

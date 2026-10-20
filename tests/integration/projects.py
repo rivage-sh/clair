@@ -156,3 +156,24 @@ def copy_with_ci_routing(project_path: Path, destination: Path) -> Path:
     for config_path in copy_path.rglob("__database_config__.py"):
         config_path.write_text(CI_DATABASE_CONFIG_FILE)
     return copy_path
+
+
+def write_refined_project(
+    destination: Path, database_name: str, trouve_files: dict[str, str]
+) -> Path:
+    """Write a project with the test routing entry, and give the path of its root.
+
+    Args:
+        destination: The directory that receives the project.
+        database_name: The name of the project and of its one database.
+        trouve_files: The text of each Trouve file of the refined schema, by
+            table name. A second call with the same destination replaces them.
+    """
+    project_path = destination / database_name
+    trouve_directory = project_path / database_name / "refined"
+    trouve_directory.mkdir(parents=True, exist_ok=True)
+    (project_path / "__routing__.py").write_text(CI_ROUTING_FILE)
+    (project_path / database_name / "__database_config__.py").write_text(CI_DATABASE_CONFIG_FILE)
+    for table_name, trouve_text in trouve_files.items():
+        (trouve_directory / f"{table_name}.py").write_text(trouve_text)
+    return project_path
