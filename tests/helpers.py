@@ -33,6 +33,7 @@ from clair.environments.routing import RoutingEntry, TrouveAddress
 from clair.exceptions import RunError
 from clair.trouves.address import NodeAddresses
 from clair.trouves.config import ResolvedConfig
+from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.seed_table import SeedTable
 from clair.trouves.trouve import (
@@ -379,6 +380,7 @@ class RecordingAdapter(WarehouseAdapter):
         self.session_parameters: list[tuple[str, int | None]] = []
         self.is_open = True
         self.written_addresses: list[str] = []
+        self.transient_addresses: list[str] = []
         self.fetched_addresses: list[str] = []
         self._query_counter = 0
 
@@ -489,12 +491,14 @@ class RecordingAdapter(WarehouseAdapter):
         return self.dataframes[str(address)]
 
     def write_dataframe(
-        self, dataframe: pd.DataFrame, address: TrouveAddress
+        self, dataframe: pd.DataFrame, address: TrouveAddress, transient: bool
     ) -> Statement:
         if self.write_error is not None:
             raise self.write_error
         self.dataframes[str(address)] = dataframe
         self.written_addresses.append(str(address))
+        if transient:
+            self.transient_addresses.append(str(address))
         return self.execute(f"-- write_dataframe {address}")
 
 
@@ -518,13 +522,13 @@ def compile_trouve(trouve: AnyTrouve, address: str = TEST_ADDRESS) -> AnyTrouve:
         module_name=address,
         imports=[],
         config=ResolvedConfig().apply(trouve),
-        execution_type=ExecutionType.SNOWFLAKE,
+        execution_type=trouve.execution_type,
     )
     return trouve
 
 
 def run_one_trouve(
-    trouve: SqlTrouve,
+    trouve: SqlTrouve | DataframeTrouve,
     adapter: RecordingAdapter,
     *,
     use_staging: bool = True,

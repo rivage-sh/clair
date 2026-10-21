@@ -96,6 +96,7 @@ class TestPromoteStatements:
             TrouveType.TABLE,
             staging_address=_address("db.s.t__staging"),
             physical_address=_address("db.s.t"),
+            transient=False,
         )
         assert "CREATE OR REPLACE TABLE db.s.t CLONE db.s.t__staging COPY GRANTS" in statement
 
@@ -105,6 +106,7 @@ class TestPromoteStatements:
             TrouveType.TABLE,
             staging_address=_address("db.s.t__staging"),
             physical_address=_address("db.s.t"),
+            transient=False,
         )
         assert "IF NOT EXISTS" not in statement
         assert "SWAP WITH" not in statement
@@ -116,6 +118,7 @@ class TestPromoteStatements:
             staging_address=_address("db.s.v__staging"),
             physical_address=_address("db.s.v"),
             resolved_sql="SELECT 1 AS id",
+            transient=False,
         )
         assert "CREATE OR REPLACE VIEW db.s.v COPY GRANTS AS" in statement
         assert "SELECT 1 AS id" in statement
@@ -129,7 +132,9 @@ class TestPromoteStatements:
         )
 
     def test_clone_is_zero_copy(self):
-        statement = build_clone_statement(_address("db.s.t"), _address("db.s.t__staging"))
+        statement = build_clone_statement(
+            _address("db.s.t"), _address("db.s.t__staging"), transient=False
+        )
         assert "CREATE OR REPLACE TABLE db.s.t__staging CLONE db.s.t" in statement
 
 

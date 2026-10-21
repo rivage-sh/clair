@@ -19,6 +19,10 @@ A downstream Trouve reads the physical address, because clair promotes each node
 immediately after the tests of that node. The SQL of a dependent therefore finds
 the data that it expects.
 
+A TRANSIENT table goes through the same steps, and each CREATE says TRANSIENT.
+Snowflake cannot clone a transient table into a permanent one, thus the staging
+object and the physical object must be the same kind.
+
 A Trouve that changes from a TABLE to a VIEW, or from a VIEW to a TABLE, stops
 before the promotion. Snowflake replaces an object with an object of the same
 type only, and clair does not drop the old object, because a drop removes each
@@ -33,7 +37,7 @@ from pydantic import ValidationError
 
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve import TrouveType, table_keyword
 
 STAGING_SUFFIX = "__clair_"
 
@@ -83,16 +87,19 @@ def make_staging_address(physical_address: TrouveAddress, run_id: str) -> Trouve
 
 
 def build_clone_statement(
-    physical_address: TrouveAddress, staging_address: TrouveAddress
+    physical_address: TrouveAddress, staging_address: TrouveAddress, *, transient: bool
 ) -> str:
     """Give the zero-copy clone that seeds the staging table of an incremental run.
 
     Snowflake makes a clone in the metadata, so the time does not grow with the
-    size of the physical table.
+    size of the physical table. A permanent table clones into a transient one,
+    but a transient table does not clone into a permanent one. Thus a Trouve
+    that becomes transient keeps its rows, and a Trouve that becomes permanent
+    fails here, before it writes anything.
     """
     return (
         f"-- staging: clone the target, so the incremental statements have a base\n"
-        f"CREATE OR REPLACE TABLE {staging_address} CLONE {physical_address}"
+        f"CREATE OR REPLACE {table_keyword(transient)} {staging_address} CLONE {physical_address}"
     )
 
 
@@ -101,6 +108,8 @@ def build_promote_statement(
     staging_address: TrouveAddress,
     physical_address: TrouveAddress,
     resolved_sql: str = "",
+    *,
+    transient: bool,
 ) -> str:
     """Give the statement that promotes a tested staging object to its physical address.
 
@@ -122,6 +131,7 @@ def build_promote_statement(
         staging_address: The address of the object that holds the tested data.
         physical_address: The address that the object must have.
         resolved_sql: The resolved SQL of the Trouve. A VIEW needs it.
+        transient: True promotes a TRANSIENT table. A VIEW ignores it.
 
     Returns:
         One SQL statement.
@@ -139,7 +149,8 @@ def build_promote_statement(
     # Snowflake makes a clone in the metadata. The time is constant.
     return (
         f"-- staging: promote the tested table\n"
-        f"CREATE OR REPLACE TABLE {physical_address} CLONE {staging_address} COPY GRANTS"
+        f"CREATE OR REPLACE {table_keyword(transient)} {physical_address} "
+        f"CLONE {staging_address} COPY GRANTS"
     )
 
 

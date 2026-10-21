@@ -61,6 +61,16 @@ def query_rows(adapter: SnowflakeAdapter, sql: str) -> list[tuple[object, ...]]:
         cursor.close()
 
 
+def privileges_on(adapter: SnowflakeAdapter, address: TrouveAddress) -> set[str]:
+    """Give the privilege names that one object holds now.
+
+    ``SHOW GRANTS ON TABLE`` gives one row for each privilege. The privilege is
+    the second column.
+    """
+    rows = query_rows(adapter, f"show grants on table {address}")
+    return {str(row[1]).upper() for row in rows}
+
+
 def staging_objects(
     adapter: SnowflakeAdapter, schema_name: str, name_prefix: str = ""
 ) -> list[str]:
