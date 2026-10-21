@@ -85,7 +85,11 @@ A run with no data quality tests has no staging step, thus it has no candidate t
 
 ## A transient table
 
-`transient=True` on a `Table`, a `PandasTable` or a `SeedTable` makes a TRANSIENT table. Snowflake keeps no Fail-safe copy of a transient table, and its Time Travel lasts one day maximum. The table costs less storage, but Snowflake cannot recover it after that day. Use it for a table that clair can make again from its inputs.
+`transient=True` on a `Table`, a `PandasTable` or a `SeedTable` makes a TRANSIENT table. Snowflake keeps no Fail-safe copy of a transient table, its Time Travel lasts one day maximum, and Snowflake Backups do not include it. The table costs less storage, but Snowflake cannot recover it after that day. Use it for a table that clair can make again from its inputs.
+
+In a transient schema or a transient database, each table is transient, also with `transient=False`. Snowflake decides the kind from the schema, and the runs operate in the same way.
+
+Clair makes no TEMPORARY table. Snowflake drops a temporary table at the end of the session, and only that session can read it. Each thread of a run has its own session, thus a downstream Trouve cannot read the table, and the table is gone after the run. A `CREATE OR REPLACE TEMPORARY TABLE` also does not replace a permanent table of the same name: it hides that table from its own session only, and each other reader sees the old data.
 
 ```python
 trouve = Table(
