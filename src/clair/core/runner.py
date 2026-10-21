@@ -341,26 +341,31 @@ def _run_dataframe_trouve(
     )
 
 
-def wanted_object_type(trouve_type: TrouveType) -> WarehouseObjectType:
-    """Give the warehouse object type that a Trouve of this type must have.
+def wanted_object_type(trouve: TrouveAbc) -> WarehouseObjectType:
+    """Give the warehouse object type that the Trouve must have at its address.
 
     Clair never materializes a SOURCE Trouve, thus a SOURCE never reaches this
     function.
     """
-    assert trouve_type != TrouveType.SOURCE, "clair does not materialize a SOURCE Trouve"
-    return WarehouseObjectType.VIEW if trouve_type == TrouveType.VIEW else WarehouseObjectType.TABLE
+    assert trouve.type != TrouveType.SOURCE, "clair does not materialize a SOURCE Trouve"
+    if trouve.type == TrouveType.VIEW:
+        return WarehouseObjectType.VIEW
+    table_options = table_options_of(trouve)
+    if table_options is not None and table_options.iceberg_settings() is not None:
+        return WarehouseObjectType.ICEBERG_TABLE
+    return WarehouseObjectType.TABLE
 
 
 def type_change_error(
-    trouve_type: TrouveType,
+    trouve: TrouveAbc,
     adapter: WarehouseAdapter,
     physical_address: TrouveAddress,
 ) -> str | None:
     """Give the error that stops a Trouve whose type differs from the object at its address.
 
     A warehouse replaces an object with an object of the same type only. A
-    Trouve that changes from a TABLE to a VIEW, or from a VIEW to a TABLE, thus
-    needs a drop of the old object. Clair does not send that drop. A drop removes
+    Trouve that changes between a TABLE, an ICEBERG TABLE and a VIEW thus needs
+    a drop of the old object. Clair does not send that drop. A drop removes
     each privilege on the object, and the role of the run often cannot grant
     them again, for example in a managed access schema. The person who changed
     the type must drop the object, and decide about the grants.
@@ -369,7 +374,7 @@ def type_change_error(
     connection and cannot know it.
 
     Args:
-        trouve_type: The type that the Trouve has now, TABLE or VIEW.
+        trouve: The Trouve as it is now.
         adapter: A warehouse adapter with an open connection.
         physical_address: The address that clair writes to.
 
@@ -379,14 +384,15 @@ def type_change_error(
         address.
     """
     current_type = adapter.object_type(physical_address)
-    if current_type is None or current_type == wanted_object_type(trouve_type):
+    new_type = wanted_object_type(trouve)
+    if current_type is None or current_type == new_type:
         return None
 
     old_type_name = current_type.value.upper()
-    new_type_name = wanted_object_type(trouve_type).value.upper()
+    new_type_name = new_type.value.upper()
     return (
-        f"{physical_address} holds a {old_type_name}, and the Trouve is now a "
-        f"{new_type_name}. Snowflake cannot replace one type with the other. "
+        f"{physical_address} holds the type {old_type_name}, and the Trouve now "
+        f"makes the type {new_type_name}. Snowflake cannot replace one type with the other. "
         f"Clair does not drop the {old_type_name}, because a drop removes each "
         f"grant on it. Run DROP {old_type_name} {physical_address}, then run "
         f"clair again"
@@ -428,7 +434,7 @@ def _promote_or_keep(
     # The tests passed, so the candidate must reach the physical address. A
     # Trouve that changed its type finds an object of the old type there. Clair
     # stops, and keeps the tested candidate for the person who fixes the address.
-    type_error = type_change_error(trouve.type, adapter, physical_address)
+    type_error = type_change_error(trouve, adapter, physical_address)
     if type_error is not None:
         return statements, (
             f"the tests passed, but clair does not promote: {type_error}. "
@@ -596,7 +602,7 @@ def _run_node(
     # candidate to keep. A Trouve that changed its type stops before any write.
     # A staged run builds and tests first, and stops in _promote_or_keep.
     if staging_address is None and trouve.type != TrouveType.SOURCE:
-        type_error = type_change_error(trouve.type, adapter, addresses.physical)
+        type_error = type_change_error(trouve, adapter, addresses.physical)
         if type_error is not None:
             logger.warning("run.node.failure", logical=logical_address, physical=name, error=type_error)
             return _NodeOutcome(
@@ -659,7 +665,7 @@ def _run_node(
         if current_type is None:
             logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_not_found")
             effective_mode = RunMode.FULL_REFRESH
-        elif current_type != WarehouseObjectType.TABLE:
+        elif current_type != wanted_object_type(trouve):
             logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_type_changed")
             effective_mode = RunMode.FULL_REFRESH
 

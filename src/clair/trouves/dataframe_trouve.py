@@ -20,7 +20,8 @@ class DataframeTrouve(TrouveAbc, TableOptions, ABC):
 
     ``PandasTable`` calls a function that you write. ``SeedTable`` holds its
     rows in the Python file. ``TableOptions`` gives ``transient`` and
-    ``cluster_by``.
+    ``cluster_by``. ``write_pandas`` makes a standard table only, thus a
+    DataFrame Trouve cannot make an Iceberg table.
     """
 
     trouve_type: ClassVar[TrouveType] = TrouveType.TABLE

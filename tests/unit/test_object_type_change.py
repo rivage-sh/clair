@@ -20,7 +20,6 @@ from clair.environments.routing import TrouveAddress
 from clair.trouves.run_config import Append, Incremental, RunMode
 from clair.trouves.trouve import (
     Table,
-    TrouveType,
     View,
 )
 from tests.helpers import (
@@ -56,10 +55,10 @@ def _drops_of_the_physical_object(result: RunResult) -> list[str]:
 
 class TestWantedObjectType:
     def test_a_table_trouve_wants_a_table(self):
-        assert wanted_object_type(TrouveType.TABLE) == WarehouseObjectType.TABLE
+        assert wanted_object_type(Table(sql="SELECT 1 AS id")) == WarehouseObjectType.TABLE
 
     def test_a_view_trouve_wants_a_view(self):
-        assert wanted_object_type(TrouveType.VIEW) == WarehouseObjectType.VIEW
+        assert wanted_object_type(View(sql="SELECT 1 AS id")) == WarehouseObjectType.VIEW
 
 
 class TestStagedRun:
@@ -70,7 +69,7 @@ class TestStagedRun:
         result = run_one_trouve(View(sql="SELECT 1 AS id"), adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert f"{ADDRESS} holds a TABLE, and the Trouve is now a VIEW" in result.error
+        assert f"{ADDRESS} holds the type TABLE, and the Trouve now makes the type VIEW" in result.error
         assert f"Run DROP TABLE {ADDRESS}" in result.error
         assert not [sql for sql in executed_sql(result) if PROMOTE_VIEW in sql]
         assert _drops_of_the_physical_object(result) == []
@@ -80,7 +79,7 @@ class TestStagedRun:
         result = run_one_trouve(Table(sql="SELECT 1 AS id"), adapter)
 
         assert result.status == RunStatus.FAILURE
-        assert f"{ADDRESS} holds a VIEW, and the Trouve is now a TABLE" in result.error
+        assert f"{ADDRESS} holds the type VIEW, and the Trouve now makes the type TABLE" in result.error
         assert f"Run DROP VIEW {ADDRESS}" in result.error
         assert not [sql for sql in executed_sql(result) if PROMOTE_TABLE in sql]
         assert _drops_of_the_physical_object(result) == []
@@ -224,18 +223,22 @@ class TestSnowflakeObjectType:
     """The map from the TABLE_TYPE column of Snowflake onto WarehouseObjectType."""
 
     def test_a_base_table_is_a_table(self):
-        adapter, _ = snowflake_adapter_that_answers([("BASE TABLE",)])
+        adapter, _ = snowflake_adapter_that_answers([("BASE TABLE", "NO")])
         assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.TABLE
 
     def test_a_view_is_a_view(self):
-        adapter, _ = snowflake_adapter_that_answers([("VIEW",)])
+        adapter, _ = snowflake_adapter_that_answers([("VIEW", "NO")])
         assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.VIEW
 
     def test_a_materialized_view_is_a_view(self):
         # Clair makes no materialized view, but a user can point a Trouve at an
         # address that holds one. A view is the closer answer of the two.
-        adapter, _ = snowflake_adapter_that_answers([("MATERIALIZED VIEW",)])
+        adapter, _ = snowflake_adapter_that_answers([("MATERIALIZED VIEW", "NO")])
         assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.VIEW
+
+    def test_an_iceberg_base_table_is_an_iceberg_table(self):
+        adapter, _ = snowflake_adapter_that_answers([("BASE TABLE", "YES")])
+        assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.ICEBERG_TABLE
 
     def test_no_row_means_the_address_holds_nothing(self):
         adapter, _ = snowflake_adapter_that_answers([])
@@ -251,7 +254,7 @@ class TestSnowflakeObjectType:
         assert cursor.closed
 
     def test_the_query_reads_the_information_schema_of_the_database(self):
-        adapter, cursor = snowflake_adapter_that_answers([("BASE TABLE",)])
+        adapter, cursor = snowflake_adapter_that_answers([("BASE TABLE", "NO")])
         adapter.object_type(TrouveAddress.parse(ADDRESS))
         assert "analytics.INFORMATION_SCHEMA.TABLES" in cursor.sql
         assert "TABLE_SCHEMA = 'REVENUE'" in cursor.sql

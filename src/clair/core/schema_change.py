@@ -104,11 +104,17 @@ def schema_change_error(
     return "\n".join(lines)
 
 
-def add_column_statements(change: SchemaChange, address: TrouveAddress) -> list[str]:
-    """Give one ALTER TABLE for each column that the SQL adds."""
+def add_column_statements(
+    change: SchemaChange, address: TrouveAddress, object_keyword: str
+) -> list[str]:
+    """Give one ALTER for each column that the SQL adds.
+
+    *object_keyword* is ``TABLE`` or ``ICEBERG TABLE``.
+    """
     return [
         f"-- add the new column {column.name}\n"
-        f"ALTER TABLE {address} ADD COLUMN {quote_column_name(column.name)} {column.data_type}"
+        f"ALTER {object_keyword} {address} "
+        f"ADD COLUMN {quote_column_name(column.name)} {column.data_type}"
         for column in change.added_columns
     ]
 
@@ -150,7 +156,7 @@ def read_incremental_columns(
             *(column.name for column in target_columns),
             *(column.name for column in change.added_columns),
         ],
-        alter_statements=add_column_statements(change, write_address),
+        alter_statements=add_column_statements(change, write_address, trouve.object_keyword),
         change=change,
     )
 

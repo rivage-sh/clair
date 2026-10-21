@@ -84,6 +84,8 @@ Give `transient=True` to make a TRANSIENT table, with no Fail-safe storage. See 
 
 Give `cluster_by=["order_date"]` to give the table a clustering key. See [A clustered table](staging.md#a-clustered-table).
 
+Give `iceberg=Iceberg()` to make a Snowflake-managed Iceberg table. See [An Iceberg table](staging.md#an-iceberg-table).
+
 ### VIEW
 
 A VIEW is the same as a TABLE, but clair runs `CREATE OR REPLACE VIEW`. A VIEW cannot use incremental strategies.
