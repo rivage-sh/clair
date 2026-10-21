@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from clair.core.dag import ClairDag, addresses_of
 from clair.core.discovery import ARTIFACTS_DIR_NAME
-from clair.core.runner import resolve_effective_mode
+from clair.core.runner import resolve_effective_mode, wanted_object_type
 from clair.core.staging import (
     build_clone_statement,
     build_cluster_by_statements,
@@ -157,7 +157,7 @@ def build_statements(
     if not use_staging:
         plan = trouve.build_sql(effective_mode, run_id=run_id)
         return [
-            build_type_change_comment(trouve.type, physical_address),
+            build_type_change_comment(wanted_object_type(trouve), physical_address),
             *plan.statements,
             *build_cluster_by_statements(physical_address, table_options),
             *plan.cleanup_statements,
@@ -177,7 +177,7 @@ def build_statements(
     statements.extend(plan.cleanup_statements)
 
     statements.append("-- staging: the data quality tests run here")
-    statements.append(build_type_change_comment(trouve.type, physical_address))
+    statements.append(build_type_change_comment(wanted_object_type(trouve), physical_address))
     statements.extend(
         build_promote_statements(
             trouve.type,

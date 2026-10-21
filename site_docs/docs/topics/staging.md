@@ -58,7 +58,7 @@ Snowflake makes a clone in the metadata, so this step takes constant time for a 
 
 ## A Trouve that changes its type
 
-Change a `Table` to a `View`, or the reverse, and the next run stops before the promotion. You drop the old object, and the run after that makes the new one.
+Change a `Table` to a `View`, or the reverse, and the next run stops before the promotion. A change between a standard table and an [Iceberg table](#an-iceberg-table) does the same. You drop the old object, and the run after that makes the new one.
 
 Snowflake replaces an object with an object of the same type only. `CREATE OR REPLACE VIEW` against a name that holds a table raises `Object '<name>' already exists.` The only repair is a drop, and a drop removes each grant on the object. The role that runs clair often cannot grant them again — for example in a managed access schema. Clair therefore does not drop the object. The person who changed the type decides about the grants.
 
@@ -71,9 +71,10 @@ The run does these steps:
 The error names the drop to run:
 
 ```text
-db.schema.orders holds a TABLE, and the Trouve is now a VIEW. Snowflake cannot
-replace one type with the other. Clair does not drop the TABLE, because a drop
-removes each grant on it. Run DROP TABLE db.schema.orders, then run clair again.
+db.schema.orders holds the type TABLE, and the Trouve now makes the type VIEW.
+Snowflake cannot replace one type with the other. Clair does not drop the TABLE,
+because a drop removes each grant on it. Run DROP TABLE db.schema.orders, then
+run clair again.
 The tested candidate stays at db.schema.orders__clair_<run_id>
 ```
 
@@ -81,7 +82,7 @@ After the drop, the address holds nothing, and the next run takes the usual path
 
 A run with no data quality tests has no staging step, thus it has no candidate to keep. It stops before it writes anything.
 
-`clair compile` opens no warehouse connection, thus it cannot know the type that the address holds. The plan shows the condition as a comment: `-- object type: if <address> holds an object that is not a TABLE, clair stops here and writes nothing to it`.
+`clair compile` opens no warehouse connection, thus it cannot know the type that the address holds. The plan shows the condition as a comment: `-- object type: if <address> holds an object of a type other than TABLE, clair stops here and writes nothing to it`.
 
 ## A transient table
 
@@ -140,6 +141,29 @@ The key goes on with an `ALTER`, and not in the `CREATE TABLE ... AS SELECT`, be
 An incremental run clones the physical table, and the clone keeps its key. The `ALTER` then replaces it with the key of the Trouve. When you remove `cluster_by`, the key stays on an incremental table until the next full refresh, because `clair compile` cannot see the key of a table. To remove it now, run `ALTER TABLE <physical> DROP CLUSTERING KEY`.
 
 A run with `--no-test` has no staging step and no clone. It sets the key on the physical table, and Automatic Clustering stays on.
+
+## An Iceberg table
+
+`iceberg=Iceberg()` on a `Table` makes a Snowflake-managed Apache Iceberg table. Snowflake is the catalog, and it writes the data as Parquet files to an external volume. Another engine, for example Spark or Trino, can read the table from those files.
+
+```python
+from clair import Iceberg, Table
+
+trouve = Table(
+    sql=f"SELECT ... FROM {events}",
+    iceberg=Iceberg(external_volume="analytics_lake"),
+)
+```
+
+With no `external_volume`, Snowflake takes the default of the schema, the database or the account. Without one of those, it uses `SNOWFLAKE_MANAGED`, its own storage. Snowflake makes the base location of the files from the table name, thus each staging table has its own files.
+
+Snowflake builds, clones and promotes an Iceberg table in the same way as a standard table. Each statement says `ICEBERG TABLE`: the build `CREATE OR REPLACE ICEBERG TABLE ... CATALOG = 'SNOWFLAKE' AS (...)`, the clone of an incremental run, the promotion, and each `ALTER`. The promotion uses `COPY GRANTS`.
+
+- Only a `Table` accepts `iceberg`. A `PandasTable` and a `SeedTable` write through `write_pandas`, which makes a standard table only.
+- A `Table` cannot be `transient` and Iceberg. Snowflake gives no `TRANSIENT` in the clone of an Iceberg table, and each run clones.
+- An Iceberg table accepts fewer data types than a standard table. For example, a timestamp must have the scale 6 or less, thus cast `CURRENT_TIMESTAMP()` to `TIMESTAMP_NTZ(6)`. Snowflake stops the build with the column name.
+
+Snowflake cannot replace a standard table with an Iceberg table, or the reverse. A Trouve that changes its kind thus stops before the promotion, as a change from a TABLE to a VIEW does: the error names the drop to run, and the tested candidate stays. An incremental run of an Iceberg Trouve against a standard table makes a full refresh candidate, because the clone of a standard table cannot make an Iceberg table.
 
 ## The plan
 

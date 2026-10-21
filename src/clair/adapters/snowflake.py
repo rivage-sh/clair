@@ -104,6 +104,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         ``MATERIALIZED VIEW`` and ``EXTERNAL TABLE`` in that column. Clair makes
         neither type, but a user can point a Trouve at an address that holds
         one, so this method reads each name that holds the word VIEW as a view.
+        An Iceberg table is a ``BASE TABLE`` with ``IS_ICEBERG = 'YES'``.
 
         The method gives None when the address holds no object, and also when
         the query fails, for example because the database does not exist. A
@@ -115,7 +116,8 @@ class SnowflakeAdapter(WarehouseAdapter):
         cursor = self._conn.cursor()
         try:
             cursor.execute(
-                f"SELECT TABLE_TYPE FROM {address.database_name}.INFORMATION_SCHEMA.TABLES "
+                f"SELECT TABLE_TYPE, IS_ICEBERG "
+                f"FROM {address.database_name}.INFORMATION_SCHEMA.TABLES "
                 f"WHERE TABLE_CATALOG = '{address.database_name.upper()}' "
                 f"AND TABLE_SCHEMA = '{address.schema_name.upper()}' "
                 f"AND TABLE_NAME = '{address.table_name.upper()}'"
@@ -128,7 +130,12 @@ class SnowflakeAdapter(WarehouseAdapter):
 
         if row is None or row[0] is None:
             return None
-        return WarehouseObjectType.VIEW if "VIEW" in str(row[0]).upper() else WarehouseObjectType.TABLE
+        table_type, is_iceberg = row
+        if "VIEW" in str(table_type).upper():
+            return WarehouseObjectType.VIEW
+        if str(is_iceberg).upper() == "YES":
+            return WarehouseObjectType.ICEBERG_TABLE
+        return WarehouseObjectType.TABLE
 
     def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
         """Give the columns of the object at the address. Reads DESCRIBE TABLE.

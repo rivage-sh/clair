@@ -123,6 +123,7 @@ class Table(SqlTrouve):
     run_config: RunConfig = FullRefresh()
     transient: bool = False
     cluster_by: list[str] = []
+    iceberg: Iceberg | None = None
 ```
 
 | Field | Type | Default | Description |
@@ -130,10 +131,26 @@ class Table(SqlTrouve):
 | `run_config` | `RunConfig` | full refresh | Materialization strategy. See [RunConfig](run-config-api.md). |
 | `transient` | `bool` | `False` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. See [A transient table](../topics/staging.md#a-transient-table). |
 | `cluster_by` | `list[str]` | `[]` | The clustering key: a column name or an SQL expression for each part. Snowflake reclusters the table in the background. See [A clustered table](../topics/staging.md#a-clustered-table). |
+| `iceberg` | `Iceberg \| None` | `None` | `Iceberg(...)` makes a Snowflake-managed Iceberg table. A `transient` Iceberg table is rejected. See [An Iceberg table](../topics/staging.md#an-iceberg-table). |
 
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `insert_statement(address, new_rows, target_column_names)` | `str` | An `INSERT` that names each column of the target. `new_rows` is a table name, or a subquery in parentheses. With no `target_column_names`, it names the declared `columns`. Use it in a `build_sql()` override. |
+
+## `Iceberg`
+
+The settings of a Snowflake-managed Apache Iceberg table. Snowflake is the catalog.
+
+```python
+from clair import Iceberg
+
+class Iceberg(BaseModel):
+    external_volume: str | None = None
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `external_volume` | `str \| None` | `None` | The external volume that holds the data files and the metadata files. `None` takes the default of the schema, the database or the account, then `SNOWFLAKE_MANAGED`. |
 
 ## `View`
 
