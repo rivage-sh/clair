@@ -34,7 +34,7 @@ from clair.exceptions import RunError
 from clair.trouves.address import NodeAddresses
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.run_config import RunMode
-from clair.trouves.seed_trouve import SeedTrouve
+from clair.trouves.seed_table import SeedTable
 from clair.trouves.trouve import (
     CompiledAttributes,
     ExecutionType,
@@ -186,9 +186,9 @@ def make_compiled_trouve(
     return trouve
 
 
-def make_compiled_seed_trouve(physical_address: str) -> SeedTrouve:
-    """Make one compiled SeedTrouve, with no file on the disk."""
-    trouve = SeedTrouve(dataframe=pd.DataFrame({"code": ["US", "FR"]}))
+def make_compiled_seed_table(physical_address: str) -> SeedTable:
+    """Make one compiled SeedTable, with no file on the disk."""
+    trouve = SeedTable(dataframe=pd.DataFrame({"code": ["US", "FR"]}))
     address = TrouveAddress.parse(physical_address)
     trouve.compiled = CompiledAttributes(
         physical_address=address,

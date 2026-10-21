@@ -18,7 +18,7 @@ class DataframeTrouve(TrouveAbc, ABC):
     executes no SQL for these Trouves, thus the Snowflake type of each column
     comes from the dtype of that column.
 
-    ``PandasTable`` calls a function that you write. ``SeedTrouve`` holds its
+    ``PandasTable`` calls a function that you write. ``SeedTable`` holds its
     rows in the Python file.
     """
 

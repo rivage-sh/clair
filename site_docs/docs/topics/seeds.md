@@ -1,6 +1,6 @@
 # Seeds
 
-A `SeedTrouve` is a table that holds its rows in the Python file. Use it for a small table
+A `SeedTable` is a table that holds its rows in the Python file. Use it for a small table
 that a person maintains by hand: country codes, tax rates, or a map from an id to a label.
 
 A seed reads no other Trouve, thus it is always a root of the DAG. clair builds it in the
@@ -14,7 +14,7 @@ the file in place of a `SELECT`.
 # example_4_database/reference/event_type_labels.py
 import pandas as pd
 
-from clair import Column, ColumnType, SeedTrouve
+from clair import Column, ColumnType, SeedTable
 
 # A seed holds its rows in this file. Set the dtype of each column, because the
 # Snowflake type of a seed column comes from the dtype of that column.
@@ -28,7 +28,7 @@ event_type_labels = pd.DataFrame(
 event_type_labels["event_type"] = event_type_labels["event_type"].astype("string")
 event_type_labels["label"] = event_type_labels["label"].astype("string")
 
-trouve = SeedTrouve(
+trouve = SeedTable(
     dataframe=event_type_labels,
     docs="The label of each event type. A person maintains this table by hand.",
     columns=[
@@ -113,7 +113,7 @@ decimal, cast in a Trouve that reads the seed.
 
 ## The shape of the data
 
-`SeedTrouve` takes one DataFrame, and the pandas constructor accepts each usual shape:
+`SeedTable` takes one DataFrame, and the pandas constructor accepts each usual shape:
 
 ```python
 # A dict of columns.
@@ -150,13 +150,13 @@ import pandas as pd
 
 TEMPLATE = '''import pandas as pd
 
-from clair import SeedTrouve
+from clair import SeedTable
 
 rows = {rows}
 
 frame = pd.DataFrame(rows)
 
-trouve = SeedTrouve(dataframe=frame)
+trouve = SeedTable(dataframe=frame)
 '''
 
 destination = Path("mydb/reference")

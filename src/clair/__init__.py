@@ -94,7 +94,7 @@ from clair.trouves.run_config import (
     RunMode,
     Upsert,
 )
-from clair.trouves.seed_trouve import SeedTrouve
+from clair.trouves.seed_table import SeedTable
 from clair.trouves.test import (
     THIS,
     AnyTest,
@@ -142,7 +142,7 @@ __all__ = [
     "RunConfig",
     "RunMode",
     "SchemaDefaults",
-    "SeedTrouve",
+    "SeedTable",
     "Source",
     "SqlTrouve",
     "Table",

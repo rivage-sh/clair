@@ -1,6 +1,6 @@
 import pandas as pd
 
-from clair import Column, ColumnType, SeedTrouve
+from clair import Column, ColumnType, SeedTable
 
 # A seed holds its rows in this file. Set the dtype of each column, because the
 # Snowflake type of a seed column comes from the dtype of that column.
@@ -25,7 +25,7 @@ country_regions = pd.DataFrame(
 country_regions["country"] = country_regions["country"].astype("string")
 country_regions["region"] = country_regions["region"].astype("string")
 
-trouve = SeedTrouve(
+trouve = SeedTable(
     dataframe=country_regions,
     docs="The sales region of each country. A person maintains this table by hand.",
     columns=[

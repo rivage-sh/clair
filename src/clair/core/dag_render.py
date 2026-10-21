@@ -17,7 +17,7 @@ from pydantic import BaseModel, computed_field
 
 from clair.core.dag import ClairDag
 from clair.exceptions import ClairError
-from clair.trouves.seed_trouve import SeedTrouve
+from clair.trouves.seed_table import SeedTable
 from clair.trouves.trouve import ExecutionType, TrouveType
 
 # The text that marks a node that the tree already showed below another parent.
@@ -222,7 +222,7 @@ def _build_subtree(
         physical_address=physical_address,
         trouve_type=trouve.type,
         execution_type=trouve.compiled.execution_type,
-        is_seed=isinstance(trouve, SeedTrouve),
+        is_seed=isinstance(trouve, SeedTable),
         is_matched=physical_address in matched,
         is_repeat=is_repeat,
         children=children,
