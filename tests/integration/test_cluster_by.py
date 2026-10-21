@@ -61,7 +61,9 @@ def clustering_of(adapter: SnowflakeAdapter, address: TrouveAddress) -> _Cluster
     )
     assert len(rows) == 1, rows
     key, automatic_clustering = rows[0]
-    return _Clustering(str(key or "").upper(), automatic_clustering == "YES")
+    # The documentation gives AUTO_CLUSTERING_ON as a BOOLEAN, and IS_TRANSIENT
+    # as YES or NO. Accept both forms.
+    return _Clustering(str(key or "").upper(), automatic_clustering in (True, "YES"))
 
 
 class _Step(NamedTuple):
