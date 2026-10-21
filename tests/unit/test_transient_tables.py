@@ -19,7 +19,7 @@ from clair.trouves.address import TrouveAddress
 from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import Append, Incremental, RunMode
 from clair.trouves.seed_table import SeedTable
-from clair.trouves.trouve import Source, Table, TrouveAbc, View, is_transient
+from clair.trouves.trouve import Source, Table, TrouveAbc, View, table_options_of
 from tests.helpers import (
     TEST_ADDRESS,
     TEST_RUN_ID,
@@ -61,10 +61,12 @@ class TestTheOption:
         ids=["Table", "PandasTable", "SeedTable"],
     )
     def test_each_class_that_makes_a_table_accepts_it(self, trouve: TrouveAbc):
-        assert is_transient(trouve)
+        table_options = table_options_of(trouve)
+        assert table_options is not None
+        assert table_options.transient
 
     def test_a_table_is_permanent_by_default(self):
-        assert not is_transient(Table(sql="SELECT 1 AS id"))
+        assert not Table(sql="SELECT 1 AS id").transient
 
     def test_a_view_rejects_it(self):
         with pytest.raises(ValidationError, match="transient"):

@@ -21,8 +21,9 @@ from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.schema_change import read_incremental_columns
 from clair.core.staging import (
     build_clone_statement,
+    build_cluster_by_statements,
     build_drop_staging_statement,
-    build_promote_statement,
+    build_promote_statements,
     make_staging_address,
 )
 from clair.core.test_runner import TestResult
@@ -36,7 +37,7 @@ from clair.trouves.trouve import (
     Table,
     TrouveAbc,
     TrouveType,
-    is_transient,
+    table_options_of,
 )
 
 
@@ -325,9 +326,15 @@ def _run_dataframe_trouve(
     if not statement.success:
         return failure(statement.error or f"Clair cannot write the DataFrame to {address}")
 
+    statements = [statement]
+    for sql in build_cluster_by_statements(address, trouve):
+        statements.append(adapter.execute(sql))
+        if not statements[-1].success:
+            return failure(statements[-1].error or f"Clair cannot cluster {address}")
+
     return RunResult(
         addresses=addresses,
-        statements=[statement],
+        statements=statements,
         effective_run_mode=effective_run_mode,
         duration_seconds=time.monotonic() - start,
         row_count=statement.row_count,
@@ -428,21 +435,28 @@ def _promote_or_keep(
             f"The tested candidate stays at {staging_address}"
         )
 
-    promotion = adapter.execute(
-        build_promote_statement(
-            trouve.type,
-            staging_address=staging_address,
-            physical_address=physical_address,
-            resolved_sql=trouve.compiled.resolved_sql,
-            transient=is_transient(trouve),
-        )
+    promotion_statements = build_promote_statements(
+        trouve.type,
+        staging_address=staging_address,
+        physical_address=physical_address,
+        resolved_sql=trouve.compiled.resolved_sql,
+        table_options=table_options_of(trouve),
     )
-    statements.append(promotion)
-    if not promotion.success:
+    for statement_index, sql in enumerate(promotion_statements):
+        statements.append(adapter.execute(sql))
+        if statements[-1].success:
+            continue
+        error = statements[-1].error or "unknown error"
+        if statement_index == 0:
+            return statements, (
+                f"the tests passed, but the promotion failed: {error}. "
+                f"The candidate stays at {staging_address}"
+            )
+        # The clone succeeded, thus the physical address holds the tested data.
+        # The table is not yet in the state that the Trouve declares.
         return statements, (
-            f"the tests passed, but the promotion failed: "
-            f"{promotion.error or 'unknown error'}. "
-            f"The candidate stays at {staging_address}"
+            f"{physical_address} holds the tested data, but a statement after "
+            f"the promotion failed: {error}. Run it again: {sql.splitlines()[-1]}"
         )
 
     # The physical address now holds the tested data, so the staging copy has no
@@ -682,15 +696,21 @@ def _run_node(
     # physical table as it was.
     prefix_statements: list[str] = []
     if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
+        assert isinstance(trouve, Table)
         prefix_statements.append(
-            build_clone_statement(
-                addresses.physical, staging_address, transient=is_transient(trouve)
-            )
+            build_clone_statement(addresses.physical, staging_address, table_options=trouve)
         )
     if incremental_columns is not None:
         prefix_statements.extend(incremental_columns.alter_statements)
-    if prefix_statements:
-        plan = plan.model_copy(update={"statements": [*prefix_statements, *plan.statements]})
+    # A build_sql() that gives no statement makes no table, thus no key.
+    cluster_by_statements: list[str] = []
+    if plan.statements:
+        cluster_by_statements = build_cluster_by_statements(
+            addresses.target, table_options_of(trouve)
+        )
+    plan = plan.model_copy(
+        update={"statements": [*prefix_statements, *plan.statements, *cluster_by_statements]}
+    )
 
     if not plan.statements:
         return _NodeOutcome(None, downstream_ok=True)
@@ -705,7 +725,10 @@ def _run_node(
             failed_at = statement_index
             break
 
-    row_count = statements[-1].row_count
+    # The last statement that writes rows gives the count. The ALTER of the
+    # clustering key comes after it.
+    last_write_index = len(plan.statements) - len(cluster_by_statements) - 1
+    row_count = statements[min(len(statements) - 1, last_write_index)].row_count
 
     # The result holds each statement of the plan, thus the reader sees the
     # complete plan and the point where clair stopped.
