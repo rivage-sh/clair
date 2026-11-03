@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
+from clair.adapters.base import WarehouseObjectType
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError
 from clair.trouves.trouve import TableOptions, TrouveType
@@ -132,7 +133,7 @@ def build_cluster_by_statements(
     return [
         (
             f"-- cluster: set the clustering key\n"
-            f"ALTER TABLE {address} CLUSTER BY ({cluster_key})"
+            f"ALTER {table_options.object_keyword} {address} CLUSTER BY ({cluster_key})"
         )
     ]
 
@@ -196,13 +197,13 @@ def build_promote_statements(
     if table_options.cluster_by:
         statements.append(
             f"-- cluster: the clone starts with Automatic Clustering suspended\n"
-            f"ALTER TABLE {physical_address} RESUME RECLUSTER"
+            f"ALTER {table_options.object_keyword} {physical_address} RESUME RECLUSTER"
         )
     return statements
 
 
 def build_type_change_comment(
-    trouve_type: TrouveType, physical_address: TrouveAddress
+    object_type: WarehouseObjectType, physical_address: TrouveAddress
 ) -> str:
     """Give the comment that tells a reader of the plan about the type test.
 
@@ -210,10 +211,9 @@ def build_type_change_comment(
     that the physical address holds now. The comment names the condition, so a
     reader of the compiled SQL knows that the run can stop here.
     """
-    object_type_name = "VIEW" if trouve_type == TrouveType.VIEW else "TABLE"
     return (
-        f"-- object type: if {physical_address} holds an object that is not a "
-        f"{object_type_name}, clair stops here and writes nothing to it"
+        f"-- object type: if {physical_address} holds an object of a type other than "
+        f"{object_type.value.upper()}, clair stops here and writes nothing to it"
     )
 
 

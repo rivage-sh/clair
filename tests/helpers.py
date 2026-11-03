@@ -334,6 +334,8 @@ class RecordingAdapter(WarehouseAdapter):
         existing_views: The address of each view that the warehouse holds. An
             address here answers VIEW, even when existing_tables holds it too.
             Use it to test a Trouve that changes its type.
+        existing_iceberg_tables: The address of each Iceberg table that the
+            warehouse holds. An address here answers ICEBERG_TABLE.
         dataframes: The DataFrame at each address, by the address text.
         default_dataframe: The DataFrame that a read of an absent address gives.
             None makes an absent address raise a KeyError.
@@ -354,6 +356,7 @@ class RecordingAdapter(WarehouseAdapter):
         table_columns: Sequence[WarehouseColumn] | None = DEFAULT_TABLE_COLUMNS,
         query_columns: Sequence[WarehouseColumn] | None = None,
         existing_views: Sequence[str] = (),
+        existing_iceberg_tables: Sequence[str] = (),
         dataframes: dict[str, pd.DataFrame] | None = None,
         default_dataframe: pd.DataFrame | None = None,
         select_row_count: int = 0,
@@ -367,6 +370,7 @@ class RecordingAdapter(WarehouseAdapter):
         self.table_columns = None if table_columns is None else list(table_columns)
         self.query_columns = None if query_columns is None else list(query_columns)
         self.existing_views = set(existing_views)
+        self.existing_iceberg_tables = set(existing_iceberg_tables)
         self.dataframes: dict[str, pd.DataFrame] = dict(dataframes or {})
         self.default_dataframe = default_dataframe
         self.select_row_count = select_row_count
@@ -402,6 +406,7 @@ class RecordingAdapter(WarehouseAdapter):
             table_columns=self.table_columns,
             query_columns=self.query_columns,
             existing_views=sorted(self.existing_views),
+            existing_iceberg_tables=sorted(self.existing_iceberg_tables),
             dataframes=self.dataframes,
             default_dataframe=self.default_dataframe,
             select_row_count=self.select_row_count,
@@ -465,12 +470,14 @@ class RecordingAdapter(WarehouseAdapter):
     def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
         if str(address) in self.existing_views:
             return WarehouseObjectType.VIEW
+        if str(address) in self.existing_iceberg_tables:
+            return WarehouseObjectType.ICEBERG_TABLE
         if self.existing_tables is None:
             return WarehouseObjectType.TABLE
         return WarehouseObjectType.TABLE if str(address) in self.existing_tables else None
 
     def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
-        if self.table_columns is None or self.object_type(address) != WarehouseObjectType.TABLE:
+        if self.table_columns is None or self.object_type(address) in (None, WarehouseObjectType.VIEW):
             return None
         return list(self.table_columns)
 

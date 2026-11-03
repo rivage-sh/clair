@@ -133,6 +133,31 @@ def quote_column_name(column_name: str) -> str:
     return f'"{escaped_name}"'
 
 
+class Iceberg(BaseModel):
+    """The settings of a Snowflake-managed Apache Iceberg table.
+
+    Snowflake is the catalog. Snowflake writes the data and the metadata as
+    Parquet and Iceberg files to the external volume, and an external engine
+    can read them.
+
+    Attributes:
+        external_volume: The external volume that holds the files. None takes
+            the default of the schema, the database or the account. Without
+            one of those, Snowflake uses ``SNOWFLAKE_MANAGED``, its own storage.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    external_volume: str | None = None
+
+    @field_validator("external_volume")
+    @classmethod
+    def _reject_an_empty_name(cls, external_volume: str | None) -> str | None:
+        if external_volume is not None and not external_volume.strip():
+            raise ValueError("external_volume is empty. Give a name, or None for the default.")
+        return external_volume
+
+
 class TableOptions(BaseModel):
     """The options of each Trouve that makes a TABLE: ``Table``, ``PandasTable``, ``SeedTable``.
 
@@ -161,10 +186,40 @@ class TableOptions(BaseModel):
             )
         return cluster_by
 
+    def iceberg_settings(self) -> Iceberg | None:
+        """Give the Iceberg settings. Only a ``Table`` can make an Iceberg table."""
+        return None
+
     @property
     def table_keyword(self) -> str:
-        """Give the object keyword of a CREATE statement: ``TABLE`` or ``TRANSIENT TABLE``."""
+        """Give the object keyword of a CREATE statement.
+
+        ``TABLE``, ``TRANSIENT TABLE`` or ``ICEBERG TABLE``.
+        """
+        if self.iceberg_settings() is not None:
+            return "ICEBERG TABLE"
         return "TRANSIENT TABLE" if self.transient else "TABLE"
+
+    @property
+    def object_keyword(self) -> str:
+        """Give the object keyword of an ALTER statement: ``TABLE`` or ``ICEBERG TABLE``."""
+        return "TABLE" if self.iceberg_settings() is None else "ICEBERG TABLE"
+
+    @property
+    def create_parameters(self) -> str:
+        """Give the parameters of a CREATE TABLE AS SELECT, after the table name.
+
+        A standard table needs none. An Iceberg table names its catalog, and
+        its external volume when the Trouve gives one.
+        """
+        iceberg = self.iceberg_settings()
+        if iceberg is None:
+            return ""
+        parameters = ""
+        if iceberg.external_volume is not None:
+            escaped_volume = iceberg.external_volume.replace("'", "''")
+            parameters += f"\nEXTERNAL_VOLUME = '{escaped_volume}'"
+        return parameters + "\nCATALOG = 'SNOWFLAKE'"
 
 
 def table_options_of(trouve: TrouveAbc) -> TableOptions | None:
@@ -364,12 +419,17 @@ class SqlTrouve(TrouveAbc, ABC):
             raise RuntimeError("build_sql() needs a compiled Trouve")
         return self.compiled.resolved_sql.strip()
 
-    def _full_refresh_plan(self, object_keyword: str, staging_address: TrouveAddress | None) -> BuildPlan:
+    def _full_refresh_plan(
+        self,
+        object_keyword: str,
+        staging_address: TrouveAddress | None,
+        create_parameters: str = "",
+    ) -> BuildPlan:
         """Give the plan that makes the object again from the SQL."""
         resolved_sql = self.resolved_sql()
         address = staging_address or self.physical_address
         return BuildPlan(statements=[
-            f"CREATE OR REPLACE {object_keyword} {address} AS (\n{resolved_sql}\n)"
+            f"CREATE OR REPLACE {object_keyword} {address}{create_parameters} AS (\n{resolved_sql}\n)"
         ])
 
 
@@ -394,6 +454,8 @@ class Table(SqlTrouve, TableOptions):
 
     Attributes:
         run_config: FullRefresh, or Incremental with its strategy.
+        iceberg: Iceberg settings make a Snowflake-managed Iceberg table. None
+            makes a standard table.
 
     ``TableOptions`` gives ``transient`` and ``cluster_by``.
     """
@@ -401,6 +463,23 @@ class Table(SqlTrouve, TableOptions):
     trouve_type: ClassVar[TrouveType] = TrouveType.TABLE
 
     run_config: RunConfig = Field(default_factory=FullRefresh)
+    iceberg: Iceberg | None = None
+
+    @model_validator(mode="after")
+    def _reject_a_transient_iceberg_table(self) -> Table:
+        # Snowflake gives no TRANSIENT in the CLONE of an Iceberg table, and
+        # each run clones. A transient Iceberg table also needs the
+        # SNOWFLAKE_MANAGED volume.
+        if self.iceberg is not None and self.transient:
+            raise ValueError(
+                "A Table cannot be both transient and Iceberg. Give transient=True "
+                "or iceberg=Iceberg(...), not both."
+            )
+        return self
+
+    def iceberg_settings(self) -> Iceberg | None:
+        """Give the Iceberg settings of this Table, or None for a standard table."""
+        return self.iceberg
 
     def build_sql(
         self,
@@ -419,7 +498,9 @@ class Table(SqlTrouve, TableOptions):
             ValueError: If the config asks for UPSERT but has no columns.
         """
         if effective_mode == RunMode.FULL_REFRESH:
-            return self._full_refresh_plan(self.table_keyword, staging_address)
+            return self._full_refresh_plan(
+                self.table_keyword, staging_address, self.create_parameters
+            )
 
         resolved_sql = self.resolved_sql()
         address = str(staging_address or self.physical_address)

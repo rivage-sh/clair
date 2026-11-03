@@ -105,7 +105,16 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import BuildPlan, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
+from clair.trouves.trouve import (
+    BuildPlan,
+    Iceberg,
+    Source,
+    SqlTrouve,
+    Table,
+    TrouveAbc,
+    TrouveType,
+    View,
+)
 
 # discover_project() sets this before it loads the Trouve modules.
 # It stays None outside of a clair discovery run.
@@ -131,6 +140,7 @@ __all__ = [
     "DeleteInsert",
     "Environment",
     "FullRefresh",
+    "Iceberg",
     "Incremental",
     "NodeAddresses",
     "OnSchemaChange",

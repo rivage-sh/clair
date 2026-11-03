@@ -29,12 +29,13 @@ class StatementStatus(StrEnum):
 class WarehouseObjectType(StrEnum):
     """The type of an object that exists in the warehouse.
 
-    Clair materializes a TABLE or a VIEW. It never makes a SOURCE, thus this
-    enum holds two members and ``TrouveType`` holds three. An adapter maps the
-    type names of its warehouse onto these two members.
+    Clair materializes a TABLE, an ICEBERG TABLE or a VIEW. Snowflake cannot
+    replace one of the three with another, thus each is a member. An adapter
+    maps the type names of its warehouse onto these members.
     """
 
     TABLE = "table"
+    ICEBERG_TABLE = "iceberg table"
     VIEW = "view"
 
 
