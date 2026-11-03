@@ -19,7 +19,8 @@ class DataframeTrouve(TrouveAbc, TableOptions, ABC):
     comes from the dtype of that column.
 
     ``PandasTable`` calls a function that you write. ``SeedTable`` holds its
-    rows in the Python file. ``TableOptions`` gives ``transient``.
+    rows in the Python file. ``TableOptions`` gives ``transient`` and
+    ``cluster_by``.
     """
 
     trouve_type: ClassVar[TrouveType] = TrouveType.TABLE

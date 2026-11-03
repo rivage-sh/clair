@@ -23,6 +23,10 @@ A TRANSIENT table goes through the same steps, and each CREATE says TRANSIENT.
 Snowflake cannot clone a transient table into a permanent one, thus the staging
 object and the physical object must be the same kind.
 
+A clone copies the clustering key, but Snowflake suspends Automatic Clustering
+on the clone. A table with a ``cluster_by`` thus gets its key on the staging
+object after the build, and ``RESUME RECLUSTER`` after the promotion.
+
 A Trouve that changes from a TABLE to a VIEW, or from a VIEW to a TABLE, stops
 before the promotion. Snowflake replaces an object with an object of the same
 type only, and clair does not drop the old object, because a drop removes each
@@ -37,7 +41,7 @@ from pydantic import ValidationError
 
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError
-from clair.trouves.trouve import TrouveType, table_keyword
+from clair.trouves.trouve import TableOptions, TrouveType
 
 STAGING_SUFFIX = "__clair_"
 
@@ -87,7 +91,10 @@ def make_staging_address(physical_address: TrouveAddress, run_id: str) -> Trouve
 
 
 def build_clone_statement(
-    physical_address: TrouveAddress, staging_address: TrouveAddress, *, transient: bool
+    physical_address: TrouveAddress,
+    staging_address: TrouveAddress,
+    *,
+    table_options: TableOptions,
 ) -> str:
     """Give the zero-copy clone that seeds the staging table of an incremental run.
 
@@ -99,19 +106,46 @@ def build_clone_statement(
     """
     return (
         f"-- staging: clone the target, so the incremental statements have a base\n"
-        f"CREATE OR REPLACE {table_keyword(transient)} {staging_address} CLONE {physical_address}"
+        f"CREATE OR REPLACE {table_options.table_keyword} {staging_address} "
+        f"CLONE {physical_address}"
     )
 
 
-def build_promote_statement(
+def build_cluster_by_statements(
+    address: TrouveAddress, table_options: TableOptions | None
+) -> list[str]:
+    """Give the statement that sets the clustering key of a table that clair built.
+
+    The key goes on after the build, as in dbt-snowflake: the Snowflake
+    documentation asks for column definitions in a CREATE TABLE AS SELECT
+    that clusters, and clair does not know the columns. The key also
+    replaces the key that an incremental clone copies from the physical table.
+    A key that the Trouve removes stays on an incremental table until a full
+    refresh, because clair cannot see the key offline.
+
+    Returns:
+        One statement, or no statement for a view or a table with no key.
+    """
+    if table_options is None or not table_options.cluster_by:
+        return []
+    cluster_key = ", ".join(table_options.cluster_by)
+    return [
+        (
+            f"-- cluster: set the clustering key\n"
+            f"ALTER TABLE {address} CLUSTER BY ({cluster_key})"
+        )
+    ]
+
+
+def build_promote_statements(
     trouve_type: TrouveType,
     staging_address: TrouveAddress,
     physical_address: TrouveAddress,
     resolved_sql: str = "",
     *,
-    transient: bool,
-) -> str:
-    """Give the statement that promotes a tested staging object to its physical address.
+    table_options: TableOptions | None,
+) -> list[str]:
+    """Give the statements that promote a tested staging object to its physical address.
 
     ``COPY GRANTS`` makes this operation safe against a production object.
     Without it clair removes each privilege that an administrator granted on the
@@ -131,27 +165,40 @@ def build_promote_statement(
         staging_address: The address of the object that holds the tested data.
         physical_address: The address that the object must have.
         resolved_sql: The resolved SQL of the Trouve. A VIEW needs it.
-        transient: True promotes a TRANSIENT table. A VIEW ignores it.
+        table_options: The options of a TABLE. A VIEW has none.
 
     Returns:
-        One SQL statement.
+        The clone or the view first. A clustered table then gets a
+        ``RESUME RECLUSTER``, because Snowflake suspends Automatic Clustering
+        on each clone.
     """
     if trouve_type == TrouveType.VIEW:
         # Snowflake cannot clone a view into position. But CREATE OR REPLACE VIEW
         # is atomic and it operates in the metadata. The staging view showed that
         # the SQL is correct and that the results pass the tests.
-        return (
-            f"-- staging: promote the tested view\n"
-            f"CREATE OR REPLACE VIEW {physical_address} COPY GRANTS AS (\n"
-            f"{resolved_sql.strip()}\n)"
-        )
+        return [
+            (
+                f"-- staging: promote the tested view\n"
+                f"CREATE OR REPLACE VIEW {physical_address} COPY GRANTS AS (\n"
+                f"{resolved_sql.strip()}\n)"
+            )
+        ]
 
+    assert table_options is not None, "a TABLE has table options"
     # Snowflake makes a clone in the metadata. The time is constant.
-    return (
-        f"-- staging: promote the tested table\n"
-        f"CREATE OR REPLACE {table_keyword(transient)} {physical_address} "
-        f"CLONE {staging_address} COPY GRANTS"
-    )
+    statements = [
+        (
+            f"-- staging: promote the tested table\n"
+            f"CREATE OR REPLACE {table_options.table_keyword} {physical_address} "
+            f"CLONE {staging_address} COPY GRANTS"
+        )
+    ]
+    if table_options.cluster_by:
+        statements.append(
+            f"-- cluster: the clone starts with Automatic Clustering suspended\n"
+            f"ALTER TABLE {physical_address} RESUME RECLUSTER"
+        )
+    return statements
 
 
 def build_type_change_comment(

@@ -21,4 +21,7 @@ trouve = Table(
         Column(name="gross_revenue", type=ColumnType.FLOAT),
         Column(name="avg_order_value", type=ColumnType.FLOAT),
     ],
+    # A dashboard filters this table by a date range. The key keeps each range
+    # in few micro-partitions, thus Snowflake reads less of the table.
+    cluster_by=["order_date"],
 )

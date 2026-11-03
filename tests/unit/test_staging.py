@@ -13,7 +13,7 @@ from clair.core.staging import (
     StagingAddressError,
     build_clone_statement,
     build_drop_staging_statement,
-    build_promote_statement,
+    build_promote_statements,
     make_staging_address,
 )
 from clair.environments.routing import TrouveAddress
@@ -23,6 +23,7 @@ from clair.trouves.trouve import (
     CompiledAttributes,
     ExecutionType,
     Table,
+    TableOptions,
     TrouveAbc,
     TrouveType,
 )
@@ -92,34 +93,34 @@ class TestStagingAddress:
 
 class TestPromoteStatements:
     def test_table_is_cloned_into_place_carrying_grants(self):
-        statement = build_promote_statement(
+        statement = "\n".join(build_promote_statements(
             TrouveType.TABLE,
             staging_address=_address("db.s.t__staging"),
             physical_address=_address("db.s.t"),
-            transient=False,
-        )
+            table_options=TableOptions(),
+        ))
         assert "CREATE OR REPLACE TABLE db.s.t CLONE db.s.t__staging COPY GRANTS" in statement
 
     def test_table_promotion_does_not_depend_on_the_target_existing(self):
         """COPY GRANTS copies from the replaced table, or the clone source if there is none."""
-        statement = build_promote_statement(
+        statement = "\n".join(build_promote_statements(
             TrouveType.TABLE,
             staging_address=_address("db.s.t__staging"),
             physical_address=_address("db.s.t"),
-            transient=False,
-        )
+            table_options=TableOptions(),
+        ))
         assert "IF NOT EXISTS" not in statement
         assert "SWAP WITH" not in statement
         assert "RENAME TO" not in statement
 
     def test_view_is_recreated_carrying_grants(self):
-        statement = build_promote_statement(
+        statement = "\n".join(build_promote_statements(
             TrouveType.VIEW,
             staging_address=_address("db.s.v__staging"),
             physical_address=_address("db.s.v"),
             resolved_sql="SELECT 1 AS id",
-            transient=False,
-        )
+            table_options=None,
+        ))
         assert "CREATE OR REPLACE VIEW db.s.v COPY GRANTS AS" in statement
         assert "SELECT 1 AS id" in statement
 
@@ -133,7 +134,7 @@ class TestPromoteStatements:
 
     def test_clone_is_zero_copy(self):
         statement = build_clone_statement(
-            _address("db.s.t"), _address("db.s.t__staging"), transient=False
+            _address("db.s.t"), _address("db.s.t__staging"), table_options=TableOptions()
         )
         assert "CREATE OR REPLACE TABLE db.s.t__staging CLONE db.s.t" in statement
 

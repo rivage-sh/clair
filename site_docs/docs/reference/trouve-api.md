@@ -122,12 +122,14 @@ A table that Snowflake makes from the SQL.
 class Table(SqlTrouve):
     run_config: RunConfig = FullRefresh()
     transient: bool = False
+    cluster_by: list[str] = []
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `run_config` | `RunConfig` | full refresh | Materialization strategy. See [RunConfig](run-config-api.md). |
 | `transient` | `bool` | `False` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. See [A transient table](../topics/staging.md#a-transient-table). |
+| `cluster_by` | `list[str]` | `[]` | The clustering key: a column name or an SQL expression for each part. Snowflake reclusters the table in the background. See [A clustered table](../topics/staging.md#a-clustered-table). |
 
 | Method | Returns | Description |
 |--------|---------|-------------|
@@ -182,6 +184,7 @@ the result. Its `execution_type` is always `PANDAS`.
 ```python
 class DataframeTrouve(TrouveAbc, ABC):
     transient: bool = False
+    cluster_by: list[str] = []
 
     def build_dataframe(self, *input_dataframes: pd.DataFrame) -> pd.DataFrame: ...
 
@@ -214,6 +217,7 @@ from clair import PandasTable
 | `transform` | `Callable[..., pd.DataFrame]` | required | The function that gives the output DataFrame. |
 | `inputs` | `list[TrouveAbc]` | `[]` | The upstream Trouves. Clair binds them to the transform parameters by position. |
 | `transient` | `bool` | `False` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. See [A transient table](../topics/staging.md#a-transient-table). |
+| `cluster_by` | `list[str]` | `[]` | The clustering key: a column name or an SQL expression for each part. Snowflake reclusters the table in the background. See [A clustered table](../topics/staging.md#a-clustered-table). |
 
 `TrouveAbc` holds the other fields: `columns`, `tests`, `docs`.
 
@@ -292,6 +296,7 @@ from clair import SeedTable
 |-------|------|---------|-------------|
 | `dataframe` | `pd.DataFrame` | required | The rows that clair writes. Clair reads it when it imports the file. |
 | `transient` | `bool` | `False` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. See [A transient table](../topics/staging.md#a-transient-table). |
+| `cluster_by` | `list[str]` | `[]` | The clustering key: a column name or an SQL expression for each part. Snowflake reclusters the table in the background. See [A clustered table](../topics/staging.md#a-clustered-table). |
 
 `TrouveAbc` holds the other fields: `columns`, `tests`, `docs`.
 

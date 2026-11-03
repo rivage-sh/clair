@@ -22,7 +22,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from clair.exceptions import CompileError
 from clair.trouves._refs import register
@@ -133,27 +133,43 @@ def quote_column_name(column_name: str) -> str:
     return f'"{escaped_name}"'
 
 
-def table_keyword(transient: bool) -> str:
-    """Give the object keyword of a CREATE statement: ``TABLE`` or ``TRANSIENT TABLE``."""
-    return "TRANSIENT TABLE" if transient else "TABLE"
-
-
 class TableOptions(BaseModel):
     """The options of each Trouve that makes a TABLE: ``Table``, ``PandasTable``, ``SeedTable``.
+
+    ``clair.core.staging`` tells how a run keeps each option on the physical table.
 
     Attributes:
         transient: True makes a TRANSIENT table. Snowflake keeps no Fail-safe
             copy of it, and its Time Travel lasts one day maximum. The table
             costs less storage, and it can lose data that a permanent table
-            keeps. ``clair.core.staging`` tells how a run changes the kind.
+            keeps.
+        cluster_by: The clustering key, one column name or SQL expression for
+            each part, for example ``["order_date", "customer_id"]``. Snowflake
+            then reclusters the table in the background. An empty list gives
+            no key.
     """
 
     transient: bool = False
+    cluster_by: list[str] = []
+
+    @field_validator("cluster_by")
+    @classmethod
+    def _reject_an_empty_expression(cls, cluster_by: list[str]) -> list[str]:
+        if any(not expression.strip() for expression in cluster_by):
+            raise ValueError(
+                "cluster_by holds an empty expression. Give a column name or an SQL expression."
+            )
+        return cluster_by
+
+    @property
+    def table_keyword(self) -> str:
+        """Give the object keyword of a CREATE statement: ``TABLE`` or ``TRANSIENT TABLE``."""
+        return "TRANSIENT TABLE" if self.transient else "TABLE"
 
 
-def is_transient(trouve: TrouveAbc) -> bool:
-    """Tell you if the Trouve makes a TRANSIENT table. A View and a Source never do."""
-    return isinstance(trouve, TableOptions) and trouve.transient
+def table_options_of(trouve: TrouveAbc) -> TableOptions | None:
+    """Give the table options of the Trouve. A View and a Source have none."""
+    return trouve if isinstance(trouve, TableOptions) else None
 
 
 class CompiledAttributes(BaseModel):
@@ -379,7 +395,7 @@ class Table(SqlTrouve, TableOptions):
     Attributes:
         run_config: FullRefresh, or Incremental with its strategy.
 
-    ``TableOptions`` gives ``transient``.
+    ``TableOptions`` gives ``transient`` and ``cluster_by``.
     """
 
     trouve_type: ClassVar[TrouveType] = TrouveType.TABLE
@@ -403,7 +419,7 @@ class Table(SqlTrouve, TableOptions):
             ValueError: If the config asks for UPSERT but has no columns.
         """
         if effective_mode == RunMode.FULL_REFRESH:
-            return self._full_refresh_plan(table_keyword(self.transient), staging_address)
+            return self._full_refresh_plan(self.table_keyword, staging_address)
 
         resolved_sql = self.resolved_sql()
         address = str(staging_address or self.physical_address)

@@ -13,8 +13,9 @@ from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.core.runner import resolve_effective_mode
 from clair.core.staging import (
     build_clone_statement,
+    build_cluster_by_statements,
     build_drop_staging_statement,
-    build_promote_statement,
+    build_promote_statements,
     build_type_change_comment,
     make_staging_address,
 )
@@ -22,7 +23,7 @@ from clair.exceptions import CompileError
 from clair.trouves.address import NodeAddresses
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, SqlTrouve, TrouveType, is_transient
+from clair.trouves.trouve import ExecutionType, SqlTrouve, TrouveType, table_options_of
 
 
 class CompiledNodeInfo(BaseModel):
@@ -148,38 +149,42 @@ def build_statements(
     and the staging object stays.
     """
     effective_mode = resolve_effective_mode(trouve, run_mode)
+    table_options = table_options_of(trouve)
 
     assert trouve.compiled is not None
     physical_address = trouve.compiled.physical_address
 
     if not use_staging:
+        plan = trouve.build_sql(effective_mode, run_id=run_id)
         return [
             build_type_change_comment(trouve.type, physical_address),
-            *trouve.build_sql(effective_mode, run_id=run_id).all_statements,
+            *plan.statements,
+            *build_cluster_by_statements(physical_address, table_options),
+            *plan.cleanup_statements,
         ]
 
     staging_address = make_staging_address(physical_address, run_id)
 
     statements: list[str] = []
     if effective_mode == RunMode.INCREMENTAL:
+        assert table_options is not None, "an incremental Trouve is a Table"
         statements.append(
-            build_clone_statement(physical_address, staging_address, transient=is_transient(trouve))
+            build_clone_statement(physical_address, staging_address, table_options=table_options)
         )
-    statements.extend(
-        trouve.build_sql(
-            effective_mode, run_id=run_id, staging_address=staging_address
-        ).all_statements
-    )
+    plan = trouve.build_sql(effective_mode, run_id=run_id, staging_address=staging_address)
+    statements.extend(plan.statements)
+    statements.extend(build_cluster_by_statements(staging_address, table_options))
+    statements.extend(plan.cleanup_statements)
 
     statements.append("-- staging: the data quality tests run here")
     statements.append(build_type_change_comment(trouve.type, physical_address))
-    statements.append(
-        build_promote_statement(
+    statements.extend(
+        build_promote_statements(
             trouve.type,
             staging_address=staging_address,
             physical_address=physical_address,
             resolved_sql=trouve.compiled.resolved_sql,
-            transient=is_transient(trouve),
+            table_options=table_options,
         )
     )
     statements.append(build_drop_staging_statement(trouve.type, staging_address))

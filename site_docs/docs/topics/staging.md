@@ -119,6 +119,28 @@ Then run clair again. The incremental run clones a permanent table into a perman
 
 A run with `--no-test` has no staging step. An incremental run then adds the rows to the table as it is, and the kind of the table does not change. A full refresh makes the table again, with the new kind.
 
+## A clustered table
+
+`cluster_by` on a `Table`, a `PandasTable` or a `SeedTable` gives the table a clustering key. Each part is a column name or an SQL expression. Snowflake then reclusters the table in the background, and a query that filters on the key reads fewer micro-partitions. Automatic Clustering costs credits, thus give a key to a large table only.
+
+```python
+trouve = Table(
+    sql=f"SELECT ... FROM {events}",
+    cluster_by=["to_date(created_at)", "customer_id"],
+)
+```
+
+A clone copies the clustering key, but Snowflake suspends Automatic Clustering on the clone. Each promotion is a clone, thus clair adds two statements:
+
+1. After the build, `ALTER TABLE <staging> CLUSTER BY (...)`. A key that Snowflake rejects stops the node before the promotion.
+2. After the promotion, `ALTER TABLE <physical> RESUME RECLUSTER`. If this statement fails, the physical table holds the tested data, and the node fails with the statement to run again.
+
+The key goes on with an `ALTER`, and not in the `CREATE TABLE ... AS SELECT`, because Snowflake asks for the column definitions in a CTAS that clusters.
+
+An incremental run clones the physical table, and the clone keeps its key. The `ALTER` then replaces it with the key of the Trouve. When you remove `cluster_by`, the key stays on an incremental table until the next full refresh, because `clair compile` cannot see the key of a table. To remove it now, run `ALTER TABLE <physical> DROP CLUSTERING KEY`.
+
+A run with `--no-test` has no staging step and no clone. It sets the key on the physical table, and Automatic Clustering stays on.
+
 ## The plan
 
 `clair compile` writes the complete plan to `_clairtifacts/`: the clone, the build at the staging address, a comment that marks the test step, and the promotion.
