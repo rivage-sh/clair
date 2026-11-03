@@ -9,6 +9,7 @@ import pytest
 from clair.adapters.base import StatementStatus
 from clair.core.dag import build_dag
 from clair.core.test_runner import (
+    SampleScope,
     TestSummary,
     run_tests,
 )
@@ -422,87 +423,77 @@ class TestRunTestsUniqueColumns:
         assert results[0].passed is False
 
 
-class TestUseSample:
-    def test_row_count_skipped_when_use_sample(self):
-        """Clair skips a TestRowCount when use_sample is True."""
-        dt = _make_trouve_with_tests(
-            "db.s.orders",
-            TrouveType.TABLE,
-            [TestRowCount(min_rows=1)],
-        )
-        dag = build_dag([dt])
-        adapter = RecordingAdapter()
+# The scopes that sample the data. Each one skips the tests that need the
+# complete data.
+SAMPLED_SCOPES = [SampleScope.TEST_QUERIES, SampleScope.RUN_INPUTS]
 
-        results = run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
 
-        assert len(results) == 0
-        assert adapter.record.statements == []
-
-    def test_non_row_count_tests_run_with_use_sample(self):
-        """A test that is not a row count test runs when use_sample is True."""
-        dt = _make_trouve_with_tests(
-            "db.s.orders",
-            TrouveType.TABLE,
-            [TestUnique(column="id")],
-        )
-        dag = build_dag([dt])
-        adapter = RecordingAdapter()
-
-        results = run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
-
-        assert len(results) == 1
-        assert results[0].passed is True
-
-    def test_use_sample_applies_top_1000(self):
-        """With use_sample=True, trouve.sample() puts TOP 1000 around the table."""
-        dt = _make_trouve_with_tests(
-            "db.s.orders",
-            TrouveType.TABLE,
-            [TestUnique(column="id")],
-        )
-        dag = build_dag([dt])
-        adapter = RecordingAdapter()
-
-        run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
-
-        executed_sql = adapter.record.statements[-1]
-        assert "SELECT TOP 1000" in executed_sql
-
-    def test_mixed_tests_use_sample_skips_row_count(self):
-        """With use_sample=True, clair skips the row count test but runs the other tests."""
-        dt = _make_trouve_with_tests(
+class TestSampleScope:
+    @pytest.mark.parametrize("sample_scope", SAMPLED_SCOPES)
+    def test_a_sampled_scope_skips_each_test_that_needs_the_complete_data(
+        self, sample_scope: SampleScope
+    ):
+        """TestRowCount and TestSql need each row. The column tests run on a sample."""
+        trouve = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
             [
                 TestUnique(column="id"),
                 TestRowCount(min_rows=1),
                 TestNotNull(column="id"),
+                TestSql(sql="SELECT 1", resolved_sql="SELECT 1"),
             ],
         )
-        dag = build_dag([dt])
-        adapter = RecordingAdapter()
+        dag = build_dag([trouve])
 
-        results = run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
+        results = run_tests(dag, ["db.s.orders"], RecordingAdapter(), sample_scope=sample_scope)
 
-        # There are 2 results, unique and not_null. Clair skipped row_count.
-        assert len(results) == 2
-        assert all(r.test_type != "row_count" for r in results)
+        assert [result.test_type for result in results] == ["unique", "not_null"]
 
-    def test_use_sample_false_runs_all(self):
-        """With use_sample=False, each test runs on the complete table."""
-        dt = _make_trouve_with_tests(
-            "db.s.orders",
-            TrouveType.TABLE,
-            [TestRowCount(min_rows=1)],
+    @pytest.mark.parametrize("sample_scope", SAMPLED_SCOPES)
+    def test_a_sampled_scope_runs_no_query_for_a_skipped_test(self, sample_scope: SampleScope):
+        trouve = _make_trouve_with_tests(
+            "db.s.orders", TrouveType.TABLE, [TestRowCount(min_rows=1)]
         )
-        dag = build_dag([dt])
+        dag = build_dag([trouve])
         adapter = RecordingAdapter()
 
-        results = run_tests(dag, ["db.s.orders"], adapter)
+        results = run_tests(dag, ["db.s.orders"], adapter, sample_scope=sample_scope)
+
+        assert results == []
+        assert adapter.record.statements == []
+
+    def test_no_scope_runs_each_test(self):
+        trouve = _make_trouve_with_tests(
+            "db.s.orders", TrouveType.TABLE, [TestRowCount(min_rows=1)]
+        )
+        dag = build_dag([trouve])
+
+        results = run_tests(dag, ["db.s.orders"], RecordingAdapter())
 
         assert len(results) == 1
-        executed_sql = adapter.record.statements[-1]
-        assert "TOP" not in executed_sql
+
+    @pytest.mark.parametrize(
+        ("sample_scope", "reads_the_top_rows"),
+        [
+            (SampleScope.NONE, False),
+            (SampleScope.TEST_QUERIES, True),
+            # The run built the object from a sample. The test reads all of it.
+            (SampleScope.RUN_INPUTS, False),
+        ],
+    )
+    def test_only_the_test_query_scope_reads_the_top_rows(
+        self, sample_scope: SampleScope, reads_the_top_rows: bool
+    ):
+        trouve = _make_trouve_with_tests(
+            "db.s.orders", TrouveType.TABLE, [TestUnique(column="id")]
+        )
+        dag = build_dag([trouve])
+        adapter = RecordingAdapter()
+
+        run_tests(dag, ["db.s.orders"], adapter, sample_scope=sample_scope)
+
+        assert ("SELECT TOP 1000" in adapter.record.statements[-1]) is reads_the_top_rows
 
 
 class TestTestSql:
@@ -585,8 +576,8 @@ class TestTestSql:
         assert len(results) == 0
         assert adapter.record.statements == []
 
-    def test_skipped_when_use_sample(self):
-        """Clair skips a TestSql when use_sample is True, because is_run_with_sample is False."""
+    def test_skipped_on_a_sample(self):
+        """Clair skips a TestSql on a sample, because is_run_with_sample is False."""
         dt = _make_trouve_with_tests(
             "db.s.orders",
             TrouveType.TABLE,
@@ -595,7 +586,7 @@ class TestTestSql:
         dag = build_dag([dt])
         adapter = RecordingAdapter()
 
-        results = run_tests(dag, ["db.s.orders"], adapter, use_sample=True)
+        results = run_tests(dag, ["db.s.orders"], adapter, sample_scope=SampleScope.TEST_QUERIES)
 
         assert len(results) == 0
         assert adapter.record.statements == []

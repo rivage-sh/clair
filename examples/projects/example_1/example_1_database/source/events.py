@@ -2,6 +2,8 @@ from clair import Column, ColumnType, Source
 
 trouve = Source(
     docs="An events table that exists before clair runs. It holds the raw user interactions.",
+    # `clair run --sample '3 days'` reads only the events of the last 3 days.
+    event_time="occurred_at",
     columns=[
         Column(name="event_id", type=ColumnType.STRING),
         Column(name="user_id", type=ColumnType.STRING),

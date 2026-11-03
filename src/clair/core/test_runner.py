@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from concurrent.futures import ThreadPoolExecutor
+from enum import StrEnum
 
 import structlog
 from pydantic import BaseModel, computed_field
@@ -16,6 +17,19 @@ from clair.trouves.trouve import TrouveType
 
 logger = structlog.get_logger()
 
+
+class SampleScope(StrEnum):
+    """The part of the data that a test run sees."""
+
+    # Each test reads each row of the object.
+    NONE = "none"
+    # `clair test --sample`: each test reads ``trouve.sample()`` of the object,
+    # and clair skips each test that needs the complete data.
+    TEST_QUERIES = "test_queries"
+    # `clair run --sample`: the run built the object from a sample of each
+    # input. Each test reads the complete object, and clair skips each test
+    # that needs the complete data.
+    RUN_INPUTS = "run_inputs"
 
 
 class TestResult(BaseModel):
@@ -133,7 +147,7 @@ def _run_trouve_tests(
     name: str,
     dag: ClairDag,
     adapter: WarehouseAdapter,
-    use_sample: bool,
+    sample_scope: SampleScope,
     query_addresses: dict[str, str],
 ) -> list[TestResult]:
     """Execute each data quality test of one Trouve.
@@ -145,7 +159,7 @@ def _run_trouve_tests(
         name: The name of the Trouve in the DAG.
         dag: The project DAG.
         adapter: The warehouse adapter of the thread that calls this function.
-        use_sample: If True, the function takes a sample of the Trouve.
+        sample_scope: The part of the data that the tests see.
         query_addresses: The map of node name to the address to query.
 
     Returns:
@@ -167,8 +181,8 @@ def _run_trouve_tests(
         physical_address = str(trouve.compiled.physical_address)
         queried_address = query_addresses.get(name, physical_address)
 
-        # Skip each test that needs the complete table.
-        if use_sample and not test.is_run_with_sample:
+        # Skip each test that needs the complete data.
+        if sample_scope != SampleScope.NONE and not test.is_run_with_sample:
             logger.info(
                 "test.skipped_for_sample",
                 trouve=physical_address,
@@ -181,7 +195,7 @@ def _run_trouve_tests(
         try:
             sql = test.to_sql(queried_address)
 
-            if use_sample:
+            if sample_scope == SampleScope.TEST_QUERIES:
                 # sample() gives the physical address of the Trouve. Point it
                 # at the object that the test examines.
                 sample_subquery = trouve.sample().replace(physical_address, queried_address)
@@ -215,7 +229,7 @@ def run_tests(
     dag: ClairDag,
     selected: list[str],
     adapter: WarehouseAdapter,
-    use_sample: bool = False,
+    sample_scope: SampleScope = SampleScope.NONE,
     query_addresses: dict[str, str] | None = None,
     threads: int = 1,
 ) -> list[TestResult]:
@@ -232,9 +246,9 @@ def run_tests(
         adapter: A warehouse adapter with an open connection. With more than one
             thread, clair uses it as the first connection of the pool, and it
             opens `threads - 1` more.
-        use_sample: If True, the function takes a sample of each Trouve with
-            ``trouve.sample()``. It also skips each test that needs the
-            complete table, such as ``TestRowCount``.
+        sample_scope: The part of the data that the tests see. See
+            ``SampleScope``. Each scope except NONE skips each test that needs
+            the complete data, such as ``TestRowCount``.
         query_addresses: An optional map of node name to the address to query.
             The runner gives the staging address here, so the tests examine the
             candidate before clair promotes it. Each result still reports the
@@ -259,7 +273,7 @@ def run_tests(
         results: list[TestResult] = []
         for name in selected:
             results.extend(
-                _run_trouve_tests(name, dag, adapter, use_sample, query_addresses)
+                _run_trouve_tests(name, dag, adapter, sample_scope, query_addresses)
             )
         return results
 
@@ -267,7 +281,7 @@ def run_tests(
 
     def test_one(name: str) -> list[TestResult]:
         """Test one Trouve on the connection of this thread."""
-        return _run_trouve_tests(name, dag, pool.acquire(), use_sample, query_addresses)
+        return _run_trouve_tests(name, dag, pool.acquire(), sample_scope, query_addresses)
 
     try:
         with ThreadPoolExecutor(max_workers=threads, thread_name_prefix="clair-test") as executor:

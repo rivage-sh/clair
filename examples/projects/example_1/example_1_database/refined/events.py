@@ -7,6 +7,7 @@ trouve = Table(
         The refined layer. It puts the semi-structured PROPERTIES VARIANT into typed columns
         and adds more fields. The downstream Trouves read this Trouve, not the raw source.
     """,
+    event_time="occurred_at",
     sql=f"""
         select
             event_id,

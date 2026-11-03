@@ -49,7 +49,13 @@ from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefault
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, SqlTrouve, TrouveAbc
+from clair.trouves.trouve import (
+    CompiledAttributes,
+    DataframeInput,
+    ExecutionType,
+    SqlTrouve,
+    TrouveAbc,
+)
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
 _SKIP_DIRS = {"clair", "tests", ARTIFACTS_DIR_NAME, "__pycache__", ".git", ".venv", "node_modules"}
@@ -255,7 +261,7 @@ def _compile_trouve(
             file_path=relative_file_path,
             module_name=module_name,
             imports=transform_imports,
-            input_addresses=input_addresses,
+            inputs=[DataframeInput(address=address) for address in input_addresses],
             config=config,
             execution_type=ExecutionType.PANDAS,
         )

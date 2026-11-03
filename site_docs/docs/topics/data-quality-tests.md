@@ -125,11 +125,14 @@ clair test --env dev
 clair test --env dev --select='refined.orders.*'
 ```
 
-**Tests on a sample.** Most tests run against `SELECT TOP 1000 *`. clair skips `TestRowCount`:
+**Tests on a sample.** `clair test --sample` runs most tests against `SELECT TOP 1000 *`.
+`clair run --sample` builds each Trouve from a time window of its inputs, and the tests read
+the complete object that the run built. See [Sampled Runs](sampling.md). Both skip each
+test that needs the complete data, such as `TestRowCount`:
 
 ```bash
-clair run --env dev --sample
 clair test --env dev --sample
+clair run --env dev --sample '3 days'
 ```
 
 ## Test reference

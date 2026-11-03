@@ -234,7 +234,7 @@ class TestMixedDag:
 
 
 class TestPandasInputAddresses:
-    """The tests of input_addresses, the read address of each pandas input.
+    """The tests of the inputs, the read address of each pandas input.
 
     A pandas Trouve names its inputs in a list, and not in SQL. These tests
     confirm that the list obeys the same rule as the SQL of a SQL Trouve.
@@ -248,7 +248,7 @@ class TestPandasInputAddresses:
             if t.compiled and str(t.compiled.logical_address) == logical_address
         )
         assert trouve.compiled is not None
-        return trouve.compiled.input_addresses
+        return [dataframe_input.address for dataframe_input in trouve.compiled.inputs]
 
     def test_discovery_gives_the_logical_address(self, tmp_path: Path):
         """Before the selection, each input holds its logical address."""

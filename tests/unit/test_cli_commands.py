@@ -11,6 +11,7 @@ The integration tests run the API against Snowflake. The API tests in
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from clair.core.test_runner import TestSummary
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey, load_environment
 from clair.exceptions import ClairError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
+from clair.trouves.sample_window import SampleWindow
 from tests.helpers import make_environment, make_run_result, make_test_result
 
 
@@ -196,7 +198,7 @@ class TestRunCommand:
                 "--env", "prod",
                 "--run-mode", "incremental",
                 "--no-test",
-                "--sample",
+                "--sample", "2024-07-01/2024-07-08",
                 "--threads", "3",
             ],
         )
@@ -210,8 +212,22 @@ class TestRunCommand:
         assert calls["env"].name == "prod"
         assert calls["run_mode"] == RunMode.INCREMENTAL
         assert calls["test"] is False
-        assert calls["sample"] is True
+        assert calls["sample"] == SampleWindow(
+            start=datetime(2024, 7, 1, tzinfo=UTC), end=datetime(2024, 7, 8, tzinfo=UTC)
+        )
         assert calls["threads"] == 3
+
+    def test_a_sample_window_that_clair_cannot_read_stops_the_command(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path
+    ):
+        _give_api(
+            monkeypatch, calls, "run", RunSummary(results=[], env_name="dev", run_id="abc")
+        )
+
+        result = CliRunner().invoke(cli, ["run", "--sample", "3 fortnights"])
+
+        assert result.exit_code == 2
+        assert calls == {}
 
 
 class TestTestCommand:

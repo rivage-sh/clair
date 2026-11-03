@@ -169,8 +169,14 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
-    def fetch_dataframe(self, address: TrouveAddress) -> pd.DataFrame:
-        """Read a table into a pandas DataFrame."""
+    def fetch_dataframe(
+        self, address: TrouveAddress, row_filter: str | None = None
+    ) -> pd.DataFrame:
+        """Read a table into a pandas DataFrame.
+
+        *row_filter* is a WHERE condition, for example the window of a sampled
+        run. None reads each row.
+        """
         ...
 
     @abstractmethod

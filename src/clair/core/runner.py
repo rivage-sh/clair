@@ -31,6 +31,7 @@ from clair.exceptions import ClairError, ResultNotFoundError, RunError
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
+from clair.trouves.sample_window import SampleWindow
 from clair.trouves.trouve import (
     ExecutionType,
     SqlTrouve,
@@ -119,6 +120,8 @@ class RunSummary(BaseModel):
     run_id: str = ""
     project_root: Path | None = None
     run_mode: RunMode = RunMode.FULL_REFRESH
+    # The window of a sampled run. None tells that the run read each row.
+    sample: SampleWindow | None = None
 
     def result(self, address: str) -> RunResult:
         """Find one result by its logical address or its physical address.
@@ -281,22 +284,25 @@ def _run_dataframe_trouve(
 
     # 1. Read each input DataFrame. Clair keeps the order of the inputs.
     input_dataframes: list[pd.DataFrame] = []
-    # compiled.input_addresses holds the address of each input, in the order
-    # of the inputs. recompile_for_selection() sets it: the physical
-    # address of an input that this run builds, and the logical production
-    # address of an input that it does not build.
+    # compiled.inputs holds the read of each input, in the order of the
+    # inputs. recompile_for_selection() sets it: the physical address of an
+    # input that this run builds, the logical production address of an input
+    # that it does not build, and the filter of a sampled run.
     assert trouve.compiled is not None
-    assert len(trouve.compiled.input_addresses) == len(trouve.upstream_trouves())
-    for parameter_name, input_address in zip(
-        trouve.parameter_names(), trouve.compiled.input_addresses
+    assert len(trouve.compiled.inputs) == len(trouve.upstream_trouves())
+    for parameter_name, dataframe_input in zip(
+        trouve.parameter_names(), trouve.compiled.inputs
     ):
         try:
             input_dataframes.append(
-                adapter.fetch_dataframe(TrouveAddress.parse(input_address))
+                adapter.fetch_dataframe(
+                    TrouveAddress.parse(dataframe_input.address),
+                    row_filter=dataframe_input.row_filter,
+                )
             )
         except Exception as fetch_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
             return failure(
-                f"Clair cannot read the input '{parameter_name}' ({input_address}): {fetch_error}"
+                f"Clair cannot read the input '{parameter_name}' ({dataframe_input.address}): {fetch_error}"
             )
 
     # 2. Build the DataFrame. Clair binds each input by position.

@@ -227,6 +227,18 @@ def table_options_of(trouve: TrouveAbc) -> TableOptions | None:
     return trouve if isinstance(trouve, TableOptions) else None
 
 
+class DataframeInput(BaseModel):
+    """One input of a DataFrame Trouve, as the runner reads it.
+
+    Attributes:
+        address: The address that the runner reads.
+        row_filter: The WHERE condition of a sampled run. None reads each row.
+    """
+
+    address: str
+    row_filter: str | None = None
+
+
 class CompiledAttributes(BaseModel):
     """The attributes that discovery sets after it loads a Trouve.
 
@@ -239,10 +251,10 @@ class CompiledAttributes(BaseModel):
     logical_address: TrouveAddress
     resolved_sql: str
     resolved_transform: str = ""
-    # The address that each input of a PANDAS Trouve reads, in the parameter
-    # order of the transform. A SQL Trouve keeps its addresses in resolved_sql,
-    # thus this list stays empty for it.
-    input_addresses: list[str] = []
+    # The read of each input of a PANDAS Trouve, in the parameter order of the
+    # transform. A SQL Trouve keeps its addresses in resolved_sql, thus this
+    # list stays empty for it.
+    inputs: list[DataframeInput] = []
     file_path: Path
     module_name: str
     imports: list[str]
@@ -267,6 +279,9 @@ class TrouveAbc(SessionConfig, ABC):
         columns: The column definitions, for the docs and for future checks.
         tests: The data quality tests.
         docs: The documentation text for this Trouve.
+        event_time: The column that holds the time of each row, for example
+            ``"created_at"``. ``clair run --sample`` then reads only the rows of
+            the sample window from this Trouve. None reads each row.
         compiled: Discovery sets this. It stays None until discovery reads the
              project.
     """
@@ -277,6 +292,7 @@ class TrouveAbc(SessionConfig, ABC):
     columns: list[Column] = Field(default_factory=list)
     tests: list[AnyTest] = Field(default_factory=list)
     docs: str = ""
+    event_time: str | None = None
     compiled: CompiledAttributes | None = None
 
     # "forbid" makes a keyword that the class does not read an error, for
@@ -288,6 +304,20 @@ class TrouveAbc(SessionConfig, ABC):
     def type(self) -> TrouveType:
         """Give SOURCE, TABLE, or VIEW. The class decides it."""
         return self.trouve_type
+
+    @model_validator(mode="after")
+    def _require_a_declared_event_time(self) -> TrouveAbc:
+        if self.event_time is None:
+            return self
+        if not self.event_time.strip():
+            raise ValueError("event_time is empty. Give a column name, or None.")
+        declared_names = {column.name.lower() for column in self.columns}
+        if declared_names and self.event_time.lower() not in declared_names:
+            raise ValueError(
+                f"event_time names the column '{self.event_time}', but the "
+                "columns of the Trouve do not hold it."
+            )
+        return self
 
     @property
     @abstractmethod
@@ -312,6 +342,16 @@ class TrouveAbc(SessionConfig, ABC):
         true physical_address.
         """
         return register(self)
+
+    def unsampled(self) -> UnsampledReference:
+        """Give a reference that ``clair run --sample`` never filters.
+
+        Write ``f"SELECT * FROM {customers.unsampled()}"`` when the SQL needs
+        each row of an input that gives an ``event_time``. A dimension table is
+        the usual case: the customers of the last three days do not join to
+        each order of the last three days.
+        """
+        return UnsampledReference(trouve=self)
 
     @property
     def is_compiled(self) -> bool:
@@ -343,6 +383,16 @@ class TrouveAbc(SessionConfig, ABC):
     def get_full_table_name(self) -> str:
         """The physical address as a string. Use it in f-string SQL."""
         return str(self.physical_address)
+
+
+class UnsampledReference:
+    """A reference to a Trouve that a sampled run reads in full. See ``TrouveAbc.unsampled``."""
+
+    def __init__(self, trouve: TrouveAbc) -> None:
+        self.trouve = trouve
+
+    def __format__(self, _spec: str) -> str:
+        return register(self.trouve, sampled=False)
 
 
 class Source(TrouveAbc):

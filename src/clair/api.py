@@ -57,7 +57,7 @@ from clair.core.discovery import (
 from clair.core.references import recompile_for_selection
 from clair.core.runner import RunResult, RunSummary, run_project
 from clair.core.selector import expand_selectors
-from clair.core.test_runner import TestResult, TestSummary, run_tests
+from clair.core.test_runner import SampleScope, TestResult, TestSummary, run_tests
 from clair.core.validation import ValidationReport, validate_project
 from clair.environments.environments import Environment
 from clair.environments.project_routing import (
@@ -68,7 +68,9 @@ from clair.environments.routing import (
     RoutingEntry,
     detect_routing_collisions_of_trouves,
 )
+from clair.exceptions import SampleTargetsProductionError
 from clair.trouves.run_config import RunMode
+from clair.trouves.sample_window import SampleWindow
 from clair.trouves.trouve import TrouveAbc, TrouveType
 from clair.web_ui.catalog import build_catalog
 from clair.web_ui.server import serve
@@ -237,7 +239,7 @@ def run(
     exclude: Selectors = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     test: bool = True,
-    sample: bool = False,
+    sample: SampleWindow | None = None,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> RunSummary:
@@ -261,7 +263,11 @@ def run(
             the new data.
         test: If True, clair runs the data quality tests of a Trouve after it
             builds that Trouve.
-        sample: If True, clair runs the tests on a sample of each Trouve.
+        sample: The time window of a sampled run. Each reference to a Trouve
+            that gives an ``event_time`` reads only the rows of the window, and
+            clair skips each test that needs the complete data. Each selected
+            Trouve must write to an address that routing changed: a sample
+            never replaces a production object. None reads each row.
         threads: The number of Trouves that run at one time. None takes the
             thread count of the environment.
         adapter: A connected warehouse adapter. The default makes a
@@ -274,6 +280,9 @@ def run(
         row count, and the test results.
 
     Raises:
+        SampleTargetsProductionError: If *sample* is given, and a selected
+            Trouve writes to its logical address. Clair raises it before it
+            connects.
         ClairError: If discovery, routing, or the connection fails. A Trouve
             that fails gives a RunResult with the FAILURE status, and raises no
             error, because the other branches of the DAG continue.
@@ -316,9 +325,13 @@ def run(
             run_id=run_id,
             project_root=project_root,
             run_mode=run_mode,
+            sample=sample,
         )
 
-    recompile_for_selection(discovered, set(selected))
+    if sample is not None:
+        _refuse_a_sampled_production_write(dag, selected, env_name)
+        logger.info("run.sample", start=sample.start.isoformat(), end=sample.end.isoformat())
+    recompile_for_selection(discovered, set(selected), sample=sample)
     write_compile_output(
         dag, selected, project_root, run_mode=run_mode, run_id=run_id, use_staging=use_staging
     )
@@ -347,7 +360,7 @@ def run(
             dag,
             [node_name],
             node_adapter,
-            use_sample=sample,
+            sample_scope=SampleScope.NONE if sample is None else SampleScope.RUN_INPUTS,
             query_addresses={node_name: query_address},
         )
         # list.extend is atomic, thus the threads need no lock here. Each thread
@@ -398,6 +411,7 @@ def run(
         run_id=run_id,
         project_root=project_root,
         run_mode=run_mode,
+        sample=sample,
     )
     logger.info(
         "run.complete",
@@ -407,6 +421,29 @@ def run(
         skipped=summary.skipped_count,
     )
     return summary
+
+
+def _refuse_a_sampled_production_write(
+    dag: ClairDag, selected: Sequence[str], env_name: str
+) -> None:
+    """Stop a sampled run that would write to a production address.
+
+    A Trouve writes to production when routing gives it its logical address.
+    A SOURCE writes nothing, thus it is never a fault.
+
+    Raises:
+        SampleTargetsProductionError: If a selected Trouve writes to its
+            logical address.
+    """
+    production_addresses: list[str] = []
+    for node_name in selected:
+        trouve = dag.get_trouve(node_name)
+        if trouve.type == TrouveType.SOURCE or trouve.compiled is None:
+            continue
+        if trouve.compiled.physical_address == trouve.compiled.logical_address:
+            production_addresses.append(str(trouve.compiled.logical_address))
+    if production_addresses:
+        raise SampleTargetsProductionError(env_name, sorted(production_addresses))
 
 
 def test(
@@ -486,7 +523,11 @@ def test(
         )
         summary = TestSummary(
             results=run_tests(
-                dag, selected, warehouse_adapter, use_sample=sample, threads=thread_count
+                dag,
+                selected,
+                warehouse_adapter,
+                sample_scope=SampleScope.TEST_QUERIES if sample else SampleScope.NONE,
+                threads=thread_count,
             )
         )
     finally:

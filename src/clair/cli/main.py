@@ -39,8 +39,25 @@ from clair.exceptions import (
     ProjectRootNotFoundError,
 )
 from clair.trouves.run_config import RunMode
+from clair.trouves.sample_window import SampleWindow
 
 logger = structlog.get_logger()
+
+
+class SampleWindowParameter(click.ParamType):
+    """The value of ``clair run --sample``. ``SampleWindow.parse`` gives the two forms."""
+
+    name = "window"
+
+    def convert(
+        self, value: object, param: click.Parameter | None, ctx: click.Context | None
+    ) -> SampleWindow:
+        if isinstance(value, SampleWindow):
+            return value
+        try:
+            return SampleWindow.parse(str(value))
+        except ValueError as exc:
+            self.fail(str(exc), param, ctx)
 
 
 def _load_environment(env_name: str | None) -> Environment:
@@ -399,9 +416,13 @@ def docs(port: int, host: str, no_browser: bool) -> None:
 )
 @click.option(
     "--sample",
-    is_flag=True,
-    default=False,
-    help="Run the tests on a sample of each Trouve. Clair does not run the row count tests.",
+    type=SampleWindowParameter(),
+    default=None,
+    help=(
+        "Read only the rows of a time window from each Trouve that gives an event_time. "
+        "Give a duration that ends now, for example '3 days', or START/END, for example "
+        "'2024-07-01/2024-07-08'. Each Trouve must write to an address that routing changed."
+    ),
 )
 @click.option(
     "--threads",
@@ -409,7 +430,7 @@ def docs(port: int, host: str, no_browser: bool) -> None:
     default=None,
     help="The number of Trouves that run at one time. The default comes from the environment.",
 )
-def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, no_test: bool, sample: bool, threads: int | None) -> None:
+def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, no_test: bool, sample: SampleWindow | None, threads: int | None) -> None:
     """Run the Trouves on Snowflake. Then run the data quality tests."""
     try:
         summary = clair_api.run(

@@ -13,7 +13,7 @@ from clair.exceptions import InvalidTrouveAddressError
 from clair.trouves.config import ResolvedConfig
 from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Source
+from clair.trouves.trouve import CompiledAttributes, DataframeInput, ExecutionType, Source
 from tests.helpers import RecordingAdapter, addresses_of_text
 
 
@@ -33,14 +33,14 @@ def _make_compiled(physical_address: str = "db.schema.table") -> CompiledAttribu
 def _compile_pandas(trouve: PandasTable, physical_address: str) -> None:
     """Compile a PandasTable, as discovery does.
 
-    input_addresses holds the address that each input reads. Discovery writes
+    The inputs hold the address that each input reads. Discovery writes
     the logical address, and recompile_for_selection() changes it to a physical
     address for each input that the run builds. These tests give one address to
     each input, thus the two addresses are equal.
     """
     trouve.compiled = _make_compiled(physical_address)
-    trouve.compiled.input_addresses = [
-        str(upstream.physical_address) for upstream in trouve.inputs
+    trouve.compiled.inputs = [
+        DataframeInput(address=str(upstream.physical_address)) for upstream in trouve.inputs
     ]
 
 

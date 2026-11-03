@@ -3,7 +3,7 @@
 Run Trouves against Snowflake in dependency order, then run the data quality tests.
 
 ```bash
-clair run [--env NAME] [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample] [--threads N]
+clair run [--env NAME] [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample WINDOW] [--threads N]
 ```
 
 ## Example
@@ -23,6 +23,9 @@ clair run --env dev --no-test
 
 # Run 8 Trouves at one time
 clair run --env dev --threads 8
+
+# Read only the rows of the last 3 days from each input
+clair run --env dev --sample '3 days'
 ```
 
 ## Run order
@@ -69,6 +72,24 @@ clair runs the attached tests after each successful TABLE or VIEW. If a test fai
 
 The tests decide the publication. They do not report a fault after it reaches production: clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes. See [Staging](../topics/staging.md).
 
+## Sampled run
+
+`--sample` reads only the rows of a time window from each Trouve that gives an
+`event_time`. A Trouve without an `event_time` gives each row. See
+[Sampled Runs](../topics/sampling.md).
+
+| `--sample` value | Window |
+|---|---|
+| `'3 days'`, `'6 hours'`, `'2 weeks'` | From that duration before now, to now |
+| `2024-07-01/2024-07-08` | From the start, up to and not including the end. ISO 8601. A moment without a time zone is UTC. |
+
+clair stops a sampled run before it connects if a selected Trouve writes to its
+logical address. A sample must never replace a production object, thus the
+environment must route each Trouve to a different address.
+
+The tests run on the complete object that the run built. clair skips each test
+that needs the complete data: `TestRowCount` and `TestSql`.
+
 ## Flags
 
 | Flag | Default | Description |
@@ -77,7 +98,7 @@ The tests decide the publication. They do not report a fault after it reaches pr
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides the `run_config` of each Trouve. |
 | `--no-test` | `false` | Skip the data quality tests |
-| `--sample` | `false` | Run the tests against `SELECT TOP 1000 *` (skips `TestRowCount`) |
+| `--sample` | none | Read only the rows of a time window from each Trouve that gives an `event_time`. See [Sampled run](#sampled-run). |
 | `--threads` | the `threads` field of the environment, or `4` | The number of Trouves that run at one time. Each thread holds one Snowflake connection. |
 
 ## Exit codes
