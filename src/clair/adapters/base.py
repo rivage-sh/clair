@@ -170,12 +170,12 @@ class WarehouseAdapter(ABC):
 
     @abstractmethod
     def fetch_dataframe(
-        self, address: TrouveAddress, row_filter: str | None = None
+        self, address: TrouveAddress, sample_query: str | None = None
     ) -> pd.DataFrame:
         """Read a table into a pandas DataFrame.
 
-        *row_filter* is a WHERE condition, for example the window of a sampled
-        run. None reads each row.
+        *sample_query* is the subquery of a sampled run, which the adapter
+        reads in place of the complete table at *address*. None reads each row.
         """
         ...
 

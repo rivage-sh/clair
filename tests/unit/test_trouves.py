@@ -135,53 +135,17 @@ class TestTrouveConstruction:
         with pytest.raises(ValueError, match="Extra inputs are not permitted"):
             trouve_class(**arguments)
 
-    def test_sample_returns_top_subquery(self):
-        from pathlib import Path
+    def test_sample_without_a_sample_sql_gives_the_row_limit(self):
+        """The THIS token stays. Clair renders it with the address that the reader reads."""
+        assert Table(sql="select 1").sample(500) == "(SELECT * FROM __CLAIR_THIS__ LIMIT 500)"
 
-        from clair.trouves.config import ResolvedConfig
-        from clair.trouves.trouve import CompiledAttributes, ExecutionType
+    def test_sample_gives_the_sample_sql(self):
+        trouve = Source(sample_sql="SELECT * FROM __CLAIR_THIS__ WHERE id < 10")
 
-        t = Table(sql="select 1")
-        t.compiled = CompiledAttributes(
-            physical_address=TrouveAddress.parse("db.s.orders"),
-            logical_address=TrouveAddress.parse("db.s.orders"),
-            resolved_sql="select 1",
-            file_path=Path("/fake/db/s/orders.py"),
-            module_name="db.s.orders",
-            imports=[],
-            config=ResolvedConfig(),
-            execution_type=ExecutionType.SNOWFLAKE,
-        )
-        assert t.sample() == "(SELECT TOP 1000 * FROM db.s.orders)"
+        assert trouve.sample(500) == "(SELECT * FROM __CLAIR_THIS__ WHERE id < 10)"
 
-    def test_sample_uses_the_physical_address(self):
-        """sample() uses compiled.physical_address, the physical address, not logical_address."""
-        from pathlib import Path
-
-        from clair.trouves.config import ResolvedConfig
-        from clair.trouves.trouve import CompiledAttributes, ExecutionType
-
-        t = Table(sql="select 1")
-        t.compiled = CompiledAttributes(
-            # The physical address, for example from a schema isolation policy.
-            physical_address=TrouveAddress.parse("dev_omer.s.orders"),
-            # The logical address, which the file path gives.
-            logical_address=TrouveAddress.parse("db.s.orders"),
-            resolved_sql="select 1",
-            file_path=Path("/fake/db/s/orders.py"),
-            module_name="db.s.orders",
-            imports=[],
-            config=ResolvedConfig(),
-            execution_type=ExecutionType.SNOWFLAKE,
-        )
-        result = t.sample()
-        assert "dev_omer.s.orders" in result
-        assert "db.s.orders" not in result
-
-    def test_sample_raises_when_not_compiled(self):
-        t = Table(sql="select 1")
-        with pytest.raises(AssertionError, match="needs a compiled Trouve"):
-            t.sample()
+    def test_sample_needs_no_compiled_trouve(self):
+        assert Source().sample(1) == "(SELECT * FROM __CLAIR_THIS__ LIMIT 1)"
 
     def test_trouve_with_tests(self):
         trouve = Table(

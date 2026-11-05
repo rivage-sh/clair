@@ -94,7 +94,6 @@ from clair.trouves.run_config import (
     RunMode,
     Upsert,
 )
-from clair.trouves.sample_window import SampleWindow
 from clair.trouves.seed_table import SeedTable
 from clair.trouves.test import (
     THIS,
@@ -152,7 +151,6 @@ __all__ = [
     "RoutingTable",
     "RunConfig",
     "RunMode",
-    "SampleWindow",
     "SchemaDefaults",
     "SeedTable",
     "Source",

@@ -90,7 +90,8 @@ def run(
     exclude: Sequence[str] | None = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     test: bool = True,
-    sample: SampleWindow | None = None,
+    sample: bool = False,
+    sample_rows: int = 10_000,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> RunSummary
@@ -105,20 +106,10 @@ guarantee, so `test=False` also stops the staging step.
 thread count of the environment. See
 [Environments](../topics/environments.md).
 
-`sample` reads only the rows of a time window from each Trouve that gives an
-`event_time`. clair raises `SampleTargetsProductionError` before it connects if
-a selected Trouve writes to its logical address. See
-[Sampled Runs](../topics/sampling.md).
-
-```python
-from datetime import timedelta
-
-from clair import SampleWindow
-
-summary = clair.run(
-    "~/projects/analytics", env=environment, sample=SampleWindow.last(timedelta(days=3))
-)
-```
+`sample=True` reads `Trouve.sample()` in place of each Trouve that the run does
+not build: the `sample_sql` of the Trouve, or `sample_rows` rows. clair raises
+`SampleTargetsProductionError` before it connects if a selected Trouve writes to
+its logical address. See [Sampled Runs](../topics/sampling.md).
 
 Give `adapter` to keep one connection open for many calls. Clair then closes no
 connection. The default makes a `SnowflakeAdapter`, connects it, and closes it.
@@ -153,13 +144,13 @@ class RunSummary(BaseModel):
     run_id: str
     project_root: Path | None
     run_mode: RunMode
-    sample: SampleWindow | None
+    sample_rows: int | None
 ```
 
 | Member | Gives |
 |--------|-------|
 | `results` | One `RunResult` for each Trouve, in the run order. |
-| `sample` | The window of a sampled run. `None` tells you that the run read each row. |
+| `sample_rows` | The row limit of a sampled run. `None` tells you that the run read each row. |
 | `result(address)` | One `RunResult` by its logical address or its physical address. It raises `ResultNotFoundError` if the run holds no such Trouve. |
 | `succeeded`, `failed`, `skipped` | The results with that status. |
 | `succeeded_count`, `failed_count`, `skipped_count` | The number of results with that status. |
@@ -279,6 +270,7 @@ def test(
     select: Sequence[str] | None = None,
     exclude: Sequence[str] | None = None,
     sample: bool = False,
+    sample_rows: int = 10_000,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> TestSummary

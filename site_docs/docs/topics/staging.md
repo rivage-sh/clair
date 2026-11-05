@@ -205,7 +205,7 @@ SHOW TABLES LIKE '%__clair_%' IN SCHEMA db.schema;
 - **Storage.** Each Trouve holds two copies for a short time. A full refresh makes a complete second copy for the duration of the node. An incremental build makes a clone, which shares micro-partitions with the physical table and diverges as the rows change. An object from a failure stays until you drop it.
 - **The tests give the guarantee.** `--no-test` stops the staging step, because tests that do not run cannot decide a promotion. A Trouve with no tests still goes to a staging address, and clair promotes it. Staging does not make test coverage that you did not write.
 - **Name length.** The suffix adds 40 characters to the table name. Snowflake permits 255 characters for each name, and the limit applies to each name and not to the full `database.schema.table` path. A Trouve with a table name of more than 215 characters therefore fails before the SQL starts, with a message that tells you to use a shorter name.
-- **`--sample`.** A sampled run builds the staging object from a time window of each input, and the tests decide the promotion on that object. clair stops a sampled run that writes to a logical address, thus a sample never reaches production. See [Sampled Runs](sampling.md).
+- **`--sample`.** A sampled run builds the staging object from a sample of each input, and the tests decide the promotion on that object. clair stops a sampled run that writes to a logical address, thus a sample never reaches production. See [Sampled Runs](sampling.md).
 
 ## See also
 

@@ -1,119 +1,120 @@
-"""Prove a sampled run against Snowflake: ``clair.run(sample=...)``.
+"""Prove a sampled run against Snowflake: ``clair.run(sample=True)``.
 
-The unit tests show the filter in the SQL. Only the warehouse shows which rows
-the filter keeps: the comparison of a TIMESTAMP_NTZ column and of a DATE column
-with the boundaries, and that the window keeps its start and not its end.
+The unit tests show the subquery in the SQL. Only the warehouse shows that the
+subquery is valid SQL, that a row limit reads the number of rows, and that a
+sample_sql that reads a seed carries its filter through a join.
 
-The seed holds four events. The window is 2024-07-01/2024-07-08:
-
-* id 1 at 2024-06-30 23:59:59, before the window.
-* id 2 at 2024-07-01 00:00:00, the start. The window keeps it.
-* id 3 at 2024-07-07 23:59:59, the last second of the window.
-* id 4 at 2024-07-08 00:00:00, the end. The window does not keep it.
+The fixture writes two Source tables of four rows: ``events`` (ids 1 to 4) and
+``users`` (ids 1 to 4, user ids u1 to u4). The seed ``test_users`` holds u2 and
+u3. The run reads three rows of each Trouve without a sample_sql.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import pytest
 
 import clair
-from clair import SampleWindow
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunSummary
 from clair.environments.environments import Environment
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import physical_address, write_refined_project
-from tests.integration.warehouse import query_rows
+from tests.integration.warehouse import execute, query_rows
 
 pytestmark = pytest.mark.integration
 
-DATABASE_NAME = "sample_window"
-WINDOW = SampleWindow(
-    start=datetime(2024, 7, 1, tzinfo=UTC), end=datetime(2024, 7, 8, tzinfo=UTC)
-)
-IDS_IN_THE_WINDOW = [2, 3]
-EACH_ID = [1, 2, 3, 4]
+DATABASE_NAME = "sample_rows"
+SAMPLE_ROWS = 3
+THE_TEST_USER_IDS = [2, 3]
 
-EVENTS_FILE = """\
-import pandas as pd
-
-from clair import SeedTable
-
-events = pd.DataFrame(
-    {
-        "id": [1, 2, 3, 4],
-        "event_at": pd.to_datetime(
-            [
-                "2024-06-30 23:59:59",
-                "2024-07-01 00:00:00",
-                "2024-07-07 23:59:59",
-                "2024-07-08 00:00:00",
-            ]
-        ),
-    }
-)
-
-trouve = SeedTable(dataframe=events, event_time="event_at")
-"""
+SOURCE_ROWS = {
+    "events": "SELECT column1 AS id FROM VALUES (1), (2), (3), (4)",
+    "users": (
+        "SELECT column1 AS id, column2 AS user_id "
+        "FROM VALUES (1, 'u1'), (2, 'u2'), (3, 'u3'), (4, 'u4')"
+    ),
+}
 
 
-def table_file(sql: str, event_time: str | None = None) -> str:
-    """Give a Table that reads the events. *sql* is the body of the inner f-string."""
-    event_time_argument = f'    event_time="{event_time}",\n' if event_time else ""
+def reader_file(upstream_name: str, sample_sql: str | None = None) -> str:
+    """Give a Table that reads the id of one upstream Trouve."""
+    sample_argument = f'    sample_sql=f"{sample_sql}",\n' if sample_sql else ""
     return (
-        f"from {DATABASE_NAME}.refined.events import trouve as events\n"
-        f"from {DATABASE_NAME}.refined.event_days import trouve as event_days\n"
-        "from clair import Table\n"
+        f"from {DATABASE_NAME}.refined.{upstream_name} import trouve as {upstream_name}\n"
+        "from clair import THIS, Table\n"
         "trouve = Table(\n"
-        f"{event_time_argument}"
-        f'    sql=f"{sql}",\n'
+        f'    sql=f"SELECT id FROM {{{upstream_name}}}",\n'
+        f"{sample_argument}"
         ")\n"
     )
 
 
+USERS_FILE = f"""\
+from {DATABASE_NAME}.refined.test_users import trouve as test_users
+
+from clair import THIS, Source
+
+trouve = Source(
+    sample_sql=f"SELECT * FROM {{THIS}} WHERE user_id IN (SELECT user_id FROM {{test_users}})",
+)
+"""
+
+TEST_USERS_FILE = """\
+import pandas as pd
+
+from clair import SeedTable
+
+test_users = pd.DataFrame({"user_id": ["u2", "u3"]})
+test_users["user_id"] = test_users["user_id"].astype("string")
+
+trouve = SeedTable(dataframe=test_users)
+"""
+
 FRAME_IDS_FILE = f"""\
 import pandas as pd
 
-from {DATABASE_NAME}.refined.events import trouve as events
+from {DATABASE_NAME}.refined.users import trouve as users
 from clair import PandasTable
 
 
-def ids_of(events: pd.DataFrame) -> pd.DataFrame:
-    return events[["id"]]
+def ids_of(users: pd.DataFrame) -> pd.DataFrame:
+    return users[["id"]]
 
 
-trouve = PandasTable(transform=ids_of, inputs=[events])
+trouve = PandasTable(transform=ids_of, inputs=[users])
 """
 
 TROUVE_FILES = {
-    "events": EVENTS_FILE,
-    # A DATE column, which the run builds before a reader filters it.
-    "event_days": (
-        f"from {DATABASE_NAME}.refined.events import trouve as events\n"
-        "from clair import Table\n"
-        "trouve = Table(\n"
-        '    event_time="event_day",\n'
-        '    sql=f"SELECT id, TO_DATE(event_at) AS event_day FROM {events.unsampled()}",\n'
-        ")\n"
-    ),
-    "timestamp_ids": table_file("SELECT id FROM {events}"),
-    "date_ids": table_file("SELECT id FROM {event_days}"),
-    "unsampled_ids": table_file("SELECT id FROM {events.unsampled()}"),
+    "events": "from clair import Source\n\ntrouve = Source()\n",
+    "users": USERS_FILE,
+    "test_users": TEST_USERS_FILE,
+    # A sample of limited_ids reads no row. The run builds limited_ids, thus a
+    # reader of it reads the complete table, and not the sample.
+    "limited_ids": reader_file("events", sample_sql="SELECT * FROM {THIS} WHERE 1 = 0"),
+    "chosen_ids": reader_file("users"),
     "frame_ids": FRAME_IDS_FILE,
+    "layer_ids": reader_file("limited_ids"),
 }
 
 
 class TestASampledRun:
     @pytest.fixture(scope="class")
     def summary(
-        self, environment: Environment, tmp_path_factory: pytest.TempPathFactory
+        self,
+        environment: Environment,
+        adapter: SnowflakeAdapter,
+        clair_environment: IntegrationConfig,
+        tmp_path_factory: pytest.TempPathFactory,
     ) -> RunSummary:
+        for table_name, rows_sql in SOURCE_ROWS.items():
+            address = physical_address(
+                f"{DATABASE_NAME}.refined.{table_name}", clair_environment.schema_name
+            )
+            execute(adapter, f"CREATE OR REPLACE TABLE {address} AS {rows_sql}")
         project_path = write_refined_project(
             tmp_path_factory.mktemp(DATABASE_NAME), DATABASE_NAME, TROUVE_FILES
         )
-        return clair.run(project_path, env=environment, sample=WINDOW)
+        return clair.run(project_path, env=environment, sample=True, sample_rows=SAMPLE_ROWS)
 
     def ids_of(
         self, adapter: SnowflakeAdapter, clair_environment: IntegrationConfig, table_name: str
@@ -125,26 +126,28 @@ class TestASampledRun:
 
     def test_each_trouve_succeeds(self, summary: RunSummary) -> None:
         assert summary.failed == [], [result.error for result in summary.failed]
-        assert summary.succeeded_count == len(TROUVE_FILES)
+        # Each file except the two Source files is a Trouve that the run builds.
+        assert summary.succeeded_count == len(TROUVE_FILES) - len(SOURCE_ROWS)
 
-    @pytest.mark.parametrize(
-        ("table_name", "expected_ids"),
-        [
-            # The seed reads no input, thus the sample keeps each of its rows.
-            ("events", EACH_ID),
-            ("timestamp_ids", IDS_IN_THE_WINDOW),
-            ("date_ids", IDS_IN_THE_WINDOW),
-            ("unsampled_ids", EACH_ID),
-            ("frame_ids", IDS_IN_THE_WINDOW),
-        ],
-    )
-    def test_the_window_keeps_its_start_and_not_its_end(
+    @pytest.mark.parametrize("table_name", ["limited_ids", "layer_ids"])
+    def test_the_row_limit_reads_that_number_of_rows(
         self,
         summary: RunSummary,
         adapter: SnowflakeAdapter,
         clair_environment: IntegrationConfig,
         table_name: str,
-        expected_ids: list[int],
+    ) -> None:
+        """layer_ids reads limited_ids of the run, thus it keeps each of the three rows."""
+        assert summary.failed == []
+        assert len(self.ids_of(adapter, clair_environment, table_name)) == SAMPLE_ROWS
+
+    @pytest.mark.parametrize("table_name", ["chosen_ids", "frame_ids"])
+    def test_a_sample_sql_carries_the_seed_through_the_read(
+        self,
+        summary: RunSummary,
+        adapter: SnowflakeAdapter,
+        clair_environment: IntegrationConfig,
+        table_name: str,
     ) -> None:
         assert summary.failed == []
-        assert self.ids_of(adapter, clair_environment, table_name) == expected_ids
+        assert self.ids_of(adapter, clair_environment, table_name) == THE_TEST_USER_IDS

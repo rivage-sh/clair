@@ -3,7 +3,7 @@
 Run Trouves against Snowflake in dependency order, then run the data quality tests.
 
 ```bash
-clair run [--env NAME] [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample WINDOW] [--threads N]
+clair run [--env NAME] [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample [--sample-rows N]] [--threads N]
 ```
 
 ## Example
@@ -24,8 +24,8 @@ clair run --env dev --no-test
 # Run 8 Trouves at one time
 clair run --env dev --threads 8
 
-# Read only the rows of the last 3 days from each input
-clair run --env dev --sample '3 days'
+# Read a sample of each input that the run does not build
+clair run --env dev --sample --sample-rows 1000
 ```
 
 ## Run order
@@ -74,21 +74,20 @@ The tests decide the publication. They do not report a fault after it reaches pr
 
 ## Sampled run
 
-`--sample` reads only the rows of a time window from each Trouve that gives an
-`event_time`. A Trouve without an `event_time` gives each row. See
-[Sampled Runs](../topics/sampling.md).
+`--sample` reads a sample of each Trouve that the run does not build: each
+Source, and each Trouve outside the selection. A Trouve that the run builds is
+a sample already, thus a reader of it reads the complete table.
 
-| `--sample` value | Window |
-|---|---|
-| `'3 days'`, `'6 hours'`, `'2 weeks'` | From that duration before now, to now |
-| `2024-07-01/2024-07-08` | From the start, up to and not including the end. ISO 8601. A moment without a time zone is UTC. |
+The sample is the `sample_sql` of the Trouve. A Trouve without a `sample_sql`
+gives `--sample-rows` rows. See [Sampled Runs](../topics/sampling.md).
 
 clair stops a sampled run before it connects if a selected Trouve writes to its
 logical address. A sample must never replace a production object, thus the
 environment must route each Trouve to a different address.
 
-The tests run on the complete object that the run built. clair skips each test
-that needs the complete data: `TestRowCount` and `TestSql`.
+The tests read the complete object that the run built. clair skips each test
+that can fail on a sample when the complete data obeys it: `TestRowCount` and
+`TestSql`, and each test that gives `run_with_sample=False`.
 
 ## Flags
 
@@ -98,7 +97,8 @@ that needs the complete data: `TestRowCount` and `TestSql`.
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides the `run_config` of each Trouve. |
 | `--no-test` | `false` | Skip the data quality tests |
-| `--sample` | none | Read only the rows of a time window from each Trouve that gives an `event_time`. See [Sampled run](#sampled-run). |
+| `--sample` | `false` | Read a sample of each Trouve that the run does not build. See [Sampled run](#sampled-run). |
+| `--sample-rows` | `10000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |
 | `--threads` | the `threads` field of the environment, or `4` | The number of Trouves that run at one time. Each thread holds one Snowflake connection. |
 
 ## Exit codes

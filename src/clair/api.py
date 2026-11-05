@@ -70,8 +70,7 @@ from clair.environments.routing import (
 )
 from clair.exceptions import SampleTargetsProductionError
 from clair.trouves.run_config import RunMode
-from clair.trouves.sample_window import SampleWindow
-from clair.trouves.trouve import TrouveAbc, TrouveType
+from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, TrouveAbc, TrouveType
 from clair.web_ui.catalog import build_catalog
 from clair.web_ui.server import serve
 
@@ -239,7 +238,8 @@ def run(
     exclude: Selectors = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     test: bool = True,
-    sample: SampleWindow | None = None,
+    sample: bool = False,
+    sample_rows: int = DEFAULT_SAMPLE_ROWS,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> RunSummary:
@@ -263,11 +263,13 @@ def run(
             the new data.
         test: If True, clair runs the data quality tests of a Trouve after it
             builds that Trouve.
-        sample: The time window of a sampled run. Each reference to a Trouve
-            that gives an ``event_time`` reads only the rows of the window, and
-            clair skips each test that needs the complete data. Each selected
-            Trouve must write to an address that routing changed: a sample
-            never replaces a production object. None reads each row.
+        sample: If True, each reference to a Trouve that the run does not
+            build reads ``Trouve.sample()``: its ``sample_sql``, or
+            *sample_rows* rows. Clair skips each test that needs the complete
+            data. Each selected Trouve must write to an address that routing
+            changed, because a sample must never replace a production object.
+        sample_rows: The row limit of a sampled read, for each Trouve without
+            a ``sample_sql``.
         threads: The number of Trouves that run at one time. None takes the
             thread count of the environment.
         adapter: A connected warehouse adapter. The default makes a
@@ -280,13 +282,17 @@ def run(
         row count, and the test results.
 
     Raises:
-        SampleTargetsProductionError: If *sample* is given, and a selected
+        SampleTargetsProductionError: If *sample* is True, and a selected
             Trouve writes to its logical address. Clair raises it before it
             connects.
+        ValueError: If *sample_rows* is less than 1.
         ClairError: If discovery, routing, or the connection fails. A Trouve
             that fails gives a RunResult with the FAILURE status, and raises no
             error, because the other branches of the DAG continue.
     """
+    _require_a_positive_sample_rows(sample_rows)
+    # The row limit of this run, or None for a run that reads each row.
+    run_sample_rows = sample_rows if sample else None
     project_root = _resolve_project_root(project_dir)
     run_id = uuid6.uuid7().hex
     use_staging = test
@@ -325,13 +331,13 @@ def run(
             run_id=run_id,
             project_root=project_root,
             run_mode=run_mode,
-            sample=sample,
+            sample_rows=run_sample_rows,
         )
 
-    if sample is not None:
+    if sample:
         _refuse_a_sampled_production_write(dag, selected, env_name)
-        logger.info("run.sample", start=sample.start.isoformat(), end=sample.end.isoformat())
-    recompile_for_selection(discovered, set(selected), sample=sample)
+        logger.info("run.sample", sample_rows=sample_rows)
+    recompile_for_selection(discovered, set(selected), sample_rows=run_sample_rows)
     write_compile_output(
         dag, selected, project_root, run_mode=run_mode, run_id=run_id, use_staging=use_staging
     )
@@ -360,7 +366,7 @@ def run(
             dag,
             [node_name],
             node_adapter,
-            sample_scope=SampleScope.NONE if sample is None else SampleScope.RUN_INPUTS,
+            sample_scope=SampleScope.RUN_INPUTS if sample else SampleScope.NONE,
             query_addresses={node_name: query_address},
         )
         # list.extend is atomic, thus the threads need no lock here. Each thread
@@ -411,7 +417,7 @@ def run(
         run_id=run_id,
         project_root=project_root,
         run_mode=run_mode,
-        sample=sample,
+        sample_rows=run_sample_rows,
     )
     logger.info(
         "run.complete",
@@ -421,6 +427,11 @@ def run(
         skipped=summary.skipped_count,
     )
     return summary
+
+
+def _require_a_positive_sample_rows(sample_rows: int) -> None:
+    if sample_rows < 1:
+        raise ValueError(f"sample_rows must be 1 or more, but it is {sample_rows}")
 
 
 def _refuse_a_sampled_production_write(
@@ -453,6 +464,7 @@ def test(
     select: Selectors = None,
     exclude: Selectors = None,
     sample: bool = False,
+    sample_rows: int = DEFAULT_SAMPLE_ROWS,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> TestSummary:
@@ -467,8 +479,11 @@ def test(
         env: The Environment that holds the connection settings, and that names
             the routing entry. This function reads no file: the caller parses
             environments.yml, or it makes the Environment itself.
-        sample: If True, clair runs the tests on a sample of each Trouve, and
-            runs no row count test.
+        sample: If True, each test reads ``Trouve.sample()`` of its Trouve:
+            the ``sample_sql``, or *sample_rows* rows. Clair skips each test
+            that needs the complete data, such as a row count test.
+        sample_rows: The row limit of a sample, for each Trouve without a
+            ``sample_sql``.
         threads: The number of Trouves that clair tests at one time. None takes
             the thread count of the environment.
         adapter: A connected warehouse adapter. The default makes a
@@ -480,7 +495,9 @@ def test(
 
     Raises:
         ClairError: If discovery, routing, or the connection fails.
+        ValueError: If *sample_rows* is less than 1.
     """
+    _require_a_positive_sample_rows(sample_rows)
     project_root = _resolve_project_root(project_dir)
 
     # `environment` names the object, and `env` names the argument.
@@ -527,6 +544,7 @@ def test(
                 selected,
                 warehouse_adapter,
                 sample_scope=SampleScope.TEST_QUERIES if sample else SampleScope.NONE,
+                sample_rows=sample_rows,
                 threads=thread_count,
             )
         )

@@ -285,6 +285,16 @@ def _compile_trouve(
             f"'{trouve_obj.execution_type}'.",
         )
 
+    # A sample can read another Trouve, for example a seed of test users. Each
+    # run keeps the edge, thus --sample does not change the DAG.
+    if trouve_obj.sample_sql is not None:
+        sample_imports = detect_imports(trouve_obj.sample_sql, logical_addresses, logical)
+        trouve_obj.compiled = trouve_obj.compiled.model_copy(
+            update={
+                "imports": list(dict.fromkeys([*trouve_obj.compiled.imports, *sample_imports]))
+            }
+        )
+
     # A test reads the tables that its Trouve reads, thus the same map renders
     # the SQL of each test.
     for test in trouve_obj.tests:

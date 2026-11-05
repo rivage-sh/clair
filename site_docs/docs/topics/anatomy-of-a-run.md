@@ -163,10 +163,10 @@ This step is the same for both backends. A SQL Trouve holds its addresses in its
 a pandas Trouve holds them in `inputs`. The rule above decides both. A `TestSql`
 gets its addresses from the same step, thus a test reads the tables that its Trouve reads.
 
-A sampled run (`--sample`) adds one rule. A reference to a Trouve that gives an
-`event_time` becomes a subquery that reads only the rows of the window. A pandas input
-gets the same filter. The SQL of a test keeps the address. See
-[Sampled Runs](sampling.md).
+A sampled run (`--sample`) adds one rule. A reference to a Trouve that the run does not
+build becomes the subquery of `Trouve.sample()`, and a pandas input reads the same
+subquery. A reference to a Trouve of the run keeps its address. The SQL of a test keeps
+each address. See [Sampled Runs](sampling.md).
 
 ## 7. Execute
 

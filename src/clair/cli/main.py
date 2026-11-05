@@ -39,25 +39,26 @@ from clair.exceptions import (
     ProjectRootNotFoundError,
 )
 from clair.trouves.run_config import RunMode
-from clair.trouves.sample_window import SampleWindow
+from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
 
 logger = structlog.get_logger()
 
+# `clair run` and `clair test` take the same two sample options.
+_sample_rows_option = click.option(
+    "--sample-rows",
+    type=click.IntRange(min=1),
+    default=None,
+    help=f"The rows of each sample, for a Trouve without a sample_sql. The default is {DEFAULT_SAMPLE_ROWS}. It needs --sample.",
+)
 
-class SampleWindowParameter(click.ParamType):
-    """The value of ``clair run --sample``. ``SampleWindow.parse`` gives the two forms."""
 
-    name = "window"
-
-    def convert(
-        self, value: object, param: click.Parameter | None, ctx: click.Context | None
-    ) -> SampleWindow:
-        if isinstance(value, SampleWindow):
-            return value
-        try:
-            return SampleWindow.parse(str(value))
-        except ValueError as exc:
-            self.fail(str(exc), param, ctx)
+def _sample_rows(sample: bool, sample_rows: int | None) -> int:
+    """Give the row limit of the sample, and stop a --sample-rows without --sample."""
+    if sample_rows is None:
+        return DEFAULT_SAMPLE_ROWS
+    if not sample:
+        raise click.UsageError("--sample-rows needs --sample.")
+    return sample_rows
 
 
 def _load_environment(env_name: str | None) -> Environment:
@@ -416,22 +417,23 @@ def docs(port: int, host: str, no_browser: bool) -> None:
 )
 @click.option(
     "--sample",
-    type=SampleWindowParameter(),
-    default=None,
+    is_flag=True,
+    default=False,
     help=(
-        "Read only the rows of a time window from each Trouve that gives an event_time. "
-        "Give a duration that ends now, for example '3 days', or START/END, for example "
-        "'2024-07-01/2024-07-08'. Each Trouve must write to an address that routing changed."
+        "Read a sample of each Trouve that the run does not build: its sample_sql, or a row limit. "
+        "Each Trouve must write to an address that routing changed."
     ),
 )
+@_sample_rows_option
 @click.option(
     "--threads",
     type=click.IntRange(min=1),
     default=None,
     help="The number of Trouves that run at one time. The default comes from the environment.",
 )
-def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, no_test: bool, sample: SampleWindow | None, threads: int | None) -> None:
+def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, no_test: bool, sample: bool, sample_rows: int | None, threads: int | None) -> None:
     """Run the Trouves on Snowflake. Then run the data quality tests."""
+    row_limit = _sample_rows(sample, sample_rows)
     try:
         summary = clair_api.run(
             select=select,
@@ -440,6 +442,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_
             run_mode=RunMode(run_mode),
             test=not no_test,
             sample=sample,
+            sample_rows=row_limit,
             threads=threads,
         )
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
@@ -479,8 +482,9 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_
     "--sample",
     is_flag=True,
     default=False,
-    help="Run the tests on a sample of each Trouve. Clair does not run the row count tests.",
+    help="Run each test on a sample of its Trouve: the sample_sql, or a row limit. Clair does not run the row count tests.",
 )
+@_sample_rows_option
 @click.option(
     "--threads",
     type=click.IntRange(min=1),
@@ -488,15 +492,22 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_
     help="The number of Trouves that clair tests at one time. The default comes from the environment.",
 )
 def test(
-    select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, sample: bool, threads: int | None
+    select: tuple[str, ...],
+    exclude: tuple[str, ...],
+    env: str | None,
+    sample: bool,
+    sample_rows: int | None,
+    threads: int | None,
 ) -> None:
     """Run the data quality tests on Snowflake."""
+    row_limit = _sample_rows(sample, sample_rows)
     try:
         summary = clair_api.test(
             select=select,
             exclude=exclude,
             env=_load_environment(env),
             sample=sample,
+            sample_rows=row_limit,
             threads=threads,
         )
     except ClairError as e:

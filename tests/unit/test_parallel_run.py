@@ -170,7 +170,7 @@ class RecordingAdapter(WarehouseAdapter):
         self.closed = True
 
     def fetch_dataframe(
-        self, address: TrouveAddress, row_filter: str | None = None
+        self, address: TrouveAddress, sample_query: str | None = None
     ) -> pd.DataFrame:
         return pd.DataFrame()
 

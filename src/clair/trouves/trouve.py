@@ -25,7 +25,7 @@ from typing import ClassVar
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from clair.exceptions import CompileError
-from clair.trouves._refs import register
+from clair.trouves._refs import THIS_PLACEHOLDER, register
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column
 from clair.trouves.config import ResolvedConfig, SessionConfig
@@ -227,16 +227,21 @@ def table_options_of(trouve: TrouveAbc) -> TableOptions | None:
     return trouve if isinstance(trouve, TableOptions) else None
 
 
+# The rows that a sampled run reads from an input that has no sample_sql.
+DEFAULT_SAMPLE_ROWS = 10_000
+
+
 class DataframeInput(BaseModel):
     """One input of a DataFrame Trouve, as the runner reads it.
 
     Attributes:
-        address: The address that the runner reads.
-        row_filter: The WHERE condition of a sampled run. None reads each row.
+        address: The address of the input.
+        sample_query: The subquery that a sampled run reads in place of the
+            address. None reads each row of the address.
     """
 
     address: str
-    row_filter: str | None = None
+    sample_query: str | None = None
 
 
 class CompiledAttributes(BaseModel):
@@ -279,9 +284,11 @@ class TrouveAbc(SessionConfig, ABC):
         columns: The column definitions, for the docs and for future checks.
         tests: The data quality tests.
         docs: The documentation text for this Trouve.
-        event_time: The column that holds the time of each row, for example
-            ``"created_at"``. ``clair run --sample`` then reads only the rows of
-            the sample window from this Trouve. None reads each row.
+        sample_sql: The query that a sampled run reads in place of this
+            Trouve. Write ``{THIS}`` for the address of this Trouve, for example
+            ``f"SELECT * FROM {THIS} WHERE user_id IN (SELECT user_id FROM
+            {test_users})"``. None reads a number of rows that Snowflake
+            selects. See ``sample()``.
         compiled: Discovery sets this. It stays None until discovery reads the
              project.
     """
@@ -292,7 +299,7 @@ class TrouveAbc(SessionConfig, ABC):
     columns: list[Column] = Field(default_factory=list)
     tests: list[AnyTest] = Field(default_factory=list)
     docs: str = ""
-    event_time: str | None = None
+    sample_sql: str | None = Field(default=None, exclude=True)
     compiled: CompiledAttributes | None = None
 
     # "forbid" makes a keyword that the class does not read an error, for
@@ -306,17 +313,9 @@ class TrouveAbc(SessionConfig, ABC):
         return self.trouve_type
 
     @model_validator(mode="after")
-    def _require_a_declared_event_time(self) -> TrouveAbc:
-        if self.event_time is None:
-            return self
-        if not self.event_time.strip():
-            raise ValueError("event_time is empty. Give a column name, or None.")
-        declared_names = {column.name.lower() for column in self.columns}
-        if declared_names and self.event_time.lower() not in declared_names:
-            raise ValueError(
-                f"event_time names the column '{self.event_time}', but the "
-                "columns of the Trouve do not hold it."
-            )
+    def _reject_an_empty_sample_sql(self) -> TrouveAbc:
+        if self.sample_sql is not None and not self.sample_sql.strip():
+            raise ValueError("sample_sql is empty. Give a query, or None for the row limit.")
         return self
 
     @property
@@ -343,16 +342,6 @@ class TrouveAbc(SessionConfig, ABC):
         """
         return register(self)
 
-    def unsampled(self) -> UnsampledReference:
-        """Give a reference that ``clair run --sample`` never filters.
-
-        Write ``f"SELECT * FROM {customers.unsampled()}"`` when the SQL needs
-        each row of an input that gives an ``event_time``. A dimension table is
-        the usual case: the customers of the last three days do not join to
-        each order of the last three days.
-        """
-        return UnsampledReference(trouve=self)
-
     @property
     def is_compiled(self) -> bool:
         """True if discovery processed this Trouve."""
@@ -371,28 +360,23 @@ class TrouveAbc(SessionConfig, ABC):
             )
         return self.compiled.physical_address
 
-    def sample(self) -> str:
-        """Give a subquery that reads a sample of this Trouve, for test SQL.
+    def sample(self, sample_rows: int) -> str:
+        """Give the subquery that a sampled run reads in place of this Trouve.
 
-        The default result is ``(SELECT TOP 1000 * FROM {physical_address})``. To change
-        how clair takes the sample, override this method in a subclass.
+        The result holds the ``{THIS}`` token and the reference tokens of the
+        author. Clair renders them with the address that the reader reads.
+        The default result is ``sample_sql`` in parentheses. Without it, the
+        result reads *sample_rows* rows, and Snowflake selects them: a LIMIT
+        without an ORDER BY gives no specific rows. To change the rule for many
+        Trouves, override this method in a subclass.
         """
-        assert self.compiled is not None, "sample() needs a compiled Trouve"
-        return f"(SELECT TOP 1000 * FROM {self.compiled.physical_address})"
+        if self.sample_sql is not None:
+            return f"({self.sample_sql})"
+        return f"(SELECT * FROM {THIS_PLACEHOLDER} LIMIT {sample_rows})"
 
     def get_full_table_name(self) -> str:
         """The physical address as a string. Use it in f-string SQL."""
         return str(self.physical_address)
-
-
-class UnsampledReference:
-    """A reference to a Trouve that a sampled run reads in full. See ``TrouveAbc.unsampled``."""
-
-    def __init__(self, trouve: TrouveAbc) -> None:
-        self.trouve = trouve
-
-    def __format__(self, _spec: str) -> str:
-        return register(self.trouve, sampled=False)
 
 
 class Source(TrouveAbc):

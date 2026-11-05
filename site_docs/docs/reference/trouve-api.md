@@ -51,7 +51,7 @@ class TrouveAbc(SessionConfig, ABC):
     columns:  list[Column] = []
     tests:    list[AnyTest] = []
     docs:       str = ""
-    event_time: str | None = None
+    sample_sql: str | None = None
     compiled:   CompiledAttributes | None = None
 
     @property
@@ -72,7 +72,7 @@ Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any class.
 | `columns` | `list[Column]` | `[]` | Column definitions. Required for UPSERT. |
 | `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](tests-api.md). |
 | `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
-| `event_time` | `str \| None` | `None` | The column that holds the time of each row. `clair run --sample` reads only the rows of the window from this Trouve. If `columns` is not empty, it must name one of them. See [Sampled Runs](../topics/sampling.md). |
+| `sample_sql` | `str \| None` | `None` | The query that a sample reads in place of this Trouve. Write `{THIS}` for the address of this Trouve. It can read another Trouve, which then is an upstream Trouve. `None` gives a row limit. See [Sampled Runs](../topics/sampling.md). |
 | `compiled` | `CompiledAttributes \| None` | `None` | Discovery sets this. Do not set it manually. |
 | `warehouse`, `role`, `query_tags`, `statement_timeout_seconds` | | `None`, `None`, `{}`, `None` | The session of this Trouve. A value here replaces the value of the schema and the database. See [Per-Database & Schema Config](../topics/per-database-schema-config.md). |
 
@@ -88,8 +88,7 @@ Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any class.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `unsampled()` | `UnsampledReference` | A reference that `clair run --sample` never filters. Write `f"SELECT * FROM {customers.unsampled()}"`. |
-| `sample()` | `str` | The subquery that `clair test --sample` reads: `(SELECT TOP 1000 * FROM <address>)`. Override it to change the sample of the tests. |
+| `sample(sample_rows)` | `str` | The subquery that `--sample` reads in place of this Trouve: `({sample_sql})`, or `(SELECT * FROM {THIS} LIMIT <sample_rows>)`. clair replaces `{THIS}` with the address that the reader reads. Override it in a subclass to change the sample of many Trouves. |
 
 ## `Source`
 
@@ -197,7 +196,7 @@ Discovery sets these attributes on `trouve.compiled`. They are available after `
 | `logical_address` | `TrouveAddress` | The address that the file system gives. clair uses it for the DAG edges and the selectors. |
 | `resolved_sql` | `str` | The SQL. clair replaced each placeholder token with a real logical address. It is empty for a `PandasTable`. |
 | `resolved_transform` | `str` | The source text of the transform function. It is empty for a `Table` or a `View`. |
-| `inputs` | `list[DataframeInput]` | The read of each input of a `PandasTable`, in the parameter order of the transform: the `address`, and the `row_filter` of a sampled run. It is empty for a `Table` or a `View`. |
+| `inputs` | `list[DataframeInput]` | The read of each input of a `PandasTable`, in the parameter order of the transform: the `address`, and the `sample_query` of a sampled run. It is empty for a `Table` or a `View`. |
 | `file_path` | `Path` | Absolute path to the Trouve file |
 | `imports` | `list[str]` | The logical addresses of the upstream Trouves |
 | `execution_type` | `ExecutionType` | SNOWFLAKE or PANDAS |
@@ -386,9 +385,6 @@ sql=f"SELECT * FROM {other_trouve}"
 Python calls `TrouveAbc.__format__`, which:
 
 1. Registers `other_trouve` in a global registry
-2. Returns a placeholder token, such as `__CLAIR_TROUVE_140234567890`
+2. Returns a placeholder token, such as `__CLAIR_TROUVE_140234567890__`
 
 At discovery, clair replaces every placeholder with the logical address of the Trouve. Thus clair builds the dependency graph and resolves the SQL names.
-
-`{other_trouve.unsampled()}` gives a token that a sampled run never filters. It
-makes the same DAG edge.

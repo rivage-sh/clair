@@ -3,7 +3,7 @@
 Run data quality tests against live Snowflake tables.
 
 ```bash
-clair test [--env NAME] [--select PATTERN]... [--sample] [--threads N]
+clair test [--env NAME] [--select PATTERN]... [--sample [--sample-rows N]] [--threads N]
 ```
 
 ## Example
@@ -35,7 +35,7 @@ clair test --env dev --threads 8
 
 ## `--sample` mode
 
-If you give `--sample`, most tests run against `SELECT TOP 1000 *` instead of the full table. clair skips `TestRowCount`, because a row count has no meaning on a sample.
+If you give `--sample`, each test reads the sample of its Trouve instead of the full table: the `sample_sql` of the Trouve, or `--sample-rows` rows. clair skips `TestRowCount` and `TestSql`, because a row count has no meaning on a sample. A test that gives `run_with_sample` replaces that default. See [Sampled Runs](../topics/sampling.md).
 
 ## Flags
 
@@ -43,7 +43,8 @@ If you give `--sample`, most tests run against `SELECT TOP 1000 *` instead of th
 |------|---------|-------------|
 | `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
-| `--sample` | `false` | Run the tests against `SELECT TOP 1000 *` |
+| `--sample` | `false` | Run each test against the sample of its Trouve |
+| `--sample-rows` | `10000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |
 | `--threads` | the `threads` field of the environment, or `4` | The number of Trouves that clair tests at one time. Each thread holds one Snowflake connection. |
 
 ## Exit codes

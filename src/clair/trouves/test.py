@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -48,7 +48,18 @@ class Test(BaseModel, ABC):
 
     The ``label`` property comes from the class name. Clair removes the ``Test``
     prefix and makes the remainder snake_case.
+
+    Attributes:
+        run_with_sample: True runs the test on a sample, and False skips it.
+            None takes the default of the class, ``is_run_with_sample_by_default``.
     """
+
+    # A sample is correct input for a test that cannot fail on a sample when
+    # the complete data obeys the test. A row count can fail that way, thus a
+    # subclass sets False.
+    is_run_with_sample_by_default: ClassVar[bool] = True
+
+    run_with_sample: bool | None = None
 
     @abstractmethod
     def to_sql(self, physical_address: str) -> str:
@@ -57,13 +68,10 @@ class Test(BaseModel, ABC):
 
     @property
     def is_run_with_sample(self) -> bool:
-        """Tell you if clair can run this test on a sample of the data.
-
-        A sample is correct input for most tests. Override this property and
-        give False for a test that needs the complete table, such as a row
-        count test.
-        """
-        return True
+        """Tell you if clair runs this test on a sample of the data."""
+        if self.run_with_sample is not None:
+            return self.run_with_sample
+        return self.is_run_with_sample_by_default
 
     @property
     def label(self) -> str:
@@ -123,10 +131,8 @@ class TestRowCount(Test):
             raise ValueError("max_rows must be >= min_rows")
         return self
 
-    @property
-    def is_run_with_sample(self) -> bool:
-        """A row count test needs the complete table, not a sample."""
-        return False
+    # A row count test needs the complete table, not a sample.
+    is_run_with_sample_by_default: ClassVar[bool] = False
 
     def to_sql(self, physical_address: str) -> str:
         parts = []
@@ -185,10 +191,8 @@ class TestSql(Test):
     # time, because the selection decides the address of each upstream Trouve.
     resolved_sql: str = ""
 
-    @property
-    def is_run_with_sample(self) -> bool:
-        """Your own SQL can group rows or read many tables, so a sample is not safe."""
-        return False
+    # Your own SQL can group rows or read many tables, so a sample is not safe.
+    is_run_with_sample_by_default: ClassVar[bool] = False
 
     def to_sql(self, physical_address: str) -> str:
         return self.resolved_sql

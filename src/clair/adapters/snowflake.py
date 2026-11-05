@@ -234,15 +234,14 @@ class SnowflakeAdapter(WarehouseAdapter):
             cursor.close()
 
     def fetch_dataframe(
-        self, address: TrouveAddress, row_filter: str | None = None
+        self, address: TrouveAddress, sample_query: str | None = None
     ) -> pd.DataFrame:
-        """Read a Snowflake table into a pandas DataFrame."""
+        """Read a Snowflake table, or the sample of a sampled run, into a pandas DataFrame."""
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
-        query = f"SELECT * FROM {address}"
-        if row_filter is not None:
-            query += f" WHERE {row_filter}"
+        relation = sample_query if sample_query is not None else str(address)
+        query = f"SELECT * FROM {relation}"
         cursor = self._conn.cursor()
         try:
             cursor.execute(query)

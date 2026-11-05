@@ -474,7 +474,7 @@ class TestSampleScope:
         assert len(results) == 1
 
     @pytest.mark.parametrize(
-        ("sample_scope", "reads_the_top_rows"),
+        ("sample_scope", "reads_the_sample"),
         [
             (SampleScope.NONE, False),
             (SampleScope.TEST_QUERIES, True),
@@ -482,8 +482,8 @@ class TestSampleScope:
             (SampleScope.RUN_INPUTS, False),
         ],
     )
-    def test_only_the_test_query_scope_reads_the_top_rows(
-        self, sample_scope: SampleScope, reads_the_top_rows: bool
+    def test_only_the_test_query_scope_reads_the_sample(
+        self, sample_scope: SampleScope, reads_the_sample: bool
     ):
         trouve = _make_trouve_with_tests(
             "db.s.orders", TrouveType.TABLE, [TestUnique(column="id")]
@@ -491,9 +491,9 @@ class TestSampleScope:
         dag = build_dag([trouve])
         adapter = RecordingAdapter()
 
-        run_tests(dag, ["db.s.orders"], adapter, sample_scope=sample_scope)
+        run_tests(dag, ["db.s.orders"], adapter, sample_scope=sample_scope, sample_rows=10)
 
-        assert ("SELECT TOP 1000" in adapter.record.statements[-1]) is reads_the_top_rows
+        assert ("LIMIT 10" in adapter.record.statements[-1]) is reads_the_sample
 
 
 class TestTestSql:

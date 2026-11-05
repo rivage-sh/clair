@@ -22,9 +22,8 @@ The object id is the join key, thus one file must give one Trouve object. See
 ``core/project_imports.py``.
 
 A sampled run (``clair run --sample``) renders a reference to a Trouve that
-gives an ``event_time`` as a subquery: ``(SELECT * FROM <address> WHERE
-<event_time> in the window)``. A token from ``trouve.unsampled()`` always
-renders as the address.
+the run does not build as the subquery of ``Trouve.sample()``. A Trouve that the
+run builds is a sample already, thus a reference to it keeps the address.
 """
 
 from __future__ import annotations
@@ -36,16 +35,12 @@ from pathlib import Path
 from clair.core.project_imports import names_of_files_that_ran_two_times
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import CompileError
-from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX, UNSAMPLED_MARKER
+from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.dataframe_trouve import DataframeTrouve
-from clair.trouves.sample_window import SampleWindow
 from clair.trouves.test import TestSql
 from clair.trouves.trouve import DataframeInput, SqlTrouve, TrouveAbc, TrouveType
 
-# Group 1 holds the unsampled marker, or None. Group 2 holds the object id.
-_PLACEHOLDER_RE = re.compile(
-    re.escape(TROUVE_PLACEHOLDER_PREFIX) + f"({re.escape(UNSAMPLED_MARKER)})?" + r"(\d+)"
-)
+_PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 
 
 def resolve_sql(
@@ -68,8 +63,7 @@ def resolve_sql(
 
     Args:
         id_to_sampled_reference: The subquery of each Trouve that a sampled
-            run filters. A token of such a Trouve becomes its subquery, and an
-            unsampled token keeps the address. None samples nothing.
+            run reads in place of the address. None samples nothing.
 
     Raises:
         CompileError: If the SQL qualifies a column with a sampled reference,
@@ -78,9 +72,8 @@ def resolve_sql(
     sampled_references = id_to_sampled_reference or {}
 
     def replace(match: re.Match[str]) -> str:
-        object_id = int(match.group(2))
-        is_unsampled = match.group(1) is not None
-        sampled_reference = None if is_unsampled else sampled_references.get(object_id)
+        object_id = int(match.group(1))
+        sampled_reference = sampled_references.get(object_id)
         address = id_to_address.get(object_id)
         if sampled_reference is None:
             return str(address) if address else match.group(0)
@@ -105,7 +98,7 @@ def detect_imports(
     """Give the logical address of each Trouve that the SQL points to with a token."""
     imports: list[str] = []
     for match in _PLACEHOLDER_RE.finditer(sql):
-        dependency = id_to_logical_address.get(int(match.group(2)))
+        dependency = id_to_logical_address.get(int(match.group(1)))
         if dependency is None or dependency == own_logical_address:
             continue
         if str(dependency) not in imports:
@@ -198,37 +191,50 @@ def _reference_addresses_for_selection(
     return reference_addresses
 
 
+def render_sample(
+    trouve: TrouveAbc,
+    id_to_address: dict[int, TrouveAddress],
+    address: TrouveAddress,
+    sample_rows: int,
+) -> str:
+    """Give the subquery that a sampled read of *trouve* at *address* executes.
+
+    ``{THIS}`` becomes *address*. A reference to another Trouve in the
+    ``sample_sql`` becomes its address in *id_to_address*, and never a sample
+    of its own: thus one sample reads no second sample.
+    """
+    return resolve_sql(trouve.sample(sample_rows), id_to_address, this_address=address)
+
+
 def _sampled_references(
     trouves: Sequence[TrouveAbc],
+    selected_addresses: set[str],
     reference_addresses: dict[int, TrouveAddress],
-    sample: SampleWindow | None,
+    sample_rows: int | None,
 ) -> dict[int, str]:
-    """Give the subquery of each Trouve that the sample window filters, keyed by the object id."""
-    if sample is None:
+    """Give the sample of each Trouve that the run does not build, keyed by the object id.
+
+    A Trouve that the run builds is a sample already. A second sample of it
+    would make each layer of the DAG smaller than the layer before it.
+    """
+    if sample_rows is None:
         return {}
-    return {
-        id(trouve): sample.reference(str(reference_addresses[id(trouve)]), trouve.event_time)
-        for trouve in trouves
-        if trouve.event_time is not None and id(trouve) in reference_addresses
-    }
-
-
-def _dataframe_input(
-    upstream: TrouveAbc,
-    reference_addresses: dict[int, TrouveAddress],
-    sample: SampleWindow | None,
-) -> DataframeInput:
-    """Give the read of one input of a DataFrame Trouve."""
-    row_filter = None
-    if sample is not None and upstream.event_time is not None:
-        row_filter = sample.row_filter(upstream.event_time)
-    return DataframeInput(address=str(reference_addresses[id(upstream)]), row_filter=row_filter)
+    sampled_references: dict[int, str] = {}
+    for trouve in trouves:
+        if trouve.compiled is None:
+            continue
+        if str(trouve.compiled.physical_address) in selected_addresses:
+            continue
+        sampled_references[id(trouve)] = render_sample(
+            trouve, reference_addresses, reference_addresses[id(trouve)], sample_rows
+        )
+    return sampled_references
 
 
 def recompile_for_selection(
     trouves: Sequence[TrouveAbc],
     selected_addresses: set[str],
-    sample: SampleWindow | None = None,
+    sample_rows: int | None = None,
 ) -> None:
     """Resolve each address again, now that clair knows the selection.
 
@@ -248,16 +254,17 @@ def recompile_for_selection(
     inputs of a DataFrame Trouve. It changes nothing for a Trouve outside
     the selection, because this run does not execute that Trouve.
 
-    A sample window filters each reference to a Trouve that gives an
-    ``event_time``, in the SQL and in the inputs of a DataFrame Trouve. It does
-    not filter the SQL of a test: a test examines the object that the run
+    A sampled run reads ``Trouve.sample()`` in place of each Trouve that the
+    run does not build, in the SQL and in the inputs of a DataFrame Trouve. It
+    does not sample the SQL of a test: a test examines the object that the run
     built, and a test that reads a second Trouve needs each of its rows.
 
     Args:
         trouves: Each Trouve from discover_project().
         selected_addresses: The physical addresses of the Trouves for this run.
             The DAG selector gives them.
-        sample: The window of a sampled run, or None to read each row.
+        sample_rows: The row limit of a sampled run, for each Trouve without a
+            ``sample_sql``. None reads each row.
 
     Raises:
         CompileError: If a sampled reference qualifies a column. See
@@ -266,7 +273,9 @@ def recompile_for_selection(
     reference_addresses = _reference_addresses_for_selection(
         trouves, selected_addresses
     )
-    sampled_references = _sampled_references(trouves, reference_addresses, sample)
+    sampled_references = _sampled_references(
+        trouves, selected_addresses, reference_addresses, sample_rows
+    )
 
     for trouve in trouves:
         if not trouve.compiled:
@@ -295,7 +304,10 @@ def recompile_for_selection(
             trouve.compiled = trouve.compiled.model_copy(
                 update={
                     "inputs": [
-                        _dataframe_input(upstream, reference_addresses, sample)
+                        DataframeInput(
+                            address=str(reference_addresses[id(upstream)]),
+                            sample_query=sampled_references.get(id(upstream)),
+                        )
                         for upstream in trouve.upstream_trouves()
                     ]
                 }

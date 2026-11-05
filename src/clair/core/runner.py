@@ -31,7 +31,6 @@ from clair.exceptions import ClairError, ResultNotFoundError, RunError
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.sample_window import SampleWindow
 from clair.trouves.trouve import (
     ExecutionType,
     SqlTrouve,
@@ -120,8 +119,8 @@ class RunSummary(BaseModel):
     run_id: str = ""
     project_root: Path | None = None
     run_mode: RunMode = RunMode.FULL_REFRESH
-    # The window of a sampled run. None tells that the run read each row.
-    sample: SampleWindow | None = None
+    # The row limit of a sampled run. None tells that the run read each row.
+    sample_rows: int | None = None
 
     def result(self, address: str) -> RunResult:
         """Find one result by its logical address or its physical address.
@@ -297,7 +296,7 @@ def _run_dataframe_trouve(
             input_dataframes.append(
                 adapter.fetch_dataframe(
                     TrouveAddress.parse(dataframe_input.address),
-                    row_filter=dataframe_input.row_filter,
+                    sample_query=dataframe_input.sample_query,
                 )
             )
         except Exception as fetch_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status

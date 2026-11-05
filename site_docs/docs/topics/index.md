@@ -13,7 +13,7 @@ page, The Anatomy of a Run, at the end: it shows how each subject above operates
 - **[Data Quality Tests](data-quality-tests.md)** — attach tests to Trouves.
 - **[Staging](staging.md)** — clair publishes a Trouve only after its tests pass.
 - **[Incrementality](incrementality.md)** — APPEND and UPSERT strategies for large tables.
-- **[Sampled Runs](sampling.md)** — build each Trouve from a time window of its inputs.
+- **[Sampled Runs](sampling.md)** — build each Trouve from a sample of its inputs.
 - **[Pandas-Native Transformations](pandas-native.md)** — write pipeline steps as Python functions with pandas.
 - **[Seeds](seeds.md)** — a small table that holds its rows in the Python file.
 - **[Routing](routing.md)** — remap the Snowflake target of each environment.
