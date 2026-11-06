@@ -91,7 +91,7 @@ def run(
     run_mode: RunMode = RunMode.FULL_REFRESH,
     test: bool = True,
     sample: bool = False,
-    sample_rows: int = 10_000,
+    sample_rows: int = 1_000,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> RunSummary
@@ -270,7 +270,7 @@ def test(
     select: Sequence[str] | None = None,
     exclude: Sequence[str] | None = None,
     sample: bool = False,
-    sample_rows: int = 10_000,
+    sample_rows: int = 1_000,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
 ) -> TestSummary

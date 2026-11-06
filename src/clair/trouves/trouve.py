@@ -228,7 +228,7 @@ def table_options_of(trouve: TrouveAbc) -> TableOptions | None:
 
 
 # The rows that a sampled run reads from an input that has no sample_sql.
-DEFAULT_SAMPLE_ROWS = 10_000
+DEFAULT_SAMPLE_ROWS = 1_000
 
 
 class DataframeInput(BaseModel):

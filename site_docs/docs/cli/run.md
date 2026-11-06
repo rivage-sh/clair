@@ -25,7 +25,7 @@ clair run --env dev --no-test
 clair run --env dev --threads 8
 
 # Read a sample of each input that the run does not build
-clair run --env dev --sample --sample-rows 1000
+clair run --env dev --sample --sample-rows 100
 ```
 
 ## Run order
@@ -98,7 +98,7 @@ that can fail on a sample when the complete data obeys it: `TestRowCount` and
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides the `run_config` of each Trouve. |
 | `--no-test` | `false` | Skip the data quality tests |
 | `--sample` | `false` | Read a sample of each Trouve that the run does not build. See [Sampled run](#sampled-run). |
-| `--sample-rows` | `10000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |
+| `--sample-rows` | `1000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |
 | `--threads` | the `threads` field of the environment, or `4` | The number of Trouves that run at one time. Each thread holds one Snowflake connection. |
 
 ## Exit codes

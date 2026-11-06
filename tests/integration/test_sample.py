@@ -17,9 +17,10 @@ import clair
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunSummary
 from clair.environments.environments import Environment
+from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import physical_address, write_refined_project
-from tests.integration.warehouse import execute, query_rows
+from tests.integration.warehouse import execute, query_rows, row_count
 
 pytestmark = pytest.mark.integration
 
@@ -151,3 +152,114 @@ class TestASampledRun:
     ) -> None:
         assert summary.failed == []
         assert self.ids_of(adapter, clair_environment, table_name) == THE_TEST_USER_IDS
+
+
+DEFAULT_LIMIT_DATABASE_NAME = "sample_default"
+# More rows than the default row limit, thus the limit is visible.
+SOURCE_ROW_COUNT = DEFAULT_SAMPLE_ROWS + 500
+# ROW_NUMBER gives the ids 1 to SOURCE_ROW_COUNT with no gap. SEQ4 alone can
+# give a gap.
+NUMBERED_ROWS_SQL = (
+    "SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS id "
+    f"FROM TABLE(GENERATOR(ROWCOUNT => {SOURCE_ROW_COUNT}))"
+)
+FILTERED_ROW_COUNT = 10
+
+
+def source_file(sample_sql: str | None) -> str:
+    """Give a Source, with a sample_sql or without one."""
+    sample_argument = f'sample_sql=f"{sample_sql}"' if sample_sql else ""
+    return f"from clair import THIS, Source\n\ntrouve = Source({sample_argument})\n"
+
+
+def counted_reader_file(upstream_name: str) -> str:
+    """Give a Table that reads the id of one Source, and tests that no id is NULL."""
+    return (
+        f"from {DEFAULT_LIMIT_DATABASE_NAME}.refined.{upstream_name} import trouve as {upstream_name}\n"
+        "from clair import Table, TestNotNull\n"
+        "trouve = Table(\n"
+        f'    sql=f"SELECT id FROM {{{upstream_name}}}",\n'
+        '    tests=[TestNotNull(column="id")],\n'
+        ")\n"
+    )
+
+
+# Each Source reads the same rows. The reader of each one has the name of the
+# Source and the suffix `_ids`.
+DEFAULT_LIMIT_SOURCE_FILES = {
+    "unfiltered": source_file(None),
+    "filtered": source_file(f"SELECT * FROM {{THIS}} WHERE id <= {FILTERED_ROW_COUNT}"),
+    "emptied": source_file("SELECT * FROM {THIS} WHERE 1 = 0"),
+}
+
+
+class TestTheDefaultRowLimit:
+    """A run with sample=True and no sample_rows reads DEFAULT_SAMPLE_ROWS rows.
+
+    A Source without a sample_sql gives the row limit. A Source with a
+    sample_sql gives the rows of that query, and the limit does not apply.
+    A sample_sql that gives no row makes an empty table, and a TestNotNull on
+    an empty table passes: zero rows hold a NULL.
+    """
+
+    @pytest.fixture(scope="class")
+    def summary(
+        self,
+        environment: Environment,
+        adapter: SnowflakeAdapter,
+        clair_environment: IntegrationConfig,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> RunSummary:
+        for source_name in DEFAULT_LIMIT_SOURCE_FILES:
+            address = physical_address(
+                f"{DEFAULT_LIMIT_DATABASE_NAME}.refined.{source_name}",
+                clair_environment.schema_name,
+            )
+            execute(adapter, f"CREATE OR REPLACE TABLE {address} AS {NUMBERED_ROWS_SQL}")
+        trouve_files = {
+            **DEFAULT_LIMIT_SOURCE_FILES,
+            **{
+                f"{source_name}_ids": counted_reader_file(source_name)
+                for source_name in DEFAULT_LIMIT_SOURCE_FILES
+            },
+        }
+        project_path = write_refined_project(
+            tmp_path_factory.mktemp(DEFAULT_LIMIT_DATABASE_NAME),
+            DEFAULT_LIMIT_DATABASE_NAME,
+            trouve_files,
+        )
+        return clair.run(project_path, env=environment, sample=True)
+
+    def test_each_reader_succeeds(self, summary: RunSummary) -> None:
+        assert summary.failed == [], [result.error for result in summary.failed]
+        assert summary.succeeded_count == len(DEFAULT_LIMIT_SOURCE_FILES)
+        assert summary.sample_rows == DEFAULT_SAMPLE_ROWS
+
+    @pytest.mark.parametrize(
+        ("table_name", "expected_row_count"),
+        [
+            ("unfiltered_ids", DEFAULT_SAMPLE_ROWS),
+            ("filtered_ids", FILTERED_ROW_COUNT),
+            ("emptied_ids", 0),
+        ],
+    )
+    def test_each_reader_holds_the_rows_of_its_sample(
+        self,
+        summary: RunSummary,
+        adapter: SnowflakeAdapter,
+        clair_environment: IntegrationConfig,
+        table_name: str,
+        expected_row_count: int,
+    ) -> None:
+        assert summary.failed == []
+        address = physical_address(
+            f"{DEFAULT_LIMIT_DATABASE_NAME}.refined.{table_name}", clair_environment.schema_name
+        )
+        assert row_count(adapter, address) == expected_row_count
+
+    def test_a_not_null_test_passes_on_an_empty_table(self, summary: RunSummary) -> None:
+        (test_result,) = summary.result(
+            f"{DEFAULT_LIMIT_DATABASE_NAME}.refined.emptied_ids"
+        ).test_results
+        assert test_result.test_type == "not_null"
+        assert test_result.passed

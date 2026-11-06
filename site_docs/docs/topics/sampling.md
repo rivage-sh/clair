@@ -19,7 +19,7 @@ Trouve outside the selection. A reference to such a Trouve becomes a subquery:
 
 ```sql
 -- FROM {orders} AS o, in a sampled run
-FROM (SELECT * FROM raw.shop.orders LIMIT 10000) AS o
+FROM (SELECT * FROM raw.shop.orders LIMIT 1000) AS o
 ```
 
 A Trouve that the run builds is a sample already, because it read sampled inputs. Thus a
@@ -30,11 +30,11 @@ A pandas input reads the same subquery, thus the two backends read the same rows
 
 ## The row limit, and its limit
 
-A Trouve without a `sample_sql` gives `--sample-rows` rows. The default is 10000.
+A Trouve without a `sample_sql` gives `--sample-rows` rows. The default is 1000.
 
 A `LIMIT` without an `ORDER BY` gives no specific rows. Snowflake can stop the scan early,
 thus the sample is cheap, but it is not random. Two inputs that you join keep
-different keys: 10000 orders and 10000 order lines can have almost no order in common, and
+different keys: 1000 orders and 1000 order lines can have almost no order in common, and
 the join gives almost no rows.
 
 That is correct for the question above. The SQL compiles, each column exists, and each

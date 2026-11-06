@@ -44,7 +44,7 @@ If you give `--sample`, each test reads the sample of its Trouve instead of the 
 | `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--sample` | `false` | Run each test against the sample of its Trouve |
-| `--sample-rows` | `10000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |
+| `--sample-rows` | `1000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |
 | `--threads` | the `threads` field of the environment, or `4` | The number of Trouves that clair tests at one time. Each thread holds one Snowflake connection. |
 
 ## Exit codes
