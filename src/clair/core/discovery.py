@@ -49,7 +49,13 @@ from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefault
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, SqlTrouve, TrouveAbc
+from clair.trouves.trouve import (
+    CompiledAttributes,
+    DataframeInput,
+    ExecutionType,
+    SqlTrouve,
+    TrouveAbc,
+)
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
 _SKIP_DIRS = {"clair", "tests", ARTIFACTS_DIR_NAME, "__pycache__", ".git", ".venv", "node_modules"}
@@ -255,7 +261,7 @@ def _compile_trouve(
             file_path=relative_file_path,
             module_name=module_name,
             imports=transform_imports,
-            input_addresses=input_addresses,
+            inputs=[DataframeInput(address=address) for address in input_addresses],
             config=config,
             execution_type=ExecutionType.PANDAS,
         )
@@ -277,6 +283,16 @@ def _compile_trouve(
             str(file_path),
             f"clair cannot compile the execution type "
             f"'{trouve_obj.execution_type}'.",
+        )
+
+    # A sample can read another Trouve, for example a seed of test users. Each
+    # run keeps the edge, thus --sample does not change the DAG.
+    if trouve_obj.sample_sql is not None:
+        sample_imports = detect_imports(trouve_obj.sample_sql, logical_addresses, logical)
+        trouve_obj.compiled = trouve_obj.compiled.model_copy(
+            update={
+                "imports": list(dict.fromkeys([*trouve_obj.compiled.imports, *sample_imports]))
+            }
         )
 
     # A test reads the tables that its Trouve reads, thus the same map renders

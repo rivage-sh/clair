@@ -386,6 +386,8 @@ class RecordingAdapter(WarehouseAdapter):
         self.written_addresses: list[str] = []
         self.transient_addresses: list[str] = []
         self.fetched_addresses: list[str] = []
+        # The sample query of each fetch, in the order of fetched_addresses.
+        self.fetched_sample_queries: list[str | None] = []
         self._query_counter = 0
 
     # The connection.
@@ -489,8 +491,11 @@ class RecordingAdapter(WarehouseAdapter):
 
     # The DataFrames.
 
-    def fetch_dataframe(self, address: TrouveAddress) -> pd.DataFrame:
+    def fetch_dataframe(
+        self, address: TrouveAddress, sample_query: str | None = None
+    ) -> pd.DataFrame:
         self.fetched_addresses.append(str(address))
+        self.fetched_sample_queries.append(sample_query)
         if self.fetch_error is not None:
             raise self.fetch_error
         if str(address) not in self.dataframes and self.default_dataframe is not None:

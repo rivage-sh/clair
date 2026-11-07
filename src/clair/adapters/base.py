@@ -169,8 +169,14 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
-    def fetch_dataframe(self, address: TrouveAddress) -> pd.DataFrame:
-        """Read a table into a pandas DataFrame."""
+    def fetch_dataframe(
+        self, address: TrouveAddress, sample_query: str | None = None
+    ) -> pd.DataFrame:
+        """Read a table into a pandas DataFrame.
+
+        *sample_query* is the subquery of a sampled run, which the adapter
+        reads in place of the complete table at *address*. None reads each row.
+        """
         ...
 
     @abstractmethod

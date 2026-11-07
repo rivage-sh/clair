@@ -169,7 +169,9 @@ class RecordingAdapter(WarehouseAdapter):
     def close(self) -> None:
         self.closed = True
 
-    def fetch_dataframe(self, address: TrouveAddress) -> pd.DataFrame:
+    def fetch_dataframe(
+        self, address: TrouveAddress, sample_query: str | None = None
+    ) -> pd.DataFrame:
         return pd.DataFrame()
 
     def write_dataframe(

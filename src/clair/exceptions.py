@@ -152,3 +152,24 @@ class RunError(ClairError):
 
 class ResultNotFoundError(ClairError):
     """A run summary holds no result for the address that the caller gave."""
+
+
+class SampleTargetsProductionError(ClairError):
+    """A sampled run would write to a production address.
+
+    A sampled run builds each Trouve from a part of its inputs. Its result must
+    never replace a production object. Clair raises this error before it opens
+    a connection.
+    """
+
+    def __init__(self, env_name: str, logical_addresses: list[str]) -> None:
+        self.env_name = env_name
+        self.logical_addresses = logical_addresses
+        listed = ", ".join(logical_addresses)
+        super().__init__(
+            f"A sampled run must not write to a production address, but the "
+            f"environment '{env_name}' routes these Trouves to their logical "
+            f"address: {listed}. Give the environment a routing entry in "
+            "__routing__.py that sends each Trouve to another address, or run "
+            "without --sample."
+        )

@@ -25,6 +25,7 @@ from clair.core.test_runner import TestSummary
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey, load_environment
 from clair.exceptions import ClairError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
+from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
 from tests.helpers import make_environment, make_run_result, make_test_result
 
 
@@ -197,6 +198,7 @@ class TestRunCommand:
                 "--run-mode", "incremental",
                 "--no-test",
                 "--sample",
+                "--sample-rows", "250",
                 "--threads", "3",
             ],
         )
@@ -211,7 +213,42 @@ class TestRunCommand:
         assert calls["run_mode"] == RunMode.INCREMENTAL
         assert calls["test"] is False
         assert calls["sample"] is True
+        assert calls["sample_rows"] == 250
         assert calls["threads"] == 3
+
+    @pytest.mark.parametrize("command_name", ["run", "test"])
+    def test_sample_rows_has_a_default(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], command_name: str
+    ):
+        result_of_command = (
+            RunSummary(results=[], env_name="dev", run_id="abc")
+            if command_name == "run"
+            else TestSummary(results=[])
+        )
+        _give_api(monkeypatch, calls, command_name, result_of_command)
+
+        CliRunner().invoke(cli, [command_name, "--sample"])
+
+        assert calls["sample"] is True
+        assert calls["sample_rows"] == DEFAULT_SAMPLE_ROWS
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            ["run", "--sample-rows", "10"],
+            ["test", "--sample-rows", "10"],
+            ["run", "--sample", "--sample-rows", "0"],
+        ],
+    )
+    def test_a_bad_sample_rows_stops_the_command(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], arguments: list[str]
+    ):
+        _give_api(monkeypatch, calls, arguments[0], RunSummary(results=[], env_name="dev", run_id="abc"))
+
+        result = CliRunner().invoke(cli, arguments)
+
+        assert result.exit_code == 2
+        assert calls == {}
 
 
 class TestTestCommand:

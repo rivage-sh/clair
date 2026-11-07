@@ -6,6 +6,11 @@ from clair import TestUnique, TestNotNull, TestRowCount, TestUniqueColumns
 
 All the tests are Pydantic models. Zero rows from `to_sql()` = pass.
 
+Each test takes `run_with_sample: bool | None = None`. `True` runs the test on a
+sample, `False` skips it, and `None` takes the default of the class. The default
+skips a test that can fail on a sample when the complete data obeys it. See
+[Sampled Runs](../topics/sampling.md).
+
 ## `TestUnique`
 
 Assert that a column has no duplicate values.
@@ -105,7 +110,7 @@ Run with `--sample`: **Yes**
 
 ## Summary
 
-| Class | Args | Run with `--sample`? |
+| Class | Args | Run with `--sample` by default? |
 |-------|------|----------------------|
 | `TestUnique` | `column: str` | Yes |
 | `TestNotNull` | `column: str` | Yes |

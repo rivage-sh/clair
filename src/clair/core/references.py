@@ -20,6 +20,10 @@ author types as text stays as the author wrote it.
 
 The object id is the join key, thus one file must give one Trouve object. See
 ``core/project_imports.py``.
+
+A sampled run (``clair run --sample``) renders a reference to a Trouve that
+the run does not build as the subquery of ``Trouve.sample()``. A Trouve that the
+run builds is a sample already, thus a reference to it keeps the address.
 """
 
 from __future__ import annotations
@@ -30,10 +34,11 @@ from pathlib import Path
 
 from clair.core.project_imports import names_of_files_that_ran_two_times
 from clair.environments.routing import TrouveAddress
+from clair.exceptions import CompileError
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import SqlTrouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import DataframeInput, SqlTrouve, TrouveAbc, TrouveType
 
 _PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 
@@ -42,11 +47,12 @@ def resolve_sql(
     sql: str,
     id_to_address: dict[int, TrouveAddress],
     this_address: TrouveAddress,
+    id_to_sampled_reference: dict[int, str] | None = None,
 ) -> str:
     """Render the SQL of the author into SQL with true addresses.
 
     The function replaces a token that points to a different Trouve
-    (``__CLAIR_TROUVE_<id>__``) with the address in ``id_to_address``. It also
+    (``__CLAIR_TROUVE_<id>``) with the address in ``id_to_address``. It also
     replaces the THIS marker (``__CLAIR_THIS__``) with ``this_address``.
 
     Clair calls this function two times, and the map decides the difference.
@@ -54,10 +60,32 @@ def resolve_sql(
     selection. recompile_for_selection() gives the address that the selection
     decides. Both calls read the same source string, thus the second call needs
     no text substitution on the result of the first.
+
+    Args:
+        id_to_sampled_reference: The subquery of each Trouve that a sampled
+            run reads in place of the address. None samples nothing.
+
+    Raises:
+        CompileError: If the SQL qualifies a column with a sampled reference,
+            as ``{orders}.order_id``. A subquery cannot qualify a column.
     """
-    def replace(m: re.Match[str]) -> str:
-        address = id_to_address.get(int(m.group(1)))
-        return str(address) if address else m.group(0)
+    sampled_references = id_to_sampled_reference or {}
+
+    def replace(match: re.Match[str]) -> str:
+        object_id = int(match.group(1))
+        sampled_reference = sampled_references.get(object_id)
+        address = id_to_address.get(object_id)
+        if sampled_reference is None:
+            return str(address) if address else match.group(0)
+        if sql.startswith(".", match.end()):
+            raise CompileError(
+                f"The SQL of '{this_address}' qualifies a column with the "
+                f"reference to '{address}', and a sampled run makes that "
+                "reference a subquery. Give the reference an alias, for "
+                "example `FROM {orders} AS orders`, and write `orders.<column>`."
+            )
+        return sampled_reference
+
     result = _PLACEHOLDER_RE.sub(replace, sql)
     return result.replace(THIS_PLACEHOLDER, str(this_address))
 
@@ -69,8 +97,8 @@ def detect_imports(
 ) -> list[str]:
     """Give the logical address of each Trouve that the SQL points to with a token."""
     imports: list[str] = []
-    for obj_id_str in _PLACEHOLDER_RE.findall(sql):
-        dependency = id_to_logical_address.get(int(obj_id_str))
+    for match in _PLACEHOLDER_RE.finditer(sql):
+        dependency = id_to_logical_address.get(int(match.group(1)))
         if dependency is None or dependency == own_logical_address:
             continue
         if str(dependency) not in imports:
@@ -163,8 +191,50 @@ def _reference_addresses_for_selection(
     return reference_addresses
 
 
+def render_sample(
+    trouve: TrouveAbc,
+    id_to_address: dict[int, TrouveAddress],
+    address: TrouveAddress,
+    sample_rows: int,
+) -> str:
+    """Give the subquery that a sampled read of *trouve* at *address* executes.
+
+    ``{THIS}`` becomes *address*. A reference to another Trouve in the
+    ``sample_sql`` becomes its address in *id_to_address*, and never a sample
+    of its own: thus one sample reads no second sample.
+    """
+    return resolve_sql(trouve.sample(sample_rows), id_to_address, this_address=address)
+
+
+def _sampled_references(
+    trouves: Sequence[TrouveAbc],
+    selected_addresses: set[str],
+    reference_addresses: dict[int, TrouveAddress],
+    sample_rows: int | None,
+) -> dict[int, str]:
+    """Give the sample of each Trouve that the run does not build, keyed by the object id.
+
+    A Trouve that the run builds is a sample already. A second sample of it
+    would make each layer of the DAG smaller than the layer before it.
+    """
+    if sample_rows is None:
+        return {}
+    sampled_references: dict[int, str] = {}
+    for trouve in trouves:
+        if trouve.compiled is None:
+            continue
+        if str(trouve.compiled.physical_address) in selected_addresses:
+            continue
+        sampled_references[id(trouve)] = render_sample(
+            trouve, reference_addresses, reference_addresses[id(trouve)], sample_rows
+        )
+    return sampled_references
+
+
 def recompile_for_selection(
-    trouves: Sequence[TrouveAbc], selected_addresses: set[str]
+    trouves: Sequence[TrouveAbc],
+    selected_addresses: set[str],
+    sample_rows: int | None = None,
 ) -> None:
     """Resolve each address again, now that clair knows the selection.
 
@@ -181,16 +251,30 @@ def recompile_for_selection(
 
     This function changes each Trouve in place. It writes three places: the
     resolved_sql of a SQL Trouve, the resolved_sql of each TestSql, and the
-    input_addresses of a DataFrame Trouve. It changes nothing for a Trouve outside
+    inputs of a DataFrame Trouve. It changes nothing for a Trouve outside
     the selection, because this run does not execute that Trouve.
+
+    A sampled run reads ``Trouve.sample()`` in place of each Trouve that the
+    run does not build, in the SQL and in the inputs of a DataFrame Trouve. It
+    does not sample the SQL of a test: a test examines the object that the run
+    built, and a test that reads a second Trouve needs each of its rows.
 
     Args:
         trouves: Each Trouve from discover_project().
         selected_addresses: The physical addresses of the Trouves for this run.
             The DAG selector gives them.
+        sample_rows: The row limit of a sampled run, for each Trouve without a
+            ``sample_sql``. None reads each row.
+
+    Raises:
+        CompileError: If a sampled reference qualifies a column. See
+            ``resolve_sql``.
     """
     reference_addresses = _reference_addresses_for_selection(
         trouves, selected_addresses
+    )
+    sampled_references = _sampled_references(
+        trouves, selected_addresses, reference_addresses, sample_rows
     )
 
     for trouve in trouves:
@@ -208,7 +292,10 @@ def recompile_for_selection(
             trouve.compiled = trouve.compiled.model_copy(
                 update={
                     "resolved_sql": resolve_sql(
-                        trouve.sql, reference_addresses, this_address=this_address
+                        trouve.sql,
+                        reference_addresses,
+                        this_address=this_address,
+                        id_to_sampled_reference=sampled_references,
                     )
                 }
             )
@@ -216,8 +303,11 @@ def recompile_for_selection(
             # A DataFrame Trouve names each input in a list, and not in SQL.
             trouve.compiled = trouve.compiled.model_copy(
                 update={
-                    "input_addresses": [
-                        str(reference_addresses[id(upstream)])
+                    "inputs": [
+                        DataframeInput(
+                            address=str(reference_addresses[id(upstream)]),
+                            sample_query=sampled_references.get(id(upstream)),
+                        )
                         for upstream in trouve.upstream_trouves()
                     ]
                 }

@@ -144,7 +144,7 @@ class TestSeedTableDiscovery:
 
         assert seed.compiled is not None
         assert seed.compiled.execution_type == ExecutionType.PANDAS
-        assert seed.compiled.input_addresses == []
+        assert seed.compiled.inputs == []
         assert seed.compiled.resolved_sql == ""
         assert "country_code: string" in seed.compiled.resolved_transform
 
