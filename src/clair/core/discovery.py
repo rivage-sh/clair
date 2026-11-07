@@ -421,6 +421,17 @@ def discover_project(
             logical_address, trouve_obj.type, routing
         )
 
+    # A token without an address stops the run here, before the compiler reads
+    # it. Thus the fault names the file that ran two times.
+    errors.extend(describe_unresolved_tokens(collected, logical_addresses))
+
+    # A fault stops the run. A file that clair cannot read holds a Trouve that
+    # the DAG then misses, and a run would report success after it built fewer
+    # tables than the project declares.
+    if errors:
+        logger.info("discovery.complete", project_root=str(project_root), trouves=len(collected), errors=len(errors))
+        raise ProjectDiscoveryError(errors)
+
     # Phase B: compile each Trouve.
     # Clair puts the logical addresses in the SQL. Thus, by default, the SQL
     # reads the production upstream tables. After the selection, call
@@ -437,15 +448,6 @@ def discover_project(
             profile_defaults=profile_defaults,
         )
 
-    errors.extend(describe_unresolved_tokens(collected))
-
-    trouve_count = len(collected)
-    logger.info("discovery.complete", project_root=str(project_root), trouves=trouve_count, errors=len(errors))
-
-    # A fault stops the run. A file that clair cannot read holds a Trouve that
-    # the DAG then misses, and a run would report success after it built fewer
-    # tables than the project declares.
-    if errors:
-        raise ProjectDiscoveryError(errors)
+    logger.info("discovery.complete", project_root=str(project_root), trouves=len(collected), errors=0)
 
     return [trouve for trouve, _, _, _ in collected]

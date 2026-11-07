@@ -38,7 +38,13 @@ from clair.exceptions import CompileError
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import DataframeInput, SqlTrouve, TrouveAbc, TrouveType
+from clair.trouves.trouve import (
+    DEFAULT_SAMPLE_ROWS,
+    DataframeInput,
+    SqlTrouve,
+    TrouveAbc,
+    TrouveType,
+)
 
 _PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 
@@ -68,6 +74,10 @@ def resolve_sql(
     Raises:
         CompileError: If the SQL qualifies a column with a sampled reference,
             as ``{orders}.order_id``. A subquery cannot qualify a column.
+        CompileError: If a token points to an object without an address. Thus
+            no SQL from this function holds a token, and no token gets to the
+            warehouse. ``describe_unresolved_tokens()`` finds this fault first,
+            and its message names the file that ran two times.
     """
     sampled_references = id_to_sampled_reference or {}
 
@@ -75,8 +85,13 @@ def resolve_sql(
         object_id = int(match.group(1))
         sampled_reference = sampled_references.get(object_id)
         address = id_to_address.get(object_id)
+        if address is None:
+            raise CompileError(
+                f"The SQL of '{this_address}' interpolates a Trouve object "
+                "that clair did not collect, thus clair cannot give it an address."
+            )
         if sampled_reference is None:
-            return str(address) if address else match.group(0)
+            return str(address)
         if sql.startswith(".", match.end()):
             raise CompileError(
                 f"The SQL of '{this_address}' qualifies a column with the "
@@ -106,33 +121,45 @@ def detect_imports(
     return imports
 
 
+def texts_with_tokens(trouve: TrouveAbc) -> list[str]:
+    """Give each SQL text of the author that can hold a reference token.
+
+    Each text is the source, before clair renders it: the sample, the SQL, and
+    the SQL of each TestSql. Add a new SQL field of a Trouve here, thus the
+    token guard reads it too.
+    """
+    texts = [trouve.sample(DEFAULT_SAMPLE_ROWS)]
+    if isinstance(trouve, SqlTrouve):
+        texts.append(trouve.sql)
+    texts.extend(test.sql for test in trouve.tests if isinstance(test, TestSql))
+    return texts
+
 
 def describe_unresolved_tokens(
     collected: Sequence[tuple[TrouveAbc, TrouveAddress, Path, str]],
+    id_to_address: dict[int, TrouveAddress],
 ) -> list[str]:
-    """Give one fault for each Trouve that keeps a placeholder token.
+    """Give one fault for each Trouve with a token that has no address.
 
-    A token stays in the SQL when clair holds no address for the object that
-    the author interpolated. The module identity finder removes the common
-    cause — one file that runs two times under two names — but an import
-    machinery that clair does not see, for example the finder of an editable
-    install, can still make a second module object. Clair must never send such
-    SQL to the warehouse: the warehouse answers with a parse error that names
-    the token and nothing else, and the DAG has already lost the edge in
-    silence.
+    A token has no address when the author interpolated an object that clair
+    did not collect. The module identity finder removes the common cause — one
+    file that runs two times under two names — but an import machinery that
+    clair does not see, for example the finder of an editable install, can
+    still make a second module object.
+
+    Discovery calls this function before it compiles, thus the fault stops each
+    run, also a run without --sample. Each DAG holds the edge of a
+    ``sample_sql``, and a token without an address removes that edge in
+    silence. ``resolve_sql()`` also refuses such a token, but its message
+    cannot name the file that ran two times.
     """
     faulty: list[tuple[TrouveAddress, Path]] = []
     for trouve_obj, logical_address, file_path, _ in collected:
-        compiled = trouve_obj.compiled
-        if compiled is None:
-            continue
-        texts = [compiled.resolved_sql]
-        texts.extend(
-            test.resolved_sql
-            for test in trouve_obj.tests
-            if isinstance(test, TestSql) and test.resolved_sql
-        )
-        if any(_PLACEHOLDER_RE.search(text) for text in texts):
+        if any(
+            int(match.group(1)) not in id_to_address
+            for text in texts_with_tokens(trouve_obj)
+            for match in _PLACEHOLDER_RE.finditer(text)
+        ):
             faulty.append((logical_address, file_path))
     if not faulty:
         return []

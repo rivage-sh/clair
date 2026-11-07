@@ -13,12 +13,15 @@ import clair
 from clair.cli.main import cli
 from clair.core.dag import build_dag
 from clair.core.discovery import discover_project, find_project_root
+from clair.core.references import resolve_sql
 from clair.exceptions import (
+    CompileError,
     NotAProjectRootError,
     ProjectDiscoveryError,
     ProjectRootNotFoundError,
 )
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
+from clair.trouves.address import TrouveAddress
 from clair.trouves.trouve import CompiledAttributes, TrouveAbc
 from tests.helpers import write_project_marker
 
@@ -270,28 +273,47 @@ class TestTheFlatProject:
 
 
 class TestTheTokenGuard:
-    """A reference token that survives compilation stops the run."""
+    """A reference token without an address stops the run."""
 
+    @pytest.mark.parametrize(
+        "table_arguments",
+        [
+            'sql=f"SELECT * FROM {foreign}"',
+            'sql="SELECT 1", sample_sql=f"SELECT * FROM {THIS} JOIN {foreign} USING (id)"',
+            'sql="SELECT 1", tests=[TestSql(sql=f"SELECT * FROM {foreign}")]',
+        ],
+        ids=["sql", "sample_sql", "test_sql"],
+    )
     def test_a_trouve_from_outside_the_project_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        table_arguments: str,
     ) -> None:
         outside = tmp_path / "outside"
         outside.mkdir()
         (outside / "foreign_trouve_module.py").write_text(SOURCE_FILE)
         monkeypatch.syspath_prepend(str(outside))
+        monkeypatch.delitem(sys.modules, "foreign_trouve_module", raising=False)
 
         project_root = write_project_marker(tmp_path / "project")
         (project_root / "shop" / "refined").mkdir(parents=True)
         (project_root / "shop" / "refined" / "daily.py").write_text(
             "from foreign_trouve_module import trouve as foreign\n"
-            "from clair import Table\n"
-            'trouve = Table(sql=f"SELECT * FROM {foreign}")\n'
+            "from clair import THIS, Table, TestSql\n"
+            f"trouve = Table({table_arguments})\n"
         )
 
         with pytest.raises(ProjectDiscoveryError) as error:
             discover_project(project_root)
         assert "reference token" in str(error.value)
         sys.modules.pop("foreign_trouve_module", None)
+
+    def test_resolve_sql_refuses_a_token_without_an_address(self) -> None:
+        address = TrouveAddress.parse("shop.refined.daily")
+        sql = f"SELECT * FROM {TROUVE_PLACEHOLDER_PREFIX}12345"
+        with pytest.raises(CompileError, match="did not collect"):
+            resolve_sql(sql, {}, this_address=address)
 
 
 class TestTheCommands:
