@@ -57,9 +57,12 @@ class TestTheSession:
         assert result.status == RunStatus.SUCCESS, result.error
         query_id = next(statement.query_id for statement in result.statements if statement.query_id)
 
+        # The time window keeps the lookup short. Without it, the table function
+        # reads 10000 queries and takes up to one minute of the warehouse.
         ((query_tag,),) = query_rows(
             adapter,
             f"SELECT query_tag FROM TABLE({WAREHOUSE_DATABASE_NAME}.INFORMATION_SCHEMA.QUERY_HISTORY("
+            "END_TIME_RANGE_START => DATEADD('minute', -15, CURRENT_TIMESTAMP()), "
             "RESULT_LIMIT => 10000)) "
             f"WHERE query_id = '{query_id}'",
         )

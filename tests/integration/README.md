@@ -83,7 +83,9 @@ belong to one process. Without that option xdist splits a class over the
 workers, each worker runs the fixture, and two runs write the same tables.
 
 A test of a project in `examples/projects/` asks for the `example_sources`
-fixture, which clones the golden source tables under the prefix of its class. A
+fixture, which clones the golden source tables under the prefix of its class.
+The class or the module names its project with an `example_project_name`
+fixture, and the fixture clones the tables of that project only. A
 probe project of the staging tests or the seed tests makes its own rows, thus it
 needs no clone.
 
