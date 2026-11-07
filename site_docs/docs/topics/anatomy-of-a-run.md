@@ -92,9 +92,10 @@ object, whatever name an import uses: the import resolves in the normal way, and
 existing module object then answers under the new name too. The standard library does the
 same by hand — `os.path` and `posixpath` are two names for one module.
 
-A reference token that survives compilation stops the run anyway, and the error names the
-Trouve. clair never sends unresolved SQL to the warehouse: Snowflake answers with a parse
-error that names the token and nothing else.
+A reference token without an address stops the run anyway, before clair compiles, and the
+error names the Trouve. clair reads each token in `Trouve.sql`, in `sample_sql`, and in
+each `TestSql.sql`. clair never sends unresolved SQL to the warehouse: Snowflake answers
+with a parse error that names the token and nothing else.
 
 ### A file that clair cannot read stops the run
 
