@@ -42,6 +42,12 @@ DEPENDENT_LOGICAL_NAME = "example_1_database.derived.daily_event_counts"
 
 
 @pytest.fixture(scope="class")
+def example_project_name() -> str:
+    """Give the project whose source tables `example_sources` clones."""
+    return PROJECT_NAME
+
+
+@pytest.fixture(scope="class")
 def project_copy(
     tmp_path_factory: pytest.TempPathFactory, example_sources: list[str]
 ) -> Path:

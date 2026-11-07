@@ -1,8 +1,13 @@
 """Run each example project against Snowflake.
 
 The projects in `examples/projects/` are the fixtures. A change that breaks an
-example therefore breaks the build, and the documentation stays correct. A new
-project in that directory joins these tests with no change here.
+example therefore breaks the build, and the documentation stays correct.
+
+Each project has its own test class. `--dist loadscope` sends each class to one
+worker, thus the four projects run at the same time, and the class-scoped
+fixtures clone the sources one time for each project. A new project in that
+directory needs a class here: `test_each_example_project_has_a_class` fails
+without one.
 
 Each test calls `clair.run()` or `clair.test()` and reads the summary that the
 call gives. The summary names each Trouve, its status, its statements and its
@@ -24,6 +29,7 @@ module from the tests of another module that builds the same project.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -44,63 +50,183 @@ from tests.integration.warehouse import row_count, table_exists
 pytestmark = pytest.mark.integration
 
 EXAMPLE_PROJECT_PATHS = example_project_paths()
-EXAMPLE_PROJECT_IDS = [path.name for path in EXAMPLE_PROJECT_PATHS]
 
 
-@pytest.fixture(scope="class")
-def project_copies(
-    tmp_path_factory: pytest.TempPathFactory, example_sources: list[str]
-) -> dict[str, Path]:
-    """Copy each example project once, with the test routing entry.
+class ExampleProjectTests:
+    """The tests of one example project. Each subclass names its project.
 
-    `example_sources` clones the SOURCE table of each project under the prefix
-    of this module. A copy is useless without those tables.
+    The name does not start with `Test`, thus pytest collects each subclass and
+    not this class. pytest runs the tests of this class before the tests of a
+    subclass, thus a test of a subclass can change the source tables.
     """
-    destination = tmp_path_factory.mktemp("projects")
-    return {
-        path.name: copy_with_ci_routing(path, destination)
-        for path in EXAMPLE_PROJECT_PATHS
-    }
+
+    project_name: ClassVar[str]
+
+    @pytest.fixture(scope="class")
+    def example_project_name(self) -> str:
+        """Give the project whose source tables `example_sources` clones."""
+        return self.project_name
+
+    @pytest.fixture(scope="class")
+    def project_path(self) -> Path:
+        """Give the project in the repository, which holds the logical names."""
+        return next(
+            path for path in EXAMPLE_PROJECT_PATHS if path.name == self.project_name
+        )
+
+    @pytest.fixture(scope="class")
+    def project_copy(
+        self,
+        tmp_path_factory: pytest.TempPathFactory,
+        example_sources: list[str],
+        project_path: Path,
+    ) -> Path:
+        """Copy the project once, with the test routing entry.
+
+        `example_sources` clones the SOURCE tables of the project under the
+        prefix of this class. A copy is useless without those tables.
+        """
+        return copy_with_ci_routing(project_path, tmp_path_factory.mktemp("projects"))
+
+    def test_a_full_refresh_builds_every_model(
+        self,
+        project_path: Path,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """Each Trouve that clair builds exists in the schema of the run."""
+        schema_name = clair_environment.schema_name
+
+        summary = clair.run(project_copy, env=environment)
+
+        logical_names = model_logical_names(trouves_of(project_path))
+        assert logical_names, f"{project_path.name} builds no Trouve"
+
+        absent = [
+            str(physical_address(logical_name, schema_name))
+            for logical_name in logical_names
+            if not table_exists(adapter, physical_address(logical_name, schema_name))
+        ]
+        assert absent == []
+
+        assert summary.failed == []
+        assert summary.succeeded_count == len(logical_names)
+
+        # The result of each Trouve holds the statements that Snowflake ran, and
+        # the staging address that clair built at. A staged run writes there
+        # first, thus the statements name that address.
+        for result in summary.succeeded:
+            assert result.addresses.staging is not None
+            assert summary.run_id in str(result.addresses.staging)
+            assert [s for s in result.statements if s.query_id]
+            if result.statements:
+                assert any(
+                    str(result.addresses.staging) in s.sql for s in result.statements
+                )
+
+    def test_the_data_quality_tests_pass(
+        self,
+        project_path: Path,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
+    ) -> None:
+        """`clair.test()` reports no failure and no error."""
+        summary = clair.test(project_copy, env=environment)
+
+        # Each example project must declare a minimum of one data quality test.
+        # An example with no test gives this test nothing to do, and the run
+        # stays green with no proof.
+        assert summary.results, f"{project_path.name} declares no data quality test"
+        assert summary.failed_results == []
+        assert summary.error_count == 0
 
 
-@pytest.mark.parametrize("project_path", EXAMPLE_PROJECT_PATHS, ids=EXAMPLE_PROJECT_IDS)
-def test_a_full_refresh_builds_every_model(
-    project_path: Path,
-    project_copies: dict[str, Path],
-    clair_environment: IntegrationConfig,
-    environment: Environment,
-    adapter: SnowflakeAdapter,
-) -> None:
-    """Each Trouve that clair builds exists in the schema of the run."""
-    copy_path = project_copies[project_path.name]
-    schema_name = clair_environment.schema_name
+class TestExample1(ExampleProjectTests):
+    project_name = "example_1"
 
-    summary = clair.run(copy_path, env=environment)
+    def test_select_builds_one_part_of_the_dag(
+        self,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
+    ) -> None:
+        """`select` builds the named Trouve only.
 
-    logical_names = model_logical_names(trouves_of(project_path))
-    assert logical_names, f"{project_path.name} builds no Trouve"
-
-    absent = [
-        str(physical_address(logical_name, schema_name))
-        for logical_name in logical_names
-        if not table_exists(adapter, physical_address(logical_name, schema_name))
-    ]
-    assert absent == []
-
-    assert summary.failed == []
-    assert summary.succeeded_count == len(logical_names)
-
-    # The result of each Trouve holds the statements that Snowflake ran, and
-    # the staging address that clair built at. A staged run writes there first,
-    # thus the statements name that address.
-    for result in summary.succeeded:
-        assert result.addresses.staging is not None
-        assert summary.run_id in str(result.addresses.staging)
-        assert [s for s in result.statements if s.query_id]
-        if result.statements:
-            assert any(
-                str(result.addresses.staging) in s.sql for s in result.statements
+        A selector matches the physical address, thus the pattern is
+        `clair_pr_testing.<schema>.example_1_database__refined__events`, not the
+        logical name `example_1_database.refined.events`.
+        """
+        selector = str(
+            physical_address(
+                "example_1_database.refined.events", clair_environment.schema_name
             )
+        )
+
+        summary = clair.run(project_copy, env=environment, select=[selector])
+
+        assert summary.succeeded_count == 1
+        assert str(summary.results[0].addresses.logical) == "example_1_database.refined.events"
+
+
+class TestExample2(ExampleProjectTests):
+    project_name = "example_2"
+
+
+class TestExample3(ExampleProjectTests):
+    project_name = "example_3"
+
+    def test_the_incremental_append_adds_only_the_new_rows(
+        self,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """example_3 appends the orders of the last 3 days.
+
+        Each date in the golden table is old, thus no seed order reaches the 3
+        day window. The full refresh takes all 6 orders, and the incremental run
+        then appends the 2 orders that this test inserts.
+        """
+        schema_name = clair_environment.schema_name
+        recent_orders = physical_address(
+            "example_3_database.derived.recent_orders", schema_name
+        )
+        source_orders = physical_address("example_3_database.source.orders", schema_name)
+
+        clair.run(project_copy, env=environment, run_mode=RunMode.FULL_REFRESH)
+        assert row_count(adapter, recent_orders) == 6
+
+        adapter.execute(f"""
+            insert into {source_orders}
+            select column1, column2, column3, column4, column5, column6
+            from values
+                ('ord_007', 'cust_c', 'placed',  55.00, current_timestamp(), current_timestamp()),
+                ('ord_008', 'cust_d', 'placed', 310.00, current_timestamp(), current_timestamp())
+        """)
+
+        summary = clair.run(project_copy, env=environment, run_mode=RunMode.INCREMENTAL)
+        assert row_count(adapter, recent_orders) == 8
+
+        # The mode of the result is the mode that clair used, after the
+        # RunConfig of the Trouve and the fallback of a table that does not
+        # exist yet.
+        result = summary.result("example_3_database.derived.recent_orders")
+        assert result is not None
+        assert result.effective_run_mode == RunMode.INCREMENTAL
+
+
+class TestExample4(ExampleProjectTests):
+    project_name = "example_4"
+
+
+def test_each_example_project_has_a_class() -> None:
+    """Each project in `examples/projects/` has a test class in this module."""
+    tested = {cls.project_name for cls in ExampleProjectTests.__subclasses__()}
+    assert tested == {path.name for path in EXAMPLE_PROJECT_PATHS}
 
 
 def test_the_address_of_a_trouve_is_the_one_that_you_expect(
@@ -130,86 +256,3 @@ def test_the_address_of_a_trouve_is_the_one_that_you_expect(
         f"{workspace_prefix}__example_2_database__reports__top_customers"
     )
 
-
-@pytest.mark.parametrize("project_path", EXAMPLE_PROJECT_PATHS, ids=EXAMPLE_PROJECT_IDS)
-def test_the_data_quality_tests_pass(
-    project_path: Path,
-    project_copies: dict[str, Path],
-    clair_environment: IntegrationConfig,
-    environment: Environment,
-) -> None:
-    """`clair.test()` reports no failure and no error."""
-    copy_path = project_copies[project_path.name]
-
-    summary = clair.test(copy_path, env=environment)
-
-    # Each example project must declare a minimum of one data quality test. An
-    # example with no test gives this test nothing to do, and the run stays
-    # green with no proof.
-    assert summary.results, f"{project_path.name} declares no data quality test"
-    assert summary.failed_results == []
-    assert summary.error_count == 0
-
-
-def test_the_incremental_append_adds_only_the_new_rows(
-    project_copies: dict[str, Path],
-    clair_environment: IntegrationConfig,
-    environment: Environment,
-    adapter: SnowflakeAdapter,
-) -> None:
-    """example_3 appends the orders of the last 3 days.
-
-    Each date in the golden table is old, thus no seed order reaches the 3 day
-    window. The full refresh takes all 6 orders, and the incremental run then
-    appends the 2 orders that this test inserts.
-    """
-    copy_path = project_copies["example_3"]
-    schema_name = clair_environment.schema_name
-    recent_orders = physical_address(
-        "example_3_database.derived.recent_orders", schema_name
-    )
-    source_orders = physical_address("example_3_database.source.orders", schema_name)
-
-    clair.run(copy_path, env=environment, run_mode=RunMode.FULL_REFRESH)
-    assert row_count(adapter, recent_orders) == 6
-
-    adapter.execute(f"""
-        insert into {source_orders}
-        select column1, column2, column3, column4, column5, column6
-        from values
-            ('ord_007', 'cust_c', 'placed',  55.00, current_timestamp(), current_timestamp()),
-            ('ord_008', 'cust_d', 'placed', 310.00, current_timestamp(), current_timestamp())
-    """)
-
-    summary = clair.run(copy_path, env=environment, run_mode=RunMode.INCREMENTAL)
-    assert row_count(adapter, recent_orders) == 8
-
-    # The mode of the result is the mode that clair used, after the RunConfig of
-    # the Trouve and the fallback of a table that does not exist yet.
-    result = summary.result("example_3_database.derived.recent_orders")
-    assert result is not None
-    assert result.effective_run_mode == RunMode.INCREMENTAL
-
-
-def test_select_builds_one_part_of_the_dag(
-    project_copies: dict[str, Path],
-    clair_environment: IntegrationConfig,
-    environment: Environment,
-) -> None:
-    """`select` builds the named Trouve only.
-
-    A selector matches the physical address, thus the pattern is
-    `clair_pr_testing.<schema>.example_1_database__refined__events`, not the
-    logical name `example_1_database.refined.events`.
-    """
-    copy_path = project_copies["example_1"]
-    selector = str(
-        physical_address(
-            "example_1_database.refined.events", clair_environment.schema_name
-        )
-    )
-
-    summary = clair.run(copy_path, env=environment, select=[selector])
-
-    assert summary.succeeded_count == 1
-    assert str(summary.results[0].addresses.logical) == "example_1_database.refined.events"

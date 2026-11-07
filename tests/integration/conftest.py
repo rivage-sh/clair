@@ -96,9 +96,14 @@ def workspace_prefix(request: pytest.FixtureRequest) -> Iterator[str]:
 
 @pytest.fixture(scope="class")
 def example_sources(
-    snowflake_workspace: IntegrationConfig, workspace_prefix: str
+    snowflake_workspace: IntegrationConfig,
+    workspace_prefix: str,
+    example_project_name: str,
 ) -> list[str]:
-    """Clone the golden source table of each example project into the workspace.
+    """Clone the golden source tables of one example project into the workspace.
+
+    The test module or the test class gives the project with an
+    `example_project_name` fixture.
 
     A clone is a zero copy operation, thus each class can hold its own copy. The
     name of each copy holds `workspace_prefix`, so this fixture runs one time
@@ -109,7 +114,9 @@ def example_sources(
     """
     adapter = connect(snowflake_workspace)
     try:
-        return load_source_tables(adapter, snowflake_workspace.schema_name)
+        return load_source_tables(
+            adapter, snowflake_workspace.schema_name, example_project_name
+        )
     finally:
         adapter.close()
 

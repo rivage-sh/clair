@@ -44,17 +44,22 @@ def create_schema(adapter: SnowflakeAdapter, schema_name: str) -> None:
     execute(adapter, f"create schema if not exists {DATABASE_NAME}.{schema_name}")
 
 
-def load_source_tables(adapter: SnowflakeAdapter, schema_name: str) -> list[str]:
-    """Clone the golden source table of each example project into the schema.
+def load_source_tables(
+    adapter: SnowflakeAdapter, schema_name: str, project_name: str
+) -> list[str]:
+    """Clone the golden source tables of one example project into the schema.
 
     A clone is a zero copy operation. The run can write to its copy, thus the
-    golden table never changes.
+    golden table never changes. A clone still takes about one second of the
+    warehouse, thus a class clones the tables of its own project only.
 
     Returns:
         The name of each table that this function made.
     """
     made: list[str] = []
     for project_path in example_project_paths():
+        if project_path.name != project_name:
+            continue
         for logical_name in source_logical_names(trouves_of(project_path)):
             target = f"{DATABASE_NAME}.{schema_name}.{physical_table_name(logical_name)}"
             golden = f"{DATABASE_NAME}.{golden_table_name(project_path, logical_name)}"
