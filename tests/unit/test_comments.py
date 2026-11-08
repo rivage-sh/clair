@@ -2,8 +2,8 @@
 
 A promotion of a view is a CREATE OR REPLACE VIEW, and it removes each comment
 of the staging view. Thus the comments go onto the physical object after the
-promotion. An incremental table keeps its comments between runs, thus it gets
-an empty comment for each text that is empty.
+promotion. An incremental table keeps its comments between runs. The runner
+compares them with the docs, and writes only a comment that differs.
 """
 
 from __future__ import annotations
@@ -11,7 +11,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from clair.core.comments import build_comment_statements, quote_comment
+from clair.adapters.base import WarehouseColumn
+from clair.core.comments import WarehouseComments, build_comment_statements, quote_comment
 from clair.core.compiler import build_statements
 from clair.core.runner import RunStatus
 from clair.core.staging import make_staging_address
@@ -37,7 +38,8 @@ DROP_STAGING = "drop the staging object"
 
 TABLE_COMMENT = f"ALTER TABLE {PHYSICAL_ADDRESS} SET COMMENT = 'The orders.'"
 VIEW_COMMENT = f"ALTER VIEW {PHYSICAL_ADDRESS} SET COMMENT = 'The orders.'"
-COLUMN_COMMENT = f"COMMENT ON COLUMN {PHYSICAL_ADDRESS}.id IS 'The order ID.'"
+TABLE_COLUMN_COMMENT = f"ALTER TABLE {PHYSICAL_ADDRESS} ALTER COLUMN id COMMENT 'The order ID.'"
+VIEW_COLUMN_COMMENT = f"COMMENT ON COLUMN {PHYSICAL_ADDRESS}.id IS 'The order ID.'"
 
 
 def documented_columns() -> list[Column]:
@@ -54,6 +56,28 @@ def index_of(sql_texts: list[str], expected: str) -> int:
 
 def comment_statements(sql_texts: list[str]) -> list[str]:
     return [sql for sql in sql_texts if "COMMENT" in sql]
+
+
+def last_lines(statements: list[str]) -> list[str]:
+    """Give each statement without its header comment."""
+    return [statement.splitlines()[-1] for statement in statements]
+
+
+def incremental_table(docs: str = "", columns: list[Column] | None = None) -> Table:
+    return Table(
+        sql="SELECT 1 AS id",
+        run_config=Incremental(strategy=Append()),
+        docs=docs,
+        columns=columns or [],
+    )
+
+
+def current_comments(object_comment: str = "", **column_comments: str) -> WarehouseComments:
+    """Give the comments of a table, with each column name in upper case as Snowflake stores it."""
+    return WarehouseComments(
+        object_comment=object_comment,
+        column_comments={name.upper(): comment for name, comment in column_comments.items()},
+    )
 
 
 class TestTheText:
@@ -85,37 +109,115 @@ class TestTheStatements:
 
         statements = build_comment_statements(PHYSICAL_ADDRESS, trouve)
 
-        assert [statement.splitlines()[-1] for statement in statements] == [
-            TABLE_COMMENT,
-            COLUMN_COMMENT,
-        ]
+        assert last_lines(statements) == [TABLE_COMMENT, TABLE_COLUMN_COMMENT]
 
-    def test_a_view_gets_an_alter_view(self):
-        trouve = View(sql="SELECT 1 AS id", docs="The orders.")
-
-        assert build_comment_statements(PHYSICAL_ADDRESS, trouve)[0].endswith(VIEW_COMMENT)
-
-    def test_an_iceberg_table_gets_an_alter_iceberg_table(self):
-        trouve = Table(sql="SELECT 1 AS id", docs="The orders.", iceberg=Iceberg())
+    def test_the_columns_of_a_table_share_one_alter(self):
+        trouve = Table(
+            sql="SELECT 1 AS id",
+            columns=[
+                Column(name="id", type="NUMBER", docs="The order ID."),
+                Column(name="amount", type="NUMBER", docs="The total."),
+            ],
+        )
 
         (statement,) = build_comment_statements(PHYSICAL_ADDRESS, trouve)
 
-        assert f"ALTER ICEBERG TABLE {PHYSICAL_ADDRESS} SET COMMENT" in statement
+        assert statement.endswith(
+            f"ALTER TABLE {PHYSICAL_ADDRESS} ALTER COLUMN id COMMENT 'The order ID.', "
+            f"COLUMN amount COMMENT 'The total.'"
+        )
 
-    def test_an_incremental_table_clears_each_empty_text(self):
-        trouve = Table(
+    def test_a_view_gets_an_alter_view_and_one_statement_per_column(self):
+        trouve = View(
             sql="SELECT 1 AS id",
-            run_config=Incremental(strategy=Append()),
-            columns=documented_columns(),
+            docs="The orders.",
+            columns=[
+                Column(name="id", type="NUMBER", docs="The order ID."),
+                Column(name="amount", type="NUMBER", docs="The total."),
+            ],
         )
 
         statements = build_comment_statements(PHYSICAL_ADDRESS, trouve)
 
-        assert [statement.splitlines()[-1] for statement in statements] == [
-            f"ALTER TABLE {PHYSICAL_ADDRESS} SET COMMENT = ''",
-            COLUMN_COMMENT,
-            f"COMMENT ON COLUMN {PHYSICAL_ADDRESS}.amount IS ''",
+        assert last_lines(statements) == [
+            VIEW_COMMENT,
+            VIEW_COLUMN_COMMENT,
+            f"COMMENT ON COLUMN {PHYSICAL_ADDRESS}.amount IS 'The total.'",
         ]
+
+    def test_an_iceberg_table_gets_an_alter_iceberg_table(self):
+        trouve = Table(
+            sql="SELECT 1 AS id",
+            docs="The orders.",
+            columns=documented_columns(),
+            iceberg=Iceberg(),
+        )
+
+        statements = build_comment_statements(PHYSICAL_ADDRESS, trouve)
+
+        assert all(f"ALTER ICEBERG TABLE {PHYSICAL_ADDRESS}" in statement for statement in statements)
+
+
+class TestTheDifference:
+    """An incremental table holds comments, and only a comment that differs gets a statement."""
+
+    def test_comments_that_match_the_docs_get_no_statement(self):
+        trouve = incremental_table("The orders.", documented_columns())
+
+        statements = build_comment_statements(
+            PHYSICAL_ADDRESS, trouve, current_comments("The orders.", id="The order ID.")
+        )
+
+        assert statements == []
+
+    def test_only_the_column_that_differs_gets_a_statement(self):
+        trouve = incremental_table(
+            "The orders.",
+            [
+                Column(name="id", type="NUMBER", docs="The order ID."),
+                Column(name="amount", type="NUMBER", docs="The total."),
+            ],
+        )
+
+        statements = build_comment_statements(
+            PHYSICAL_ADDRESS,
+            trouve,
+            current_comments("The orders.", id="The order ID.", amount="An old text."),
+        )
+
+        assert last_lines(statements) == [
+            f"ALTER TABLE {PHYSICAL_ADDRESS} ALTER COLUMN amount COMMENT 'The total.'"
+        ]
+
+    def test_a_removed_docs_text_clears_its_comment(self):
+        trouve = incremental_table(columns=[Column(name="id", type="NUMBER")])
+
+        statements = build_comment_statements(
+            PHYSICAL_ADDRESS, trouve, current_comments("The orders.", id="The order ID.")
+        )
+
+        assert last_lines(statements) == [
+            f"ALTER TABLE {PHYSICAL_ADDRESS} SET COMMENT = ''",
+            f"ALTER TABLE {PHYSICAL_ADDRESS} ALTER COLUMN id COMMENT ''",
+        ]
+
+    def test_a_new_column_has_no_comment_in_the_warehouse(self):
+        trouve = incremental_table(columns=[Column(name="discount", type="NUMBER", docs="Off.")])
+
+        statements = build_comment_statements(PHYSICAL_ADDRESS, trouve, current_comments())
+
+        assert last_lines(statements) == [
+            f"ALTER TABLE {PHYSICAL_ADDRESS} ALTER COLUMN discount COMMENT 'Off.'"
+        ]
+
+    def test_the_column_name_matches_in_each_case(self):
+        trouve = incremental_table(columns=[Column(name="Order_Id", type="NUMBER", docs="The ID.")])
+
+        statements = build_comment_statements(
+            PHYSICAL_ADDRESS, trouve, current_comments(order_id="The ID.")
+        )
+
+        assert statements == []
 
 
 class TestThePlan:
@@ -182,6 +284,36 @@ class TestTheRun:
         sql_texts = executed_sql(result)
         assert index_of(sql_texts, TABLE_COMMENT) == len(sql_texts) - 1
         assert len(comment_statements(sql_texts)) == 1
+
+    @pytest.mark.parametrize("use_staging", [True, False])
+    def test_an_unchanged_incremental_run_writes_no_comment(self, use_staging: bool):
+        adapter = RecordingAdapter(
+            object_comment="The orders.",
+            table_columns=[WarehouseColumn(name="ID", data_type="NUMBER(38,0)", comment="The order ID.")],
+        )
+        trouve = incremental_table("The orders.", [Column(name="id", type="NUMBER", docs="The order ID.")])
+
+        result = run_one_trouve(
+            trouve, adapter, run_mode=RunMode.INCREMENTAL, use_staging=use_staging
+        )
+
+        assert result.status == RunStatus.SUCCESS
+        assert comment_statements(executed_sql(result)) == []
+
+    @pytest.mark.parametrize("use_staging", [True, False])
+    def test_an_incremental_run_writes_only_the_comment_that_differs(self, use_staging: bool):
+        adapter = RecordingAdapter(
+            object_comment="An old text.",
+            table_columns=[WarehouseColumn(name="ID", data_type="NUMBER(38,0)", comment="The order ID.")],
+        )
+        trouve = incremental_table("The orders.", [Column(name="id", type="NUMBER", docs="The order ID.")])
+
+        result = run_one_trouve(
+            trouve, adapter, run_mode=RunMode.INCREMENTAL, use_staging=use_staging
+        )
+
+        assert result.status == RunStatus.SUCCESS
+        assert last_lines(comment_statements(executed_sql(result))) == [TABLE_COMMENT]
 
     def test_a_comment_that_snowflake_rejects_fails_the_node_after_the_promotion(self):
         adapter = RecordingAdapter(fail_on=["SET COMMENT"])

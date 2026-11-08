@@ -4,11 +4,14 @@ A mock adapter shows the statements. Only the warehouse shows that the
 comment survives the promotion, and that the syntax is correct for a table and
 for a view.
 
-The fixture runs one project two times:
+The fixture runs one project three times:
 
 1. Each Trouve has docs on the object and on one column.
-2. The incremental Trouve has no docs. Its table keeps the comments of the
-   first run, so clair must clear them.
+2. An incremental run with the same docs. The promotion clones a clone of
+   the physical table, and the comments must survive the two clones. The
+   comments equal the docs, thus clair sends no comment statement.
+3. The incremental Trouve has no docs. Its table keeps the comments of the
+   earlier runs, so clair must clear them.
 """
 
 from __future__ import annotations
@@ -86,7 +89,18 @@ class _Step(NamedTuple):
 
 class _Runs(NamedTuple):
     documented: _Step
+    unchanged: _Step
     undocumented: _Step
+
+
+def comment_statements_of(summary: RunSummary) -> list[str]:
+    """Give each comment statement that the run sent to the warehouse."""
+    return [
+        statement.sql
+        for result in summary.results
+        for statement in result.statements
+        if "-- comment:" in statement.sql
+    ]
 
 
 class TestComments:
@@ -118,10 +132,13 @@ class TestComments:
             documented=run(
                 incremental_file(1, "The orders.", "The order ID."), RunMode.FULL_REFRESH
             ),
-            undocumented=run(incremental_file(2, "", ""), RunMode.INCREMENTAL),
+            unchanged=run(
+                incremental_file(2, "The orders.", "The order ID."), RunMode.INCREMENTAL
+            ),
+            undocumented=run(incremental_file(3, "", ""), RunMode.INCREMENTAL),
         )
 
-    @pytest.mark.parametrize("step_name", ["documented", "undocumented"])
+    @pytest.mark.parametrize("step_name", ["documented", "unchanged", "undocumented"])
     def test_each_run_succeeds(self, runs: _Runs, step_name: str) -> None:
         step: _Step = getattr(runs, step_name)
         assert step.summary.failed == [], [result.error for result in step.summary.failed]
@@ -133,6 +150,15 @@ class TestComments:
         assert runs.documented.view == _Comments(
             "The view of the orders.\nIt's one row.", "The order ID."
         )
+
+    def test_an_unchanged_incremental_run_keeps_the_comments_and_writes_none(
+        self, runs: _Runs
+    ) -> None:
+        assert runs.unchanged.table == _Comments("The orders.", "The order ID.")
+        table_statements = [
+            sql for sql in comment_statements_of(runs.unchanged.summary) if "orders_view" not in sql.lower()
+        ]
+        assert table_statements == []
 
     def test_an_incremental_run_clears_the_comments_that_the_docs_no_longer_hold(
         self, runs: _Runs

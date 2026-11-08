@@ -165,7 +165,11 @@ The comments go onto the physical object, and not onto the staging object, becau
 
 Clair cleans a triple-quoted `docs` text as Python cleans a docstring: it removes the first and the last empty line, and the common indent.
 
-Clair writes a comment only for a text that is not empty, because a new object has no comment. An incremental table is the exception: it keeps its comments from the last run. Thus an incremental Trouve writes each comment, also an empty one, and a `docs` text that you remove leaves the table on the next run. A column that you remove from `columns` keeps its old comment.
+A new object has no comment, thus clair writes each text that is not empty. The comments of the columns of a table go into one `ALTER TABLE <physical> ALTER COLUMN a COMMENT '...', COLUMN b COMMENT '...'`. Snowflake accepts one column only in each `ALTER VIEW`, thus a view gets one `COMMENT ON COLUMN` for each column.
+
+An incremental table keeps its comments from the last run. The run already reads that table, for its type and for its columns, and the two answers hold the comments. Clair compares them with the `docs`, and writes only a comment that differs. An incremental run with unchanged `docs` thus sends no comment statement, and a `docs` text that you remove leaves the table on the next run. A column that you remove from `columns` keeps its old comment.
+
+`clair compile` opens no connection, thus its plan shows each text that is not empty, as for a new object.
 
 ## An Iceberg table
 

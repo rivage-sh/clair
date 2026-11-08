@@ -46,10 +46,24 @@ class WarehouseColumn(BaseModel):
         name: The name that the warehouse stores. Snowflake stores an unquoted
             name in upper case.
         data_type: The type as DDL text, for example ``NUMBER(38,0)``.
+        comment: The comment of the column, or an empty text.
     """
 
     name: str
     data_type: str
+    comment: str = ""
+
+
+class WarehouseObject(BaseModel):
+    """One object that exists in the warehouse.
+
+    Attributes:
+        object_type: The type of the object.
+        comment: The comment of the object, or an empty text.
+    """
+
+    object_type: WarehouseObjectType
+    comment: str = ""
 
 
 class Statement(BaseModel):
@@ -130,15 +144,21 @@ class WarehouseAdapter(ABC):
         ...
 
     @abstractmethod
-    def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
-        """Give the type of the object at the address, or None if it holds none.
+    def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
+        """Give the type and the comment of the object at the address, or None if it holds none.
 
         Clair asks this question before it writes to a physical address. A
         warehouse replaces an object with an object of the same type only, so a
         Trouve that changes from a TABLE to a VIEW needs a drop first. The
-        answer also tells the runner if an incremental Trouve has a base table.
+        answer also tells the runner if an incremental Trouve has a base table,
+        and if the comment of that table differs from the docs of the Trouve.
         """
         ...
+
+    def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
+        """Give the type of the object at the address, or None if it holds none."""
+        warehouse_object = self.describe_object(address)
+        return None if warehouse_object is None else warehouse_object.object_type
 
     @abstractmethod
     def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:

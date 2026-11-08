@@ -16,6 +16,7 @@ from clair.adapters.base import (
     StatementStatus,
     WarehouseAdapter,
     WarehouseColumn,
+    WarehouseObject,
     WarehouseObjectType,
 )
 from clair.adapters.pool import AdapterPool
@@ -157,8 +158,8 @@ class RecordingAdapter(WarehouseAdapter):
     ) -> None:
         return None
 
-    def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
-        return WarehouseObjectType.TABLE
+    def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
+        return WarehouseObject(object_type=WarehouseObjectType.TABLE)
 
     def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
         return list(DEFAULT_TABLE_COLUMNS)

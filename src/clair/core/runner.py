@@ -17,7 +17,7 @@ from pydantic import BaseModel, computed_field
 
 from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
 from clair.adapters.pool import AdapterPool
-from clair.core.comments import build_comment_statements
+from clair.core.comments import WarehouseComments, build_comment_statements
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.schema_change import read_incremental_columns
 from clair.core.staging import (
@@ -414,6 +414,7 @@ def _promote_or_keep(
     adapter: WarehouseAdapter,
     addresses: NodeAddresses,
     tests_passed: bool,
+    current_comments: WarehouseComments | None = None,
 ) -> tuple[list[Statement], str]:
     """Complete a node: promote the staging object, or keep it for an examination.
 
@@ -423,6 +424,9 @@ def _promote_or_keep(
         addresses: The addresses of the node. The staging address holds the
             candidate data, and the physical address must receive it.
         tests_passed: The result of the data quality tests on the staging object.
+        current_comments: The comments of the physical table before the run.
+            None means a new object. The promotion of an incremental table
+            clones a clone of the physical table, thus it keeps them.
 
     Returns:
         The statements that clair executed, and an error message. The error
@@ -461,7 +465,7 @@ def _promote_or_keep(
             resolved_sql=trouve.compiled.resolved_sql,
             table_options=table_options_of(trouve),
         ),
-        *build_comment_statements(physical_address, trouve),
+        *build_comment_statements(physical_address, trouve, current_comments),
     ]
     for statement_index, sql in enumerate(promotion_statements):
         statements.append(adapter.execute(sql))
@@ -675,8 +679,10 @@ def _run_node(
     # before. Both change the run to the full refresh mode. For the view, the
     # full refresh builds and tests a candidate, and the promotion then stops,
     # because the address holds an object of the old type.
+    current_object = None
     if effective_mode == RunMode.INCREMENTAL:
-        current_type = adapter.object_type(addresses.physical)
+        current_object = adapter.describe_object(addresses.physical)
+        current_type = None if current_object is None else current_object.object_type
         if current_type is None:
             logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_not_found")
             effective_mode = RunMode.FULL_REFRESH
@@ -731,12 +737,17 @@ def _run_node(
             table_options_of(trouve),
             incremental=effective_mode == RunMode.INCREMENTAL,
         )
+    # An incremental table keeps its comments, and the two reads above hold
+    # them. Clair writes only a comment that differs from the docs.
+    current_comments = None
+    if incremental_columns is not None and current_object is not None:
+        current_comments = WarehouseComments.of(current_object, incremental_columns.target_columns)
     # A staged run writes the comments after the promotion, in _promote_or_keep.
     after_build_statements = cluster_by_statements
     if plan.statements and staging_address is None:
         after_build_statements = [
             *cluster_by_statements,
-            *build_comment_statements(addresses.physical, trouve),
+            *build_comment_statements(addresses.physical, trouve, current_comments),
         ]
     plan = plan.model_copy(
         update={"statements": [*prefix_statements, *plan.statements, *after_build_statements]}
@@ -780,7 +791,7 @@ def _run_node(
         assert after_node_success is not None
         tests_passed = after_node_success(name, str(staging_address), adapter)
         promote_statements, staging_error = _promote_or_keep(
-            trouve, adapter, addresses, tests_passed
+            trouve, adapter, addresses, tests_passed, current_comments
         )
         statements.extend(promote_statements)
 

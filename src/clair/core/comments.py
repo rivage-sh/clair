@@ -9,20 +9,60 @@ The comments go onto the physical object after the promotion. A promotion of a
 view is a ``CREATE OR REPLACE VIEW``, and it removes each comment that the
 staging view had. A run with no staging writes the comments after the build.
 
-Clair writes a comment only when the text is not empty, because a new object
-has no comment. An incremental table is the exception: it keeps each comment
-from the last run. An incremental Trouve thus writes each comment, also an
-empty one, so that a docs text that you remove does not stay on the table. A
+A new object has no comment, thus clair writes each text that is not empty. An
+incremental table keeps its comments from the last run. The runner already
+reads that table, for its type and for its columns, and the two answers hold
+the comments. Clair compares them with the docs, and writes only a comment that
+differs. An unchanged incremental Trouve thus gets no comment statement. A
 column that you remove from ``columns`` keeps its old comment.
+
+The comments of the columns of a table go into one ALTER. Snowflake accepts
+one column only in each ALTER VIEW, thus a view gets one statement per column.
 """
 
 from __future__ import annotations
 
 import inspect
 
+from pydantic import BaseModel
+
+from clair.adapters.base import WarehouseColumn, WarehouseObject
 from clair.environments.routing import TrouveAddress
-from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import Table, TrouveAbc, TrouveType, table_options_of
+from clair.trouves.trouve import TrouveAbc, TrouveType, table_options_of
+
+
+class WarehouseComments(BaseModel):
+    """The comments that an object in the warehouse holds now.
+
+    Attributes:
+        object_comment: The comment of the object.
+        column_comments: The comment of each column, by the name that the
+            warehouse stores.
+    """
+
+    object_comment: str
+    column_comments: dict[str, str]
+
+    @classmethod
+    def of(
+        cls, warehouse_object: WarehouseObject, warehouse_columns: list[WarehouseColumn]
+    ) -> WarehouseComments:
+        """Collect the comments from the answers that the runner already has."""
+        return cls(
+            object_comment=warehouse_object.comment,
+            column_comments={column.name: column.comment for column in warehouse_columns},
+        )
+
+    def column_comment(self, column_name: str) -> str:
+        """Give the comment of a declared column, or an empty text for a new column.
+
+        Snowflake stores an unquoted name in upper case, thus the match ignores
+        the case.
+        """
+        for warehouse_name, comment in self.column_comments.items():
+            if warehouse_name.upper() == column_name.upper():
+                return comment
+        return ""
 
 
 def quote_comment(text: str) -> str:
@@ -41,44 +81,61 @@ def quote_comment(text: str) -> str:
     return f"'{escaped_text}'"
 
 
-def keeps_comments_between_runs(trouve: TrouveAbc) -> bool:
-    """Tell you if the object of the Trouve can hold a comment from an earlier run.
-
-    Only an incremental table survives a run. Each other object is new.
-    """
-    return isinstance(trouve, Table) and trouve.run_config.run_mode == RunMode.INCREMENTAL
-
-
-def build_comment_statements(address: TrouveAddress, trouve: TrouveAbc) -> list[str]:
+def build_comment_statements(
+    address: TrouveAddress,
+    trouve: TrouveAbc,
+    current_comments: WarehouseComments | None = None,
+) -> list[str]:
     """Give the statements that write the docs of a Trouve to the object at an address.
 
     Args:
         address: The physical address of the object.
         trouve: The Trouve that holds the docs.
+        current_comments: The comments that the object holds now. None means a
+            new object, which holds no comment.
 
     Returns:
-        One statement for the object, then one statement for each column, or
-        no statement when there is nothing to write.
+        The statement for the object, then the statements for the columns.
+        Each text that the object already holds gets no statement.
     """
     assert trouve.type != TrouveType.SOURCE, "clair does not write to a SOURCE Trouve"
-    write_empty_text = keeps_comments_between_runs(trouve)
     table_options = table_options_of(trouve)
-    object_keyword = "VIEW" if table_options is None else table_options.object_keyword
+
     # A docs text is often a triple-quoted string. Clean it as Python cleans a docstring.
     trouve_docs = inspect.cleandoc(trouve.docs)
+    current_object_comment = "" if current_comments is None else current_comments.object_comment
+
+    changed_columns: list[tuple[str, str]] = []
+    for column in trouve.columns:
+        column_docs = inspect.cleandoc(column.docs)
+        current_column_comment = (
+            "" if current_comments is None else current_comments.column_comment(column.name)
+        )
+        if column_docs != current_column_comment:
+            changed_columns.append((column.name, column_docs))
 
     statements: list[str] = []
-    if trouve_docs or write_empty_text:
+    if trouve_docs != current_object_comment:
+        object_keyword = "VIEW" if table_options is None else table_options.object_keyword
         statements.append(
             f"-- comment: write the docs of the Trouve\n"
             f"ALTER {object_keyword} {address} SET COMMENT = {quote_comment(trouve_docs)}"
         )
-    for column in trouve.columns:
-        column_docs = inspect.cleandoc(column.docs)
-        if not column_docs and not write_empty_text:
-            continue
-        statements.append(
-            f"-- comment: write the docs of the column {column.name}\n"
-            f"COMMENT ON COLUMN {address}.{column.name} IS {quote_comment(column_docs)}"
+    if not changed_columns:
+        return statements
+    if table_options is None:
+        statements.extend(
+            f"-- comment: write the docs of the column {column_name}\n"
+            f"COMMENT ON COLUMN {address}.{column_name} IS {quote_comment(column_docs)}"
+            for column_name, column_docs in changed_columns
         )
+        return statements
+    column_clauses = ", ".join(
+        f"COLUMN {column_name} COMMENT {quote_comment(column_docs)}"
+        for column_name, column_docs in changed_columns
+    )
+    statements.append(
+        f"-- comment: write the docs of the columns\n"
+        f"ALTER {table_options.object_keyword} {address} ALTER {column_clauses}"
+    )
     return statements
