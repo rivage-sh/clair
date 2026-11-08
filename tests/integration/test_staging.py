@@ -22,10 +22,11 @@ import pytest
 import clair
 from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus, RunSummary
+from clair.core.runner import RunSummary
 from clair.core.staging import STAGING_SUFFIX
 from clair.environments.environments import Environment
 from clair.trouves.trouve import ExecutionType
+from tests.helpers import failure_of, success_of
 from tests.integration.config import IntegrationConfig
 from tests.integration.staging_project import (
     checked_address,
@@ -191,10 +192,7 @@ class TestAFailedDataQualityTest:
         self, failed_run: RunSummary
     ) -> None:
         """The failed test makes the node a failure, and the run says so."""
-        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
-
-        assert result is not None
-        assert result.status == RunStatus.FAILURE
+        failure_of(failed_run, f"{self.DATABASE_NAME}.refined.checked")
         assert failed_run.failed_count == 1
 
     def test_the_run_names_the_test_that_rejected_the_data(
@@ -210,9 +208,7 @@ class TestAFailedDataQualityTest:
         the reader sees the Trouve and not the candidate.
         """
         checked = checked_address(self.DATABASE_NAME, clair_environment.schema_name)
-        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
-
-        assert result is not None
+        result = failure_of(failed_run, f"{self.DATABASE_NAME}.refined.checked")
         assert [test.passed for test in result.test_results] == [False]
         assert result.test_results[0].test_type == "row_count"
         assert result.test_results[0].address == checked
@@ -245,8 +241,7 @@ class TestAFailedDataQualityTest:
         assert row_count(adapter, staging) == 5
         assert str(staging).endswith(f"{STAGING_SUFFIX}{failed_run.run_id}")
         # The error names the object, thus a person can query it.
-        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
-        assert result is not None
+        result = failure_of(failed_run, f"{self.DATABASE_NAME}.refined.checked")
         assert str(staging) in result.error
 
     def test_clair_skips_the_dependent(
@@ -379,10 +374,7 @@ class TestAPandasTableThatFails:
     def test_the_run_reports_the_failure_of_the_candidate(
         self, failed_run: RunSummary
     ) -> None:
-        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
-
-        assert result is not None
-        assert result.status == RunStatus.FAILURE
+        result = failure_of(failed_run, f"{self.DATABASE_NAME}.refined.checked")
         assert [test.passed for test in result.test_results] == [False]
 
     def test_the_physical_address_keeps_the_data_of_the_run_that_passed(
@@ -478,8 +470,7 @@ class TestTheTestFalseFlag:
         _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=3)
         summary = clair.run(project_path, env=environment, test=False)
 
-        result = summary.result(f"{self.DATABASE_NAME}.refined.checked")
-        assert result is not None
+        result = success_of(summary, f"{self.DATABASE_NAME}.refined.checked")
         # The test of this project always fails. The run passes, thus clair did
         # not run it, and it did not decide the promotion.
         assert summary.failed == []

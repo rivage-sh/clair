@@ -14,7 +14,7 @@ import pytest
 from clair.adapters.base import WarehouseColumn
 from clair.core.comments import WarehouseComments, build_comment_statements, quote_comment
 from clair.core.compiler import build_statements
-from clair.core.runner import RunStatus
+from clair.core.runner import RunFailure, RunSuccess
 from clair.core.staging import make_staging_address
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column
@@ -262,7 +262,7 @@ class TestTheRun:
     def test_a_staged_run_writes_the_comment_after_the_promotion(self, trouve: Table | PandasTable):
         result = run_one_trouve(trouve, RecordingAdapter())
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         sql_texts = executed_sql(result)
         assert -1 < index_of(sql_texts, PROMOTE_TABLE) < index_of(sql_texts, TABLE_COMMENT)
         assert len(comment_statements(sql_texts)) == 1
@@ -280,7 +280,7 @@ class TestTheRun:
     ):
         result = run_one_trouve(trouve, RecordingAdapter(), use_staging=False)
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         sql_texts = executed_sql(result)
         assert index_of(sql_texts, TABLE_COMMENT) == len(sql_texts) - 1
         assert len(comment_statements(sql_texts)) == 1
@@ -297,7 +297,7 @@ class TestTheRun:
             trouve, adapter, run_mode=RunMode.INCREMENTAL, use_staging=use_staging
         )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert comment_statements(executed_sql(result)) == []
 
     @pytest.mark.parametrize("use_staging", [True, False])
@@ -312,7 +312,7 @@ class TestTheRun:
             trouve, adapter, run_mode=RunMode.INCREMENTAL, use_staging=use_staging
         )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert last_lines(comment_statements(executed_sql(result))) == [TABLE_COMMENT]
 
     def test_a_comment_that_snowflake_rejects_fails_the_node_after_the_promotion(self):
@@ -320,7 +320,7 @@ class TestTheRun:
 
         result = run_one_trouve(Table(sql="SELECT 1 AS id", docs="The orders."), adapter)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert index_of(executed_sql(result), PROMOTE_TABLE) > -1
         assert f"{PHYSICAL_ADDRESS} holds the tested data" in result.error
         assert TABLE_COMMENT in result.error

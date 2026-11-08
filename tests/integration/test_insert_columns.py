@@ -13,7 +13,7 @@ import pytest
 
 import clair
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus, RunSummary
+from clair.core.runner import RunSuccess, RunSummary
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
@@ -79,7 +79,7 @@ class TestAReorderedSelect:
         clair_environment: IntegrationConfig,
     ) -> None:
         result = reordered_run.result(logical_name)
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert result.effective_run_mode == RunMode.INCREMENTAL
 
         address = physical_address(logical_name, clair_environment.schema_name)

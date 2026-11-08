@@ -26,7 +26,13 @@ from clair.environments.environments import Authenticator, Environment, Password
 from clair.exceptions import ClairError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
-from tests.helpers import make_environment, make_run_result, make_test_result
+from tests.helpers import (
+    make_environment,
+    make_run_failure,
+    make_run_skip,
+    make_run_success,
+    make_test_result,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -52,20 +58,21 @@ def restore_the_logger() -> Any:
 def _run_result(
     status: RunStatus = RunStatus.SUCCESS, tests_passed: bool = True
 ) -> RunResult:
-    """Make one result of a run, with one data quality test result."""
-    return make_run_result(
-        "mydb.analytics.orders",
-        error="the statement failed" if status == RunStatus.FAILURE else "",
-        skipped_by="mydb.analytics.upstream" if status == RunStatus.SKIPPED else None,
-        test_results=[
-            make_test_result(
-                "mydb.analytics.orders",
-                test_type="not_null",
-                column_name="id",
-                row_count=0 if tests_passed else 3,
-            )
-        ],
-    )
+    """Make one result of a run. A success and a failure hold one data quality test result."""
+    address = "mydb.analytics.orders"
+    if status == RunStatus.SKIPPED:
+        return make_run_skip(address, skipped_by="mydb.analytics.upstream")
+    test_results = [
+        make_test_result(
+            address,
+            test_type="not_null",
+            column_name="id",
+            row_count=0 if tests_passed else 3,
+        )
+    ]
+    if status == RunStatus.FAILURE:
+        return make_run_failure(address, error="the statement failed", test_results=test_results)
+    return make_run_success(address, test_results=test_results)
 
 
 @pytest.fixture(autouse=True)

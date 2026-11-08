@@ -17,7 +17,7 @@ from structlog.testing import capture_logs
 import clair
 from clair.adapters.base import StatementStatus
 from clair.core.dag import build_dag, get_executable_nodes
-from clair.core.runner import RunResult, RunStatus, run_project
+from clair.core.runner import RunFailure, RunResult, RunSuccess, run_project
 from clair.environments.routing import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.run_config import DeleteInsert, Incremental, RunMode, Upsert
@@ -66,7 +66,7 @@ def test_no_statement_runs_after_the_one_that_fails(failed_index: int) -> None:
     result = run_plan(BuildPlan(statements=STATEMENTS), adapter)
 
     assert executed_plan_statements(adapter) == STATEMENTS[: failed_index + 1]
-    assert result.status == RunStatus.FAILURE
+    assert isinstance(result, RunFailure)
     assert [statement.status for statement in result.statements[failed_index + 1 :]] == [
         StatementStatus.NOT_RUN
     ] * (len(STATEMENTS) - failed_index - 1)
@@ -92,7 +92,7 @@ def test_a_failed_cleanup_runs_the_next_cleanup_and_keeps_the_node_a_success() -
         )
 
     assert executed_plan_statements(adapter) == STATEMENTS + CLEANUP_STATEMENTS
-    assert result.status == RunStatus.SUCCESS
+    assert isinstance(result, RunSuccess)
     assert [log["event"] for log in logs].count("run.node.cleanup_failure") == 1
 
 
@@ -103,6 +103,7 @@ def test_the_row_count_comes_from_the_last_statement_and_not_from_the_cleanup() 
         BuildPlan(statements=STATEMENTS, cleanup_statements=CLEANUP_STATEMENTS), adapter
     )
 
+    assert isinstance(result, RunSuccess)
     assert result.row_count == 7
 
 
@@ -146,7 +147,7 @@ def test_a_staged_incremental_run_drops_the_new_rows_table_after_a_failure(
         use_staging=True,
     )
 
-    assert result.status == RunStatus.FAILURE
+    assert isinstance(result, RunFailure)
     assert adapter.record.statements[-1].endswith(
         f"DROP TABLE IF EXISTS {NEW_ROWS_TABLE}_test"
     )

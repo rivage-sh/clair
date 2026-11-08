@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from clair.adapters.base import WarehouseColumn
-from clair.core.runner import RunStatus
+from clair.core.runner import RunFailure, RunSuccess
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.run_config import Append, DeleteInsert, Incremental, RunMode
@@ -95,7 +95,7 @@ class TestTheRun:
             incremental_table(strategy), adapter, run_mode=RunMode.INCREMENTAL
         )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert '("LABEL", "ID")\nSELECT "LABEL", "ID" FROM' in insert_of(executed_sql(result))
 
     def test_the_warehouse_columns_win_over_the_declared_columns(self):
@@ -114,7 +114,7 @@ class TestTheRun:
             incremental_table(Append()), adapter, run_mode=RunMode.INCREMENTAL
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "cannot read the columns of analytics.revenue.orders" in result.error
         assert executed_sql(result) == []
 

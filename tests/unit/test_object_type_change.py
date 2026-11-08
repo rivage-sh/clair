@@ -15,7 +15,7 @@ from structlog.testing import capture_logs
 
 from clair.adapters.base import WarehouseObject, WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunResult, RunStatus, wanted_object_type
+from clair.core.runner import RunFailure, RunSuccess, wanted_object_type
 from clair.core.staging import make_staging_address
 from clair.environments.routing import TrouveAddress
 from clair.trouves.pandas_table import PandasTable
@@ -47,7 +47,7 @@ def _staging_address(address: str = ADDRESS) -> str:
     return str(make_staging_address(TrouveAddress.parse(address), RUN_ID))
 
 
-def _drops_of_the_physical_object(result: RunResult) -> list[str]:
+def _drops_of_the_physical_object(result: RunSuccess | RunFailure) -> list[str]:
     """Give each statement that drops the physical address, and not the staging one."""
     return [
         sql
@@ -71,7 +71,7 @@ class TestStagedRun:
         adapter = RecordingAdapter()
         result = run_one_trouve(View(sql="SELECT 1 AS id"), adapter)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert f"{ADDRESS} holds the type TABLE, and the Trouve now makes the type VIEW" in result.error
         assert f"Run DROP TABLE {ADDRESS}" in result.error
         assert not [sql for sql in executed_sql(result) if PROMOTE_VIEW in sql]
@@ -81,7 +81,7 @@ class TestStagedRun:
         adapter = RecordingAdapter(existing_views=[ADDRESS])
         result = run_one_trouve(Table(sql="SELECT 1 AS id"), adapter)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert f"{ADDRESS} holds the type VIEW, and the Trouve now makes the type TABLE" in result.error
         assert f"Run DROP VIEW {ADDRESS}" in result.error
         assert not [sql for sql in executed_sql(result) if PROMOTE_TABLE in sql]
@@ -98,6 +98,7 @@ class TestStagedRun:
             tested_addresses=tested_addresses,
         )
 
+        assert isinstance(result, RunFailure)
         assert f"CREATE OR REPLACE TABLE {_staging_address()}" in executed_sql(result)[0]
         assert tested_addresses == [_staging_address()]
         assert f"The tested candidate stays at {_staging_address()}" in result.error
@@ -114,7 +115,7 @@ class TestStagedRun:
             tests_passed=False,
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "the tests failed" in result.error
         assert "holds a TABLE" not in result.error
 
@@ -122,7 +123,7 @@ class TestStagedRun:
         adapter = RecordingAdapter()
         result = run_one_trouve(Table(sql="SELECT 1 AS id"), adapter)
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert [sql for sql in executed_sql(result) if PROMOTE_TABLE in sql]
 
     def test_an_address_that_holds_nothing_promotes(self):
@@ -130,7 +131,7 @@ class TestStagedRun:
         adapter = RecordingAdapter(existing_tables=[])
         result = run_one_trouve(View(sql="SELECT 1 AS id"), adapter)
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert [sql for sql in executed_sql(result) if PROMOTE_VIEW in sql]
 
     def test_the_failure_is_in_the_log(self):
@@ -152,7 +153,7 @@ class TestRunWithNoStaging:
             use_staging=False,
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert f"Run DROP VIEW {ADDRESS}" in result.error
         # No staging step, thus no candidate to keep, and no word about one.
         assert "candidate" not in result.error
@@ -166,7 +167,7 @@ class TestRunWithNoStaging:
             use_staging=False,
         )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert f"CREATE OR REPLACE TABLE {ADDRESS}" in executed_sql(result)[0]
 
 
@@ -192,7 +193,7 @@ class TestDataframeTrouve:
         adapter = RecordingAdapter(existing_views=[ADDRESS])
         result = run_one_trouve(trouve, adapter)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert f"{ADDRESS} holds the type VIEW, and the Trouve now makes the type TABLE" in result.error
         assert f"Run DROP VIEW {ADDRESS}" in result.error
         assert adapter.written_addresses == [_staging_address()]
@@ -204,7 +205,7 @@ class TestDataframeTrouve:
         adapter = RecordingAdapter(existing_views=[ADDRESS])
         result = run_one_trouve(trouve, adapter, use_staging=False)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert f"Run DROP VIEW {ADDRESS}" in result.error
         assert adapter.written_addresses == []
         assert result.statements == []
@@ -234,7 +235,7 @@ class TestOneReadForEachNode:
 
         result = run_one_trouve(trouve, adapter, run_mode=run_mode, use_staging=use_staging)
 
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert adapter.described_addresses == [ADDRESS]
 class TestIncrementalFallback:
     def _incremental_trouve(self) -> Table:
@@ -253,7 +254,7 @@ class TestIncrementalFallback:
                 self._incremental_trouve(), adapter, run_mode=RunMode.INCREMENTAL
             )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert result.effective_run_mode == RunMode.FULL_REFRESH
         fallbacks = [
             e for e in log_entries if e["event"] == "run.node.incremental_fallback"
@@ -272,7 +273,7 @@ class TestIncrementalFallback:
                 self._incremental_trouve(), adapter, run_mode=RunMode.INCREMENTAL
             )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert result.effective_run_mode == RunMode.FULL_REFRESH
         fallbacks = [
             e for e in log_entries if e["event"] == "run.node.incremental_fallback"
@@ -283,7 +284,7 @@ class TestIncrementalFallback:
         adapter = RecordingAdapter()
         result = run_one_trouve(self._incremental_trouve(), adapter, run_mode=RunMode.INCREMENTAL)
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert result.effective_run_mode == RunMode.INCREMENTAL
         assert [sql for sql in executed_sql(result) if SEED_CLONE in sql]
 

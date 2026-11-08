@@ -4,20 +4,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
 from structlog.testing import capture_logs
 
+import clair
 from clair.adapters.base import StatementStatus
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
-from clair.core.runner import RunStatus, RunSummary, run_project
+from clair.core.runner import RunFailure, RunSkip, RunStatus, RunSuccess, RunSummary, run_project
 from clair.trouves.run_config import RunMode
 from tests.helpers import (
     DatabaseOverrideRouting,
     RecordingAdapter,
     compile_trouve,
-    make_run_result,
+    make_environment,
+    make_run_failure,
+    make_run_skip,
+    make_run_success,
     make_statement,
     make_trouve,
+    write_project_marker,
 )
 
 
@@ -131,14 +138,14 @@ class TestRunnerFailureHandling:
         staging_result = next(r for r in results if r.addresses.matches("db.s.staging"))
         mart_result = next(r for r in results if r.addresses.matches("db.s.mart"))
 
-        assert staging_result.status == RunStatus.FAILURE
+        assert isinstance(staging_result, RunFailure)
         assert staging_result.error
-        assert mart_result.status == RunStatus.SKIPPED
+        assert isinstance(mart_result, RunSkip)
         assert mart_result.skipped_by == "db.s.staging"
 
     def test_the_summary_of_a_run_that_fails(self):
         results = [
-            make_run_result(
+            make_run_failure(
                 "db.s.staging",
                 statements=[
                     make_statement(
@@ -152,7 +159,7 @@ class TestRunnerFailureHandling:
                 error="Object does not exist",
                 duration_seconds=0.5,
             ),
-            make_run_result("db.s.mart", skipped_by="db.s.staging"),
+            make_run_skip("db.s.mart", skipped_by="db.s.staging"),
         ]
 
         output = RunSummary(results=results, env_name="default")
@@ -182,8 +189,8 @@ class TestRunSummaryProperties:
 
     def test_all_succeeded(self):
         results = [
-            make_run_result("db.s.a", statements=[make_statement(query_id="q1")], duration_seconds=1.0),
-            make_run_result("db.s.b", statements=[make_statement(query_id="q2")], duration_seconds=2.0),
+            make_run_success("db.s.a", statements=[make_statement(query_id="q1")], duration_seconds=1.0),
+            make_run_success("db.s.b", statements=[make_statement(query_id="q2")], duration_seconds=2.0),
         ]
         output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 2
@@ -195,8 +202,8 @@ class TestRunSummaryProperties:
 
     def test_all_failed(self):
         results = [
-            make_run_result("db.s.a", error="err1"),
-            make_run_result("db.s.b", error="err2"),
+            make_run_failure("db.s.a", error="err1"),
+            make_run_failure("db.s.b", error="err2"),
         ]
         output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 0
@@ -205,8 +212,8 @@ class TestRunSummaryProperties:
 
     def test_all_skipped(self):
         results = [
-            make_run_result("db.s.a", skipped_by="db.s.upstream"),
-            make_run_result("db.s.b", skipped_by="db.s.upstream"),
+            make_run_skip("db.s.a", skipped_by="db.s.upstream"),
+            make_run_skip("db.s.b", skipped_by="db.s.upstream"),
         ]
         output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 0
@@ -216,9 +223,9 @@ class TestRunSummaryProperties:
 
     def test_mixed_results(self):
         results = [
-            make_run_result("db.s.ok", statements=[make_statement(query_id="q1")], duration_seconds=1.0),
-            make_run_result("db.s.fail", error="broke"),
-            make_run_result("db.s.skip", skipped_by="db.s.fail"),
+            make_run_success("db.s.ok", statements=[make_statement(query_id="q1")], duration_seconds=1.0),
+            make_run_failure("db.s.fail", error="broke"),
+            make_run_skip("db.s.skip", skipped_by="db.s.fail"),
         ]
         output = RunSummary(results=results, env_name="default")
         assert output.succeeded_count == 1
@@ -230,7 +237,7 @@ class TestRunSummaryProperties:
 
     def test_results_list_preserved_in_summary(self):
         results = [
-            make_run_result("db.s.a", statements=[make_statement(query_id="q1")]),
+            make_run_success("db.s.a", statements=[make_statement(query_id="q1")]),
         ]
         output = RunSummary(results=results, env_name="default")
         assert len(output.results) == 1
@@ -241,3 +248,57 @@ class TestRunSummaryProperties:
 
         output = RunSummary(results=[], env_name="default")
         assert isinstance(output, RunSummary)
+
+
+class TestTheOutcomeOfAResult:
+    """Each outcome is its own class, and it holds only the fields of that outcome."""
+
+    def test_a_failure_without_a_cause_raises(self):
+        with pytest.raises(ValidationError, match="error"):
+            make_run_failure("db.s.a", error="")
+
+    def test_a_skip_holds_no_field_of_a_run(self):
+        skip = make_run_skip("db.s.b", skipped_by="db.s.a")
+
+        assert set(skip.model_dump()) == {"addresses", "status", "skipped_by"}
+
+    def test_the_summary_reads_each_outcome_back_from_json(self):
+        summary = RunSummary(
+            results=[
+                make_run_success("db.s.a", row_count=3),
+                make_run_failure("db.s.b", error="broke"),
+                make_run_skip("db.s.c", skipped_by="db.s.b"),
+            ],
+            env_name="default",
+        )
+
+        read_back = RunSummary.model_validate_json(summary.model_dump_json())
+
+        assert [type(result) for result in read_back.results] == [RunSuccess, RunFailure, RunSkip]
+        assert read_back == summary
+
+    def test_a_run_gives_a_skip_no_test_results(self, tmp_path: Path):
+        """clair.run() adds the test results to each result that ran, and not to a skip."""
+        project_root = write_project_marker(tmp_path / "project")
+        for relative_path, text in {
+            "db/s/upstream.py": 'from clair import Table\n\ntrouve = Table(sql="select 1 as id")\n',
+            "db/s/downstream.py": (
+                "from db.s.upstream import trouve as upstream\n\n"
+                "from clair import Table\n\n"
+                'trouve = Table(sql=f"select id from {upstream}")\n'
+            ),
+        }.items():
+            (project_root / relative_path).parent.mkdir(parents=True, exist_ok=True)
+            (project_root / relative_path).write_text(text)
+
+        summary = clair.run(
+            project_root,
+            env=make_environment(),
+            adapter=RecordingAdapter(fail_on=["db.s.upstream"]),
+        )
+
+        skip = summary.result("db.s.downstream")
+        assert isinstance(skip, RunSkip)
+        # model_copy(update=...) would add the attribute, and model_dump() would hide it.
+        assert not hasattr(skip, "test_results")
+        assert summary.test_results == []

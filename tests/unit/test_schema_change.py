@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from clair.adapters.base import WarehouseColumn
-from clair.core.runner import RunStatus
+from clair.core.runner import RunFailure, RunSuccess
 from clair.core.schema_change import SchemaChange, compare_columns, schema_change_error
 from clair.exceptions import RunError
 from clair.trouves.address import TrouveAddress
@@ -98,14 +98,14 @@ class TestTheRun:
     def test_a_new_column_with_fail_writes_nothing_and_names_the_column(self):
         result = run_with_columns([ID, LABEL], [ID, LABEL, DISCOUNT])
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "DISCOUNT" in result.error
         assert executed_sql(result) == []
 
     def test_a_removed_column_writes_nothing_also_with_add_new_columns(self):
         result = run_with_columns([ID, LABEL], [ID], OnSchemaChange.ADD_NEW_COLUMNS)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "LABEL" in result.error
         assert executed_sql(result) == []
 
@@ -114,7 +114,7 @@ class TestTheRun:
         statements = executed_sql(result)
         staging_address = f"{TEST_ADDRESS}__clair_{TEST_RUN_ID}"
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         (alter,) = alter_statements(statements)
         assert alter.endswith(f'ALTER TABLE {staging_address} ADD COLUMN "DISCOUNT" NUMBER(10,2)')
         # The clone first, then the ALTER, then the INSERT.
@@ -135,7 +135,7 @@ class TestTheRun:
         adapter = RecordingAdapter(fail_on=["SELECT 1 AS id"])
         result = run_one_trouve(incremental_table(), adapter, run_mode=RunMode.INCREMENTAL)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "fails a query" in result.error
         assert executed_sql(result) == []
 
@@ -144,7 +144,7 @@ class TestTheRun:
         full_refresh = run_one_trouve(
             incremental_table(), RecordingAdapter(table_columns=[ID], query_columns=[ID, DISCOUNT])
         )
-        assert full_refresh.status == RunStatus.SUCCESS
+        assert isinstance(full_refresh, RunSuccess)
 
 
 class TestSnowflakeDescribeQuery:

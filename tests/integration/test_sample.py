@@ -18,6 +18,7 @@ from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunSummary
 from clair.environments.environments import Environment
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
+from tests.helpers import success_of
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import physical_address, write_refined_project
 from tests.integration.warehouse import execute, query_rows, row_count
@@ -258,8 +259,8 @@ class TestTheDefaultRowLimit:
         assert row_count(adapter, address) == expected_row_count
 
     def test_a_not_null_test_passes_on_an_empty_table(self, summary: RunSummary) -> None:
-        (test_result,) = summary.result(
-            f"{DEFAULT_LIMIT_DATABASE_NAME}.refined.emptied_ids"
+        (test_result,) = success_of(
+            summary, f"{DEFAULT_LIMIT_DATABASE_NAME}.refined.emptied_ids"
         ).test_results
         assert test_result.test_type == "not_null"
         assert test_result.passed

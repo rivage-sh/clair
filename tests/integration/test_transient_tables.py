@@ -24,7 +24,7 @@ import pytest
 import clair
 from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus, RunSummary
+from clair.core.runner import RunFailure, RunSuccess, RunSummary
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
@@ -116,7 +116,7 @@ class TestAChangeOfKind:
 
     def test_an_incremental_run_makes_a_permanent_table_transient(self, runs: _Runs) -> None:
         result = runs.to_transient.summary.result(LOGICAL_NAME)
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert runs.to_transient.transient
 
     def test_the_change_to_transient_keeps_the_rows_and_the_grants(self, runs: _Runs) -> None:
@@ -125,7 +125,7 @@ class TestAChangeOfKind:
 
     def test_an_incremental_run_cannot_make_a_transient_table_permanent(self, runs: _Runs) -> None:
         result = runs.to_permanent_incremental.summary.result(LOGICAL_NAME)
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "cannot be cloned to a permanent object" in result.error
 
     def test_the_failed_change_leaves_the_table_as_it_was(self, runs: _Runs) -> None:
@@ -134,7 +134,7 @@ class TestAChangeOfKind:
 
     def test_a_full_refresh_makes_the_table_permanent_and_keeps_the_grants(self, runs: _Runs) -> None:
         result = runs.to_permanent_full_refresh.summary.result(LOGICAL_NAME)
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert not runs.to_permanent_full_refresh.transient
         assert runs.to_permanent_full_refresh.ids == [3]
         assert "INSERT" in runs.to_permanent_full_refresh.privileges

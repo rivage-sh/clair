@@ -23,7 +23,7 @@ import pytest
 import clair
 from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunSummary
+from clair.core.runner import RunSkip, RunSummary
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
@@ -98,6 +98,7 @@ def comment_statements_of(summary: RunSummary) -> list[str]:
     return [
         statement.sql
         for result in summary.results
+        if not isinstance(result, RunSkip)
         for statement in result.statements
         if "-- comment:" in statement.sql
     ]

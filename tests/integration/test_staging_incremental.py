@@ -28,10 +28,11 @@ import pytest
 import clair
 from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus, RunSummary
+from clair.core.runner import RunSuccess, RunSummary
 from clair.core.staging import make_staging_address
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
+from tests.helpers import failure_of, success_of
 from tests.integration.comparison import tables_are_equal
 from tests.integration.config import IntegrationConfig
 from tests.integration.staging_project import (
@@ -116,9 +117,7 @@ class TestAnUpsertRunThatPasses:
     ) -> None:
         """No physical table exists yet, so clair makes no clone."""
         first, _ = runs
-        result = first.result(f"{self.DATABASE_NAME}.refined.checked")
-
-        assert result is not None
+        result = success_of(first, f"{self.DATABASE_NAME}.refined.checked")
         assert result.effective_run_mode == RunMode.FULL_REFRESH
 
     def test_the_second_run_stays_incremental(
@@ -126,9 +125,7 @@ class TestAnUpsertRunThatPasses:
     ) -> None:
         """The table exists now, thus the incremental statements run."""
         _, second = runs
-        result = second.result(f"{self.DATABASE_NAME}.refined.checked")
-
-        assert result is not None
+        result = success_of(second, f"{self.DATABASE_NAME}.refined.checked")
         assert result.effective_run_mode == RunMode.INCREMENTAL
         # The clone seeds the staging table, and the MERGE follows it.
         assert "clone" in result.statements[0].sql.lower()
@@ -212,13 +209,11 @@ class _DeleteInsertRunThatPasses:
         self, runs: tuple[RunSummary, RunSummary]
     ) -> None:
         first, second = runs
-        first_result = first.result(f"{self.DATABASE_NAME}.refined.checked")
-        second_result = second.result(f"{self.DATABASE_NAME}.refined.checked")
+        first_result = success_of(first, f"{self.DATABASE_NAME}.refined.checked")
+        second_result = success_of(second, f"{self.DATABASE_NAME}.refined.checked")
 
-        assert first_result is not None
         assert first_result.effective_run_mode == RunMode.FULL_REFRESH
-        assert second_result is not None
-        assert second_result.status == RunStatus.SUCCESS
+        assert isinstance(second_result, RunSuccess)
         assert second_result.effective_run_mode == RunMode.INCREMENTAL
 
     def test_the_new_rows_replace_the_deleted_rows(
@@ -314,10 +309,7 @@ class TestAnUpsertRunWhoseTestFails:
     ) -> None:
         """The MERGE ran on the clone, so it never touched this table."""
         checked = checked_address(self.DATABASE_NAME, clair_environment.schema_name)
-        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
-
-        assert result is not None
-        assert result.status == RunStatus.FAILURE
+        result = failure_of(failed_run, f"{self.DATABASE_NAME}.refined.checked")
         assert [test.passed for test in result.test_results] == [False]
         assert row_count(adapter, checked) == 3
 
@@ -398,10 +390,7 @@ class TestAMergeThatFails:
         clair makes the merge source table one statement earlier. The result
         names the statement, thus this test reads the SQL of that step.
         """
-        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
-
-        assert result is not None
-        assert result.status == RunStatus.FAILURE
+        result = failure_of(failed_run, f"{self.DATABASE_NAME}.refined.checked")
         assert failed_run.failed_count == 1
         assert result.failed_statement is not None
         assert "merge into" in result.failed_statement.sql.lower()
@@ -409,9 +398,7 @@ class TestAMergeThatFails:
 
     def test_the_run_ran_no_data_quality_test(self, failed_run: RunSummary) -> None:
         """A build that fails never reaches the test step."""
-        result = failed_run.result(f"{self.DATABASE_NAME}.refined.checked")
-
-        assert result is not None
+        result = failure_of(failed_run, f"{self.DATABASE_NAME}.refined.checked")
         assert result.test_results == []
 
     def test_clair_drops_the_merge_source_table(
@@ -491,9 +478,7 @@ class TestAnAppendRun:
         """The MERGE belongs to the UPSERT mode only."""
         schema_name = clair_environment.schema_name
         checked = checked_address(self.DATABASE_NAME, schema_name)
-        result = second_run.result(f"{self.DATABASE_NAME}.refined.checked")
-
-        assert result is not None
+        result = success_of(second_run, f"{self.DATABASE_NAME}.refined.checked")
         assert not any("merge into" in s.sql.lower() for s in result.statements)
         assert not table_exists(
             adapter, merge_source_address(checked, second_run.run_id, schema_name)
@@ -569,11 +554,11 @@ class TestTheFallbackGivesTheDataOfAFullRefresh:
             reference_path, env=environment, run_mode=RunMode.FULL_REFRESH
         )
 
-        assert fallback.result(
-            f"{self.FALLBACK_DATABASE_NAME}.refined.checked"
+        assert success_of(
+            fallback, f"{self.FALLBACK_DATABASE_NAME}.refined.checked"
         ).effective_run_mode == RunMode.FULL_REFRESH
-        assert reference.result(
-            f"{self.FULL_REFRESH_DATABASE_NAME}.refined.checked"
+        assert success_of(
+            reference, f"{self.FULL_REFRESH_DATABASE_NAME}.refined.checked"
         ).effective_run_mode == RunMode.FULL_REFRESH
 
         return (

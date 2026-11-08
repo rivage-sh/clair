@@ -28,7 +28,7 @@ from clair.core.runner import RunSummary
 from clair.exceptions import CompileError, SampleTargetsProductionError
 from clair.trouves.test import TestNotNull
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, Source, Table
-from tests.helpers import RecordingAdapter, make_environment
+from tests.helpers import RecordingAdapter, make_environment, success_of
 
 ORDERS_SAMPLE = f"(SELECT * FROM raw.shop.orders LIMIT {DEFAULT_SAMPLE_ROWS})"
 CUSTOMERS_SAMPLE = (
@@ -184,7 +184,7 @@ def run_sampled(
 
 def sql_of(summary: RunSummary, address: str) -> str:
     """Give the build SQL of one Trouve: each statement, joined."""
-    return "\n".join(statement.sql for statement in summary.result(address).statements)
+    return "\n".join(statement.sql for statement in success_of(summary, address).statements)
 
 
 class TestASampledReference:
@@ -304,14 +304,14 @@ class TestTheTestsOfASampledRun:
 
         test_types = [
             test_result.test_type
-            for test_result in summary.result("mart.shop.order_facts").test_results
+            for test_result in success_of(summary, "mart.shop.order_facts").test_results
         ]
         assert test_types == ["not_null"]
 
     def test_a_test_reads_the_complete_object_that_the_run_built(self, project: Path):
         summary, _ = run_sampled(project)
 
-        (test_result,) = summary.result("mart.shop.order_facts").test_results
+        (test_result,) = success_of(summary, "mart.shop.order_facts").test_results
         assert "LIMIT" not in test_result.statement.sql
 
     def test_a_run_without_a_sample_runs_each_test(self, project: Path):
@@ -319,7 +319,7 @@ class TestTheTestsOfASampledRun:
 
         test_types = [
             test_result.test_type
-            for test_result in summary.result("mart.shop.order_facts").test_results
+            for test_result in success_of(summary, "mart.shop.order_facts").test_results
         ]
         assert test_types == ["not_null", "row_count", "unique"]
 

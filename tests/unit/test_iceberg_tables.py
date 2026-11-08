@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from clair.adapters.base import WarehouseColumn
 from clair.core.compiler import build_statements
-from clair.core.runner import RunStatus
+from clair.core.runner import RunFailure, RunSuccess
 from clair.core.staging import make_staging_address
 from clair.trouves.address import TrouveAddress
 from clair.trouves.pandas_table import PandasTable
@@ -150,7 +150,7 @@ class TestTheRun:
             iceberg_table(incremental=True), adapter, run_mode=RunMode.INCREMENTAL
         )
 
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert result.effective_run_mode == RunMode.INCREMENTAL
         assert contains_statement(executed_sql(result), CLONE)
         assert contains_statement(executed_sql(result), PROMOTION)
@@ -164,7 +164,7 @@ class TestTheRun:
             iceberg_table(incremental=True), adapter, run_mode=RunMode.INCREMENTAL
         )
 
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert contains_statement(
             executed_sql(result), f'ALTER ICEBERG TABLE {STAGING_ADDRESS} ADD COLUMN "LABEL"'
         )
@@ -192,7 +192,7 @@ class TestTheRun:
     ):
         result = run_one_trouve(trouve, adapter)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert f"holds the type {old_type}, and the Trouve now makes the type {new_type}" in result.error
         assert f"Run DROP {old_type} {TEST_ADDRESS}" in result.error
         assert not contains_statement(executed_sql(result), f"{PHYSICAL_ADDRESS} CLONE")
@@ -206,7 +206,7 @@ class TestTheRun:
             iceberg_table(incremental=True), adapter, run_mode=RunMode.INCREMENTAL
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert result.effective_run_mode == RunMode.FULL_REFRESH
         assert not contains_statement(executed_sql(result), CLONE)
         assert "Run DROP TABLE" in result.error

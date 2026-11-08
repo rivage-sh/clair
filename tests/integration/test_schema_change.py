@@ -17,7 +17,7 @@ import pytest
 import clair
 from clair.adapters.base import WarehouseColumn
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus, RunSummary
+from clair.core.runner import RunFailure, RunStatus, RunSuccess, RunSummary
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
@@ -93,7 +93,7 @@ class TestANewColumn:
 
     def test_fail_stops_the_run_and_names_the_column(self, runs: _Runs) -> None:
         result = runs.fail.result(LOGICAL_NAME)
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "DISCOUNT" in result.error
 
     def test_fail_leaves_the_columns_of_the_table(self, runs: _Runs) -> None:
@@ -106,5 +106,5 @@ class TestANewColumn:
 
     def test_add_new_columns_adds_the_column_and_the_old_row_gets_null(self, runs: _Runs) -> None:
         result = runs.added.result(LOGICAL_NAME)
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert runs.rows_after_added == [(1, "a", None), (2, "b", 7)]

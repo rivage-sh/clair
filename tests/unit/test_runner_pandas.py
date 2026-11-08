@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from clair.core.runner import RunStatus, _run_dataframe_trouve
+from clair.core.runner import RunFailure, RunSuccess, _run_dataframe_trouve
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import InvalidTrouveAddressError
 from clair.trouves.pandas_table import PandasTable
@@ -51,7 +51,7 @@ class TestRunPandasTableHappyPath:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert str(result.addresses.physical) == "db.schema.summary"
         assert len(adapter.written_addresses) == 1
         written = adapter.dataframes[adapter.written_addresses[0]]
@@ -77,7 +77,7 @@ class TestRunPandasTableHappyPath:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert len(adapter.fetched_addresses) == 2
 
     def test_transform_receives_the_fetched_dataframe(self):
@@ -119,7 +119,7 @@ class TestRunPandasTableAddress:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert adapter.written_addresses == ["mydb.myschema.mytable"]
 
     def test_a_name_that_is_not_three_parts_never_reaches_the_write(self):
@@ -146,7 +146,7 @@ class TestRunPandasTableTransformErrors:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "Clair cannot build the DataFrame" in result.error
         assert "something went wrong" in result.error
 
@@ -167,7 +167,7 @@ class TestRunPandasTableTransformErrors:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "must give a pandas DataFrame" in result.error
         assert "dict" in result.error
 
@@ -188,7 +188,7 @@ class TestRunPandasTableTransformErrors:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "must give a pandas DataFrame" in result.error
 
 
@@ -210,7 +210,7 @@ class TestRunPandasTableFetchErrors:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "cannot read the input" in result.error
         assert "events" in result.error
 
@@ -234,7 +234,7 @@ class TestRunPandasTableWriteErrors:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "cannot write the DataFrame" in result.error
 
     def test_write_returns_success_false_results_in_failure(self):
@@ -255,7 +255,7 @@ class TestRunPandasTableWriteErrors:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert result.error
 
 
@@ -278,7 +278,7 @@ class TestRunPandasTableResultFields:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert result.duration_seconds >= 0.0
 
     def test_failure_result_has_duration(self):
@@ -298,5 +298,5 @@ class TestRunPandasTableResultFields:
             trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
         )
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert result.duration_seconds >= 0.0
