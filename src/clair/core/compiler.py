@@ -159,7 +159,11 @@ def build_statements(
         return [
             build_type_change_comment(wanted_object_type(trouve), physical_address),
             *plan.statements,
-            *build_cluster_by_statements(physical_address, table_options),
+            *build_cluster_by_statements(
+                physical_address,
+                table_options,
+                incremental=effective_mode == RunMode.INCREMENTAL,
+            ),
             *plan.cleanup_statements,
         ]
 
@@ -173,7 +177,13 @@ def build_statements(
         )
     plan = trouve.build_sql(effective_mode, run_id=run_id, staging_address=staging_address)
     statements.extend(plan.statements)
-    statements.extend(build_cluster_by_statements(staging_address, table_options))
+    statements.extend(
+        build_cluster_by_statements(
+            staging_address,
+            table_options,
+            incremental=effective_mode == RunMode.INCREMENTAL,
+        )
+    )
     statements.extend(plan.cleanup_statements)
 
     statements.append("-- staging: the data quality tests run here")

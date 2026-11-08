@@ -25,7 +25,9 @@ object and the physical object must be the same kind.
 
 A clone copies the clustering key, but Snowflake suspends Automatic Clustering
 on the clone. A table with a ``cluster_by`` thus gets its key on the staging
-object after the build, and ``RESUME RECLUSTER`` after the promotion.
+object after the build, and ``RESUME RECLUSTER`` after the promotion. An
+incremental table with no ``cluster_by`` gets ``DROP CLUSTERING KEY``, because
+the clone keeps a key that the Trouve removed.
 
 A Trouve that changes from a TABLE to a VIEW, or from a VIEW to a TABLE, stops
 before the promotion. Snowflake replaces an object with an object of the same
@@ -113,7 +115,10 @@ def build_clone_statement(
 
 
 def build_cluster_by_statements(
-    address: TrouveAddress, table_options: TableOptions | None
+    address: TrouveAddress,
+    table_options: TableOptions | None,
+    *,
+    incremental: bool = False,
 ) -> list[str]:
     """Give the statement that sets the clustering key of a table that clair built.
 
@@ -121,14 +126,31 @@ def build_cluster_by_statements(
     documentation asks for column definitions in a CREATE TABLE AS SELECT
     that clusters, and clair does not know the columns. The key also
     replaces the key that an incremental clone copies from the physical table.
-    A key that the Trouve removes stays on an incremental table until a full
-    refresh, because clair cannot see the key offline.
+
+    An incremental run writes into a table that already exists, and that table
+    can hold a key that the Trouve no longer declares. ``clair compile`` cannot
+    see the key of a table, thus an incremental run with no ``cluster_by``
+    drops the key each time. Snowflake accepts the drop on a table with no key.
+
+    Args:
+        address: The table that gets the key.
+        table_options: The options of a TABLE. A view has none.
+        incremental: True when the table existed before this run.
 
     Returns:
-        One statement, or no statement for a view or a table with no key.
+        One statement, or no statement for a view, or for a new table with no key.
     """
-    if table_options is None or not table_options.cluster_by:
+    if table_options is None:
         return []
+    if not table_options.cluster_by:
+        if not incremental:
+            return []
+        return [
+            (
+                f"-- cluster: drop a clustering key that the Trouve no longer declares\n"
+                f"ALTER {table_options.object_keyword} {address} DROP CLUSTERING KEY"
+            )
+        ]
     cluster_key = ", ".join(table_options.cluster_by)
     return [
         (

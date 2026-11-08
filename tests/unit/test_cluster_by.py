@@ -37,6 +37,8 @@ CLUSTER_BY = ["id", "to_date(created_at)"]
 CLUSTER_STAGING = f"ALTER TABLE {STAGING_ADDRESS} CLUSTER BY (id, to_date(created_at))"
 CLUSTER_PHYSICAL = f"ALTER TABLE {PHYSICAL_ADDRESS} CLUSTER BY (id, to_date(created_at))"
 RESUME_PHYSICAL = f"ALTER TABLE {PHYSICAL_ADDRESS} RESUME RECLUSTER"
+DROP_STAGING_KEY = f"ALTER TABLE {STAGING_ADDRESS} DROP CLUSTERING KEY"
+DROP_PHYSICAL_KEY = f"ALTER TABLE {PHYSICAL_ADDRESS} DROP CLUSTERING KEY"
 PROMOTION = f"CREATE OR REPLACE TABLE {PHYSICAL_ADDRESS} CLONE {STAGING_ADDRESS} COPY GRANTS"
 
 
@@ -147,6 +149,47 @@ class TestThePlan:
 
         assert index_of(statements, "CLUSTER") == -1
 
+
+class TestARemovedKey:
+    """An incremental table can hold a key that the Trouve no longer declares."""
+
+    def test_a_staged_incremental_plan_drops_the_key_after_the_clone(self):
+        statements = build_statements(
+            compile_trouve(incremental_table([])), RunMode.INCREMENTAL, TEST_RUN_ID
+        )
+
+        clone_position = index_of(statements, f"CLONE {PHYSICAL_ADDRESS}")
+        drop_position = index_of(statements, DROP_STAGING_KEY)
+        assert -1 < clone_position < drop_position < index_of(statements, PROMOTION)
+        assert index_of(statements, "RESUME RECLUSTER") == -1
+
+    def test_an_incremental_plan_with_no_staging_drops_the_key_of_the_physical_table(self):
+        statements = build_statements(
+            compile_trouve(incremental_table([])),
+            RunMode.INCREMENTAL,
+            TEST_RUN_ID,
+            use_staging=False,
+        )
+
+        assert index_of(statements, DROP_PHYSICAL_KEY) > -1
+
+    def test_a_full_refresh_of_an_incremental_trouve_drops_nothing(self):
+        statements = build_statements(
+            compile_trouve(incremental_table([])), RunMode.FULL_REFRESH, TEST_RUN_ID
+        )
+
+        assert index_of(statements, "CLUSTER") == -1
+
+    def test_an_incremental_run_drops_the_key_of_the_clone_and_counts_the_inserted_rows(self):
+        adapter = RecordingAdapter(table_columns=[ID], query_columns=[ID])
+
+        result = run_one_trouve(incremental_table([]), adapter, run_mode=RunMode.INCREMENTAL)
+
+        assert result.status == RunStatus.SUCCESS
+        sql_texts = executed_sql(result)
+        insert_position = index_of(sql_texts, f"INSERT INTO {STAGING_ADDRESS}")
+        assert -1 < insert_position < index_of(sql_texts, DROP_STAGING_KEY)
+        assert index_of(sql_texts, DROP_STAGING_KEY) < index_of(sql_texts, PROMOTION)
 
 class TestTheRun:
     def test_an_incremental_run_clusters_the_clone_and_resumes_the_promoted_table(self):

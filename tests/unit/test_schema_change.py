@@ -51,7 +51,8 @@ def run_with_columns(
 
 
 def alter_statements(sql_texts: list[str]) -> list[str]:
-    return [sql for sql in sql_texts if "ALTER TABLE" in sql]
+    """Give each ALTER that changes a column. The clustering key is not a column."""
+    return [sql for sql in sql_texts if "ALTER TABLE" in sql and "CLUSTERING KEY" not in sql]
 
 
 class TestCompareColumns:

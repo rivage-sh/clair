@@ -10,6 +10,8 @@ The fixture runs one incremental Trouve three times:
 2. Incremental, key ``id``. The staging table is a clone of the physical table.
 3. Incremental, key ``id, name``. The ALTER replaces the key that the clone
    copied.
+4. Incremental, no key. The clone copies the old key, and the DROP removes it.
+5. Incremental, no key again. Snowflake accepts the DROP on a table with no key.
 """
 
 from __future__ import annotations
@@ -75,6 +77,8 @@ class _Runs(NamedTuple):
     full_refresh: _Step
     incremental: _Step
     new_key: _Step
+    removed_key: _Step
+    still_no_key: _Step
 
 
 class TestAPromotedTable:
@@ -100,6 +104,8 @@ class TestAPromotedTable:
             full_refresh=run(1, ["id"], RunMode.FULL_REFRESH),
             incremental=run(2, ["id"], RunMode.INCREMENTAL),
             new_key=run(3, ["id", "name"], RunMode.INCREMENTAL),
+            removed_key=run(4, [], RunMode.INCREMENTAL),
+            still_no_key=run(5, [], RunMode.INCREMENTAL),
         )
 
     @pytest.mark.parametrize("step_name", ["full_refresh", "incremental", "new_key"])
@@ -114,6 +120,14 @@ class TestAPromotedTable:
     def test_an_incremental_run_replaces_the_key_that_the_clone_copied(self, runs: _Runs) -> None:
         assert "NAME" not in runs.incremental.clustering.key
         assert "NAME" in runs.new_key.clustering.key
+
+    @pytest.mark.parametrize("step_name", ["removed_key", "still_no_key"])
+    def test_an_incremental_run_with_no_key_drops_the_key_that_the_clone_copied(
+        self, runs: _Runs, step_name: str
+    ) -> None:
+        step: _Step = getattr(runs, step_name)
+        assert step.summary.failed == [], [result.error for result in step.summary.failed]
+        assert step.clustering.key == ""
 
 
 SEED_FILE = """\
