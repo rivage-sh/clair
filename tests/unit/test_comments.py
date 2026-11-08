@@ -39,7 +39,7 @@ DROP_STAGING = "drop the staging object"
 TABLE_COMMENT = f"ALTER TABLE {PHYSICAL_ADDRESS} SET COMMENT = 'The orders.'"
 VIEW_COMMENT = f"ALTER VIEW {PHYSICAL_ADDRESS} SET COMMENT = 'The orders.'"
 TABLE_COLUMN_COMMENT = f"ALTER TABLE {PHYSICAL_ADDRESS} ALTER COLUMN id COMMENT 'The order ID.'"
-VIEW_COLUMN_COMMENT = f"COMMENT ON COLUMN {PHYSICAL_ADDRESS}.id IS 'The order ID.'"
+VIEW_COLUMN_COMMENT = f"ALTER VIEW {PHYSICAL_ADDRESS} ALTER COLUMN id COMMENT 'The order ID.'"
 
 
 def documented_columns() -> list[Column]:
@@ -142,7 +142,7 @@ class TestTheStatements:
         assert last_lines(statements) == [
             VIEW_COMMENT,
             VIEW_COLUMN_COMMENT,
-            f"COMMENT ON COLUMN {PHYSICAL_ADDRESS}.amount IS 'The total.'",
+            f"ALTER VIEW {PHYSICAL_ADDRESS} ALTER COLUMN amount COMMENT 'The total.'",
         ]
 
     def test_an_iceberg_table_gets_an_alter_iceberg_table(self):

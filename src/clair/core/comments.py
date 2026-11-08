@@ -16,8 +16,9 @@ the comments. Clair compares them with the docs, and writes only a comment that
 differs. An unchanged incremental Trouve thus gets no comment statement. A
 column that you remove from ``columns`` keeps its old comment.
 
-The comments of the columns of a table go into one ALTER. Snowflake accepts
-one column only in each ALTER VIEW, thus a view gets one statement per column.
+The comments of the columns of a table go into one ALTER. A view gets one
+``ALTER VIEW ... ALTER COLUMN`` for each column: ``COMMENT ON COLUMN`` accepts
+a table only, and ALTER VIEW accepts one column in each statement.
 """
 
 from __future__ import annotations
@@ -126,7 +127,7 @@ def build_comment_statements(
     if table_options is None:
         statements.extend(
             f"-- comment: write the docs of the column {column_name}\n"
-            f"COMMENT ON COLUMN {address}.{column_name} IS {quote_comment(column_docs)}"
+            f"ALTER VIEW {address} ALTER COLUMN {column_name} COMMENT {quote_comment(column_docs)}"
             for column_name, column_docs in changed_columns
         )
         return statements
