@@ -35,6 +35,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import structlog
 import uuid6
@@ -152,6 +153,82 @@ def _select_nodes(
     return selected
 
 
+class _DiscoveredProject(NamedTuple):
+    """The project after discovery: each Trouve, compiled to its logical addresses."""
+
+    project_root: Path
+    env_name: str
+    trouves: list[TrouveAbc]
+    dag: ClairDag
+
+
+def _discover(
+    project_dir: str | Path | None, env: EnvSpec, run_mode: RunMode = RunMode.FULL_REFRESH
+) -> _DiscoveredProject:
+    """Find the project, apply the routing of *env*, discover each Trouve, and build the DAG.
+
+    An Environment gives its warehouse and its role to each Trouve that names
+    none. A name gives the routing entry only.
+    """
+    project_root = _resolve_project_root(project_dir)
+    environment = env if isinstance(env, Environment) else None
+    env_name = _env_name_of(env)
+    profile_defaults = (
+        None
+        if environment is None
+        else {"warehouse": environment.connection.warehouse, "role": environment.connection.role}
+    )
+    routing = _resolve_routing(project_root, env_name)
+    trouves = discover_project(
+        project_root,
+        profile_defaults,
+        routing=routing,
+        environment=environment,
+        run_mode=run_mode,
+    )
+    _warn_about_routing_collisions(trouves, env_name)
+    return _DiscoveredProject(project_root, env_name, trouves, build_dag(trouves))
+
+
+class _Plan(NamedTuple):
+    """The SQL of a run: the selected Trouves, with each reference resolved for the selection."""
+
+    project: _DiscoveredProject
+    selected: list[str]
+    # The row limit of a sampled plan, or None for a plan that reads each row.
+    sample_rows: int | None
+
+
+def _plan(
+    project_dir: str | Path | None,
+    *,
+    env: EnvSpec,
+    select: Selectors,
+    exclude: Selectors,
+    run_mode: RunMode,
+    sample: bool,
+    sample_rows: int,
+) -> _Plan:
+    """Give the plan that clair.compile() writes and clair.run() executes.
+
+    The two operations share this function, thus a compile always shows the SQL
+    that a run with the same arguments sends.
+
+    Raises:
+        SampleTargetsProductionError: If *sample* is True, and a selected
+            Trouve writes to its logical address.
+        ValueError: If *sample_rows* is less than 1.
+    """
+    _require_a_positive_sample_rows(sample_rows)
+    project = _discover(project_dir, env, run_mode)
+    selected = _select_nodes(project.dag, select, exclude)
+    plan_sample_rows = sample_rows if sample else None
+    if sample:
+        _refuse_a_sampled_production_write(project.dag, selected, project.env_name)
+    recompile_for_selection(project.trouves, set(selected), sample_rows=plan_sample_rows)
+    return _Plan(project, selected, plan_sample_rows)
+
+
 def compile(
     project_dir: str | Path | None = None,
     *,
@@ -196,26 +273,17 @@ def compile(
         ValueError: If *sample_rows* is less than 1.
         ClairError: If discovery, routing, or compilation fails.
     """
-    _require_a_positive_sample_rows(sample_rows)
-    # The row limit of this plan, or None for a plan that reads each row.
-    compile_sample_rows = sample_rows if sample else None
-    project_root = _resolve_project_root(project_dir)
-    run_id = uuid6.uuid7().hex
-
-    environment = env if isinstance(env, Environment) else None
-    env_name = _env_name_of(env)
-
-    routing = _resolve_routing(project_root, env_name)
-    discovered = discover_project(
-        project_root, routing=routing, environment=environment, run_mode=run_mode
+    plan = _plan(
+        project_dir,
+        env=env,
+        select=select,
+        exclude=exclude,
+        run_mode=run_mode,
+        sample=sample,
+        sample_rows=sample_rows,
     )
-    _warn_about_routing_collisions(discovered, env_name)
-    dag = build_dag(discovered)
-
-    selected = _select_nodes(dag, select, exclude)
-    if sample:
-        _refuse_a_sampled_production_write(dag, selected, env_name)
-    recompile_for_selection(discovered, set(selected), sample_rows=compile_sample_rows)
+    project_root, env_name, _, dag = plan.project
+    run_id = uuid6.uuid7().hex
 
     source_count = sum(1 for n in dag.nodes if dag.get_trouve(n).type == TrouveType.SOURCE)
     logger.info(
@@ -225,12 +293,12 @@ def compile(
         trouves=len(dag.nodes) - source_count,
         sources=source_count,
         run_mode=run_mode.value,
-        sample_rows=compile_sample_rows,
+        sample_rows=plan.sample_rows,
     )
 
     output = write_compile_output(
         dag,
-        selected,
+        plan.selected,
         project_root,
         on_node_compiled=lambda node_info: logger.info(
             "compile.node",
@@ -243,7 +311,7 @@ def compile(
         use_staging=use_staging,
     )
     output = output.model_copy(
-        update={"env_name": env_name, "sample_rows": compile_sample_rows}
+        update={"env_name": env_name, "sample_rows": plan.sample_rows}
     )
     logger.info("compile.complete", run_id=run_id, artifacts_dir=str(output.artifacts_dir))
     return output
@@ -309,10 +377,6 @@ def run(
             that fails gives a RunResult with the FAILURE status, and raises no
             error, because the other branches of the DAG continue.
     """
-    _require_a_positive_sample_rows(sample_rows)
-    # The row limit of this run, or None for a run that reads each row.
-    run_sample_rows = sample_rows if sample else None
-    project_root = _resolve_project_root(project_dir)
     run_id = uuid6.uuid7().hex
     use_staging = test
     if not test:
@@ -323,25 +387,20 @@ def run(
 
     # `environment` names the object, and `env` names the argument.
     environment = env
-    env_name = environment.name
     # The caller replaces the thread count of the environment.
     thread_count = threads if threads is not None else environment.threads
-    profile_defaults = {
-        "warehouse": environment.connection.warehouse,
-        "role": environment.connection.role,
-    }
-    routing = _resolve_routing(project_root, env_name)
-    discovered = discover_project(
-        project_root,
-        profile_defaults,
-        routing=routing,
-        environment=environment,
+    plan = _plan(
+        project_dir,
+        env=environment,
+        select=select,
+        exclude=exclude,
         run_mode=run_mode,
+        sample=sample,
+        sample_rows=sample_rows,
     )
-    _warn_about_routing_collisions(discovered, env_name)
-    dag = build_dag(discovered)
-
-    selected = _select_nodes(dag, select, exclude)
+    project_root, env_name, _, dag = plan.project
+    selected = plan.selected
+    run_sample_rows = plan.sample_rows
     if not selected:
         logger.info("run.no_trouves_selected")
         return RunSummary(
@@ -354,9 +413,7 @@ def run(
         )
 
     if sample:
-        _refuse_a_sampled_production_write(dag, selected, env_name)
         logger.info("run.sample", sample_rows=sample_rows)
-    recompile_for_selection(discovered, set(selected), sample_rows=run_sample_rows)
     write_compile_output(
         dag, selected, project_root, run_mode=run_mode, run_id=run_id, use_staging=use_staging
     )
@@ -517,22 +574,12 @@ def test(
         ValueError: If *sample_rows* is less than 1.
     """
     _require_a_positive_sample_rows(sample_rows)
-    project_root = _resolve_project_root(project_dir)
 
     # `environment` names the object, and `env` names the argument.
     environment = env
-    env_name = environment.name
     # The caller replaces the thread count of the environment.
     thread_count = threads if threads is not None else environment.threads
-    profile_defaults = {
-        "warehouse": environment.connection.warehouse,
-        "role": environment.connection.role,
-    }
-    routing = _resolve_routing(project_root, env_name)
-    discovered = discover_project(
-        project_root, profile_defaults, routing=routing, environment=environment
-    )
-    dag = build_dag(discovered)
+    project_root, env_name, _, dag = _discover(project_dir, environment)
 
     # Keep each SOURCE, thus a selector can match a SOURCE. run_tests skips it.
     selected = _select_nodes(dag, select, exclude, keep_sources=True)
