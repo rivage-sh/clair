@@ -9,6 +9,7 @@ drop that a person must run.
 
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 from structlog.testing import capture_logs
 
@@ -17,7 +18,9 @@ from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunResult, RunStatus, wanted_object_type
 from clair.core.staging import make_staging_address
 from clair.environments.routing import TrouveAddress
+from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import Append, Incremental, RunMode
+from clair.trouves.seed_table import SeedTable
 from clair.trouves.trouve import (
     Table,
     View,
@@ -165,6 +168,46 @@ class TestRunWithNoStaging:
 
         assert result.status == RunStatus.SUCCESS
         assert f"CREATE OR REPLACE TABLE {ADDRESS}" in executed_sql(result)[0]
+
+
+def _dataframe_trouves() -> list[PandasTable | SeedTable]:
+    return [
+        PandasTable(transform=lambda: pd.DataFrame({"id": [1]})),
+        SeedTable(dataframe=pd.DataFrame({"id": [1]})),
+    ]
+
+
+class TestDataframeTrouve:
+    """A pandas Trouve writes with ``write_pandas``, but the type test is the same.
+
+    Against an address that holds a view, ``write_pandas(overwrite=True)`` fails
+    with a Snowflake error that does not name the cause. The runner must stop
+    first, with the same error as a SQL Trouve.
+    """
+
+    @pytest.mark.parametrize("trouve", _dataframe_trouves(), ids=["PandasTable", "SeedTable"])
+    def test_a_staged_run_writes_the_candidate_and_stops_before_the_promotion(
+        self, trouve: PandasTable | SeedTable
+    ):
+        adapter = RecordingAdapter(existing_views=[ADDRESS])
+        result = run_one_trouve(trouve, adapter)
+
+        assert result.status == RunStatus.FAILURE
+        assert f"{ADDRESS} holds the type VIEW, and the Trouve now makes the type TABLE" in result.error
+        assert f"Run DROP VIEW {ADDRESS}" in result.error
+        assert adapter.written_addresses == [_staging_address()]
+        assert not [sql for sql in executed_sql(result) if PROMOTE_TABLE in sql]
+        assert _drops_of_the_physical_object(result) == []
+
+    @pytest.mark.parametrize("trouve", _dataframe_trouves(), ids=["PandasTable", "SeedTable"])
+    def test_a_run_with_no_staging_writes_nothing(self, trouve: PandasTable | SeedTable):
+        adapter = RecordingAdapter(existing_views=[ADDRESS])
+        result = run_one_trouve(trouve, adapter, use_staging=False)
+
+        assert result.status == RunStatus.FAILURE
+        assert f"Run DROP VIEW {ADDRESS}" in result.error
+        assert adapter.written_addresses == []
+        assert result.statements == []
 
 
 class TestIncrementalFallback:
