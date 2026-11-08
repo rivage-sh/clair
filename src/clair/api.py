@@ -160,6 +160,8 @@ def compile(
     env: EnvSpec = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     use_staging: bool = True,
+    sample: bool = False,
+    sample_rows: int = DEFAULT_SAMPLE_ROWS,
 ) -> CompileOutput:
     """Compile a project and write the SQL to the artifacts directory.
 
@@ -178,13 +180,25 @@ def compile(
             ``clair.env`` empty in each Trouve module. None gives the name "dev".
         run_mode: The run mode for the new SQL statements.
         use_staging: If True, the plan shows the staged path.
+        sample: If True, the plan shows the SQL of ``clair.run(sample=True)``:
+            each reference to a Trouve outside the selection reads
+            ``Trouve.sample()``. The rule for production is the same as in
+            :func:`run`.
+        sample_rows: The row limit of a sampled read, for each Trouve without
+            a ``sample_sql``.
 
     Returns:
         A CompileOutput with one CompiledNodeInfo for each Trouve.
 
     Raises:
+        SampleTargetsProductionError: If *sample* is True, and a selected
+            Trouve writes to its logical address.
+        ValueError: If *sample_rows* is less than 1.
         ClairError: If discovery, routing, or compilation fails.
     """
+    _require_a_positive_sample_rows(sample_rows)
+    # The row limit of this plan, or None for a plan that reads each row.
+    compile_sample_rows = sample_rows if sample else None
     project_root = _resolve_project_root(project_dir)
     run_id = uuid6.uuid7().hex
 
@@ -199,7 +213,9 @@ def compile(
     dag = build_dag(discovered)
 
     selected = _select_nodes(dag, select, exclude)
-    recompile_for_selection(discovered, set(selected))
+    if sample:
+        _refuse_a_sampled_production_write(dag, selected, env_name)
+    recompile_for_selection(discovered, set(selected), sample_rows=compile_sample_rows)
 
     source_count = sum(1 for n in dag.nodes if dag.get_trouve(n).type == TrouveType.SOURCE)
     logger.info(
@@ -209,6 +225,7 @@ def compile(
         trouves=len(dag.nodes) - source_count,
         sources=source_count,
         run_mode=run_mode.value,
+        sample_rows=compile_sample_rows,
     )
 
     output = write_compile_output(
@@ -225,7 +242,9 @@ def compile(
         run_id=run_id,
         use_staging=use_staging,
     )
-    output = output.model_copy(update={"env_name": env_name})
+    output = output.model_copy(
+        update={"env_name": env_name, "sample_rows": compile_sample_rows}
+    )
     logger.info("compile.complete", run_id=run_id, artifacts_dir=str(output.artifacts_dir))
     return output
 

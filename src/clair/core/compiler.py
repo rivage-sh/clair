@@ -66,6 +66,8 @@ class CompileOutput(BaseModel):
         project_root: The root directory of the project.
         env_name: The name of the active environment.
         run_mode: The run mode that the caller gave.
+        sample_rows: The row limit of a sampled plan. None for a plan that
+            reads each row.
     """
 
     trouve_count: int
@@ -76,6 +78,7 @@ class CompileOutput(BaseModel):
     project_root: Path | None = None
     env_name: str = ""
     run_mode: RunMode = RunMode.FULL_REFRESH
+    sample_rows: int | None = None
 
     def node(self, address: str) -> CompiledNodeInfo | None:
         """Find one compiled node by its logical address or its physical address."""

@@ -238,11 +238,16 @@ def compile(
     env: Environment | str | None = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     use_staging: bool = True,
+    sample: bool = False,
+    sample_rows: int = 1_000,
 ) -> CompileOutput
 ```
 
 Compile the project and write the SQL to `_clairtifacts/<run_id>/`. This needs no
 warehouse connection.
+
+`sample=True` gives the SQL of `clair.run(sample=True)`, with the same rule for
+production. See [Sampled Runs](../topics/sampling.md).
 
 ```python
 output = clair.compile("~/projects/analytics")
@@ -252,7 +257,8 @@ print("\n\n".join(node.sql))
 ```
 
 `CompileOutput` holds `compiled_nodes`, `trouve_count`, `source_count`,
-`artifacts_dir`, `run_id`, `project_root`, `env_name` and `run_mode`. The method
+`artifacts_dir`, `run_id`, `project_root`, `env_name`, `run_mode` and
+`sample_rows`. `sample_rows` is `None` for a plan that reads each row. The method
 `node(address)` finds one `CompiledNodeInfo` by its logical address or its
 physical address.
 

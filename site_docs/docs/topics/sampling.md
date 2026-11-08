@@ -12,6 +12,13 @@ clair run --env dev --sample --sample-rows 1000
 
 The flags of the command are in [clair run](../cli/run.md#sampled-run).
 
+`clair compile --sample` writes the same SQL to `_clairtifacts/`, with no connection. Use
+it to read the sampled SQL before the run:
+
+```bash
+clair compile --env dev --sample
+```
+
 ## What a sample replaces
 
 A sampled run reads a sample of each Trouve that it does not build: each `Source`, and each

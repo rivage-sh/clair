@@ -43,7 +43,7 @@ from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
 
 logger = structlog.get_logger()
 
-# `clair run` and `clair test` take the same two sample options.
+# `clair compile`, `clair run` and `clair test` take the same sample options.
 _sample_rows_option = click.option(
     "--sample-rows",
     type=click.IntRange(min=1),
@@ -292,14 +292,24 @@ def _prompt_and_write_environment() -> None:
     default="full_refresh",
     help="Run mode. full_refresh writes all tables again. incremental writes only the new data.",
 )
-def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str) -> None:
+@click.option(
+    "--sample",
+    is_flag=True,
+    default=False,
+    help="Show the SQL of `clair run --sample`: each Trouve that the run does not build reads its sample.",
+)
+@_sample_rows_option
+def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, sample: bool, sample_rows: int | None) -> None:
     """Compile the project and show the new SQL. This needs no Snowflake connection."""
+    row_limit = _sample_rows(sample, sample_rows)
     try:
         clair_api.compile(
             select=select,
             exclude=exclude,
             env=_load_environment_or_name(env),
             run_mode=RunMode(run_mode),
+            sample=sample,
+            sample_rows=row_limit,
         )
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
         logger.error("compile.routing_error", error=str(e))
