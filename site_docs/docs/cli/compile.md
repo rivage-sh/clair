@@ -3,7 +3,7 @@
 Resolve the DAG and write the generated SQL to `_clairtifacts/`. The command does not connect to Snowflake.
 
 ```bash
-clair compile [--env NAME] [--select PATTERN]... [--run-mode MODE]
+clair compile [--env NAME] [--select PATTERN]... [--run-mode MODE] [--sample [--sample-rows N]]
 ```
 
 ## Example
@@ -17,6 +17,9 @@ clair compile --env prod
 
 # Compile only the orders schema
 clair compile --select='refined.orders.*'
+
+# Show the SQL of a sampled run
+clair compile --env dev --sample --sample-rows 100
 ```
 
 Each plan shows the staged path: the build at the staging address, a comment that marks the test step, and the promotion. See [Staging](../topics/staging.md).
@@ -54,6 +57,8 @@ _clairtifacts/
 | `--env` | optional | Environment name. It selects the entry in `__routing__.py` that clair applies to the generated SQL. |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Selects which SQL variant clair generates. |
+| `--sample` | off | Show the SQL of `clair run --sample`. Each Trouve that the run does not build reads its sample. A selected Trouve must write to an address that routing changed. See [Sampled Runs](../topics/sampling.md). |
+| `--sample-rows` | `1000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |
 
 ## See also
 

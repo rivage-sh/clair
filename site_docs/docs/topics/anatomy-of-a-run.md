@@ -341,8 +341,10 @@ left.
 
 *Source: [`cli/main.py`][cli-main-py], and [`core/compiler.py`][compiler-py] — `write_compile_output()`*
 
-`clair compile` does steps 1 to 6, and it writes the SQL to `target/`. It does not connect
-to Snowflake. Run it to read the SQL that a run executes.
+`clair compile` does steps 1 to 6, and it writes the SQL to `_clairtifacts/`. It does not
+connect to Snowflake. Run it to read the SQL that a run executes. `clair.compile()` and
+`clair.run()` get their plan from one function, `_plan()` in `api.py`, thus the two cannot
+give different SQL for the same arguments, a sample too.
 
 `clair validate` does steps 2 and 3, and then it applies the routing entry to every Trouve.
 It reads the environment name, but it opens no profile and it builds no DAG, thus it needs

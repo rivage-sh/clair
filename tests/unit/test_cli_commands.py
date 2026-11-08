@@ -216,15 +216,15 @@ class TestRunCommand:
         assert calls["sample_rows"] == 250
         assert calls["threads"] == 3
 
-    @pytest.mark.parametrize("command_name", ["run", "test"])
+    @pytest.mark.parametrize("command_name", ["compile", "run", "test"])
     def test_sample_rows_has_a_default(
         self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], command_name: str
     ):
-        result_of_command = (
-            RunSummary(results=[], env_name="dev", run_id="abc")
-            if command_name == "run"
-            else TestSummary(results=[])
-        )
+        result_of_command = {
+            "compile": None,
+            "run": RunSummary(results=[], env_name="dev", run_id="abc"),
+            "test": TestSummary(results=[]),
+        }[command_name]
         _give_api(monkeypatch, calls, command_name, result_of_command)
 
         CliRunner().invoke(cli, [command_name, "--sample"])
@@ -235,6 +235,7 @@ class TestRunCommand:
     @pytest.mark.parametrize(
         "arguments",
         [
+            ["compile", "--sample-rows", "10"],
             ["run", "--sample-rows", "10"],
             ["test", "--sample-rows", "10"],
             ["run", "--sample", "--sample-rows", "0"],

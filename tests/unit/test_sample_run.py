@@ -352,6 +352,59 @@ class TestASampledTestRun:
         assert "LIMIT" not in sql_of_test["dev_mart.shop.order_facts"]
 
 
+class TestASampledCompile:
+    """``clair.compile(sample=True)`` writes the SQL of a sampled run, with no connection."""
+
+    def compiled_sql_of(self, project: Path, address: str, **options: Any) -> str:
+        output = clair.compile(project, env="dev", **options)
+        node_info = output.node(address)
+        assert node_info is not None
+        return "\n".join(node_info.sql)
+
+    def test_a_compile_with_a_sample_reads_the_sample_of_each_input(self, project: Path):
+        compiled_sql = self.compiled_sql_of(
+            project, "mart.shop.order_facts", sample=True, sample_rows=5
+        )
+
+        assert "FROM (SELECT * FROM raw.shop.orders LIMIT 5) AS o" in compiled_sql
+        assert CUSTOMERS_SAMPLE in compiled_sql
+        assert COUNTRIES_SAMPLE in compiled_sql
+
+    def test_the_compiled_sql_is_the_sql_of_the_sampled_run(self, project: Path):
+        summary, _ = run_sampled(project, select=[DAILY_ORDERS_SELECTOR], test=False)
+
+        compiled_sql = self.compiled_sql_of(
+            project,
+            "mart.shop.daily_orders",
+            sample=True,
+            select=[DAILY_ORDERS_SELECTOR],
+            # A run with test=False writes to the physical address directly.
+            use_staging=False,
+        )
+
+        # The plan adds a comment line for the object type check, and the run does not send it.
+        assert compiled_sql.endswith(sql_of(summary, "mart.shop.daily_orders"))
+        assert f"FROM (SELECT * FROM mart.shop.order_facts LIMIT {DEFAULT_SAMPLE_ROWS})" in compiled_sql
+
+    def test_the_output_names_the_row_limit(self, project: Path):
+        assert clair.compile(project, env="dev", sample=True, sample_rows=5).sample_rows == 5
+        assert clair.compile(project, env="dev").sample_rows is None
+
+    def test_a_compile_without_a_sample_reads_each_row(self, project: Path):
+        compiled_sql = self.compiled_sql_of(project, "mart.shop.order_facts")
+
+        assert "LIMIT" not in compiled_sql
+
+    def test_a_sampled_compile_for_production_stops(self, project: Path):
+        with pytest.raises(SampleTargetsProductionError):
+            clair.compile(project, env="prod", sample=True)
+
+    @pytest.mark.parametrize("sample_rows", [0, -1])
+    def test_a_row_limit_below_one_raises(self, project: Path, sample_rows: int):
+        with pytest.raises(ValueError, match="sample_rows must be 1 or more"):
+            clair.compile(project, env="dev", sample=True, sample_rows=sample_rows)
+
+
 class TestASampleNeverReachesProduction:
     def test_an_environment_without_a_routing_entry_stops_the_run(self, project: Path):
         adapter = recording_adapter()
