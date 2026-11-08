@@ -2,32 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
 from clair.core.runner import RunStatus, _run_dataframe_trouve
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import InvalidTrouveAddressError
-from clair.trouves.config import ResolvedConfig
 from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import CompiledAttributes, DataframeInput, ExecutionType, Source
-from tests.helpers import RecordingAdapter, addresses_of_text
-
-
-def _make_compiled(physical_address: str = "db.schema.table") -> CompiledAttributes:
-    return CompiledAttributes(
-        physical_address=TrouveAddress.parse(physical_address),
-        logical_address=TrouveAddress.parse(physical_address),
-        resolved_sql="",
-        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
-        module_name=physical_address,
-        imports=[],
-        config=ResolvedConfig(),
-        execution_type=ExecutionType.PANDAS,
-    )
+from clair.trouves.trouve import DataframeInput, Source
+from tests.helpers import RecordingAdapter, addresses_of_text, compile_trouve
 
 
 def _compile_pandas(trouve: PandasTable, physical_address: str) -> None:
@@ -38,16 +22,15 @@ def _compile_pandas(trouve: PandasTable, physical_address: str) -> None:
     address for each input that the run builds. These tests give one address to
     each input, thus the two addresses are equal.
     """
-    trouve.compiled = _make_compiled(physical_address)
-    trouve.compiled.inputs = [
-        DataframeInput(address=str(upstream.physical_address)) for upstream in trouve.inputs
-    ]
+    compile_trouve(
+        trouve,
+        physical_address,
+        inputs=[DataframeInput(address=str(upstream.physical_address)) for upstream in trouve.inputs],
+    )
 
 
 def _make_source(physical_address: str = "db.schema.source") -> Source:
-    source = Source()
-    source.compiled = _make_compiled(physical_address)
-    return source
+    return compile_trouve(Source(), physical_address)
 
 
 class TestRunPandasTableHappyPath:

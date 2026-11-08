@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from clair.adapters.base import StatementStatus
@@ -14,8 +12,6 @@ from clair.core.test_runner import (
     run_tests,
 )
 from clair.trouves._refs import THIS_PLACEHOLDER
-from clair.trouves.address import TrouveAddress
-from clair.trouves.config import ResolvedConfig
 from clair.trouves.test import (
     THIS,
     TestNotNull,
@@ -24,8 +20,8 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, TrouveAbc, TrouveType
-from tests.helpers import RecordingAdapter, make_test_result, make_trouve
+from clair.trouves.trouve import TrouveAbc, TrouveType
+from tests.helpers import RecordingAdapter, compile_trouve, make_test_result, make_trouve
 
 
 def _make_trouve_with_tests(
@@ -37,18 +33,9 @@ def _make_trouve_with_tests(
 ) -> TrouveAbc:
     """Make a compiled Trouve that holds some tests."""
     raw_sql = "" if trouve_type == TrouveType.SOURCE else sql
-    t = make_trouve(trouve_type, raw_sql, tests=tests)
-    t.compiled = CompiledAttributes(
-        physical_address=TrouveAddress.parse(physical_address),
-        logical_address=TrouveAddress.parse(physical_address),
-        resolved_sql=raw_sql,
-        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
-        module_name=physical_address,
-        imports=imports or [],
-        config=ResolvedConfig(),
-        execution_type=ExecutionType.SNOWFLAKE,
+    return compile_trouve(
+        make_trouve(trouve_type, raw_sql, tests=tests), physical_address, imports=imports
     )
-    return t
 
 
 

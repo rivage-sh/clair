@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TypeVar
 
 import pytest
@@ -17,16 +16,14 @@ from clair.core.staging import (
     make_staging_address,
 )
 from clair.environments.routing import TrouveAddress
-from clair.trouves.config import ResolvedConfig
 from clair.trouves.run_config import Append, Incremental, RunMode, Upsert
 from clair.trouves.trouve import (
-    CompiledAttributes,
-    ExecutionType,
     Table,
     TableOptions,
     TrouveAbc,
     TrouveType,
 )
+from tests.helpers import compile_trouve
 
 RUN_ID = "0195aabbccddeeff0011223344556677"
 
@@ -46,23 +43,8 @@ def _staging_name(physical_address: str, run_id: str = RUN_ID) -> str:
 AnyTrouve = TypeVar("AnyTrouve", bound=TrouveAbc)
 
 
-def _compile(
-    trouve: AnyTrouve,
-    address: str,
-    imports: list[str] | None = None,
-    execution_type: ExecutionType = ExecutionType.SNOWFLAKE,
-) -> AnyTrouve:
-    trouve.compiled = CompiledAttributes(
-        physical_address=TrouveAddress.parse(address),
-        logical_address=TrouveAddress.parse(address),
-        resolved_sql=getattr(trouve, "sql", ""),
-        file_path=Path(f"/fake/{address.replace('.', '/')}.py"),
-        module_name=address,
-        imports=imports or [],
-        config=ResolvedConfig(),
-        execution_type=execution_type,
-    )
-    return trouve
+def _compile(trouve: AnyTrouve, address: str, imports: list[str] | None = None) -> AnyTrouve:
+    return compile_trouve(trouve, address, imports=imports)
 
 
 class TestStagingAddress:

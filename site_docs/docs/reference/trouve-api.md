@@ -47,12 +47,12 @@ The abstract base of each Trouve. It holds the fields that each class shares.
 You do not instantiate it directly.
 
 ```python
-class TrouveAbc(SessionConfig, ABC):
+class TrouveAbc(SessionConfig, ABC, Generic[CompiledT_co]):
     columns:  list[Column] = []
     tests:    list[AnyTest] = []
     docs:       str = ""
     sample_sql: str | None = None
-    compiled:   CompiledAttributes | None = None
+    compiled:   CompiledT_co | None = None    # CompiledAttributes, or a subclass of it
 
     @property
     def type(self) -> TrouveType: ...                   # the class gives it
@@ -73,7 +73,7 @@ Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any class.
 | `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](tests-api.md). |
 | `docs` | `str` | `""` | Documentation string. `clair docs` shows it, and clair writes it as the comment of the object in Snowflake. See [Comments in Snowflake](../topics/staging.md#comments-in-snowflake). |
 | `sample_sql` | `str \| None` | `None` | The query that a sample reads in place of this Trouve. Write `{THIS}` for the address of this Trouve. It can read another Trouve, which then is an upstream Trouve. `None` gives a row limit. See [Sampled Runs](../topics/sampling.md). |
-| `compiled` | `CompiledAttributes \| None` | `None` | Discovery sets this. Do not set it manually. |
+| `compiled` | `CompiledAttributes \| None` | `None` | Discovery sets this. Do not set it manually. The class of the Trouve decides the class of the value. See [`CompiledAttributes`](#compiledattributes). |
 | `warehouse`, `role`, `query_tags`, `statement_timeout_seconds` | | `None`, `None`, `{}`, `None` | The session of this Trouve. A value here replaces the value of the schema and the database. See [Per-Database & Schema Config](../topics/per-database-schema-config.md). |
 
 ### Properties
@@ -189,17 +189,27 @@ UPSERT puts the drop of its merge source in `cleanup_statements`.
 ## `CompiledAttributes`
 
 Discovery sets these attributes on `trouve.compiled`. They are available after `clair compile` or `clair run`.
+Each Trouve holds these attributes. A `Source` holds these only.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `physical_address` | `TrouveAddress` | The address that routing gives. clair uses it in the SQL and the DDL. |
 | `logical_address` | `TrouveAddress` | The address that the file system gives. clair uses it for the DAG edges and the selectors. |
-| `resolved_sql` | `str` | The SQL. clair replaced each placeholder token with a real logical address. It is empty for a `PandasTable`. |
-| `resolved_transform` | `str` | The source text of the transform function. It is empty for a `Table` or a `View`. |
-| `inputs` | `list[DataframeInput]` | The read of each input of a `PandasTable`, in the parameter order of the transform: the `address`, and the `sample_query` of a sampled run. It is empty for a `Table` or a `View`. |
-| `file_path` | `Path` | Absolute path to the Trouve file |
+| `file_path` | `Path` | The path of the Trouve file, relative to the project root |
+| `module_name` | `str` | The module name of the Trouve file |
 | `imports` | `list[str]` | The logical addresses of the upstream Trouves |
-| `execution_type` | `ExecutionType` | SNOWFLAKE or PANDAS |
+| `config` | `ResolvedConfig` | The session of the Trouve, after clair applied the schema and the database defaults |
+
+The backend of the Trouve adds its own attributes. Thus `self.compiled` in a `Table`
+subclass is a `CompiledSql`, and a type checker knows that it holds `resolved_sql`.
+
+| Class | The Trouve that holds it | Attribute | Type | Description |
+|-------|--------------------------|-----------|------|-------------|
+| `CompiledSql` | `Table`, `View` | `resolved_sql` | `str` | The SQL. clair replaced each placeholder token with a real address. |
+| `CompiledDataframe` | `PandasTable`, `SeedTable` | `resolved_transform` | `str` | The text that shows how the Trouve makes its rows: the source text of the transform function. |
+| `CompiledDataframe` | `PandasTable`, `SeedTable` | `inputs` | `list[DataframeInput]` | The read of each input, in the parameter order of the transform: the `address`, and the `sample_query` of a sampled run. |
+
+The Trouve gives its backend: `trouve.execution_type` is `SNOWFLAKE` or `PANDAS`.
 
 ## `DataframeTrouve`
 

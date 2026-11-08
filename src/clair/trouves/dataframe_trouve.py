@@ -7,10 +7,16 @@ from typing import ClassVar
 
 import pandas as pd
 
-from clair.trouves.trouve import ExecutionType, TableOptions, TrouveAbc, TrouveType
+from clair.trouves.trouve import (
+    CompiledDataframe,
+    ExecutionType,
+    TableOptions,
+    TrouveAbc,
+    TrouveType,
+)
 
 
-class DataframeTrouve(TrouveAbc, TableOptions, ABC):
+class DataframeTrouve(TrouveAbc[CompiledDataframe], TableOptions, ABC):
     """The base of each Trouve that clair materializes from a DataFrame.
 
     Clair reads each upstream Trouve into a DataFrame, calls

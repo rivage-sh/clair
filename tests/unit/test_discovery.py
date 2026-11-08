@@ -18,11 +18,12 @@ from clair.exceptions import ProjectDiscoveryError
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import CompiledAttributes, Table, TrouveAbc, TrouveType
+from clair.trouves.trouve import CompiledAttributes, SqlTrouve, Table, TrouveAbc, TrouveType
 from tests.helpers import (
     DatabaseOverrideRouting,
     SchemaIsolationRouting,
     SourceAwareRouting,
+    resolved_sql_of,
     write_project_marker,
 )
 
@@ -71,7 +72,7 @@ class TestDiscovery:
         trouves = discover_project(simple_project)
         table = next(t for t in trouves if str(t.physical_address) == "analytics.revenue.daily_orders")
         assert table.compiled is not None
-        assert "source.raw.orders" in table.compiled.resolved_sql
+        assert "source.raw.orders" in resolved_sql_of(table)
 
     def test_raw_sql_contains_placeholder(self, simple_project: Path):
         trouves = discover_project(simple_project)
@@ -176,7 +177,7 @@ class TestDiscoveryWithRouting:
         table = next(t for t in trouves if t.type == TrouveType.TABLE)
 
         assert table.compiled is not None
-        assert "source.raw.orders" in table.compiled.resolved_sql
+        assert "source.raw.orders" in resolved_sql_of(table)
 
     def test_database_override_dag_imports_use_logical_addresses(self, simple_project: Path):
         routing = DatabaseOverrideRouting(database_name="MYDEV")
@@ -290,8 +291,8 @@ class TestRecompileForSelection:
         daily = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.derived.daily")
         assert daily.compiled is not None
         # Before the selection, refined.events keeps its logical address.
-        assert "mydb.refined.events" in daily.compiled.resolved_sql
-        assert "omer.refined.events" not in daily.compiled.resolved_sql
+        assert "mydb.refined.events" in resolved_sql_of(daily)
+        assert "omer.refined.events" not in resolved_sql_of(daily)
 
     def test_partial_run_non_selected_upstream_stays_logical(self, tmp_path: Path):
         """The selector *.derived.* omits refined.events. Thus daily reads mydb.refined.events."""
@@ -307,8 +308,8 @@ class TestRecompileForSelection:
         daily = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.derived.daily")
         assert daily.compiled is not None
         # The selection omits refined.events, and thus it keeps its logical address.
-        assert "mydb.refined.events" in daily.compiled.resolved_sql
-        assert "omer.refined.events" not in daily.compiled.resolved_sql
+        assert "mydb.refined.events" in resolved_sql_of(daily)
+        assert "omer.refined.events" not in resolved_sql_of(daily)
 
     def test_partial_run_selected_upstream_uses_the_physical_address(self, tmp_path: Path):
         """top reads omer.derived.daily, because the selection contains daily."""
@@ -322,8 +323,8 @@ class TestRecompileForSelection:
         top = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.derived.top")
         assert top.compiled is not None
         # The selection contains daily, and thus top reads omer.derived.daily.
-        assert "omer.derived.daily" in top.compiled.resolved_sql
-        assert "mydb.derived.daily" not in top.compiled.resolved_sql
+        assert "omer.derived.daily" in resolved_sql_of(top)
+        assert "mydb.derived.daily" not in resolved_sql_of(top)
 
     def test_full_run_all_selected_all_references_routed(self, tmp_path: Path):
         """When the selection holds each TABLE, each name between them is a physical address."""
@@ -342,7 +343,7 @@ class TestRecompileForSelection:
         daily = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.derived.daily")
         assert daily.compiled is not None
         # The selection contains refined.events, and thus daily reads omer.refined.events.
-        assert "omer.refined.events" in daily.compiled.resolved_sql
+        assert "omer.refined.events" in resolved_sql_of(daily)
 
     def test_a_source_reaches_the_sql_with_its_physical_address(self, tmp_path: Path):
         """A SOURCE that goes somewhere else reaches the SQL with that address.
@@ -364,8 +365,8 @@ class TestRecompileForSelection:
 
         refined = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.refined.events")
         assert refined.compiled is not None
-        assert "omer.source.events" in refined.compiled.resolved_sql
-        assert "mydb.source.events" not in refined.compiled.resolved_sql
+        assert "omer.source.events" in resolved_sql_of(refined)
+        assert "mydb.source.events" not in resolved_sql_of(refined)
 
     def test_an_address_in_text_stays_as_the_author_wrote_it(self, tmp_path: Path):
         """Only a token becomes an address. Clair reads no address out of the text.
@@ -412,7 +413,7 @@ class TestRecompileForSelection:
             if t.compiled and str(t.compiled.logical_address) == "mydb.refined.report"
         )
         assert report.compiled is not None
-        sql = report.compiled.resolved_sql
+        sql = resolved_sql_of(report)
         # The token becomes the physical address.
         assert "FROM omer.refined.events" in sql
         # The comment and the string literal keep the text of the author.
@@ -434,8 +435,8 @@ class TestRecompileForSelection:
 
         refined = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.refined.events")
         assert refined.compiled is not None
-        assert "mydb.source.events" in refined.compiled.resolved_sql
-        assert "omer.source.events" not in refined.compiled.resolved_sql
+        assert "mydb.source.events" in resolved_sql_of(refined)
+        assert "omer.source.events" not in resolved_sql_of(refined)
 
     def test_no_routing_recompile_is_noop(self, tmp_path: Path):
         """With no routing policy, recompile_for_selection changes nothing."""
@@ -443,15 +444,15 @@ class TestRecompileForSelection:
         trouves = discover_project(project, routing=None)
 
         sql_before = {
-            t.compiled.logical_address: t.compiled.resolved_sql
-            for t in trouves if t.compiled
+            t.compiled.logical_address: resolved_sql_of(t)
+            for t in trouves if isinstance(t, SqlTrouve) and t.compiled
         }
         selected = {str(t.compiled.physical_address) for t in trouves if t.compiled}
         recompile_for_selection(trouves, selected)
 
         for t in trouves:
-            if t.compiled:
-                assert t.compiled.resolved_sql == sql_before[t.compiled.logical_address]
+            if isinstance(t, SqlTrouve) and t.compiled:
+                assert resolved_sql_of(t) == sql_before[t.compiled.logical_address]
 
     def test_write_target_is_always_physical(self, tmp_path: Path):
         """The write target, physical_address, is always routed, whatever the selection is."""
@@ -653,9 +654,7 @@ class TestTwoProjectsInOneProcess:
             and str(trouve.compiled.logical_address) == "mydb.refined.checked"
         ]
         assert len(checked) == 1
-        compiled = checked[0].compiled
-        assert compiled is not None
-        assert "second_project" in compiled.resolved_sql
+        assert "second_project" in resolved_sql_of(checked[0])
 
     def test_the_root_of_the_first_project_leaves_sys_path(self, tmp_path: Path):
         """A stale root would let an import read the files of the old project."""

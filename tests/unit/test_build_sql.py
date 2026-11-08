@@ -7,7 +7,6 @@ cover the SQL text, because Snowflake reads that text.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,9 +14,9 @@ import pytest
 from clair.exceptions import CompileError
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
-from clair.trouves.config import ResolvedConfig
 from clair.trouves.run_config import Append, DeleteInsert, Incremental, RunConfig, RunMode, Upsert
-from clair.trouves.trouve import BuildPlan, CompiledAttributes, ExecutionType, Table, View
+from clair.trouves.trouve import BuildPlan, Table, View
+from tests.helpers import compile_trouve
 
 # The three columns that the upsert tests share.
 UPSERT_SQL = "SELECT 1 AS id, 2 AS name, 3 AS value"
@@ -42,19 +41,7 @@ def make_compiled_trouve(
     if run_config is not None:
         arguments["run_config"] = run_config
 
-    trouve = trouve_class(**arguments)
-    address = TrouveAddress.parse(physical_address)
-    trouve.compiled = CompiledAttributes(
-        physical_address=address,
-        logical_address=address,
-        resolved_sql=sql,
-        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
-        module_name=physical_address,
-        imports=[],
-        config=ResolvedConfig(),
-        execution_type=ExecutionType.SNOWFLAKE,
-    )
-    return trouve
+    return compile_trouve(trouve_class(**arguments), physical_address)
 
 
 def make_upsert_trouve(**strategy_arguments) -> Table:

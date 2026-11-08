@@ -247,10 +247,11 @@
         // The columns section.
         renderColumnsSection(content, trouveData.columns || [], trouveData.column_inference);
 
-        // The SQL section and the df_fn section, for a TABLE and a VIEW only.
-        if (trouveData.type !== "source" && trouveData.compiled) {
+        // The SQL section of a SQL Trouve, and the Python section of a DataFrame Trouve.
+        // Each compiled shape holds the field of one section only.
+        if (trouveData.compiled) {
             renderSqlSection(content, trouveData.compiled.resolved_sql);
-            renderDfFnSection(content, trouveData.compiled.resolved_df_fn);
+            renderTransformSection(content, trouveData.compiled.resolved_transform);
         }
 
         // The tests section.
@@ -364,14 +365,14 @@
         panel.appendChild(section);
     }
 
-    function renderDfFnSection(panel, dfFn) {
-        if (!dfFn) return;
+    function renderTransformSection(panel, transform) {
+        if (!transform) return;
 
         var section = createSection("Python");
         var pre = document.createElement("pre");
         pre.className = "sql-block";
         var code = document.createElement("code");
-        code.textContent = dfFn;
+        code.textContent = transform;
         pre.appendChild(code);
         section.appendChild(pre);
         panel.appendChild(section);

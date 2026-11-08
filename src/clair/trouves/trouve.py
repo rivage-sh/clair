@@ -20,9 +20,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Generic, Self
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+
+# typing.TypeVar takes a default from Python 3.13 only. pydantic depends on
+# typing_extensions, thus clair gets it with pydantic.
+from typing_extensions import TypeVar
 
 from clair.exceptions import CompileError
 from clair.trouves._refs import THIS_PLACEHOLDER, register
@@ -247,27 +251,54 @@ class DataframeInput(BaseModel):
 class CompiledAttributes(BaseModel):
     """The attributes that discovery sets after it loads a Trouve.
 
-    These attributes exist only when ``TrouveAbc.is_compiled`` is True.
+    These attributes exist only when ``TrouveAbc.is_compiled`` is True. A
+    ``Source`` holds these fields only. ``CompiledSql`` and
+    ``CompiledDataframe`` add the fields of one backend.
     """
 
     # The address that clair writes to. Clair puts it in the SQL and the DDL.
     physical_address: TrouveAddress
     # The address that the file path gives. DAG edges and selectors use it.
     logical_address: TrouveAddress
-    resolved_sql: str
-    resolved_transform: str = ""
-    # The read of each input of a PANDAS Trouve, in the parameter order of the
-    # transform. A SQL Trouve keeps its addresses in resolved_sql, thus this
-    # list stays empty for it.
-    inputs: list[DataframeInput] = []
     file_path: Path
     module_name: str
     imports: list[str]
     config: ResolvedConfig
-    execution_type: ExecutionType
 
 
-class TrouveAbc(SessionConfig, ABC):
+class CompiledSql(CompiledAttributes):
+    """The compiled attributes of a ``SqlTrouve``: a Table or a View.
+
+    Attributes:
+        resolved_sql: The SQL of the author, with an address in place of each
+            reference token.
+    """
+
+    resolved_sql: str
+
+
+class CompiledDataframe(CompiledAttributes):
+    """The compiled attributes of a ``DataframeTrouve``.
+
+    Attributes:
+        resolved_transform: The text that shows how the Trouve makes its rows.
+            ``clair compile`` writes it to the artifact file.
+        inputs: The read of each input, in the parameter order of the
+            transform.
+    """
+
+    resolved_transform: str
+    inputs: list[DataframeInput]
+
+
+# The compiled attributes of one kind of Trouve. The default gives the fields that
+# each Trouve holds, thus code that reads any Trouve writes TrouveAbc alone.
+CompiledT_co = TypeVar(
+    "CompiledT_co", bound=CompiledAttributes, default=CompiledAttributes, covariant=True
+)
+
+
+class TrouveAbc(SessionConfig, ABC, Generic[CompiledT_co]):
     """The base class of every Trouve.
 
     Each concrete class is one kind of object. ``Source`` is a table that clair
@@ -300,7 +331,7 @@ class TrouveAbc(SessionConfig, ABC):
     tests: list[AnyTest] = Field(default_factory=list)
     docs: str = ""
     sample_sql: str | None = Field(default=None, exclude=True)
-    compiled: CompiledAttributes | None = None
+    compiled: CompiledT_co | None = None
 
     # "forbid" makes a keyword that the class does not read an error, for
     # example a run_config on a View.
@@ -313,7 +344,7 @@ class TrouveAbc(SessionConfig, ABC):
         return self.trouve_type
 
     @model_validator(mode="after")
-    def _reject_an_empty_sample_sql(self) -> TrouveAbc:
+    def _reject_an_empty_sample_sql(self) -> Self:
         if self.sample_sql is not None and not self.sample_sql.strip():
             raise ValueError("sample_sql is empty. Give a query, or None for the row limit.")
         return self
@@ -396,7 +427,7 @@ class Source(TrouveAbc):
         return []
 
 
-class SqlTrouve(TrouveAbc, ABC):
+class SqlTrouve(TrouveAbc[CompiledSql], ABC):
     """The base of each Trouve that Snowflake materializes from SQL: a Table or a View.
 
     Attributes:
