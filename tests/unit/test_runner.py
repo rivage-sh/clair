@@ -88,9 +88,9 @@ class TestRunner:
         list(run_project(dag, selected, adapter))
 
         # Examine the SQL that the code gave to execute.
-        call_args = adapter.record.statements[-1]
-        assert "CREATE OR REPLACE TABLE" in call_args
-        assert "analytics.revenue.daily_orders" in call_args
+        builds = [sql for sql in adapter.record.statements if "CREATE OR REPLACE TABLE" in sql]
+        assert len(builds) == 1
+        assert "analytics.revenue.daily_orders" in builds[0]
 
     def test_the_summary_of_a_run_that_succeeds(self, simple_project: Path):
         discovered = discover_project(simple_project)

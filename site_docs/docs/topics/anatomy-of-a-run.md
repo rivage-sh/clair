@@ -248,6 +248,9 @@ Each node does the same steps. The run mode decides only if the clone is necessa
 
 *Source: [`core/staging.py`][staging-py], and [`trouves/trouve.py`][trouve-py] — `build_sql()`*
 
+Between step 4 and step 5, clair writes the `docs` of the Trouve and of its columns as
+comments on the physical object. See [Comments in Snowflake](staging.md#comments-in-snowflake).
+
 Step 2 comes from `SqlTrouve.build_sql()`. A subclass can override it and give its own
 statements, and clair keeps each other step. See [Write your own build](../guides/custom-build-sql.md).
 

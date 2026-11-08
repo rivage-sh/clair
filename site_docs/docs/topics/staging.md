@@ -142,6 +142,35 @@ An incremental run clones the physical table, and the clone keeps its key. The `
 
 A run with `--no-test` has no staging step and no clone. It sets the key on the physical table, and Automatic Clustering stays on.
 
+## Comments in Snowflake
+
+The `docs` of a Trouve becomes the comment of its table or view, and the `docs` of each `Column` becomes the comment of that column. Snowflake shows them in Snowsight, in `SHOW TABLES`, and in `INFORMATION_SCHEMA`. A catalog tool that reads Snowflake thus shows the same text as `clair docs`.
+
+```python
+trouve = View(
+    sql=f"SELECT order_id, amount FROM {orders}",
+    docs="The orders, one row each.",
+    columns=[Column(name="order_id", type="NUMBER", docs="The order ID.")],
+)
+```
+
+Clair adds these statements after the promotion:
+
+```sql
+ALTER VIEW <physical> SET COMMENT = 'The orders, one row each.'
+ALTER VIEW <physical> ALTER COLUMN order_id COMMENT 'The order ID.'
+```
+
+The comments go onto the physical object, and not onto the staging object, because a promotion of a view is a `CREATE OR REPLACE VIEW`, and it removes each comment. If a comment statement fails, the physical object holds the tested data, and the node fails with the statement to run again. A run with `--no-test` writes the comments after the build.
+
+Clair cleans a triple-quoted `docs` text as Python cleans a docstring: it removes the first and the last empty line, and the common indent.
+
+A new object has no comment, thus clair writes each text that is not empty. The comments of the columns of a table go into one `ALTER TABLE <physical> ALTER COLUMN a COMMENT '...', COLUMN b COMMENT '...'`. A view gets one `ALTER VIEW <physical> ALTER COLUMN ... COMMENT '...'` for each column: Snowflake accepts `COMMENT ON COLUMN` on a table only, and one column in each `ALTER VIEW`.
+
+An incremental table keeps its comments from the last run. The run already reads that table, for its type and for its columns, and the two answers hold the comments. Clair compares them with the `docs`, and writes only a comment that differs. An incremental run with unchanged `docs` thus sends no comment statement, and a `docs` text that you remove leaves the table on the next run. A column that you remove from `columns` keeps its old comment.
+
+`clair compile` opens no connection, thus its plan shows each text that is not empty, as for a new object.
+
 ## An Iceberg table
 
 `iceberg=Iceberg()` on a `Table` makes a Snowflake-managed Apache Iceberg table. Snowflake is the catalog, and it writes the data as Parquet files to an external volume. Another engine, for example Spark or Trino, can read the table from those files.

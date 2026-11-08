@@ -15,8 +15,15 @@ import pandas as pd
 import structlog
 from pydantic import BaseModel, computed_field
 
-from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
+from clair.adapters.base import (
+    Statement,
+    StatementStatus,
+    WarehouseAdapter,
+    WarehouseObject,
+    WarehouseObjectType,
+)
 from clair.adapters.pool import AdapterPool
+from clair.core.comments import WarehouseComments, build_comment_statements
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.schema_change import read_incremental_columns
 from clair.core.staging import (
@@ -331,11 +338,15 @@ def _run_dataframe_trouve(
     if not statement.success:
         return failure(statement.error or f"Clair cannot write the DataFrame to {address}")
 
+    # A staged run writes the comments after the promotion, in _promote_or_keep.
+    after_write_statements = build_cluster_by_statements(address, trouve)
+    if addresses.staging is None:
+        after_write_statements.extend(build_comment_statements(address, trouve))
     statements = [statement]
-    for sql in build_cluster_by_statements(address, trouve):
+    for sql in after_write_statements:
         statements.append(adapter.execute(sql))
         if not statements[-1].success:
-            return failure(statements[-1].error or f"Clair cannot cluster {address}")
+            return failure(statements[-1].error or f"Clair cannot complete {address}")
 
     return RunResult(
         addresses=addresses,
@@ -363,7 +374,7 @@ def wanted_object_type(trouve: TrouveAbc) -> WarehouseObjectType:
 
 def type_change_error(
     trouve: TrouveAbc,
-    adapter: WarehouseAdapter,
+    current_object: WarehouseObject | None,
     physical_address: TrouveAddress,
 ) -> str | None:
     """Give the error that stops a Trouve whose type differs from the object at its address.
@@ -375,12 +386,13 @@ def type_change_error(
     them again, for example in a managed access schema. The person who changed
     the type must drop the object, and decide about the grants.
 
-    Clair asks the warehouse for the type, because the compiler opens no
-    connection and cannot know it.
+    The runner asks the warehouse for the type one time for each node, because
+    the compiler opens no connection and cannot know it.
 
     Args:
         trouve: The Trouve as it is now.
-        adapter: A warehouse adapter with an open connection.
+        current_object: The object at the physical address, as the runner read
+            it at the start of the node. None means that the address holds nothing.
         physical_address: The address that clair writes to.
 
     Returns:
@@ -388,7 +400,7 @@ def type_change_error(
         of the correct type. The caller must stop before it writes the physical
         address.
     """
-    current_type = adapter.object_type(physical_address)
+    current_type = None if current_object is None else current_object.object_type
     new_type = wanted_object_type(trouve)
     if current_type is None or current_type == new_type:
         return None
@@ -409,6 +421,8 @@ def _promote_or_keep(
     adapter: WarehouseAdapter,
     addresses: NodeAddresses,
     tests_passed: bool,
+    current_object: WarehouseObject | None,
+    current_comments: WarehouseComments | None = None,
 ) -> tuple[list[Statement], str]:
     """Complete a node: promote the staging object, or keep it for an examination.
 
@@ -418,6 +432,11 @@ def _promote_or_keep(
         addresses: The addresses of the node. The staging address holds the
             candidate data, and the physical address must receive it.
         tests_passed: The result of the data quality tests on the staging object.
+        current_object: The object at the physical address at the start of the
+            node, or None. The promotion stops if its type differs.
+        current_comments: The comments of the physical table before the run.
+            None means a new object. The promotion of an incremental table
+            clones a clone of the physical table, thus it keeps them.
 
     Returns:
         The statements that clair executed, and an error message. The error
@@ -439,20 +458,25 @@ def _promote_or_keep(
     # The tests passed, so the candidate must reach the physical address. A
     # Trouve that changed its type finds an object of the old type there. Clair
     # stops, and keeps the tested candidate for the person who fixes the address.
-    type_error = type_change_error(trouve, adapter, physical_address)
+    type_error = type_change_error(trouve, current_object, physical_address)
     if type_error is not None:
         return statements, (
             f"the tests passed, but clair does not promote: {type_error}. "
             f"The tested candidate stays at {staging_address}"
         )
 
-    promotion_statements = build_promote_statements(
-        trouve.type,
-        staging_address=staging_address,
-        physical_address=physical_address,
-        resolved_sql=trouve.compiled.resolved_sql,
-        table_options=table_options_of(trouve),
-    )
+    # The comments go on after the promotion: a promotion of a view removes each
+    # comment that the staging view had.
+    promotion_statements = [
+        *build_promote_statements(
+            trouve.type,
+            staging_address=staging_address,
+            physical_address=physical_address,
+            resolved_sql=trouve.compiled.resolved_sql,
+            table_options=table_options_of(trouve),
+        ),
+        *build_comment_statements(physical_address, trouve, current_comments),
+    ]
     for statement_index, sql in enumerate(promotion_statements):
         statements.append(adapter.execute(sql))
         if statements[-1].success:
@@ -603,11 +627,17 @@ def _run_node(
 
     staging_address = addresses.staging
 
+    # One read of the physical object for each node. It gives the type for the
+    # type test and for the incremental mode, and the comment of the object.
+    current_object = (
+        None if trouve.type == TrouveType.SOURCE else adapter.describe_object(addresses.physical)
+    )
+
     # A run with no staging writes the physical address directly, thus it has no
     # candidate to keep. A Trouve that changed its type stops before any write.
     # A staged run builds and tests first, and stops in _promote_or_keep.
     if staging_address is None and trouve.type != TrouveType.SOURCE:
-        type_error = type_change_error(trouve, adapter, addresses.physical)
+        type_error = type_change_error(trouve, current_object, addresses.physical)
         if type_error is not None:
             logger.warning("run.node.failure", logical=logical_address, physical=name, error=type_error)
             return _NodeOutcome(
@@ -628,7 +658,7 @@ def _run_node(
             assert after_node_success is not None
             tests_passed = after_node_success(name, str(staging_address), adapter)
             promote_statements, staging_error = _promote_or_keep(
-                trouve, adapter, addresses, tests_passed
+                trouve, adapter, addresses, tests_passed, current_object
             )
             result = result.model_copy(
                 update={
@@ -666,7 +696,7 @@ def _run_node(
     # full refresh builds and tests a candidate, and the promotion then stops,
     # because the address holds an object of the old type.
     if effective_mode == RunMode.INCREMENTAL:
-        current_type = adapter.object_type(addresses.physical)
+        current_type = None if current_object is None else current_object.object_type
         if current_type is None:
             logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_not_found")
             effective_mode = RunMode.FULL_REFRESH
@@ -721,8 +751,20 @@ def _run_node(
             table_options_of(trouve),
             incremental=effective_mode == RunMode.INCREMENTAL,
         )
+    # An incremental table keeps its comments, and the two reads above hold
+    # them. Clair writes only a comment that differs from the docs.
+    current_comments = None
+    if incremental_columns is not None and current_object is not None:
+        current_comments = WarehouseComments.of(current_object, incremental_columns.target_columns)
+    # A staged run writes the comments after the promotion, in _promote_or_keep.
+    after_build_statements = cluster_by_statements
+    if plan.statements and staging_address is None:
+        after_build_statements = [
+            *cluster_by_statements,
+            *build_comment_statements(addresses.physical, trouve, current_comments),
+        ]
     plan = plan.model_copy(
-        update={"statements": [*prefix_statements, *plan.statements, *cluster_by_statements]}
+        update={"statements": [*prefix_statements, *plan.statements, *after_build_statements]}
     )
 
     if not plan.statements:
@@ -739,8 +781,8 @@ def _run_node(
             break
 
     # The last statement that writes rows gives the count. The ALTER of the
-    # clustering key comes after it.
-    last_write_index = len(plan.statements) - len(cluster_by_statements) - 1
+    # clustering key and the comments come after it.
+    last_write_index = len(plan.statements) - len(after_build_statements) - 1
     row_count = statements[min(len(statements) - 1, last_write_index)].row_count
 
     # The result holds each statement of the plan, thus the reader sees the
@@ -763,7 +805,7 @@ def _run_node(
         assert after_node_success is not None
         tests_passed = after_node_success(name, str(staging_address), adapter)
         promote_statements, staging_error = _promote_or_keep(
-            trouve, adapter, addresses, tests_passed
+            trouve, adapter, addresses, tests_passed, current_object, current_comments
         )
         statements.extend(promote_statements)
 

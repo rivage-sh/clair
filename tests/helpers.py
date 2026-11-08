@@ -22,6 +22,7 @@ from clair.adapters.base import (
     StatementStatus,
     WarehouseAdapter,
     WarehouseColumn,
+    WarehouseObject,
     WarehouseObjectType,
 )
 from clair.adapters.snowflake import SnowflakeAdapter
@@ -357,6 +358,7 @@ class RecordingAdapter(WarehouseAdapter):
         query_columns: Sequence[WarehouseColumn] | None = None,
         existing_views: Sequence[str] = (),
         existing_iceberg_tables: Sequence[str] = (),
+        object_comment: str = "",
         dataframes: dict[str, pd.DataFrame] | None = None,
         default_dataframe: pd.DataFrame | None = None,
         select_row_count: int = 0,
@@ -371,6 +373,7 @@ class RecordingAdapter(WarehouseAdapter):
         self.query_columns = None if query_columns is None else list(query_columns)
         self.existing_views = set(existing_views)
         self.existing_iceberg_tables = set(existing_iceberg_tables)
+        self.object_comment = object_comment
         self.dataframes: dict[str, pd.DataFrame] = dict(dataframes or {})
         self.default_dataframe = default_dataframe
         self.select_row_count = select_row_count
@@ -386,6 +389,8 @@ class RecordingAdapter(WarehouseAdapter):
         self.written_addresses: list[str] = []
         self.transient_addresses: list[str] = []
         self.fetched_addresses: list[str] = []
+        # The address of each describe_object() call, in order.
+        self.described_addresses: list[str] = []
         # The sample query of each fetch, in the order of fetched_addresses.
         self.fetched_sample_queries: list[str | None] = []
         self._query_counter = 0
@@ -469,17 +474,29 @@ class RecordingAdapter(WarehouseAdapter):
     ) -> None:
         self.session_parameters.append((query_tag, statement_timeout_seconds))
 
-    def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
+    def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
+        self.described_addresses.append(str(address))
+        return self._object_at(address)
+
+    def _object_at(self, address: TrouveAddress) -> WarehouseObject | None:
+        """Give the object at the address, and count no read."""
         if str(address) in self.existing_views:
-            return WarehouseObjectType.VIEW
-        if str(address) in self.existing_iceberg_tables:
-            return WarehouseObjectType.ICEBERG_TABLE
-        if self.existing_tables is None:
-            return WarehouseObjectType.TABLE
-        return WarehouseObjectType.TABLE if str(address) in self.existing_tables else None
+            object_type = WarehouseObjectType.VIEW
+        elif str(address) in self.existing_iceberg_tables:
+            object_type = WarehouseObjectType.ICEBERG_TABLE
+        elif self.existing_tables is None or str(address) in self.existing_tables:
+            object_type = WarehouseObjectType.TABLE
+        else:
+            return None
+        return WarehouseObject(object_type=object_type, comment=self.object_comment)
 
     def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
-        if self.table_columns is None or self.object_type(address) in (None, WarehouseObjectType.VIEW):
+        warehouse_object = self._object_at(address)
+        if (
+            self.table_columns is None
+            or warehouse_object is None
+            or warehouse_object.object_type == WarehouseObjectType.VIEW
+        ):
             return None
         return list(self.table_columns)
 

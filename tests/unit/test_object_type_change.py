@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 from structlog.testing import capture_logs
 
-from clair.adapters.base import WarehouseObjectType
+from clair.adapters.base import WarehouseObject, WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunResult, RunStatus, wanted_object_type
 from clair.core.staging import make_staging_address
@@ -210,6 +210,32 @@ class TestDataframeTrouve:
         assert result.statements == []
 
 
+class TestOneReadForEachNode:
+    """The runner reads the physical object one time, and each test of the node uses that answer."""
+
+    @pytest.mark.parametrize("use_staging", [True, False], ids=["staged", "no staging"])
+    @pytest.mark.parametrize(
+        ("trouve", "run_mode"),
+        [
+            (Table(sql="SELECT 1 AS id"), RunMode.FULL_REFRESH),
+            (
+                Table(sql="SELECT 1 AS id", run_config=Incremental(strategy=Append())),
+                RunMode.INCREMENTAL,
+            ),
+            (View(sql="SELECT 1 AS id"), RunMode.FULL_REFRESH),
+            (PandasTable(transform=lambda: pd.DataFrame({"id": [1]})), RunMode.FULL_REFRESH),
+        ],
+        ids=["full refresh", "incremental", "view", "pandas"],
+    )
+    def test_each_path_describes_the_physical_object_one_time(
+        self, trouve: Table | View | PandasTable, run_mode: RunMode, use_staging: bool
+    ):
+        adapter = RecordingAdapter(existing_views=[ADDRESS] if isinstance(trouve, View) else [])
+
+        result = run_one_trouve(trouve, adapter, run_mode=run_mode, use_staging=use_staging)
+
+        assert result.status == RunStatus.SUCCESS, result.error
+        assert adapter.described_addresses == [ADDRESS]
 class TestIncrementalFallback:
     def _incremental_trouve(self) -> Table:
         return Table(
@@ -266,22 +292,28 @@ class TestSnowflakeObjectType:
     """The map from the TABLE_TYPE column of Snowflake onto WarehouseObjectType."""
 
     def test_a_base_table_is_a_table(self):
-        adapter, _ = snowflake_adapter_that_answers([("BASE TABLE", "NO")])
+        adapter, _ = snowflake_adapter_that_answers([("BASE TABLE", "NO", None)])
         assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.TABLE
 
     def test_a_view_is_a_view(self):
-        adapter, _ = snowflake_adapter_that_answers([("VIEW", "NO")])
+        adapter, _ = snowflake_adapter_that_answers([("VIEW", "NO", None)])
         assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.VIEW
 
     def test_a_materialized_view_is_a_view(self):
         # Clair makes no materialized view, but a user can point a Trouve at an
         # address that holds one. A view is the closer answer of the two.
-        adapter, _ = snowflake_adapter_that_answers([("MATERIALIZED VIEW", "NO")])
+        adapter, _ = snowflake_adapter_that_answers([("MATERIALIZED VIEW", "NO", None)])
         assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.VIEW
 
     def test_an_iceberg_base_table_is_an_iceberg_table(self):
-        adapter, _ = snowflake_adapter_that_answers([("BASE TABLE", "YES")])
+        adapter, _ = snowflake_adapter_that_answers([("BASE TABLE", "YES", None)])
         assert adapter.object_type(TrouveAddress.parse(ADDRESS)) == WarehouseObjectType.ICEBERG_TABLE
+
+    def test_the_comment_of_the_object_comes_with_its_type(self):
+        adapter, _ = snowflake_adapter_that_answers([("BASE TABLE", "NO", "The orders.")])
+        assert adapter.describe_object(TrouveAddress.parse(ADDRESS)) == WarehouseObject(
+            object_type=WarehouseObjectType.TABLE, comment="The orders."
+        )
 
     def test_no_row_means_the_address_holds_nothing(self):
         adapter, _ = snowflake_adapter_that_answers([])
@@ -297,7 +329,7 @@ class TestSnowflakeObjectType:
         assert cursor.closed
 
     def test_the_query_reads_the_information_schema_of_the_database(self):
-        adapter, cursor = snowflake_adapter_that_answers([("BASE TABLE", "NO")])
+        adapter, cursor = snowflake_adapter_that_answers([("BASE TABLE", "NO", None)])
         adapter.object_type(TrouveAddress.parse(ADDRESS))
         assert "analytics.INFORMATION_SCHEMA.TABLES" in cursor.sql
         assert "TABLE_SCHEMA = 'REVENUE'" in cursor.sql

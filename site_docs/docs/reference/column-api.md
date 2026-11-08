@@ -47,7 +47,7 @@ class Column(BaseModel):
 |-------|------|---------|-------------|
 | `name` | `str` | required | Column name as it appears in Snowflake |
 | `type` | `str` | required | Snowflake data type. Use `ColumnType` constants or a plain string for parameterised types. |
-| `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
+| `docs` | `str` | `""` | Documentation string. `clair docs` shows it, and clair writes it as the comment of the column in Snowflake. See [Comments in Snowflake](../topics/staging.md#comments-in-snowflake). |
 | `nullable` | `bool` | `True` | Tells you if the column accepts NULL values |
 
 ### Example

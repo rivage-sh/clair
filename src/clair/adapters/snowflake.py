@@ -15,6 +15,7 @@ from clair.adapters.base import (
     StatementStatus,
     WarehouseAdapter,
     WarehouseColumn,
+    WarehouseObject,
     WarehouseObjectType,
 )
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey
@@ -96,8 +97,8 @@ class SnowflakeAdapter(WarehouseAdapter):
         finally:
             cursor.close()
 
-    def object_type(self, address: TrouveAddress) -> WarehouseObjectType | None:
-        """Give the type of the object at the address. Reads INFORMATION_SCHEMA.
+    def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
+        """Give the type and the comment of the object at the address. Reads INFORMATION_SCHEMA.
 
         ``INFORMATION_SCHEMA.TABLES`` holds a row for a view too, and the
         ``TABLE_TYPE`` column separates the two. Snowflake also writes
@@ -116,7 +117,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         cursor = self._conn.cursor()
         try:
             cursor.execute(
-                f"SELECT TABLE_TYPE, IS_ICEBERG "
+                f"SELECT TABLE_TYPE, IS_ICEBERG, COMMENT "
                 f"FROM {address.database_name}.INFORMATION_SCHEMA.TABLES "
                 f"WHERE TABLE_CATALOG = '{address.database_name.upper()}' "
                 f"AND TABLE_SCHEMA = '{address.schema_name.upper()}' "
@@ -130,12 +131,14 @@ class SnowflakeAdapter(WarehouseAdapter):
 
         if row is None or row[0] is None:
             return None
-        table_type, is_iceberg = row
+        table_type, is_iceberg, comment = row
         if "VIEW" in str(table_type).upper():
-            return WarehouseObjectType.VIEW
-        if str(is_iceberg).upper() == "YES":
-            return WarehouseObjectType.ICEBERG_TABLE
-        return WarehouseObjectType.TABLE
+            object_type = WarehouseObjectType.VIEW
+        elif str(is_iceberg).upper() == "YES":
+            object_type = WarehouseObjectType.ICEBERG_TABLE
+        else:
+            object_type = WarehouseObjectType.TABLE
+        return WarehouseObject(object_type=object_type, comment=str(comment or ""))
 
     def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
         """Give the columns of the object at the address. Reads DESCRIBE TABLE.
@@ -314,14 +317,23 @@ def _read_private_key(authentication: PrivateKey) -> bytes:
     )
 
 
+# The position of the comment in a row of DESCRIBE TABLE and of DESCRIBE RESULT.
+_DESCRIBE_COMMENT_INDEX = 9
+
+
 def _columns_of(rows: list[tuple]) -> list[WarehouseColumn]:
     """Give the columns of the rows of DESCRIBE TABLE or DESCRIBE RESULT.
 
-    Each row is (name, type, kind, ...). A kind other than COLUMN, for example a
+    Each row is (name, type, kind, null?, default, primary key, unique key,
+    check, expression, comment, ...). A kind other than COLUMN, for example a
     virtual column, takes no value from an insert.
     """
     return [
-        WarehouseColumn(name=str(row[0]), data_type=str(row[1]))
+        WarehouseColumn(
+            name=str(row[0]),
+            data_type=str(row[1]),
+            comment=str(row[_DESCRIBE_COMMENT_INDEX] or "") if len(row) > _DESCRIBE_COMMENT_INDEX else "",
+        )
         for row in rows
         if str(row[2]).upper() == "COLUMN"
     ]

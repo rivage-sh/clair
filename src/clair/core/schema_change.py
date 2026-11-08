@@ -51,11 +51,14 @@ class IncrementalColumns(BaseModel):
             the table, then each column that clair adds.
         alter_statements: The statements that add each new column, before the build.
         change: The difference that clair found.
+        target_columns: The columns of the table before the build, as the
+            warehouse describes them. They hold the comment of each column.
     """
 
     target_column_names: list[str]
     alter_statements: list[str]
     change: SchemaChange
+    target_columns: list[WarehouseColumn]
 
 
 def compare_columns(
@@ -158,5 +161,6 @@ def read_incremental_columns(
         ],
         alter_statements=add_column_statements(change, write_address, trouve.object_keyword),
         change=change,
+        target_columns=target_columns,
     )
 
