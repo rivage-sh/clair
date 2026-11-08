@@ -19,6 +19,7 @@ dependencies = [
     "uuid6>=2022.10.25",
     "structlog>=25.5.0",
     "sqlglot>=25.0",
+    "typing-extensions>=4.12",
 ]
 
 [project.optional-dependencies]

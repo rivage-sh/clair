@@ -24,8 +24,7 @@ from typing import ClassVar, Generic, Self
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
-# typing.TypeVar takes a default from Python 3.13 only. pydantic depends on
-# typing_extensions, thus clair gets it with pydantic.
+# typing.TypeVar takes a default from Python 3.13 only.
 from typing_extensions import TypeVar
 
 from clair.exceptions import CompileError
