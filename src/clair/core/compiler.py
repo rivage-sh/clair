@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from clair.core.comments import build_comment_statements
 from clair.core.dag import ClairDag, addresses_of
 from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.core.runner import resolve_effective_mode, wanted_object_type
@@ -164,6 +165,7 @@ def build_statements(
                 table_options,
                 incremental=effective_mode == RunMode.INCREMENTAL,
             ),
+            *build_comment_statements(physical_address, trouve),
             *plan.cleanup_statements,
         ]
 
@@ -197,6 +199,7 @@ def build_statements(
             table_options=table_options,
         )
     )
+    statements.extend(build_comment_statements(physical_address, trouve))
     statements.append(build_drop_staging_statement(trouve.type, staging_address))
     return statements
 

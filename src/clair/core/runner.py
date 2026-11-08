@@ -17,6 +17,7 @@ from pydantic import BaseModel, computed_field
 
 from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter, WarehouseObjectType
 from clair.adapters.pool import AdapterPool
+from clair.core.comments import build_comment_statements
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.schema_change import read_incremental_columns
 from clair.core.staging import (
@@ -331,11 +332,15 @@ def _run_dataframe_trouve(
     if not statement.success:
         return failure(statement.error or f"Clair cannot write the DataFrame to {address}")
 
+    # A staged run writes the comments after the promotion, in _promote_or_keep.
+    after_write_statements = build_cluster_by_statements(address, trouve)
+    if addresses.staging is None:
+        after_write_statements.extend(build_comment_statements(address, trouve))
     statements = [statement]
-    for sql in build_cluster_by_statements(address, trouve):
+    for sql in after_write_statements:
         statements.append(adapter.execute(sql))
         if not statements[-1].success:
-            return failure(statements[-1].error or f"Clair cannot cluster {address}")
+            return failure(statements[-1].error or f"Clair cannot complete {address}")
 
     return RunResult(
         addresses=addresses,
@@ -446,13 +451,18 @@ def _promote_or_keep(
             f"The tested candidate stays at {staging_address}"
         )
 
-    promotion_statements = build_promote_statements(
-        trouve.type,
-        staging_address=staging_address,
-        physical_address=physical_address,
-        resolved_sql=trouve.compiled.resolved_sql,
-        table_options=table_options_of(trouve),
-    )
+    # The comments go on after the promotion: a promotion of a view removes each
+    # comment that the staging view had.
+    promotion_statements = [
+        *build_promote_statements(
+            trouve.type,
+            staging_address=staging_address,
+            physical_address=physical_address,
+            resolved_sql=trouve.compiled.resolved_sql,
+            table_options=table_options_of(trouve),
+        ),
+        *build_comment_statements(physical_address, trouve),
+    ]
     for statement_index, sql in enumerate(promotion_statements):
         statements.append(adapter.execute(sql))
         if statements[-1].success:
@@ -721,8 +731,15 @@ def _run_node(
             table_options_of(trouve),
             incremental=effective_mode == RunMode.INCREMENTAL,
         )
+    # A staged run writes the comments after the promotion, in _promote_or_keep.
+    after_build_statements = cluster_by_statements
+    if plan.statements and staging_address is None:
+        after_build_statements = [
+            *cluster_by_statements,
+            *build_comment_statements(addresses.physical, trouve),
+        ]
     plan = plan.model_copy(
-        update={"statements": [*prefix_statements, *plan.statements, *cluster_by_statements]}
+        update={"statements": [*prefix_statements, *plan.statements, *after_build_statements]}
     )
 
     if not plan.statements:
@@ -739,8 +756,8 @@ def _run_node(
             break
 
     # The last statement that writes rows gives the count. The ALTER of the
-    # clustering key comes after it.
-    last_write_index = len(plan.statements) - len(cluster_by_statements) - 1
+    # clustering key and the comments come after it.
+    last_write_index = len(plan.statements) - len(after_build_statements) - 1
     row_count = statements[min(len(statements) - 1, last_write_index)].row_count
 
     # The result holds each statement of the plan, thus the reader sees the

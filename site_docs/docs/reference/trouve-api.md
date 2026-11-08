@@ -71,7 +71,7 @@ Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any class.
 |-------|------|---------|-------------|
 | `columns` | `list[Column]` | `[]` | Column definitions. Required for UPSERT. |
 | `tests` | `list[AnyTest]` | `[]` | Data quality tests. See [Tests](tests-api.md). |
-| `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
+| `docs` | `str` | `""` | Documentation string. `clair docs` shows it, and clair writes it as the comment of the object in Snowflake. See [Comments in Snowflake](../topics/staging.md#comments-in-snowflake). |
 | `sample_sql` | `str \| None` | `None` | The query that a sample reads in place of this Trouve. Write `{THIS}` for the address of this Trouve. It can read another Trouve, which then is an upstream Trouve. `None` gives a row limit. See [Sampled Runs](../topics/sampling.md). |
 | `compiled` | `CompiledAttributes \| None` | `None` | Discovery sets this. Do not set it manually. |
 | `warehouse`, `role`, `query_tags`, `statement_timeout_seconds` | | `None`, `None`, `{}`, `None` | The session of this Trouve. A value here replaces the value of the schema and the database. See [Per-Database & Schema Config](../topics/per-database-schema-config.md). |

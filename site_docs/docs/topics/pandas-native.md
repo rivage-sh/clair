@@ -169,7 +169,7 @@ These are the `PandasTable` fields. See the [Trouve API reference](../reference/
 | `inputs` | `list[TrouveAbc]` | `[]` | The upstream Trouves. clair binds each one to a transform parameter by position. |
 | `columns` | `list[Column]` | `[]` | Column definitions. Optional — clair uses them for the documentation. |
 | `tests` | `list[AnyTest]` | `[]` | Data quality tests. They run after clair writes the output. |
-| `docs` | `str` | `""` | Documentation string. `clair docs` shows it. |
+| `docs` | `str` | `""` | Documentation string. `clair docs` shows it, and clair writes it as the comment of the table in Snowflake. See [Comments in Snowflake](staging.md#comments-in-snowflake). |
 
 ## Complete example
 

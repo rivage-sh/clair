@@ -142,6 +142,31 @@ An incremental run clones the physical table, and the clone keeps its key. The `
 
 A run with `--no-test` has no staging step and no clone. It sets the key on the physical table, and Automatic Clustering stays on.
 
+## Comments in Snowflake
+
+The `docs` of a Trouve becomes the comment of its table or view, and the `docs` of each `Column` becomes the comment of that column. Snowflake shows them in Snowsight, in `SHOW TABLES`, and in `INFORMATION_SCHEMA`. A catalog tool that reads Snowflake thus shows the same text as `clair docs`.
+
+```python
+trouve = View(
+    sql=f"SELECT order_id, amount FROM {orders}",
+    docs="The orders, one row each.",
+    columns=[Column(name="order_id", type="NUMBER", docs="The order ID.")],
+)
+```
+
+Clair adds these statements after the promotion:
+
+```sql
+ALTER VIEW <physical> SET COMMENT = 'The orders, one row each.'
+COMMENT ON COLUMN <physical>.order_id IS 'The order ID.'
+```
+
+The comments go onto the physical object, and not onto the staging object, because a promotion of a view is a `CREATE OR REPLACE VIEW`, and it removes each comment. If a comment statement fails, the physical object holds the tested data, and the node fails with the statement to run again. A run with `--no-test` writes the comments after the build.
+
+Clair cleans a triple-quoted `docs` text as Python cleans a docstring: it removes the first and the last empty line, and the common indent.
+
+Clair writes a comment only for a text that is not empty, because a new object has no comment. An incremental table is the exception: it keeps its comments from the last run. Thus an incremental Trouve writes each comment, also an empty one, and a `docs` text that you remove leaves the table on the next run. A column that you remove from `columns` keeps its old comment.
+
 ## An Iceberg table
 
 `iceberg=Iceberg()` on a `Table` makes a Snowflake-managed Apache Iceberg table. Snowflake is the catalog, and it writes the data as Parquet files to an external volume. Another engine, for example Spark or Trino, can read the table from those files.
