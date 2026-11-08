@@ -210,6 +210,32 @@ class TestDataframeTrouve:
         assert result.statements == []
 
 
+class TestOneReadForEachNode:
+    """The runner reads the physical object one time, and each test of the node uses that answer."""
+
+    @pytest.mark.parametrize("use_staging", [True, False], ids=["staged", "no staging"])
+    @pytest.mark.parametrize(
+        ("trouve", "run_mode"),
+        [
+            (Table(sql="SELECT 1 AS id"), RunMode.FULL_REFRESH),
+            (
+                Table(sql="SELECT 1 AS id", run_config=Incremental(strategy=Append())),
+                RunMode.INCREMENTAL,
+            ),
+            (View(sql="SELECT 1 AS id"), RunMode.FULL_REFRESH),
+            (PandasTable(transform=lambda: pd.DataFrame({"id": [1]})), RunMode.FULL_REFRESH),
+        ],
+        ids=["full refresh", "incremental", "view", "pandas"],
+    )
+    def test_each_path_describes_the_physical_object_one_time(
+        self, trouve: Table | View | PandasTable, run_mode: RunMode, use_staging: bool
+    ):
+        adapter = RecordingAdapter(existing_views=[ADDRESS] if isinstance(trouve, View) else [])
+
+        result = run_one_trouve(trouve, adapter, run_mode=run_mode, use_staging=use_staging)
+
+        assert result.status == RunStatus.SUCCESS, result.error
+        assert adapter.described_addresses == [ADDRESS]
 class TestIncrementalFallback:
     def _incremental_trouve(self) -> Table:
         return Table(

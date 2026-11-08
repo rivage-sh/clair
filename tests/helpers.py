@@ -389,6 +389,8 @@ class RecordingAdapter(WarehouseAdapter):
         self.written_addresses: list[str] = []
         self.transient_addresses: list[str] = []
         self.fetched_addresses: list[str] = []
+        # The address of each describe_object() call, in order.
+        self.described_addresses: list[str] = []
         # The sample query of each fetch, in the order of fetched_addresses.
         self.fetched_sample_queries: list[str | None] = []
         self._query_counter = 0
@@ -473,6 +475,11 @@ class RecordingAdapter(WarehouseAdapter):
         self.session_parameters.append((query_tag, statement_timeout_seconds))
 
     def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
+        self.described_addresses.append(str(address))
+        return self._object_at(address)
+
+    def _object_at(self, address: TrouveAddress) -> WarehouseObject | None:
+        """Give the object at the address, and count no read."""
         if str(address) in self.existing_views:
             object_type = WarehouseObjectType.VIEW
         elif str(address) in self.existing_iceberg_tables:
@@ -484,7 +491,12 @@ class RecordingAdapter(WarehouseAdapter):
         return WarehouseObject(object_type=object_type, comment=self.object_comment)
 
     def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
-        if self.table_columns is None or self.object_type(address) in (None, WarehouseObjectType.VIEW):
+        warehouse_object = self._object_at(address)
+        if (
+            self.table_columns is None
+            or warehouse_object is None
+            or warehouse_object.object_type == WarehouseObjectType.VIEW
+        ):
             return None
         return list(self.table_columns)
 
