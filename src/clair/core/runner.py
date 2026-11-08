@@ -717,7 +717,9 @@ def _run_node(
     cluster_by_statements: list[str] = []
     if plan.statements:
         cluster_by_statements = build_cluster_by_statements(
-            addresses.target, table_options_of(trouve)
+            addresses.target,
+            table_options_of(trouve),
+            incremental=effective_mode == RunMode.INCREMENTAL,
         )
     plan = plan.model_copy(
         update={"statements": [*prefix_statements, *plan.statements, *cluster_by_statements]}

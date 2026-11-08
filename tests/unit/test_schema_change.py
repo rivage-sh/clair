@@ -51,7 +51,8 @@ def run_with_columns(
 
 
 def alter_statements(sql_texts: list[str]) -> list[str]:
-    return [sql for sql in sql_texts if "ALTER TABLE" in sql]
+    """Give each ALTER that adds a column."""
+    return [sql for sql in sql_texts if "ALTER TABLE" in sql and "ADD COLUMN" in sql]
 
 
 class TestCompareColumns:

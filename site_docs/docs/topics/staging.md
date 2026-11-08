@@ -138,7 +138,7 @@ A clone copies the clustering key, but Snowflake suspends Automatic Clustering o
 
 The key goes on with an `ALTER`, and not in the `CREATE TABLE ... AS SELECT`, because Snowflake asks for the column definitions in a CTAS that clusters.
 
-An incremental run clones the physical table, and the clone keeps its key. The `ALTER` then replaces it with the key of the Trouve. When you remove `cluster_by`, the key stays on an incremental table until the next full refresh, because `clair compile` cannot see the key of a table. To remove it now, run `ALTER TABLE <physical> DROP CLUSTERING KEY`.
+An incremental run clones the physical table, and the clone keeps its key. The `ALTER` then replaces it with the key of the Trouve. When you remove `cluster_by`, the next incremental run removes the key: an incremental Trouve with no `cluster_by` gets `ALTER TABLE <staging> DROP CLUSTERING KEY` after the build. `clair compile` cannot see the key of a table, thus the drop is in each incremental plan, and Snowflake accepts it on a table with no key. A full refresh makes a new table with no key, thus it needs no drop.
 
 A run with `--no-test` has no staging step and no clone. It sets the key on the physical table, and Automatic Clustering stays on.
 

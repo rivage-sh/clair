@@ -182,4 +182,5 @@ def test_the_example_override_compiles_its_window_plan(
     assert plan_statements[1].startswith(f"CREATE OR REPLACE TABLE {window_rows} AS")
     assert plan_statements[2].startswith(f"DELETE FROM {node.addresses.staging}")
     assert plan_statements[3].startswith(f"INSERT INTO {node.addresses.staging}")
-    assert plan_statements[4] == f"DROP TABLE IF EXISTS {window_rows}"
+    assert plan_statements[4] == f"ALTER TABLE {node.addresses.staging} DROP CLUSTERING KEY"
+    assert plan_statements[5] == f"DROP TABLE IF EXISTS {window_rows}"
