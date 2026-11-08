@@ -472,7 +472,7 @@ def _promote_or_keep(
             trouve.type,
             staging_address=staging_address,
             physical_address=physical_address,
-            resolved_sql=trouve.compiled.resolved_sql,
+            resolved_sql=trouve.compiled.resolved_sql if isinstance(trouve, SqlTrouve) else "",
             table_options=table_options_of(trouve),
         ),
         *build_comment_statements(physical_address, trouve, current_comments),

@@ -28,6 +28,7 @@ from clair.core.dag import ClairDag
 from clair.exceptions import ProjectDiscoveryError
 from clair.lineage import get_dag
 from clair.trouves.trouve import TrouveType
+from tests.helpers import resolved_sql_of
 
 SOURCE_ADDRESS = "source.raw.orders"
 TABLE_ADDRESS = "analytics.revenue.daily_orders"
@@ -74,7 +75,7 @@ class TestTheGraphOfASimpleProject:
 
         assert trouve.is_compiled
         assert trouve.compiled is not None
-        assert SOURCE_ADDRESS in trouve.compiled.resolved_sql
+        assert SOURCE_ADDRESS in resolved_sql_of(trouve)
 
     def test_an_unknown_node_raises(self, simple_project: Path):
         with pytest.raises(KeyError):

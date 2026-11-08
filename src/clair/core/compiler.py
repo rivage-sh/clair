@@ -266,8 +266,7 @@ def write_compile_output(
         )
 
         node_info = None
-        if trouve.compiled.execution_type == ExecutionType.PANDAS:
-            assert isinstance(trouve, DataframeTrouve)
+        if isinstance(trouve, DataframeTrouve):
             body_source = trouve.source_text()
 
             imports_section = ""
@@ -315,8 +314,7 @@ def write_compile_output(
 
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text(artifact_content)
-        elif trouve.compiled.execution_type == ExecutionType.SNOWFLAKE:
-            assert isinstance(trouve, SqlTrouve)
+        elif isinstance(trouve, SqlTrouve):
             statements = build_statements(
                 trouve, run_mode, run_id, use_staging=use_staging
             )
@@ -338,7 +336,7 @@ def write_compile_output(
             sql_content = "\n\n---\n\n".join(s.strip() for s in statements)
             sql_file.write_text(sql_content + "\n")
         else:
-            raise CompileError(f"Clair does not know the execution_type '{trouve.compiled.execution_type}' for {name}")
+            raise CompileError(f"Clair cannot compile the Trouve class {type(trouve).__name__} of {name}")
 
         on_node_compiled(node_info)
 

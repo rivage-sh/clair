@@ -14,6 +14,7 @@ from clair.trouves.run_config import RunMode
 from tests.helpers import (
     DatabaseOverrideRouting,
     RecordingAdapter,
+    compile_trouve,
     make_run_result,
     make_statement,
     make_trouve,
@@ -110,13 +111,7 @@ class TestRunner:
 class TestRunnerFailureHandling:
     def test_downstream_skipped_on_failure(self):
         """When a Trouve fails, clair skips each Trouve downstream of it."""
-        from clair.trouves.address import TrouveAddress
-        from clair.trouves.config import ResolvedConfig
-        from clair.trouves.trouve import (
-            CompiledAttributes,
-            ExecutionType,
-            TrouveType,
-        )
+        from clair.trouves.trouve import TrouveType
 
         trouves = []
         for name, ttype, imports, sql in [
@@ -124,18 +119,7 @@ class TestRunnerFailureHandling:
             ("db.s.staging", TrouveType.TABLE, ["db.s.source"], "select * from db.s.source"),
             ("db.s.mart", TrouveType.TABLE, ["db.s.staging"], "select * from db.s.staging"),
         ]:
-            t = make_trouve(ttype, sql)
-            t.compiled = CompiledAttributes(
-                physical_address=TrouveAddress.parse(name),
-                logical_address=TrouveAddress.parse(name),
-                resolved_sql=sql,
-                file_path=Path(f"/fake/{name}.py"),
-                module_name=name,
-                imports=imports,
-                config=ResolvedConfig(),
-                execution_type=ExecutionType.SNOWFLAKE,
-            )
-            trouves.append(t)
+            trouves.append(compile_trouve(make_trouve(ttype, sql), name, imports=imports))
 
         dag = build_dag(trouves)
         selected = get_executable_nodes(dag)

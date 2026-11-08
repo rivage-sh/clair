@@ -39,7 +39,9 @@ from clair.trouves.run_config import RunMode
 from clair.trouves.seed_table import SeedTable
 from clair.trouves.trouve import (
     CompiledAttributes,
-    ExecutionType,
+    CompiledDataframe,
+    CompiledSql,
+    DataframeInput,
     Source,
     SqlTrouve,
     Table,
@@ -168,41 +170,18 @@ def make_environment(
 def make_compiled_trouve(
     physical_address: str,
     trouve_type: TrouveType = TrouveType.TABLE,
-    execution_type: ExecutionType = ExecutionType.SNOWFLAKE,
     imports: list[str] | None = None,
 ) -> TrouveAbc:
     """Make one compiled Trouve of the class that the type names, with no file on the disk."""
     sql = "" if trouve_type == TrouveType.SOURCE else "select 1"
-    trouve = make_trouve(trouve_type, sql)
-    address = TrouveAddress.parse(physical_address)
-    trouve.compiled = CompiledAttributes(
-        physical_address=address,
-        logical_address=address,
-        resolved_sql=sql,
-        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
-        module_name=physical_address,
-        imports=imports or [],
-        config=ResolvedConfig(),
-        execution_type=execution_type,
-    )
-    return trouve
+    return compile_trouve(make_trouve(trouve_type, sql), physical_address, imports=imports)
 
 
 def make_compiled_seed_table(physical_address: str) -> SeedTable:
     """Make one compiled SeedTable, with no file on the disk."""
-    trouve = SeedTable(dataframe=pd.DataFrame({"code": ["US", "FR"]}))
-    address = TrouveAddress.parse(physical_address)
-    trouve.compiled = CompiledAttributes(
-        physical_address=address,
-        logical_address=address,
-        resolved_sql="",
-        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
-        module_name=physical_address,
-        imports=[],
-        config=ResolvedConfig(),
-        execution_type=ExecutionType.PANDAS,
+    return compile_trouve(
+        SeedTable(dataframe=pd.DataFrame({"code": ["US", "FR"]})), physical_address
     )
-    return trouve
 
 
 def build_dag_of(
@@ -541,19 +520,43 @@ TEST_ADDRESS = "analytics.revenue.orders"
 AnyTrouve = TypeVar("AnyTrouve", bound=TrouveAbc)
 
 
-def compile_trouve(trouve: AnyTrouve, address: str = TEST_ADDRESS) -> AnyTrouve:
-    """Give the Trouve the compiled attributes that the runner needs."""
-    trouve.compiled = CompiledAttributes(
-        physical_address=TrouveAddress.parse(address),
-        logical_address=TrouveAddress.parse(address),
-        resolved_sql=getattr(trouve, "sql", ""),
-        file_path=Path(f"/fake/{address.replace('.', '/')}.py"),
-        module_name=address,
-        imports=[],
-        config=ResolvedConfig().apply(trouve),
-        execution_type=trouve.execution_type,
-    )
+def compile_trouve(
+    trouve: AnyTrouve,
+    address: str = TEST_ADDRESS,
+    *,
+    imports: list[str] | None = None,
+    inputs: list[DataframeInput] | None = None,
+) -> AnyTrouve:
+    """Give the Trouve the compiled attributes that discovery gives its class.
+
+    A SQL Trouve gets its own SQL as the resolved SQL. A DataFrame Trouve gets
+    *inputs*, or no input.
+    """
+    trouve_address = TrouveAddress.parse(address)
+    shared_fields = {
+        "physical_address": trouve_address,
+        "logical_address": trouve_address,
+        "file_path": Path(f"/fake/{address.replace('.', '/')}.py"),
+        "module_name": address,
+        "imports": imports or [],
+        "config": ResolvedConfig().apply(trouve),
+    }
+    if isinstance(trouve, SqlTrouve):
+        trouve.compiled = CompiledSql(resolved_sql=trouve.sql, **shared_fields)
+    elif isinstance(trouve, DataframeTrouve):
+        trouve.compiled = CompiledDataframe(
+            resolved_transform=trouve.source_text(), inputs=inputs or [], **shared_fields
+        )
+    else:
+        trouve.compiled = CompiledAttributes(**shared_fields)
     return trouve
+
+
+def resolved_sql_of(trouve: TrouveAbc) -> str:
+    """Give the resolved SQL of a compiled SQL Trouve. Any other Trouve fails the test."""
+    assert isinstance(trouve, SqlTrouve), f"{type(trouve).__name__} holds no SQL"
+    assert trouve.compiled is not None
+    return trouve.compiled.resolved_sql
 
 
 def run_one_trouve(

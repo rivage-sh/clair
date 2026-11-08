@@ -51,8 +51,10 @@ from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
 from clair.trouves.trouve import (
     CompiledAttributes,
+    CompiledDataframe,
+    CompiledSql,
     DataframeInput,
-    ExecutionType,
+    Source,
     SqlTrouve,
     TrouveAbc,
 )
@@ -221,6 +223,11 @@ def _input_addresses_of(
     return input_addresses
 
 
+def _merge_imports(imports: list[str], sample_imports: list[str]) -> list[str]:
+    """Give each import one time, in the order of the first occurrence."""
+    return list(dict.fromkeys([*imports, *sample_imports]))
+
+
 def _compile_trouve(
     trouve_obj: TrouveAbc,
     *,
@@ -231,18 +238,27 @@ def _compile_trouve(
     physical_addresses: dict[int, TrouveAddress],
     profile_defaults: dict[str, str | None] | None,
 ) -> None:
-    """Give one Trouve its CompiledAttributes, and resolve the SQL of each test.
+    """Give one Trouve its compiled attributes, and resolve the SQL of each test.
 
-    The execution type decides the shape of the result. A SQL Trouve holds its
-    addresses in its SQL, and a pandas Trouve holds them in a list.
+    The class of the Trouve decides the shape of the result. A SQL Trouve gets a
+    CompiledSql, with its addresses in its SQL. A DataFrame Trouve gets a
+    CompiledDataframe, with its addresses in a list. A Source gets the shared
+    fields only.
     """
     logical = logical_addresses[id(trouve_obj)]
     physical = physical_addresses[id(trouve_obj)]
     relative_file_path = file_path.relative_to(project_root)
     config = _resolve_config(file_path, profile_defaults).apply(trouve_obj)
 
-    if trouve_obj.execution_type == ExecutionType.PANDAS:
-        assert isinstance(trouve_obj, DataframeTrouve)
+    # A sample can read another Trouve, for example a seed of test users. Each
+    # run keeps the edge, thus --sample does not change the DAG.
+    sample_imports = (
+        detect_imports(trouve_obj.sample_sql, logical_addresses, logical)
+        if trouve_obj.sample_sql is not None
+        else []
+    )
+
+    if isinstance(trouve_obj, DataframeTrouve):
         input_addresses = _input_addresses_of(
             trouve_obj, logical_addresses, file_path, logical
         )
@@ -253,46 +269,42 @@ def _compile_trouve(
             for address in dict.fromkeys(input_addresses)
             if address != str(logical)
         ]
-        trouve_obj.compiled = CompiledAttributes(
+        trouve_obj.compiled = CompiledDataframe(
             physical_address=physical,
             logical_address=logical,
-            resolved_sql="",
             resolved_transform=trouve_obj.source_text(),
             file_path=relative_file_path,
             module_name=module_name,
-            imports=transform_imports,
+            imports=_merge_imports(transform_imports, sample_imports),
             inputs=[DataframeInput(address=address) for address in input_addresses],
             config=config,
-            execution_type=ExecutionType.PANDAS,
         )
-    elif trouve_obj.execution_type == ExecutionType.SNOWFLAKE:
-        # A Source holds no SQL, thus it reads nothing and imports nothing.
-        sql = trouve_obj.sql if isinstance(trouve_obj, SqlTrouve) else ""
+    elif isinstance(trouve_obj, SqlTrouve):
+        trouve_obj.compiled = CompiledSql(
+            physical_address=physical,
+            logical_address=logical,
+            resolved_sql=resolve_sql(trouve_obj.sql, logical_addresses, this_address=logical),
+            file_path=relative_file_path,
+            module_name=module_name,
+            imports=_merge_imports(
+                detect_imports(trouve_obj.sql, logical_addresses, logical), sample_imports
+            ),
+            config=config,
+        )
+    elif isinstance(trouve_obj, Source):
+        # A Source holds no SQL, thus only its sample can read another Trouve.
         trouve_obj.compiled = CompiledAttributes(
             physical_address=physical,
             logical_address=logical,
-            resolved_sql=resolve_sql(sql, logical_addresses, this_address=logical),
             file_path=relative_file_path,
             module_name=module_name,
-            imports=detect_imports(sql, logical_addresses, logical),
+            imports=sample_imports,
             config=config,
-            execution_type=ExecutionType.SNOWFLAKE,
         )
     else:
         raise DiscoveryError(
             str(file_path),
-            f"clair cannot compile the execution type "
-            f"'{trouve_obj.execution_type}'.",
-        )
-
-    # A sample can read another Trouve, for example a seed of test users. Each
-    # run keeps the edge, thus --sample does not change the DAG.
-    if trouve_obj.sample_sql is not None:
-        sample_imports = detect_imports(trouve_obj.sample_sql, logical_addresses, logical)
-        trouve_obj.compiled = trouve_obj.compiled.model_copy(
-            update={
-                "imports": list(dict.fromkeys([*trouve_obj.compiled.imports, *sample_imports]))
-            }
+            f"clair cannot compile the Trouve class {type(trouve_obj).__name__}.",
         )
 
     # A test reads the tables that its Trouve reads, thus the same map renders

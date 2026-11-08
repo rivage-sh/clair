@@ -8,7 +8,7 @@ from pathlib import Path
 from clair.core.discovery import discover_project
 from clair.core.references import recompile_for_selection
 from clair.trouves.pandas_table import PandasTable
-from clair.trouves.trouve import Table, TrouveAbc
+from clair.trouves.trouve import CompiledDataframe, Table, TrouveAbc
 from tests.helpers import DatabaseOverrideRouting
 
 
@@ -186,12 +186,12 @@ class TestPandasTableCompiledAttributes:
         assert summary.compiled is not None
         assert summary.compiled.file_path == Path("mydb/derived/summary.py")
 
-    def test_resolved_sql_is_empty_for_pandas_table(self, tmp_path: Path):
+    def test_a_pandas_table_compiles_to_a_dataframe_shape(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         trouves = discover_project(project)
         summary = next(t for t in trouves if str(t.physical_address) == "mydb.derived.summary")
-        assert summary.compiled is not None
-        assert summary.compiled.resolved_sql == ""
+        assert isinstance(summary.compiled, CompiledDataframe)
+        assert "resolved_sql" not in summary.compiled.model_dump()
 
 
 class TestMixedDag:
@@ -247,7 +247,7 @@ class TestPandasInputAddresses:
             t for t in trouves
             if t.compiled and str(t.compiled.logical_address) == logical_address
         )
-        assert trouve.compiled is not None
+        assert isinstance(trouve.compiled, CompiledDataframe)
         return [dataframe_input.address for dataframe_input in trouve.compiled.inputs]
 
     def test_discovery_gives_the_logical_address(self, tmp_path: Path):

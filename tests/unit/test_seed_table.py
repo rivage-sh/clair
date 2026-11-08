@@ -14,7 +14,8 @@ from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
 from clair.trouves.run_config import Append, Incremental
 from clair.trouves.seed_table import SeedTable
-from clair.trouves.trouve import ExecutionType, TrouveType
+from clair.trouves.trouve import CompiledDataframe, ExecutionType, TrouveType
+from tests.helpers import resolved_sql_of
 
 FAKE_RUN_ID = "0" * 32
 
@@ -142,10 +143,8 @@ class TestSeedTableDiscovery:
         trouves = discover_project(project_root)
         seed = next(trouve for trouve in trouves if isinstance(trouve, SeedTable))
 
-        assert seed.compiled is not None
-        assert seed.compiled.execution_type == ExecutionType.PANDAS
+        assert isinstance(seed.compiled, CompiledDataframe)
         assert seed.compiled.inputs == []
-        assert seed.compiled.resolved_sql == ""
         assert "country_code: string" in seed.compiled.resolved_transform
 
     def test_a_sql_trouve_reads_the_seed(self, tmp_path: Path):
@@ -160,7 +159,7 @@ class TestSeedTableDiscovery:
         )
 
         assert orders.compiled is not None
-        assert "mydb.reference.tax_rates" in orders.compiled.resolved_sql
+        assert "mydb.reference.tax_rates" in resolved_sql_of(orders)
 
 
 class TestSeedTableCompiler:

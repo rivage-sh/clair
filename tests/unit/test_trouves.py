@@ -24,7 +24,8 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import CompiledAttributes, ExecutionType, Source, Table, TrouveAbc, TrouveType, View
+from clair.trouves.trouve import CompiledSql, ExecutionType, Source, Table, TrouveAbc, TrouveType, View
+from tests.helpers import compile_trouve
 
 # ---------------------------------------------------------------------------
 # The helper functions.
@@ -33,12 +34,12 @@ from clair.trouves.trouve import CompiledAttributes, ExecutionType, Source, Tabl
 SAMPLE_SQL = "SELECT id, name FROM raw.users"
 
 
-def _compiled_attrs(
+def _compiled_sql(
     physical_address: str = "db.schema.my_table",
     resolved_sql: str = SAMPLE_SQL,
-) -> CompiledAttributes:
-    """Make a CompiledAttributes with good default values."""
-    return CompiledAttributes(
+) -> CompiledSql:
+    """Make a CompiledSql with good default values."""
+    return CompiledSql(
         physical_address=TrouveAddress.parse(physical_address),
         logical_address=TrouveAddress.parse(physical_address),
         resolved_sql=resolved_sql,
@@ -46,7 +47,6 @@ def _compiled_attrs(
         module_name="db.schema.my_table",
         imports=[],
         config=ResolvedConfig(),
-        execution_type=ExecutionType.SNOWFLAKE,
     )
 
 
@@ -63,7 +63,7 @@ def _compiled_trouve(
     if run_config is not None:
         assert isinstance(trouve, Table)
         trouve.run_config = run_config
-    trouve.compiled = _compiled_attrs(
+    trouve.compiled = _compiled_sql(
         physical_address=physical_address,
         resolved_sql=resolved_sql,
     )
@@ -161,8 +161,7 @@ class TestTrouveConstruction:
         assert trouve.is_compiled is False
 
     def test_is_compiled_true_after_setting_compiled(self):
-        trouve = Source()
-        trouve.compiled = _compiled_attrs(resolved_sql="")
+        trouve = compile_trouve(Source())
         assert trouve.is_compiled is True
 
     def test_address_raises_when_not_compiled(self):
@@ -171,8 +170,7 @@ class TestTrouveConstruction:
             _ = trouve.physical_address
 
     def test_address_returns_compiled_value(self):
-        trouve = Source()
-        trouve.compiled = _compiled_attrs(physical_address="prod.analytics.orders")
+        trouve = compile_trouve(Source(), "prod.analytics.orders")
         assert str(trouve.physical_address) == "prod.analytics.orders"
 
 
@@ -818,9 +816,7 @@ class TestPandasTable:
 
     def _make_upstream(self) -> Source:
         """Make a compiled SOURCE Trouve. A different Trouve can depend on it."""
-        source = Source()
-        source.compiled = _compiled_attrs(physical_address="db.schema.upstream", resolved_sql="")
-        return source
+        return compile_trouve(Source(), "db.schema.upstream")
 
     def test_valid_construction(self):
         upstream = self._make_upstream()

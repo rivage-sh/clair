@@ -7,7 +7,7 @@ from pathlib import Path
 
 from clair._version import __version__
 from clair.core.dag import ClairDag
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve import SqlTrouve
 from clair.web_ui.columns import infer_columns
 
 
@@ -36,7 +36,7 @@ def build_catalog(dag: ClairDag, project_root: Path) -> dict:
 
         resolved_sql = (
             trouve.compiled.resolved_sql
-            if trouve.compiled and trouve.type != TrouveType.SOURCE
+            if isinstance(trouve, SqlTrouve) and trouve.compiled
             else None
         )
 

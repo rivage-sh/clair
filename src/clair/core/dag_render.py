@@ -221,7 +221,7 @@ def _build_subtree(
     return DagTreeNode(
         physical_address=physical_address,
         trouve_type=trouve.type,
-        execution_type=trouve.compiled.execution_type,
+        execution_type=trouve.execution_type,
         is_seed=isinstance(trouve, SeedTable),
         is_matched=physical_address in matched,
         is_repeat=is_repeat,

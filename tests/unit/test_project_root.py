@@ -22,7 +22,7 @@ from clair.exceptions import (
 )
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.address import TrouveAddress
-from clair.trouves.trouve import CompiledAttributes, TrouveAbc
+from clair.trouves.trouve import CompiledAttributes, CompiledSql, TrouveAbc
 from tests.helpers import write_project_marker
 
 
@@ -33,6 +33,13 @@ def compiled_of(trouves: list[TrouveAbc], logical_address: str) -> CompiledAttri
         if str(trouve.compiled.logical_address) == logical_address:
             return trouve.compiled
     raise AssertionError(f"the project holds no Trouve at {logical_address}")
+
+
+def compiled_sql_of(trouves: list[TrouveAbc], logical_address: str) -> CompiledSql:
+    """Give the compiled attributes of one SQL Trouve, by its logical address."""
+    compiled = compiled_of(trouves, logical_address)
+    assert isinstance(compiled, CompiledSql)
+    return compiled
 
 SOURCE_FILE = """\
 from clair import Source
@@ -133,7 +140,7 @@ class TestOneModulePerFile:
 
     def test_the_sql_keeps_no_reference_token(self, monorepo_project: Path) -> None:
         trouves = discover_project(monorepo_project)
-        refined = compiled_of(trouves, "shop.refined.daily")
+        refined = compiled_sql_of(trouves, "shop.refined.daily")
         assert TROUVE_PLACEHOLDER_PREFIX not in refined.resolved_sql
         assert "shop.source.orders" in refined.resolved_sql
 
@@ -178,7 +185,7 @@ class TestOneModulePerFile:
 
         trouves = discover_project(project_root)
 
-        refined = compiled_of(trouves, "shop.refined.daily")
+        refined = compiled_sql_of(trouves, "shop.refined.daily")
         assert TROUVE_PLACEHOLDER_PREFIX not in refined.resolved_sql
         assert refined.imports == ["shop.source.orders"]
 
@@ -208,7 +215,7 @@ class TestOneModulePerFile:
 
         trouves = discover_project(project_root)
 
-        derived = compiled_of(trouves, "shop.b_derived.daily")
+        derived = compiled_sql_of(trouves, "shop.b_derived.daily")
         assert TROUVE_PLACEHOLDER_PREFIX not in derived.resolved_sql
         assert derived.imports == ["shop.a_source.orders"]
 
@@ -255,7 +262,7 @@ class TestOneModulePerFile:
 
         trouves = discover_project(project_root)
 
-        refined = compiled_of(trouves, "shop.refined.daily")
+        refined = compiled_sql_of(trouves, "shop.refined.daily")
         assert refined.resolved_sql == (
             "SELECT * FROM shop.source.orders where is_active"
         )
@@ -267,7 +274,7 @@ class TestTheFlatProject:
     def test_a_flat_project_resolves_its_references(self, tmp_path: Path) -> None:
         write_flat_project(tmp_path)
         trouves = discover_project(tmp_path)
-        refined = compiled_of(trouves, "shop.refined.daily")
+        refined = compiled_sql_of(trouves, "shop.refined.daily")
         assert refined.resolved_sql == "SELECT * FROM shop.source.orders"
         assert refined.imports == ["shop.source.orders"]
 

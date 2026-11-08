@@ -22,7 +22,7 @@ from clair.environments.routing import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.run_config import DeleteInsert, Incremental, RunMode, Upsert
 from clair.trouves.trouve import BuildPlan, Table
-from tests.helpers import RecordingAdapter, make_compiled_trouve
+from tests.helpers import RecordingAdapter, compile_trouve
 
 PHYSICAL_ADDRESS = "db.s.planned"
 STATEMENTS = ["select 'step one'", "select 'step two'", "select 'step three'"]
@@ -53,8 +53,7 @@ def executed_plan_statements(adapter: RecordingAdapter) -> list[str]:
 
 
 def run_plan(build_plan: BuildPlan, adapter: RecordingAdapter) -> RunResult:
-    trouve = PlannedTrouve(sql="select 1", build_plan=build_plan)
-    trouve.compiled = make_compiled_trouve(PHYSICAL_ADDRESS).compiled
+    trouve = compile_trouve(PlannedTrouve(sql="select 1", build_plan=build_plan), PHYSICAL_ADDRESS)
     dag = build_dag([trouve])
     (result,) = run_project(dag, get_executable_nodes(dag), adapter, run_id="test")
     return result
@@ -133,9 +132,7 @@ def test_a_staged_incremental_run_drops_the_new_rows_table_after_a_failure(
         ],
         run_config=Incremental(strategy=strategy_type(primary_key_columns=["id"])),
     )
-    compiled = make_compiled_trouve(PHYSICAL_ADDRESS).compiled
-    assert compiled is not None
-    trouve.compiled = compiled.model_copy(update={"resolved_sql": trouve.sql})
+    compile_trouve(trouve, PHYSICAL_ADDRESS)
     dag = build_dag([trouve])
     adapter = RecordingAdapter(fail_on=[failed_text])
 

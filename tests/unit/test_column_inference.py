@@ -225,3 +225,30 @@ class TestBuildCatalogColumnInference:
         for trouve_data in catalog["trouves"].values():
             inference = trouve_data["column_inference"]
             assert inference["status"] == ColumnStatus.DECLARED
+
+
+class TestTheCompiledFieldsOfTheCatalog:
+    """The web UI reads `compiled.resolved_sql` and `compiled.resolved_transform` from the catalog."""
+
+    def test_each_trouve_gives_the_field_of_its_backend(self, tmp_path):
+        from clair.core.dag import build_dag
+        from clair.trouves.trouve import TrouveType
+        from clair.web_ui.catalog import build_catalog
+        from tests.helpers import make_compiled_seed_table, make_compiled_trouve
+
+        dag = build_dag([
+            make_compiled_trouve("db.raw.orders", TrouveType.SOURCE),
+            make_compiled_trouve("db.mart.orders", TrouveType.TABLE),
+            make_compiled_seed_table("db.ref.countries"),
+        ])
+
+        compiled_of_address = {
+            address: trouve_data["compiled"]
+            for address, trouve_data in build_catalog(dag, tmp_path)["trouves"].items()
+        }
+
+        assert compiled_of_address["db.mart.orders"]["resolved_sql"] == "select 1"
+        assert "resolved_transform" not in compiled_of_address["db.mart.orders"]
+        assert "2 row(s)" in compiled_of_address["db.ref.countries"]["resolved_transform"]
+        assert "resolved_sql" not in compiled_of_address["db.ref.countries"]
+        assert "resolved_sql" not in compiled_of_address["db.raw.orders"]
