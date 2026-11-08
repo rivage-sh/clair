@@ -27,7 +27,7 @@ from clair.adapters.base import (
 )
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.dag import ClairDag, build_dag, get_executable_nodes
-from clair.core.runner import RunResult, run_project
+from clair.core.runner import RunFailure, RunSkip, RunSuccess, RunSummary, run_project
 from clair.core.test_runner import TestResult
 from clair.environments.environments import Authentication, Authenticator, Connection, Environment
 from clair.environments.routing import RoutingEntry, TrouveAddress
@@ -215,9 +215,37 @@ def addresses_of_text(physical_address: str, staging_address: str | None = None)
     )
 
 
-def make_run_result(physical_address: str, **fields: Any) -> RunResult:
-    """Make a RunResult at one address. Each other attribute takes its default."""
-    return RunResult(addresses=addresses_of_text(physical_address), **fields)
+def make_run_success(physical_address: str, **fields: Any) -> RunSuccess:
+    """Make a RunSuccess at one address. Each keyword replaces one attribute."""
+    fields.setdefault("statements", [])
+    fields.setdefault("effective_run_mode", RunMode.FULL_REFRESH)
+    fields.setdefault("duration_seconds", 0.0)
+    fields.setdefault("row_count", 0)
+    return RunSuccess(addresses=addresses_of_text(physical_address), **fields)
+
+
+def make_run_failure(physical_address: str, error: str, **fields: Any) -> RunFailure:
+    """Make a RunFailure at one address. Each keyword replaces one attribute."""
+    return RunFailure(addresses=addresses_of_text(physical_address), error=error, **fields)
+
+
+def make_run_skip(physical_address: str, skipped_by: str) -> RunSkip:
+    """Make a RunSkip at one address."""
+    return RunSkip(addresses=addresses_of_text(physical_address), skipped_by=skipped_by)
+
+
+def success_of(summary: RunSummary, address: str) -> RunSuccess:
+    """Give the result of one Trouve. A result that is not a success fails the test."""
+    result = summary.result(address)
+    assert isinstance(result, RunSuccess), f"{address} gave {result!r}"
+    return result
+
+
+def failure_of(summary: RunSummary, address: str) -> RunFailure:
+    """Give the result of one Trouve. A result that is not a failure fails the test."""
+    result = summary.result(address)
+    assert isinstance(result, RunFailure), f"{address} gave {result!r}"
+    return result
 
 
 def make_statement(sql: str = "select 1", **fields: Any) -> Statement:
@@ -567,8 +595,10 @@ def run_one_trouve(
     run_mode: RunMode = RunMode.FULL_REFRESH,
     tests_passed: bool = True,
     tested_addresses: list[str] | None = None,
-) -> RunResult:
-    """Run one Trouve at TEST_ADDRESS, and give the single RunResult.
+) -> RunSuccess | RunFailure:
+    """Run one Trouve at TEST_ADDRESS, and give its result.
+
+    A run of one Trouve has no upstream Trouve, thus it never gives a RunSkip.
 
     *tested_addresses* receives the address of each object that the data
     quality tests examined.
@@ -592,11 +622,12 @@ def run_one_trouve(
             use_staging=use_staging,
         )
     )
-    assert len(results) == 1
-    return results[0]
+    (result,) = results
+    assert not isinstance(result, RunSkip)
+    return result
 
 
-def executed_sql(result: RunResult) -> list[str]:
+def executed_sql(result: RunSuccess | RunFailure) -> list[str]:
     """Give the SQL of each statement that clair sent to the warehouse."""
     return [
         statement.sql

@@ -22,8 +22,9 @@ import pytest
 import clair
 from clair import TrouveAddress
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus, RunSummary
+from clair.core.runner import RunSummary
 from clair.environments.environments import Environment
+from tests.helpers import success_of
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import (
     CI_DATABASE_CONFIG_FILE,
@@ -197,10 +198,7 @@ class TestASeedReachesSnowflake:
         self, completed_run: RunSummary
     ) -> None:
         """A seed reads no upstream, and clair still builds it."""
-        seed_result = completed_run.result(f"{self.DATABASE_NAME}.reference.labels")
-
-        assert seed_result is not None
-        assert seed_result.status == RunStatus.SUCCESS
+        success_of(completed_run, f"{self.DATABASE_NAME}.reference.labels")
 
     def test_the_table_holds_each_row_of_the_file(
         self,

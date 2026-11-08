@@ -56,7 +56,7 @@ from clair.core.discovery import (
     find_project_root,
 )
 from clair.core.references import recompile_for_selection
-from clair.core.runner import RunResult, RunSummary, run_project
+from clair.core.runner import RunResult, RunSkip, RunSummary, run_project
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import SampleScope, TestResult, TestSummary, run_tests
 from clair.core.validation import ValidationReport, validate_project
@@ -478,11 +478,12 @@ def run(
             threads=thread_count,
             environment_name=env_name,
         ):
-            results.append(
-                result.model_copy(
+            # A skipped Trouve ran no test, thus its result has no test results.
+            if not isinstance(result, RunSkip):
+                result = result.model_copy(
                     update={"test_results": test_results_of_node[str(result.addresses.physical)]}
                 )
-            )
+            results.append(result)
     finally:
         if owns_adapter:
             warehouse_adapter.close()

@@ -22,7 +22,7 @@ import clair
 from clair import TrouveAddress
 from clair.adapters.base import WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus, RunSummary
+from clair.core.runner import RunFailure, RunSuccess, RunSummary
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
@@ -97,7 +97,7 @@ class TestAnIcebergTable:
 
     def test_an_incremental_run_clones_and_promotes_an_iceberg_table(self, runs: _Runs) -> None:
         result = runs.incremental.summary.result(LOGICAL_NAME)
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert result.effective_run_mode == RunMode.INCREMENTAL
         assert runs.incremental.object_type == WarehouseObjectType.ICEBERG_TABLE
         assert runs.incremental.ids == [1, 2]
@@ -106,7 +106,7 @@ class TestAnIcebergTable:
         self, runs: _Runs
     ) -> None:
         result = runs.to_standard.summary.result(LOGICAL_NAME)
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "Run DROP ICEBERG TABLE" in result.error
         assert runs.to_standard.object_type == WarehouseObjectType.ICEBERG_TABLE
         assert runs.to_standard.ids == [1, 2]

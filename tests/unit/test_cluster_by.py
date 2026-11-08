@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from clair.adapters.base import WarehouseColumn
 from clair.core.compiler import build_statements
-from clair.core.runner import RunStatus
+from clair.core.runner import RunFailure, RunSuccess
 from clair.core.staging import make_staging_address
 from clair.trouves.address import TrouveAddress
 from clair.trouves.pandas_table import PandasTable
@@ -185,7 +185,7 @@ class TestARemovedKey:
 
         result = run_one_trouve(incremental_table([]), adapter, run_mode=RunMode.INCREMENTAL)
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         sql_texts = executed_sql(result)
         insert_position = index_of(sql_texts, f"INSERT INTO {STAGING_ADDRESS}")
         assert -1 < insert_position < index_of(sql_texts, DROP_STAGING_KEY)
@@ -199,7 +199,7 @@ class TestTheRun:
             incremental_table(CLUSTER_BY), adapter, run_mode=RunMode.INCREMENTAL
         )
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         sql_texts = executed_sql(result)
         insert_position = index_of(sql_texts, f"INSERT INTO {STAGING_ADDRESS}")
         assert -1 < insert_position < index_of(sql_texts, CLUSTER_STAGING)
@@ -211,7 +211,7 @@ class TestTheRun:
 
         result = run_one_trouve(seed, adapter)
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert adapter.written_addresses == [str(STAGING_ADDRESS)]
         sql_texts = executed_sql(result)
         assert -1 < index_of(sql_texts, CLUSTER_STAGING) < index_of(sql_texts, PROMOTION)
@@ -232,7 +232,7 @@ class TestTheRun:
 
         result = run_one_trouve(trouve, adapter)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert index_of(executed_sql(result), PROMOTION) == -1
 
     def test_a_failed_resume_fails_the_node_after_the_promotion(self):
@@ -240,6 +240,6 @@ class TestTheRun:
 
         result = run_one_trouve(full_refresh_table(CLUSTER_BY), adapter)
 
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert index_of(executed_sql(result), PROMOTION) > -1
         assert RESUME_PHYSICAL in result.error

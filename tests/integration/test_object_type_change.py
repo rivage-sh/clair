@@ -25,7 +25,7 @@ import pytest
 import clair
 from clair.adapters.base import WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus, RunSummary
+from clair.core.runner import RunFailure, RunSuccess, RunSummary
 from clair.core.staging import make_staging_address
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
@@ -149,7 +149,7 @@ class _TypeChangeCase:
         result = runs.first.result(self.logical_name)
 
         assert result is not None
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert runs.type_after_first_run == WarehouseObjectType[self.FIRST_TYPE]
 
     def test_the_second_run_fails_and_names_the_drop(
@@ -159,7 +159,7 @@ class _TypeChangeCase:
         address = physical_address(self.logical_name, clair_environment.schema_name)
 
         assert result is not None, "the second run holds no result for the Trouve"
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert f"Run DROP {self.FIRST_TYPE} {address}" in result.error
 
     def test_the_second_run_keeps_the_object_of_the_first_type(
@@ -179,7 +179,7 @@ class _TypeChangeCase:
         result = runs.third.result(self.logical_name)
 
         assert result is not None
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         assert runs.type_after_third_run == WarehouseObjectType[self.SECOND_TYPE]
 
 

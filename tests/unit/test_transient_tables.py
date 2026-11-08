@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from clair.adapters.base import WarehouseColumn
 from clair.core.compiler import build_statements
-from clair.core.runner import RunStatus
+from clair.core.runner import RunSuccess
 from clair.core.staging import make_staging_address
 from clair.trouves.address import TrouveAddress
 from clair.trouves.pandas_table import PandasTable
@@ -122,7 +122,7 @@ class TestTheRun:
 
         result = run_one_trouve(incremental_table(transient), adapter, run_mode=RunMode.INCREMENTAL)
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         sql_texts = executed_sql(result)
         assert contains_statement(
             sql_texts, f"CREATE OR REPLACE {keyword} {STAGING_ADDRESS} CLONE {PHYSICAL_ADDRESS}"
@@ -138,7 +138,7 @@ class TestTheRun:
 
         result = run_one_trouve(seed, adapter)
 
-        assert result.status == RunStatus.SUCCESS
+        assert isinstance(result, RunSuccess)
         assert adapter.written_addresses == [str(STAGING_ADDRESS)]
         assert adapter.transient_addresses == ([str(STAGING_ADDRESS)] if transient else [])
         assert contains_statement(

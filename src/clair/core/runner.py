@@ -8,12 +8,12 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import StrEnum
 from pathlib import Path
-from typing import NamedTuple
+from typing import Annotated, Literal, NamedTuple
 
 import networkx as nx
 import pandas as pd
 import structlog
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field
 
 from clair.adapters.base import (
     Statement,
@@ -54,44 +54,64 @@ class RunStatus(StrEnum):
     SKIPPED = "skipped"
 
 
-class RunResult(BaseModel):
-    """The result after clair materializes one Trouve in the warehouse.
-
-    The status is not an attribute: *error* and *skipped_by* give it. Thus a
-    result cannot hold a status that disagrees with the cause.
+class _RunResultBase(BaseModel):
+    """The field that each result holds.
 
     Attributes:
         addresses: The logical address, the physical address, and the staging
             address of the node.
-        statements: Each statement of the node, in the order that clair made
-            them. Each one holds its text, its query ID, its URL and its status.
-            A statement after the one that failed has the NOT_RUN status.
-        effective_run_mode: The run mode that clair used, after the RunConfig of
-            the Trouve and the fallback to a full refresh.
-        error: The cause of a failure. It is empty for a result that succeeded.
-        duration_seconds: The clock time of the statements.
-        row_count: The number of rows that the last build statement changed.
-        test_results: The data quality test results of this Trouve.
-        skipped_by: The physical address of the upstream Trouve that failed and
-            thus caused the skip.
     """
 
     addresses: NodeAddresses
+
+
+class RunSuccess(_RunResultBase):
+    """The result of a Trouve that clair materialized at its physical address.
+
+    Attributes:
+        statements: Each statement of the node, in the order that clair made
+            them. Each one holds its text, its query ID, its URL and its status.
+        effective_run_mode: The run mode that clair used, after the RunConfig of
+            the Trouve and the fallback to a full refresh.
+        duration_seconds: The clock time of the statements.
+        row_count: The number of rows that the last build statement changed.
+        test_results: The data quality test results of this Trouve. A test that
+            fails after a run with no staging does not change the status,
+            because the physical object holds the new data.
+    """
+
+    status: Literal[RunStatus.SUCCESS] = RunStatus.SUCCESS
+    statements: list[Statement]
+    effective_run_mode: RunMode
+    duration_seconds: float
+    row_count: int
+    test_results: list[TestResult] = []
+
+
+class RunFailure(_RunResultBase):
+    """The result of a Trouve that clair did not materialize at its physical address.
+
+    A failure before the first statement holds the error only: for example a
+    session context that clair cannot set, or an object of a different type at
+    the address.
+
+    Attributes:
+        error: The cause of the failure. It is never empty.
+        statements: Each statement of the node, in the order that clair made
+            them. A statement after the one that failed has the NOT_RUN status.
+        effective_run_mode: The run mode that clair used, or None if the node
+            failed before clair selected it.
+        duration_seconds: The clock time of the statements.
+        test_results: The data quality test results of the staging object. A
+            test that fails stops the promotion, and thus causes the failure.
+    """
+
+    status: Literal[RunStatus.FAILURE] = RunStatus.FAILURE
+    error: str = Field(min_length=1)
     statements: list[Statement] = []
     effective_run_mode: RunMode | None = None
-    error: str = ""
     duration_seconds: float = 0.0
-    row_count: int = 0
     test_results: list[TestResult] = []
-    skipped_by: str | None = None
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def status(self) -> RunStatus:
-        """Give the status of the node: an upstream failure comes first."""
-        if self.skipped_by:
-            return RunStatus.SKIPPED
-        return RunStatus.FAILURE if self.error else RunStatus.SUCCESS
 
     @property
     def failed_statement(self) -> Statement | None:
@@ -102,13 +122,29 @@ class RunResult(BaseModel):
         return None
 
 
-def _render_statements(result: RunResult) -> list[str]:
+class RunSkip(_RunResultBase):
+    """The result of a Trouve that clair did not run, because an upstream Trouve failed.
+
+    Attributes:
+        skipped_by: The physical address of the upstream Trouve that failed.
+    """
+
+    status: Literal[RunStatus.SKIPPED] = RunStatus.SKIPPED
+    skipped_by: str
+
+
+# The result of one Trouve. The status field tells the three classes apart, thus
+# a pydantic model that holds a result reads it back from JSON.
+RunResult = RunSuccess | RunFailure | RunSkip
+
+
+def _render_statements(statements: list[Statement]) -> list[str]:
     """Make a query ID line and a URL line for each statement that has an ID.
 
     Add an [i/n] label if the node has 2 statements or more.
     """
     lines: list[str] = []
-    identified = [statement for statement in result.statements if statement.query_id]
+    identified = [statement for statement in statements if statement.query_id]
     total = len(identified)
     for index, statement in enumerate(identified, 1):
         label = f" [{index}/{total}]" if total > 1 else ""
@@ -121,7 +157,7 @@ def _render_statements(result: RunResult) -> list[str]:
 class RunSummary(BaseModel):
     """The result of one run operation."""
 
-    results: list[RunResult]
+    results: list[Annotated[RunResult, Field(discriminator="status")]]
     env_name: str
     run_id: str = ""
     project_root: Path | None = None
@@ -154,19 +190,24 @@ class RunSummary(BaseModel):
     @property
     def test_results(self) -> list[TestResult]:
         """Each data quality test result of the run, in the run order."""
-        return [t for r in self.results for t in r.test_results]
+        return [
+            test_result
+            for run_result in self.results
+            if not isinstance(run_result, RunSkip)
+            for test_result in run_result.test_results
+        ]
 
     @property
-    def succeeded(self) -> list[RunResult]:
-        return self.with_status(RunStatus.SUCCESS)
+    def succeeded(self) -> list[RunSuccess]:
+        return [r for r in self.results if isinstance(r, RunSuccess)]
 
     @property
-    def failed(self) -> list[RunResult]:
-        return self.with_status(RunStatus.FAILURE)
+    def failed(self) -> list[RunFailure]:
+        return [r for r in self.results if isinstance(r, RunFailure)]
 
     @property
-    def skipped(self) -> list[RunResult]:
-        return self.with_status(RunStatus.SKIPPED)
+    def skipped(self) -> list[RunSkip]:
+        return [r for r in self.results if isinstance(r, RunSkip)]
 
     @property
     def succeeded_count(self) -> int:
@@ -195,19 +236,19 @@ class RunSummary(BaseModel):
         lines: list[str] = []
         name = str(result.addresses.physical)
 
-        if result.status == RunStatus.SKIPPED:
+        if isinstance(result, RunSkip):
             lines.append(f"[{index}/{total}] {name} ... SKIPPED")
             lines.append(f"      Reason: the upstream dependency {result.skipped_by} failed")
-        elif result.status == RunStatus.SUCCESS:
+        elif isinstance(result, RunSuccess):
             lines.append(
                 f"[{index}/{total}] {name} ... OK ({result.duration_seconds:.1f}s)"
             )
-            lines.extend(_render_statements(result))
+            lines.extend(_render_statements(result.statements))
         else:
             lines.append(
                 f"[{index}/{total}] {name} ... FAILED ({result.duration_seconds:.1f}s)"
             )
-            lines.extend(_render_statements(result))
+            lines.extend(_render_statements(result.statements))
             lines.append(f"      Error: {result.error}")
             if result.statements:
                 lines.append("      SQL:")
@@ -263,7 +304,7 @@ def _run_dataframe_trouve(
     adapter: WarehouseAdapter,
     addresses: NodeAddresses,
     effective_run_mode: RunMode,
-) -> RunResult:
+) -> RunSuccess | RunFailure:
     """Execute a DataframeTrouve. Read the inputs, build the DataFrame, write it.
 
     Clair writes the DataFrame to ``addresses.target``: the staging address of a
@@ -275,13 +316,13 @@ def _run_dataframe_trouve(
         addresses: The addresses of the node.
         effective_run_mode: The run mode of the result.
 
-    Returns a RunResult with the SUCCESS status or the FAILURE status.
+    Returns a RunSuccess or a RunFailure.
     """
     start = time.monotonic()
 
-    def failure(message: str) -> RunResult:
+    def failure(message: str) -> RunFailure:
         """Make the result of a DataframeTrouve that did not write its table."""
-        return RunResult(
+        return RunFailure(
             addresses=addresses,
             effective_run_mode=effective_run_mode,
             error=message,
@@ -348,7 +389,7 @@ def _run_dataframe_trouve(
         if not statements[-1].success:
             return failure(statements[-1].error or f"Clair cannot complete {address}")
 
-    return RunResult(
+    return RunSuccess(
         addresses=addresses,
         statements=statements,
         effective_run_mode=effective_run_mode,
@@ -603,7 +644,7 @@ def _run_node(
     except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
         logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=config.warehouse, role=config.role, error=str(e))
         return _NodeOutcome(
-            RunResult(
+            RunFailure(
                 addresses=addresses,
                 error=f"Clair cannot set the session context: {e}",
             ),
@@ -621,7 +662,7 @@ def _run_node(
         except ClairError as naming_error:
             logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(naming_error))
             return _NodeOutcome(
-                RunResult(addresses=addresses, error=str(naming_error)),
+                RunFailure(addresses=addresses, error=str(naming_error)),
                 downstream_ok=False,
             )
 
@@ -641,7 +682,7 @@ def _run_node(
         if type_error is not None:
             logger.warning("run.node.failure", logical=logical_address, physical=name, error=type_error)
             return _NodeOutcome(
-                RunResult(addresses=addresses, error=type_error),
+                RunFailure(addresses=addresses, error=type_error),
                 downstream_ok=False,
             )
 
@@ -654,19 +695,24 @@ def _run_node(
 
         downstream_ok = True
 
-        if result.status == RunStatus.SUCCESS and staging_address is not None:
+        if isinstance(result, RunSuccess) and staging_address is not None:
             assert after_node_success is not None
             tests_passed = after_node_success(name, str(staging_address), adapter)
             promote_statements, staging_error = _promote_or_keep(
                 trouve, adapter, addresses, tests_passed, current_object
             )
-            result = result.model_copy(
-                update={
-                    "statements": result.statements + promote_statements,
-                    "error": staging_error or result.error,
-                }
-            )
-        elif result.status == RunStatus.FAILURE and staging_address is not None:
+            statements = result.statements + promote_statements
+            if staging_error:
+                result = RunFailure(
+                    addresses=result.addresses,
+                    error=staging_error,
+                    statements=statements,
+                    effective_run_mode=result.effective_run_mode,
+                    duration_seconds=result.duration_seconds,
+                )
+            else:
+                result = result.model_copy(update={"statements": statements})
+        elif isinstance(result, RunFailure) and staging_address is not None:
             result = result.model_copy(
                 update={
                     "error": (
@@ -676,7 +722,7 @@ def _run_node(
                 }
             )
 
-        if result.status == RunStatus.SUCCESS:
+        if isinstance(result, RunSuccess):
             logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3))
             # Without staging the tests run after clair wrote the physical object.
             if staging_address is None and after_node_success is not None:
@@ -716,7 +762,7 @@ def _run_node(
         except ClairError as column_error:
             logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(column_error))
             return _NodeOutcome(
-                RunResult(addresses=addresses, error=str(column_error)),
+                RunFailure(addresses=addresses, error=str(column_error)),
                 downstream_ok=False,
             )
         if not incremental_columns.change.is_empty:
@@ -818,7 +864,7 @@ def _run_node(
         if staging_address is None and after_node_success is not None:
             downstream_ok = after_node_success(name, str(addresses.physical), adapter)
         return _NodeOutcome(
-            RunResult(
+            RunSuccess(
                 addresses=addresses,
                 statements=statements,
                 effective_run_mode=effective_mode,
@@ -840,13 +886,12 @@ def _run_node(
             )
     logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(duration, 3), error=error_message, query_ids=query_ids)
     return _NodeOutcome(
-        RunResult(
+        RunFailure(
             addresses=addresses,
             statements=statements,
             effective_run_mode=effective_mode,
             error=error_message,
             duration_seconds=duration,
-            row_count=row_count,
         ),
         downstream_ok=False,
     )
@@ -967,7 +1012,7 @@ def run_project(
                     if name in skip_reasons:
                         addresses = addresses_of(dag, name)
                         logger.info("run.node.skipped", logical=str(addresses.logical), physical=name, skipped_by=skip_reasons[name])
-                        yield RunResult(
+                        yield RunSkip(
                             addresses=addresses,
                             skipped_by=skip_reasons[name],
                         )
@@ -991,9 +1036,11 @@ def run_project(
                     except Exception as node_error:  # noqa: BLE001 — one node that breaks must not stop the other branches
                         logger.warning("run.node.failure", physical=name, error=str(node_error))
                         outcome = _NodeOutcome(
-                            RunResult(
+                            RunFailure(
                                 addresses=addresses_of(dag, name),
-                                error=str(node_error),
+                                # An exception can hold an empty message, and a
+                                # failure needs a cause.
+                                error=str(node_error) or type(node_error).__name__,
                             ),
                             downstream_ok=False,
                         )

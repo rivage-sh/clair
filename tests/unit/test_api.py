@@ -8,11 +8,10 @@ from pathlib import Path
 import pytest
 
 import clair
-from clair.core.runner import RunStatus
 from clair.environments.environments import Environment
 from clair.exceptions import ResultNotFoundError
 from clair.trouves.run_config import RunMode
-from tests.helpers import RecordingAdapter, make_environment
+from tests.helpers import RecordingAdapter, make_environment, success_of
 
 DAILY_ORDERS = "analytics.revenue.daily_orders"
 
@@ -117,9 +116,7 @@ class TestRun:
         assert summary.run_id
         assert summary.run_mode == RunMode.FULL_REFRESH
 
-        result = summary.result(DAILY_ORDERS)
-        assert result is not None
-        assert result.status == RunStatus.SUCCESS
+        result = success_of(summary, DAILY_ORDERS)
         assert [s for s in result.statements if s.query_id]
         assert result.row_count == 42
 
@@ -127,18 +124,20 @@ class TestRun:
         self, project: Path, environment: Environment
     ):
         """A caller reads the statements, and parses no log line."""
-        result = clair.run(project, env=environment, adapter=RecordingAdapter(), test=False).result(DAILY_ORDERS)
+        result = success_of(
+            clair.run(project, env=environment, adapter=RecordingAdapter(), test=False), DAILY_ORDERS
+        )
 
-        assert result is not None
         assert result.statements
         assert any("daily_orders" in s.sql for s in result.statements)
 
     def test_a_run_without_the_tests_writes_to_the_physical_address(
         self, project: Path, environment: Environment
     ):
-        result = clair.run(project, env=environment, adapter=RecordingAdapter(), test=False).result(DAILY_ORDERS)
+        result = success_of(
+            clair.run(project, env=environment, adapter=RecordingAdapter(), test=False), DAILY_ORDERS
+        )
 
-        assert result is not None
         assert result.addresses.staging is None
         assert result.effective_run_mode == RunMode.FULL_REFRESH
 
@@ -146,18 +145,13 @@ class TestRun:
         self, project: Path, environment: Environment
     ):
         summary = clair.run(project, env=environment, adapter=RecordingAdapter())
-        result = summary.result(DAILY_ORDERS)
-
-        assert result is not None
-        assert result.status == RunStatus.SUCCESS
+        result = success_of(summary, DAILY_ORDERS)
         assert result.addresses.staging is not None
         assert summary.run_id[:8] in str(result.addresses.staging)
 
     def test_the_result_holds_the_test_results(self, project: Path, environment: Environment):
         summary = clair.run(project, env=environment, adapter=RecordingAdapter())
-        result = summary.result(DAILY_ORDERS)
-
-        assert result is not None
+        result = success_of(summary, DAILY_ORDERS)
         assert result.test_results
         assert all(test_result.passed for test_result in result.test_results)
         assert summary.test_results == result.test_results

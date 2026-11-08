@@ -37,6 +37,7 @@ import clair
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
+from tests.helpers import success_of
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import (
     copy_with_ci_routing,
@@ -214,8 +215,7 @@ class TestExample3(ExampleProjectTests):
         # The mode of the result is the mode that clair used, after the
         # RunConfig of the Trouve and the fallback of a table that does not
         # exist yet.
-        result = summary.result("example_3_database.derived.recent_orders")
-        assert result is not None
+        result = success_of(summary, "example_3_database.derived.recent_orders")
         assert result.effective_run_mode == RunMode.INCREMENTAL
 
 

@@ -13,7 +13,7 @@ import pytest
 
 import clair
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunStatus, RunSummary
+from clair.core.runner import RunFailure, RunSuccess, RunSummary
 from clair.environments.environments import Environment
 from tests.integration.config import DATABASE_NAME as WAREHOUSE_DATABASE_NAME
 from tests.integration.projects import write_refined_project
@@ -54,7 +54,7 @@ class TestTheSession:
         self, summary: RunSummary, adapter: SnowflakeAdapter
     ) -> None:
         result = summary.result(TAGGED)
-        assert result.status == RunStatus.SUCCESS, result.error
+        assert isinstance(result, RunSuccess), result
         query_id = next(statement.query_id for statement in result.statements if statement.query_id)
 
         # The time window keeps the lookup short. Without it, the table function
@@ -71,5 +71,5 @@ class TestTheSession:
 
     def test_a_statement_longer_than_the_timeout_fails(self, summary: RunSummary) -> None:
         result = summary.result(SLOW)
-        assert result.status == RunStatus.FAILURE
+        assert isinstance(result, RunFailure)
         assert "timeout" in result.error.lower()

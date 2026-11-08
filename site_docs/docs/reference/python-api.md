@@ -132,8 +132,8 @@ for result in summary.failed:
     print("\n\n".join(statement.sql for statement in result.statements))
 ```
 
-A Trouve that fails gives a `RunResult` with the `FAILURE` status, and raises no
-error. The other branches of the DAG continue.
+A Trouve that fails gives a `RunFailure`, and raises no error. The other branches
+of the DAG continue.
 
 ## `RunSummary`
 
@@ -152,37 +152,67 @@ class RunSummary(BaseModel):
 | `results` | One `RunResult` for each Trouve, in the run order. |
 | `sample_rows` | The row limit of a sampled run. `None` tells you that the run read each row. |
 | `result(address)` | One `RunResult` by its logical address or its physical address. It raises `ResultNotFoundError` if the run holds no such Trouve. |
-| `succeeded`, `failed`, `skipped` | The results with that status. |
+| `succeeded`, `failed`, `skipped` | The results with that status: a `list[RunSuccess]`, a `list[RunFailure]` and a `list[RunSkip]`. |
 | `succeeded_count`, `failed_count`, `skipped_count` | The number of results with that status. |
 | `test_results` | Each `TestResult` of the run, in the run order. |
 | `render()` | The summary text that the CLI shows. |
 
 ## `RunResult`
 
+`RunResult` is `RunSuccess | RunFailure | RunSkip`. Each class holds only the fields of
+its outcome, thus a type checker tells you to examine the outcome before you read a
+field:
+
 ```python
-class RunResult(BaseModel):
+from clair.core.runner import RunFailure, RunSkip, RunSuccess
+
+result = summary.result("mydb.analytics.orders")
+match result:
+    case RunSuccess():
+        print(result.row_count, result.effective_run_mode)
+    case RunFailure():
+        print(result.error, result.failed_statement)
+    case RunSkip():
+        print("upstream failure:", result.skipped_by)
+```
+
+```python
+class RunSuccess(BaseModel):
     addresses: NodeAddresses
+    status: Literal[RunStatus.SUCCESS]
     statements: list[Statement]
-    effective_run_mode: RunMode | None
-    error: str
+    effective_run_mode: RunMode
     duration_seconds: float
     row_count: int
     test_results: list[TestResult]
-    skipped_by: str | None
+
+class RunFailure(BaseModel):
+    addresses: NodeAddresses
+    status: Literal[RunStatus.FAILURE]
+    error: str
+    statements: list[Statement]
+    effective_run_mode: RunMode | None
+    duration_seconds: float
+    test_results: list[TestResult]
+
+class RunSkip(BaseModel):
+    addresses: NodeAddresses
+    status: Literal[RunStatus.SKIPPED]
+    skipped_by: str
 ```
 
-| Member | Gives |
-|--------|-------|
-| `addresses` | The `NodeAddresses` of the node: `logical`, `physical` and `staging`. |
-| `statements` | One `Statement` for each statement of the node, in the order that clair made them. |
-| `status` | `RunStatus.SUCCESS`, `RunStatus.FAILURE` or `RunStatus.SKIPPED`. The other attributes give it, thus you set it never. |
-| `failed_statement` | The `Statement` that failed, or `None`. |
-| `effective_run_mode` | The mode that clair used, after the `RunConfig` of the Trouve and the fallback to a full refresh. See [Incrementality](../topics/incrementality.md). |
-| `error` | The cause of a failure. It is empty for a result that succeeded. |
-| `duration_seconds` | The clock time of the statements. |
-| `row_count` | The rows that the last build statement changed. |
-| `test_results` | The data quality test results of this Trouve. |
-| `skipped_by` | The physical address of the upstream Trouve that caused the skip. |
+| Member | Of | Gives |
+|--------|----|-------|
+| `addresses` | each | The `NodeAddresses` of the node: `logical`, `physical` and `staging`. |
+| `status` | each | `RunStatus.SUCCESS`, `RunStatus.FAILURE` or `RunStatus.SKIPPED`. The class gives it, thus you set it never. It also tells the classes apart in JSON: `RunSummary.model_validate_json()` gives each result its class. |
+| `statements` | success, failure | One `Statement` for each statement of the node, in the order that clair made them. A failure before the first statement holds none. |
+| `effective_run_mode` | success, failure | The mode that clair used, after the `RunConfig` of the Trouve and the fallback to a full refresh. It is `None` for a failure before clair selected it. See [Incrementality](../topics/incrementality.md). |
+| `duration_seconds` | success, failure | The clock time of the statements. |
+| `test_results` | success, failure | The data quality test results of this Trouve. A test that fails on a staged run causes the failure. |
+| `row_count` | success | The rows that the last build statement changed. |
+| `error` | failure | The cause of the failure. It is never empty. |
+| `failed_statement` | failure | The `Statement` that failed, or `None`. |
+| `skipped_by` | skip | The physical address of the upstream Trouve that failed. |
 
 ## `NodeAddresses`
 
