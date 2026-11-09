@@ -169,9 +169,16 @@ trouve = SeedTable(dataframe=rates)
 
 ## After discovery
 
-After clair discovers a Trouve, it sets the `compiled` attributes. Two properties become available:
+A Trouve holds two kinds of attributes.
 
-- `trouve.physical_address` — the `TrouveAddress` that clair writes to, such as `refined.orders.daily`
-- `trouve.is_compiled` — `True` after clair discovers the project
+- **What the file decides.** `trouve.logical_address` comes from the file path, such as
+  `refined.orders.daily`. It is the production address. No run and no environment changes
+  it, thus a Trouve that you import in a notebook has it too.
+- **What one run decides.** Discovery sets `trouve.compiled`: the record of one run. It
+  holds `physical_address`, the address that the routing entry of the run gives, and the
+  SQL with each reference resolved for the selection. `trouve.is_compiled` is `True` after
+  clair discovers the project, and `trouve.require_compiled()` raises
+  `TrouveNotCompiledError` before.
 
-If you read `physical_address` before discovery, clair raises `RuntimeError`.
+A different run gives a different record, because the environment, the selection and the
+run mode decide it. clair therefore keeps each value that a run decides below `compiled`.

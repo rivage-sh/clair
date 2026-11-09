@@ -84,9 +84,8 @@ def environments_file(monkeypatch: pytest.MonkeyPatch) -> Environment:
     """
     environment = make_environment()
 
-    def fake_load(env_name: str | None = None) -> tuple[str, Environment]:
-        name = env_name or "dev"
-        return name, environment.model_copy(update={"name": name})
+    def fake_load(env_name: str) -> Environment:
+        return environment.model_copy(update={"name": env_name})
 
     monkeypatch.setattr("clair.cli.main.load_environment", fake_load)
     return environment
@@ -117,6 +116,54 @@ def _give_api(
     monkeypatch.setattr(f"clair.api.{name}", fake)
 
 
+def _result_of_command(command_name: str) -> RunSummary | TestSummary | None:
+    """Give a result that the API function of *command_name* can return."""
+    if command_name == "run":
+        return RunSummary(results=[], env_name="dev", run_id="abc")
+    if command_name == "test":
+        return TestSummary(results=[])
+    return None
+
+
+class TestTheEnvironmentOption:
+    """Each command that routes names its environment. clair selects no default."""
+
+    @pytest.mark.parametrize("command_name", ["compile", "validate", "run", "test"])
+    def test_a_command_without_an_environment_stops(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], command_name: str
+    ):
+        monkeypatch.delenv("CLAIR_ENV", raising=False)
+        _give_api(monkeypatch, calls, command_name)
+
+        result = CliRunner().invoke(cli, [command_name])
+
+        assert result.exit_code == 2
+        assert "--env" in result.output
+        assert calls == {}
+
+    @pytest.mark.parametrize("command_name", ["compile", "run", "test"])
+    def test_clair_env_gives_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], command_name: str
+    ):
+        monkeypatch.setenv("CLAIR_ENV", "prod")
+        _give_api(monkeypatch, calls, command_name, _result_of_command(command_name))
+
+        CliRunner().invoke(cli, [command_name])
+
+        assert calls["env"].name == "prod"
+
+    @pytest.mark.parametrize("command_name", ["compile", "run", "test"])
+    def test_the_option_wins_against_clair_env(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], command_name: str
+    ):
+        monkeypatch.setenv("CLAIR_ENV", "prod")
+        _give_api(monkeypatch, calls, command_name, _result_of_command(command_name))
+
+        CliRunner().invoke(cli, [command_name, "--env", "dev"])
+
+        assert calls["env"].name == "dev"
+
+
 class TestRunCommand:
     def test_a_run_that_passes_gives_the_status_code_0(
         self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path
@@ -128,7 +175,7 @@ class TestRunCommand:
             RunSummary(results=[_run_result()], env_name="dev", run_id="abc"),
         )
 
-        result = CliRunner().invoke(cli, ["run"])
+        result = CliRunner().invoke(cli, ["run", "--env", "dev"])
 
         assert result.exit_code == 0
 
@@ -146,7 +193,7 @@ class TestRunCommand:
             ),
         )
 
-        result = CliRunner().invoke(cli, ["run"])
+        result = CliRunner().invoke(cli, ["run", "--env", "dev"])
 
         assert result.exit_code == 1
 
@@ -163,7 +210,7 @@ class TestRunCommand:
             ),
         )
 
-        result = CliRunner().invoke(cli, ["run"])
+        result = CliRunner().invoke(cli, ["run", "--env", "dev"])
 
         assert result.exit_code == 1
 
@@ -174,7 +221,7 @@ class TestRunCommand:
             monkeypatch, calls, "run", RunSummary(results=[], env_name="dev", run_id="abc")
         )
 
-        result = CliRunner().invoke(cli, ["run"])
+        result = CliRunner().invoke(cli, ["run", "--env", "dev"])
 
         assert result.exit_code == 0
         assert "no Trouves to run" in result.output
@@ -184,7 +231,7 @@ class TestRunCommand:
     ):
         _give_api(monkeypatch, calls, "run", error=ClairError("no environments.yml"))
 
-        result = CliRunner().invoke(cli, ["run"])
+        result = CliRunner().invoke(cli, ["run", "--env", "dev"])
 
         assert result.exit_code == 1
 
@@ -227,14 +274,9 @@ class TestRunCommand:
     def test_sample_rows_has_a_default(
         self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], command_name: str
     ):
-        result_of_command = {
-            "compile": None,
-            "run": RunSummary(results=[], env_name="dev", run_id="abc"),
-            "test": TestSummary(results=[]),
-        }[command_name]
-        _give_api(monkeypatch, calls, command_name, result_of_command)
+        _give_api(monkeypatch, calls, command_name, _result_of_command(command_name))
 
-        CliRunner().invoke(cli, [command_name, "--sample"])
+        CliRunner().invoke(cli, [command_name, "--env", "dev", "--sample"])
 
         assert calls["sample"] is True
         assert calls["sample_rows"] == DEFAULT_SAMPLE_ROWS
@@ -242,10 +284,10 @@ class TestRunCommand:
     @pytest.mark.parametrize(
         "arguments",
         [
-            ["compile", "--sample-rows", "10"],
-            ["run", "--sample-rows", "10"],
-            ["test", "--sample-rows", "10"],
-            ["run", "--sample", "--sample-rows", "0"],
+            ["compile", "--env", "dev", "--sample-rows", "10"],
+            ["run", "--env", "dev", "--sample-rows", "10"],
+            ["test", "--env", "dev", "--sample-rows", "10"],
+            ["run", "--env", "dev", "--sample", "--sample-rows", "0"],
         ],
     )
     def test_a_bad_sample_rows_stops_the_command(
@@ -279,7 +321,7 @@ class TestTestCommand:
             ),
         )
 
-        result = CliRunner().invoke(cli, ["test"])
+        result = CliRunner().invoke(cli, ["test", "--env", "dev"])
 
         assert result.exit_code == 1
 
@@ -288,7 +330,7 @@ class TestTestCommand:
     ):
         _give_api(monkeypatch, calls, "test", TestSummary(results=[]))
 
-        result = CliRunner().invoke(cli, ["test"])
+        result = CliRunner().invoke(cli, ["test", "--env", "dev"])
 
         assert result.exit_code == 0
 
@@ -301,6 +343,7 @@ class TestTestCommand:
             cli,
             [
                 "test",
+                "--env", "dev",
                 "--select", "mydb.*",
                 "--sample",
                 "--threads", "2",
@@ -318,7 +361,7 @@ class TestCompileCommand:
     ):
         _give_api(monkeypatch, calls, "compile", error=ClairError("a bad Trouve"))
 
-        result = CliRunner().invoke(cli, ["compile"])
+        result = CliRunner().invoke(cli, ["compile", "--env", "dev"])
 
         assert result.exit_code == 1
 
@@ -328,7 +371,7 @@ class TestCompileCommand:
         _give_api(monkeypatch, calls, "compile", result=None)
 
         result = CliRunner().invoke(
-            cli, ["compile", "--run-mode", "incremental"]
+            cli, ["compile", "--env", "dev", "--run-mode", "incremental"]
         )
 
         assert result.exit_code == 0
@@ -349,7 +392,7 @@ class TestCompileCommand:
     ):
         """A compile makes no connection, thus the name alone is enough."""
 
-        def fake_load(env_name: str | None = None) -> tuple[str, Environment]:
+        def fake_load(env_name: str) -> Environment:
             raise EnvironmentsFileNotFoundError("/home/analyst/.clair/environments.yml")
 
         monkeypatch.setattr("clair.cli.main.load_environment", fake_load)
@@ -437,8 +480,8 @@ class TestInitWritesAnEnvironmentThatLoads:
         )
 
         assert result.exit_code == 0, result.output
-        _name, environment = load_environment(
-            environments_path=home_dir / ".clair" / "environments.yml"
+        environment = load_environment(
+            "dev", environments_path=home_dir / ".clair" / "environments.yml"
         )
         assert environment.authentication == expected_authentication
         assert environment.connection.role is None

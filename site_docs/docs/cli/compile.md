@@ -3,20 +3,20 @@
 Resolve the DAG and write the generated SQL to `_clairtifacts/`. The command does not connect to Snowflake.
 
 ```bash
-clair compile [--env NAME] [--select PATTERN]... [--run-mode MODE] [--sample [--sample-rows N]]
+clair compile --env NAME [--select PATTERN]... [--run-mode MODE] [--sample [--sample-rows N]]
 ```
 
 ## Example
 
 ```bash
-# Compile the whole project
-clair compile
+# Compile the whole project with the dev routing
+clair compile --env dev
 
-# Compile and apply routing (requires --env)
+# Compile with the prod routing
 clair compile --env prod
 
 # Compile only the orders schema
-clair compile --select='refined.orders.*'
+clair compile --env dev --select='refined.orders.*'
 
 # Show the SQL of a sampled run
 clair compile --env dev --sample --sample-rows 100
@@ -28,7 +28,7 @@ Each plan shows the staged path: the build at the staging address, a comment tha
 
 1. Discovers all Trouves in the project
 2. Resolves import references and builds the DAG
-3. Replaces the f-string placeholders with real Snowflake names. It applies routing if you give `--env`.
+3. Replaces the f-string placeholders with real Snowflake names. It applies the routing entry of `--env`.
 4. Writes SQL files to `_clairtifacts/<run_id>/`
 
 ## Artifact layout
@@ -54,7 +54,7 @@ _clairtifacts/
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--env` | optional | Environment name. It selects the entry in `__routing__.py` that clair applies to the generated SQL. |
+| `--env` | required | The environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py`. `CLAIR_ENV` gives it when you omit the flag. |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Selects which SQL variant clair generates. |
 | `--sample` | off | Show the SQL of `clair run --sample`. Each Trouve that the run does not build reads its sample. A selected Trouve must write to an address that routing changed. See [Sampled Runs](../topics/sampling.md). |

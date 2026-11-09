@@ -233,13 +233,11 @@ class TestTheEnvironmentArgument:
         """A compile makes no connection, thus the name is enough."""
         assert clair.compile(project, env="prod").env_name == "prod"
 
-    def test_compile_without_an_environment_gives_dev(self, project: Path):
-        assert clair.compile(project).env_name == "dev"
-
-    def test_run_needs_the_environment(self, project: Path):
-        """A run connects to the warehouse, thus a name is not enough."""
+    @pytest.mark.parametrize("operation", [clair.compile, clair.validate, clair.run, clair.test])
+    def test_each_operation_needs_the_environment(self, project: Path, operation):
+        """No operation selects a default. An environment without a routing entry writes to production."""
         with pytest.raises(TypeError):
-            clair.run(project, adapter=RecordingAdapter())  # ty: ignore[missing-argument]
+            operation(project)
 
 
 class TestCatalog:

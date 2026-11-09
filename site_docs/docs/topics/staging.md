@@ -199,8 +199,8 @@ Snowflake cannot replace a standard table with an Iceberg table, or the reverse.
 `clair compile` writes the complete plan to `_clairtifacts/`: the clone, the build at the staging address, a comment that marks the test step, and the promotion.
 
 ```bash
-clair compile
-clair compile --run-mode incremental
+clair compile --env dev
+clair compile --env dev --run-mode incremental
 ```
 
 ## After a failure

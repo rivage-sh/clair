@@ -15,6 +15,7 @@ At this time the validator applies the Snowflake identifier rules.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -77,6 +78,20 @@ class TrouveAddress(BaseModel):
                 "underscores or dollar signs."
             )
         return value
+
+    @classmethod
+    def from_file_path(cls, file_path: Path) -> TrouveAddress:
+        """Make the logical address from the last three parts of a Trouve file path.
+
+        Example: ``.../database_name/schema_name/table_name.py`` gives
+        ``database_name.schema_name.table_name``. A directory above the database
+        directory takes no part in the address. Thus a project inside a larger
+        repository keeps the addresses that it declares.
+
+        Raises:
+            InvalidTrouveAddressError: If a part is not a valid identifier.
+        """
+        return cls.parse(".".join(file_path.with_suffix("").parts[-3:]))
 
     @classmethod
     def parse(cls, dotted_address: str) -> TrouveAddress:

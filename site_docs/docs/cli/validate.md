@@ -5,16 +5,15 @@ Apply the routing entries in `__routing__.py` to every Trouve in the project, an
 This command needs no Snowflake credentials, so CI runs it on every change.
 
 ```bash
-clair validate
+clair validate --env dev
 clair validate --env prod
-clair validate
 ```
 
 ## Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--env` | `CLAIR_ENV` or `dev` | The environment to route for. It matches an entry in `__routing__.py`. |
+| `--env` | required | The environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py`. `CLAIR_ENV` gives it when you omit the flag. |
 
 ## What it examines
 
@@ -68,20 +67,21 @@ because Snowflake owns the SQL syntax.
 
 `build_sql()` needs no connection, thus `clair validate` calls it on each SQL Trouve. It
 calls it for a full refresh, and for an incremental run if the `run_config` is
-`Incremental`. It calls it with a staging address and without one, because `clair run`
-stages a Trouve only when it runs the tests. Two faults are problems:
+`Incremental`. It calls it with the staging address as `target_address`, and with the
+physical address, because `clair run` stages a Trouve only when it runs the tests. Two
+faults are problems:
 
 - `build_sql()` raises. Example: `Incremental()` with no strategy on a `Table` that does
   not override `build_sql()`, or a bug in an override.
-- `build_sql()` gets a staging address, and no statement names it. The plan then writes to
-  the physical object before the tests run, and a test that fails comes too late.
+- `build_sql()` gets a target address, and no statement names it. A staged plan then writes
+  to the physical object before the tests run, and a test that fails comes too late.
 
 This is how a [`build_sql()` override](../guides/custom-build-sql.md) gets the same
 offline test as a built-in strategy.
 
 ```
   ✗ analytics.finance.revenue
-    The incremental plan, with staging: build_sql() got the staging address analytics.finance.revenue__clair_validate, and no statement names it. The plan then writes to the physical object before the tests run. Write to `staging_address or self.physical_address`.
+    The incremental plan, with staging: build_sql() got the target address analytics.finance.revenue__clair_validate, and no statement names it. The plan then writes to a different object, and a staged run writes to the physical object before the tests run. Write to `target_address`.
 ```
 
 ## Output

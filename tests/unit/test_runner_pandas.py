@@ -25,7 +25,7 @@ def _compile_pandas(trouve: PandasTable, physical_address: str) -> None:
     compile_trouve(
         trouve,
         physical_address,
-        inputs=[DataframeInput(address=str(upstream.physical_address)) for upstream in trouve.inputs],
+        inputs=[DataframeInput(address=str(upstream.require_compiled().physical_address)) for upstream in trouve.inputs],
     )
 
 
@@ -48,7 +48,7 @@ class TestRunPandasTableHappyPath:
         adapter = RecordingAdapter(dataframes={"db.schema.events": input_df})
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunSuccess)
@@ -74,7 +74,7 @@ class TestRunPandasTableHappyPath:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunSuccess)
@@ -94,7 +94,7 @@ class TestRunPandasTableHappyPath:
 
         adapter = RecordingAdapter(dataframes={"db.schema.events": input_df})
         _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert "events" in received_kwargs
@@ -116,7 +116,7 @@ class TestRunPandasTableAddress:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunSuccess)
@@ -143,7 +143,7 @@ class TestRunPandasTableTransformErrors:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunFailure)
@@ -164,7 +164,7 @@ class TestRunPandasTableTransformErrors:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunFailure)
@@ -185,7 +185,7 @@ class TestRunPandasTableTransformErrors:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunFailure)
@@ -207,7 +207,7 @@ class TestRunPandasTableFetchErrors:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunFailure)
@@ -231,7 +231,7 @@ class TestRunPandasTableWriteErrors:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunFailure)
@@ -252,7 +252,7 @@ class TestRunPandasTableWriteErrors:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunFailure)
@@ -275,7 +275,7 @@ class TestRunPandasTableResultFields:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunSuccess)
@@ -295,7 +295,7 @@ class TestRunPandasTableResultFields:
         )
 
         result = _run_dataframe_trouve(
-            trouve, adapter, addresses_of_text(str(trouve.physical_address)), RunMode.FULL_REFRESH
+            trouve, adapter, addresses_of_text(str(trouve.require_compiled().physical_address)), RunMode.FULL_REFRESH
         )
 
         assert isinstance(result, RunFailure)

@@ -27,7 +27,8 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 # typing.TypeVar takes a default from Python 3.13 only.
 from typing_extensions import TypeVar
 
-from clair.exceptions import CompileError
+from clair.core import project_imports
+from clair.exceptions import CompileError, TrouveFileNotFoundError, TrouveNotCompiledError
 from clair.trouves._refs import THIS_PLACEHOLDER, register
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column
@@ -248,17 +249,19 @@ class DataframeInput(BaseModel):
 
 
 class CompiledAttributes(BaseModel):
-    """The attributes that discovery sets after it loads a Trouve.
+    """The record of one discovery: what clair decided for this Trouve in one run.
 
-    These attributes exist only when ``TrouveAbc.is_compiled`` is True. A
-    ``Source`` holds these fields only. ``CompiledSql`` and
+    These attributes exist only when ``TrouveAbc.is_compiled`` is True. The
+    environment, the selection and the run mode of the run decide them, thus a
+    different run gives different values. What the file alone decides, such as
+    ``TrouveAbc.logical_address``, is an attribute of the Trouve itself.
+
+    A ``Source`` holds these fields only. ``CompiledSql`` and
     ``CompiledDataframe`` add the fields of one backend.
     """
 
-    # The address that clair writes to. Clair puts it in the SQL and the DDL.
+    # The address that the routing entry of this run gives. Clair writes here.
     physical_address: TrouveAddress
-    # The address that the file path gives. DAG edges and selectors use it.
-    logical_address: TrouveAddress
     file_path: Path
     module_name: str
     imports: list[str]
@@ -368,7 +371,7 @@ class TrouveAbc(SessionConfig, ABC, Generic[CompiledT_co]):
         {other_trouve}"``. The method adds the Trouve to the global refs
         registry. Then it gives a token, for example
         ``__CLAIR_TROUVE_140234567890__``. Discovery replaces the token with the
-        true physical_address.
+        address that the run reads. See ``recompile_for_selection``.
         """
         return register(self)
 
@@ -377,18 +380,38 @@ class TrouveAbc(SessionConfig, ABC, Generic[CompiledT_co]):
         """True if discovery processed this Trouve."""
         return self.compiled is not None
 
-    @property
-    def physical_address(self) -> TrouveAddress:
-        """The address of this Trouve in the warehouse: database.schema.table.
+    def require_compiled(self) -> CompiledT_co:
+        """Give the compiled attributes, the record of the run that loaded this Trouve.
 
-        This property raises a RuntimeError if you read it before discovery runs.
+        Raises:
+            TrouveNotCompiledError: If discovery did not load this Trouve.
         """
         if self.compiled is None:
-            raise RuntimeError(
-                "Trouve.physical_address is not set. "
-                "The discovery layer of clair did not load this Trouve."
+            raise TrouveNotCompiledError(type(self).__name__)
+        return self.compiled
+
+    @property
+    def logical_address(self) -> TrouveAddress:
+        """The address that the file path gives: database.schema.table.
+
+        The logical address is the production address. The file alone decides
+        it, thus it needs no environment, no routing entry and no run. A Trouve
+        that you import in a notebook has it too.
+
+        Raises:
+            TrouveFileNotFoundError: If no file defines this Trouve, or two
+                files do.
+        """
+        # Discovery recorded the file of each Trouve that it loaded, thus it
+        # needs no search of the module table.
+        if self.compiled is not None:
+            return TrouveAddress.from_file_path(self.compiled.file_path)
+        file_paths = project_imports.files_that_define(self)
+        if len(file_paths) != 1:
+            raise TrouveFileNotFoundError(
+                type(self).__name__, [str(file_path) for file_path in file_paths]
             )
-        return self.compiled.physical_address
+        return TrouveAddress.from_file_path(file_paths[0])
 
     def sample(self, sample_rows: int) -> str:
         """Give the subquery that a sampled run reads in place of this Trouve.
@@ -403,10 +426,6 @@ class TrouveAbc(SessionConfig, ABC, Generic[CompiledT_co]):
         if self.sample_sql is not None:
             return f"({self.sample_sql})"
         return f"(SELECT * FROM {THIS_PLACEHOLDER} LIMIT {sample_rows})"
-
-    def get_full_table_name(self) -> str:
-        """The physical address as a string. Use it in f-string SQL."""
-        return str(self.physical_address)
 
 
 class Source(TrouveAbc):
@@ -432,7 +451,7 @@ class SqlTrouve(TrouveAbc[CompiledSql], ABC):
     Attributes:
         sql: The SQL query. To point to a different Trouve, write
              ``f"SELECT * FROM {other_trouve}"``. Discovery replaces the
-             f-string placeholder with the true physical_address.
+             f-string placeholder with the address that the run reads.
     """
 
     sql: str = Field(exclude=True)
@@ -456,7 +475,7 @@ class SqlTrouve(TrouveAbc[CompiledSql], ABC):
         self,
         effective_mode: RunMode,
         run_id: str,
-        staging_address: TrouveAddress | None = None,
+        target_address: TrouveAddress,
         target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         """Make the SQL statements that materialize this Trouve.
@@ -464,9 +483,10 @@ class SqlTrouve(TrouveAbc[CompiledSql], ABC):
         Args:
             effective_mode: The final run mode. The caller selects it.
             run_id: The unique identifier of this clair run.
-            staging_address: The staging address, if the run has a staging step.
-                The statements write there, and not to the physical address. A
-                reference to an upstream Trouve keeps its physical address.
+            target_address: The address that the statements write to. The
+                runner gives the staging address of a run with a staging step,
+                and the physical address of a run without one. A reference to
+                an upstream Trouve keeps its own address.
             target_column_names: The columns of the table that an incremental
                 run writes to, in the order of the warehouse. The runner reads
                 them before it calls this method. It is None in a full refresh,
@@ -478,22 +498,23 @@ class SqlTrouve(TrouveAbc[CompiledSql], ABC):
         """
 
     def resolved_sql(self) -> str:
-        """Give the SQL with each reference resolved. It needs a compiled Trouve."""
-        if self.compiled is None:
-            raise RuntimeError("build_sql() needs a compiled Trouve")
-        return self.compiled.resolved_sql.strip()
+        """Give the SQL with each reference resolved.
+
+        Raises:
+            TrouveNotCompiledError: If discovery did not load this Trouve.
+        """
+        return self.require_compiled().resolved_sql.strip()
 
     def _full_refresh_plan(
         self,
         object_keyword: str,
-        staging_address: TrouveAddress | None,
+        target_address: TrouveAddress,
         create_parameters: str = "",
     ) -> BuildPlan:
         """Give the plan that makes the object again from the SQL."""
         resolved_sql = self.resolved_sql()
-        address = staging_address or self.physical_address
         return BuildPlan(statements=[
-            f"CREATE OR REPLACE {object_keyword} {address}{create_parameters} AS (\n{resolved_sql}\n)"
+            f"CREATE OR REPLACE {object_keyword} {target_address}{create_parameters} AS (\n{resolved_sql}\n)"
         ])
 
 
@@ -506,11 +527,11 @@ class View(SqlTrouve):
         self,
         effective_mode: RunMode,
         run_id: str,
-        staging_address: TrouveAddress | None = None,
+        target_address: TrouveAddress,
         target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         """Give CREATE OR REPLACE VIEW. A view has no incremental mode."""
-        return self._full_refresh_plan("VIEW", staging_address)
+        return self._full_refresh_plan("VIEW", target_address)
 
 
 class Table(SqlTrouve, TableOptions):
@@ -549,7 +570,7 @@ class Table(SqlTrouve, TableOptions):
         self,
         effective_mode: RunMode,
         run_id: str,
-        staging_address: TrouveAddress | None = None,
+        target_address: TrouveAddress,
         target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         """Make the SQL statements that materialize this Table.
@@ -557,23 +578,22 @@ class Table(SqlTrouve, TableOptions):
         See ``SqlTrouve.build_sql`` for the arguments.
 
         Raises:
-            RuntimeError: If clair did not compile the Trouve.
+            TrouveNotCompiledError: If discovery did not load this Trouve.
             CompileError: If an incremental run has no built-in strategy.
             ValueError: If the config asks for UPSERT but has no columns.
         """
         if effective_mode == RunMode.FULL_REFRESH:
             return self._full_refresh_plan(
-                self.table_keyword, staging_address, self.create_parameters
+                self.table_keyword, target_address, self.create_parameters
             )
 
         resolved_sql = self.resolved_sql()
-        address = str(staging_address or self.physical_address)
+        address = str(target_address)
 
         strategy = self.incremental_strategy()
         if strategy is None:
-            assert self.compiled is not None
             raise CompileError(
-                f"{self.compiled.logical_address} runs in the incremental mode, but its "
+                f"{self.logical_address} runs in the incremental mode, but its "
                 "run_config names no strategy. Give Incremental(strategy=...), or "
                 "override build_sql() to write the incremental SQL."
             )
@@ -712,7 +732,7 @@ class Table(SqlTrouve, TableOptions):
         Args:
             run_id: The unique identifier of this clair run.
         """
-        return f"{self.physical_address}{NEW_ROWS_SUFFIX}{run_id}"
+        return f"{self.require_compiled().physical_address}{NEW_ROWS_SUFFIX}{run_id}"
 
     def upsert_plan(self, run_id: str) -> UpsertPlan:
         """Give the decisions that the MERGE of an UPSERT run needs.

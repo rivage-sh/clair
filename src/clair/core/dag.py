@@ -21,7 +21,7 @@ class ClairDag(nx.DiGraph):
 
     def add_trouve(self, trouve: TrouveAbc) -> None:
         """Add a compiled Trouve as a node. The key of the node is its physical_address."""
-        self.add_node(str(trouve.physical_address), trouve=trouve)
+        self.add_node(str(trouve.require_compiled().physical_address), trouve=trouve)
 
     def add_dependency(self, dependency: str, dependent: str) -> None:
         """Add an edge from *dependency* to *dependent*.
@@ -104,17 +104,16 @@ def build_dag(trouves: Sequence[TrouveAbc]) -> ClairDag:
     # physical address as its key. Make a map, so that each edge is correct with
     # a routing policy active.
     logical_to_physical = {
-        str(t.compiled.logical_address): str(t.physical_address)
-        for t in trouves
-        if t.compiled
+        str(trouve.logical_address): str(trouve.require_compiled().physical_address)
+        for trouve in trouves
     }
 
     for trouve in trouves:
-        assert trouve.compiled is not None
-        for dependency in trouve.compiled.imports:
+        compiled = trouve.require_compiled()
+        for dependency in compiled.imports:
             physical_dependency = logical_to_physical.get(dependency, dependency)
             if physical_dependency in dag:
-                dag.add_dependency(physical_dependency, str(trouve.physical_address))
+                dag.add_dependency(physical_dependency, str(compiled.physical_address))
 
     dag.validate()
     return dag
@@ -136,12 +135,10 @@ def get_executable_nodes(dag: ClairDag) -> list[str]:
 def addresses_of(
     dag: ClairDag, physical_address: str, staging_address: TrouveAddress | None = None
 ) -> NodeAddresses:
-    """Give the addresses of the DAG node that *physical_address* keys.
-
-    The logical address is the physical address if the node holds no compiled
-    attributes.
-    """
+    """Give the addresses of the DAG node that *physical_address* keys."""
     trouve = dag.get_trouve(physical_address)
-    physical = TrouveAddress.parse(physical_address)
-    logical = physical if trouve.compiled is None else trouve.compiled.logical_address
-    return NodeAddresses(logical=logical, physical=physical, staging=staging_address)
+    return NodeAddresses(
+        logical=trouve.logical_address,
+        physical=TrouveAddress.parse(physical_address),
+        staging=staging_address,
+    )

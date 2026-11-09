@@ -8,7 +8,7 @@ finds `.git`:
 
 ```bash
 cd my_project/refined/orders
-clair run                       # clair finds my_project/
+clair run --env dev                       # clair finds my_project/
 ```
 
 The file is thus necessary, also when it holds no entry. An empty table gives

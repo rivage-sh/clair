@@ -30,7 +30,7 @@ def compiled_of(trouves: list[TrouveAbc], logical_address: str) -> CompiledAttri
     """Give the compiled attributes of one Trouve, by its logical address."""
     for trouve in trouves:
         assert trouve.compiled is not None
-        if str(trouve.compiled.logical_address) == logical_address:
+        if str(trouve.logical_address) == logical_address:
             return trouve.compiled
     raise AssertionError(f"the project holds no Trouve at {logical_address}")
 
@@ -355,14 +355,14 @@ class TestTheCommands:
 
 
 class TestThePythonApi:
-    """clair.validate(None) starts the root search from the working directory."""
+    """clair.validate(None, env="dev") starts the root search from the working directory."""
 
     def test_none_starts_the_root_search(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         write_flat_project(tmp_path)
         monkeypatch.chdir(tmp_path / "shop")
-        report = clair.validate()
+        report = clair.validate(env="dev")
         assert report.is_valid
 
 

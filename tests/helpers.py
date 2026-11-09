@@ -38,6 +38,7 @@ from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.seed_table import SeedTable
 from clair.trouves.trouve import (
+    BuildPlan,
     CompiledAttributes,
     CompiledDataframe,
     CompiledSql,
@@ -563,7 +564,6 @@ def compile_trouve(
     trouve_address = TrouveAddress.parse(address)
     shared_fields = {
         "physical_address": trouve_address,
-        "logical_address": trouve_address,
         "file_path": Path(f"/fake/{address.replace('.', '/')}.py"),
         "module_name": address,
         "imports": imports or [],
@@ -578,6 +578,21 @@ def compile_trouve(
     else:
         trouve.compiled = CompiledAttributes(**shared_fields)
     return trouve
+
+
+def unstaged_plan(
+    trouve: SqlTrouve,
+    effective_mode: RunMode,
+    run_id: str,
+    target_column_names: list[str] | None = None,
+) -> BuildPlan:
+    """Give the plan of a run without a staging step. The plan writes to the physical address."""
+    return trouve.build_sql(
+        effective_mode,
+        run_id,
+        target_address=trouve.require_compiled().physical_address,
+        target_column_names=target_column_names,
+    )
 
 
 def resolved_sql_of(trouve: TrouveAbc) -> str:

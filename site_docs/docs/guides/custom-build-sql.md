@@ -27,7 +27,7 @@ def build_sql(
     self,
     effective_mode: RunMode,
     run_id: str,
-    staging_address: TrouveAddress | None = None,
+    target_address: TrouveAddress,
     target_column_names: list[str] | None = None,
 ) -> BuildPlan: ...
 ```
@@ -36,7 +36,7 @@ def build_sql(
 |----------|---------|
 | `effective_mode` | `FULL_REFRESH` or `INCREMENTAL`. clair decides it: a VIEW, a first run, and a run without `--run-mode incremental` all give `FULL_REFRESH`. |
 | `run_id` | The identifier of this run. Put it in the name of each object that the plan makes for one run, thus two runs never share a name. |
-| `staging_address` | The address to write. When it is `None`, write to `self.physical_address`. Write `staging_address or self.physical_address`. |
+| `target_address` | The address to write. clair gives the staging address to a run with tests, and the physical address to a run without tests. Each statement that writes the object names this address. |
 | `target_column_names` | The columns of the target table, in the order of the warehouse. clair reads them before an incremental run. It is `None` in a full refresh and in `clair compile`. Give it to `self.insert_statement()`. |
 
 The method gives a `BuildPlan`:
@@ -51,8 +51,12 @@ does not exist. Write `DROP TABLE IF EXISTS`. A failed cleanup statement does no
 Trouve, because the data stays correct. clair writes `run.node.cleanup_failure` to the log.
 
 `build_sql()` takes no warehouse connection, and this is intentional. `clair compile`
-calls it with no connection, thus a pull request shows the complete plan. Read
-`self.compiled.resolved_sql` for the SQL of the Trouve, with each reference resolved.
+calls it with no connection, thus a pull request shows the complete plan.
+
+`self.require_compiled()` gives the record of the run: `resolved_sql` holds the SQL of the
+Trouve, with each reference resolved, and `physical_address` holds the address that the
+run promotes to. Name an object that the plan makes for one run after the physical
+address, as `window_rows` does below. The staging address already holds the run id.
 
 ## 1. Write the subclass
 
@@ -79,23 +83,22 @@ class ReplaceWindowTrouve(Table):
         self,
         effective_mode: RunMode,
         run_id: str,
-        staging_address: TrouveAddress | None = None,
+        target_address: TrouveAddress,
         target_column_names: list[str] | None = None,
     ) -> BuildPlan:
         if effective_mode == RunMode.FULL_REFRESH:
-            return super().build_sql(effective_mode, run_id, staging_address)
+            return super().build_sql(effective_mode, run_id, target_address)
 
-        assert self.compiled is not None
-        target = staging_address or self.physical_address
-        window_rows = f"{self.physical_address}__window_{run_id}"
+        compiled = self.require_compiled()
+        window_rows = f"{compiled.physical_address}__window_{run_id}"
         create_window_rows = (
-            f"CREATE OR REPLACE TABLE {window_rows} AS (\n{self.compiled.resolved_sql}\n)"
+            f"CREATE OR REPLACE TABLE {window_rows} AS (\n{compiled.resolved_sql}\n)"
         )
         delete_window = (
-            f"DELETE FROM {target}\n"
+            f"DELETE FROM {target_address}\n"
             f"WHERE {self.window_column} >= (SELECT MIN({self.window_column}) FROM {window_rows})"
         )
-        insert_window = self.insert_statement(str(target), window_rows, target_column_names)
+        insert_window = self.insert_statement(str(target_address), window_rows, target_column_names)
         return BuildPlan(
             statements=[create_window_rows, delete_window, insert_window],
             cleanup_statements=[f"DROP TABLE IF EXISTS {window_rows}"],
@@ -173,7 +176,7 @@ trouve = ReplaceWindowTrouve(
 ## 3. Read the plan
 
 ```bash
-clair compile --run-mode incremental --select example_3_database.derived.daily_revenue
+clair compile --env dev --run-mode incremental --select example_3_database.derived.daily_revenue
 ```
 
 The compiled file shows the clone, the three statements, the cleanup, the test step, and
@@ -182,9 +185,9 @@ the promotion, in the order that clair executes them.
 ## 4. Validate the override
 
 ```bash
-clair validate
+clair validate --env dev
 ```
 
-`clair validate` calls `build_sql()` for each run mode, with a staging address and without
-one, and needs no connection. It reports an override that raises, and an override that
-ignores `staging_address`. See [`clair validate`](../cli/validate.md#a-build-plan-that-clair-cannot-make).
+`clair validate` calls `build_sql()` for each run mode, with the staging address and with
+the physical address, and needs no connection. It reports an override that raises, and an
+override that ignores `target_address`. See [`clair validate`](../cli/validate.md#a-build-plan-that-clair-cannot-make).

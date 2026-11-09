@@ -23,7 +23,7 @@ from clair.trouves.trouve import (
     TrouveAbc,
     TrouveType,
 )
-from tests.helpers import compile_trouve
+from tests.helpers import compile_trouve, unstaged_plan
 
 RUN_ID = "0195aabbccddeeff0011223344556677"
 
@@ -124,7 +124,7 @@ class TestPromoteStatements:
 class TestBuildSqlStagingAddress:
     def test_full_refresh_writes_into_override(self):
         trouve = _compile(Table(sql="SELECT 1 AS id"), "db.s.orders")
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID, staging_address=_address("db.s.staging")).all_statements
+        statements = trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID, target_address=_address("db.s.staging")).all_statements
         assert "CREATE OR REPLACE TABLE db.s.staging" in statements[0]
         assert "db.s.orders" not in statements[0]
 
@@ -136,7 +136,7 @@ class TestBuildSqlStagingAddress:
             ),
             "db.s.orders",
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, staging_address=_address("db.s.staging")).all_statements
+        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, target_address=_address("db.s.staging")).all_statements
         assert statements[0].startswith("INSERT INTO db.s.staging")
 
     def test_upsert_merges_into_override_without_stacking_staging_suffixes(self):
@@ -153,17 +153,11 @@ class TestBuildSqlStagingAddress:
             ),
             "db.s.orders",
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, staging_address=_address("db.s.candidate")).all_statements
+        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, target_address=_address("db.s.candidate")).all_statements
         assert "MERGE INTO db.s.candidate" in statements[1]
         # The merge source table derives from the real name, not the override,
         # so the two suffixes never stack.
         assert f"db.s.orders__clair_new_rows_{RUN_ID}" in statements[0]
-
-    def test_omitting_the_address_writes_to_the_physical_address(self):
-        trouve = _compile(Table(sql="SELECT 1 AS id"), "db.s.orders")
-        assert trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID) == trouve.build_sql(
-            RunMode.FULL_REFRESH, RUN_ID, staging_address=None
-        )
 
 
 class TestStagingIsAlwaysOn:
@@ -218,4 +212,4 @@ class TestStagingCompilePlan:
             trouve, RunMode.FULL_REFRESH, RUN_ID, use_staging=False
         )
         assert "of a type other than TABLE, clair stops here" in statements[0]
-        assert statements[1:] == trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID).all_statements
+        assert statements[1:] == unstaged_plan(trouve, RunMode.FULL_REFRESH, RUN_ID).all_statements

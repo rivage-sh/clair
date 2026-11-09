@@ -773,7 +773,7 @@ def _run_node(
     plan = trouve.build_sql(
         effective_mode,
         run_id,
-        staging_address=staging_address,
+        target_address=addresses.target,
         target_column_names=incremental_columns.target_column_names if incremental_columns else None,
     )
 

@@ -22,6 +22,7 @@ from tests.helpers import (
     executed_sql,
     run_one_trouve,
     snowflake_adapter_that_answers,
+    unstaged_plan,
 )
 
 STRATEGIES = [
@@ -50,9 +51,7 @@ def insert_of(statements: list[str]) -> str:
 class TestThePlan:
     @pytest.mark.parametrize("strategy", STRATEGIES)
     def test_the_insert_names_the_columns_of_the_target_in_their_order(self, strategy):
-        plan = incremental_table(strategy).build_sql(
-            RunMode.INCREMENTAL, run_id="abc", target_column_names=["LABEL", "ID"]
-        )
+        plan = unstaged_plan(incremental_table(strategy), RunMode.INCREMENTAL, "abc", target_column_names=["LABEL", "ID"])
         insert = insert_of(plan.statements)
         assert 'analytics.revenue.orders ("LABEL", "ID")\nSELECT "LABEL", "ID" FROM' in insert
 
@@ -60,18 +59,18 @@ class TestThePlan:
     def test_compile_names_the_declared_columns(self, strategy):
         """clair compile has no connection, thus the declared columns are the best answer."""
         declared = [Column(name="id", type=ColumnType.NUMBER), Column(name="label", type=ColumnType.STRING)]
-        plan = incremental_table(strategy, declared).build_sql(RunMode.INCREMENTAL, run_id="abc")
+        plan = unstaged_plan(incremental_table(strategy, declared), RunMode.INCREMENTAL, "abc")
         assert "analytics.revenue.orders (id, label)\nSELECT id, label FROM" in insert_of(plan.statements)
 
     @pytest.mark.parametrize("strategy", STRATEGIES)
     def test_compile_with_no_declared_column_says_that_the_run_names_them(self, strategy):
-        plan = incremental_table(strategy).build_sql(RunMode.INCREMENTAL, run_id="abc")
+        plan = unstaged_plan(incremental_table(strategy), RunMode.INCREMENTAL, "abc")
         assert insert_of(plan.statements).endswith("-- clair run names each column of the target table")
 
     def test_the_insert_writes_to_the_staging_address(self):
         staging_address = TrouveAddress.parse("analytics.revenue.orders__clair_stg")
         plan = incremental_table(Append()).build_sql(
-            RunMode.INCREMENTAL, run_id="abc", staging_address=staging_address, target_column_names=["ID"]
+            RunMode.INCREMENTAL, run_id="abc", target_address=staging_address, target_column_names=["ID"]
         )
         assert insert_of(plan.statements).startswith(f'INSERT INTO {staging_address} ("ID")')
 

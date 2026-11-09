@@ -3,7 +3,7 @@
 Run Trouves against Snowflake in dependency order, then run the data quality tests.
 
 ```bash
-clair run [--env NAME] [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample [--sample-rows N]] [--threads N]
+clair run --env NAME [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample [--sample-rows N]] [--threads N]
 ```
 
 ## Example
@@ -93,7 +93,7 @@ that can fail on a sample when the complete data obeys it: `TestRowCount` and
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
+| `--env` | required | The environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py`. `CLAIR_ENV` gives it when you omit the flag. |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides the `run_config` of each Trouve. |
 | `--no-test` | `false` | Skip the data quality tests |

@@ -41,7 +41,7 @@ def write_project(project_root: Path, marker: str) -> Path:
 def sql_of(trouves, logical_address: str) -> str:
     for trouve in trouves:
         assert trouve.compiled is not None
-        if str(trouve.compiled.logical_address) == logical_address:
+        if str(trouve.logical_address) == logical_address:
             return trouve.compiled.resolved_sql
     raise AssertionError(f"the project holds no Trouve at {logical_address}")
 

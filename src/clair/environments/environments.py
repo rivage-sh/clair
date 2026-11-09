@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -153,36 +152,28 @@ class Environment(_SettingsModel):
     threads: int = Field(default=DEFAULT_THREADS, ge=1)
 
 
-def resolve_env_name(env_name: str | None = None) -> str:
-    """Give the environment name: the argument, then CLAIR_ENV, then "dev"."""
-    return env_name or os.environ.get("CLAIR_ENV") or "dev"
-
-
 def load_environment(
-    env_name: str | None = None,
+    env_name: str,
     environments_path: Path | None = None,
-) -> tuple[str, Environment]:
+) -> Environment:
     """Load one environment from environments.yml.
 
-    The function looks for the environment name in this order:
-    1. The env_name argument
-    2. The CLAIR_ENV environment variable
-    3. The name "dev"
+    The caller always names the environment. clair selects no default, because
+    an environment without a routing entry writes to the production addresses.
 
     Args:
-        env_name: The environment name that you select.
+        env_name: The environment name, a top-level key of environments.yml.
         environments_path: The path to environments.yml. The default path is
             ~/.clair/environments.yml.
 
     Returns:
-        A tuple of (resolved_env_name, Environment).
+        The Environment of *env_name*.
 
     Raises:
         EnvironmentsFileNotFoundError: If environments.yml does not exist.
         EnvironmentNotFoundError: If environments.yml has no such environment.
         InvalidEnvironmentError: If the environment block holds an unknown key.
     """
-    resolved_name = resolve_env_name(env_name)
     path = environments_path or DEFAULT_ENVIRONMENTS_PATH
 
     if not path.exists():
@@ -194,16 +185,16 @@ def load_environment(
     if not isinstance(raw, dict):
         raise EnvironmentsFileNotFoundError(str(path))
 
-    if resolved_name not in raw:
-        raise EnvironmentNotFoundError(resolved_name, [str(k) for k in raw])
+    if env_name not in raw:
+        raise EnvironmentNotFoundError(env_name, [str(k) for k in raw])
 
-    env_data: dict[str, Any] = raw[resolved_name]
+    env_data: dict[str, Any] = raw[env_name]
 
     try:
-        return resolved_name, Environment(name=resolved_name, **env_data)
+        return Environment(name=env_name, **env_data)
     except ValidationError as exc:
         # An unknown key is almost always a typo, or a routing block that the user
         # did not move to __routing__.py. Both send writes to the wrong target.
         raise InvalidEnvironmentError(
-            resolved_name, str(path), _first_error_message(exc)
+            env_name, str(path), _first_error_message(exc)
         ) from exc

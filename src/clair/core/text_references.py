@@ -115,7 +115,7 @@ def find_text_references(trouves: Sequence[TrouveAbc]) -> list[TextReference]:
     # Snowflake reads an unquoted name without case sensitivity. Thus the key is
     # the upper case name, and the value keeps the form that the project uses.
     logical_addresses = {
-        str(trouve.compiled.logical_address).upper(): str(trouve.compiled.logical_address)
+        str(trouve.logical_address).upper(): str(trouve.logical_address)
         for trouve in trouves
         if trouve.compiled
     }
@@ -124,7 +124,7 @@ def find_text_references(trouves: Sequence[TrouveAbc]) -> list[TextReference]:
     for trouve in trouves:
         if not trouve.compiled:
             continue
-        own_address = str(trouve.compiled.logical_address)
+        own_address = str(trouve.logical_address)
 
         sources: list[tuple[TextReferenceLocation, str]] = []
         if isinstance(trouve, SqlTrouve):

@@ -81,13 +81,14 @@ Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any class.
 | Property | Type | Description |
 |----------|------|-------------|
 | `type` | `TrouveType` | SOURCE, TABLE, or VIEW. The class gives it. |
+| `logical_address` | `TrouveAddress` | The address that the file path gives, and the production address. The file alone decides it, thus a Trouve that you import outside discovery has it too. Raises `TrouveFileNotFoundError` if no file, or two files, define the Trouve. |
 | `is_compiled` | `bool` | `True` after clair discovers the project |
-| `physical_address` | `TrouveAddress` | The address that clair writes to. `str()` gives `database.schema.table`. Raises `RuntimeError` if not compiled. |
 
 ### Methods
 
 | Method | Returns | Description |
 |--------|---------|-------------|
+| `require_compiled()` | `CompiledAttributes` | The record of the run that loaded this Trouve: `trouve.compiled`. Raises `TrouveNotCompiledError` if discovery did not load it. |
 | `sample(sample_rows)` | `str` | The subquery that `--sample` reads in place of this Trouve: `({sample_sql})`, or `(SELECT * FROM {THIS} LIMIT <sample_rows>)`. clair replaces `{THIS}` with the address that the reader reads. Override it in a subclass to change the sample of many Trouves. |
 
 ## `Source`
@@ -109,7 +110,7 @@ The abstract base of `Table` and `View`. Snowflake materializes each one from SQ
 class SqlTrouve(TrouveAbc, ABC):
     sql: str
 
-    def build_sql(self, effective_mode, run_id, staging_address=None, target_column_names=None) -> BuildPlan: ...
+    def build_sql(self, effective_mode, run_id, target_address, target_column_names=None) -> BuildPlan: ...
 ```
 
 | Field | Type | Default | Description |
@@ -118,7 +119,7 @@ class SqlTrouve(TrouveAbc, ABC):
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `build_sql(effective_mode, run_id, staging_address=None, target_column_names=None)` | `BuildPlan` | The statements that write the object. Raises `RuntimeError` if not compiled. A subclass can override it. See [Write your own build](../guides/custom-build-sql.md). |
+| `build_sql(effective_mode, run_id, target_address, target_column_names=None)` | `BuildPlan` | The statements that write the object to `target_address`. Raises `TrouveNotCompiledError` if not compiled. A subclass can override it. See [Write your own build](../guides/custom-build-sql.md). |
 
 Write `isinstance(obj, SqlTrouve)` to accept a `Table` or a `View`.
 
@@ -189,12 +190,15 @@ UPSERT puts the drop of its merge source in `cleanup_statements`.
 ## `CompiledAttributes`
 
 Discovery sets these attributes on `trouve.compiled`. They are available after `clair compile` or `clair run`.
+They are the record of one run: the environment, the selection and the run mode decide
+them, thus a different run gives different values. What the file alone decides, such as
+`trouve.logical_address`, is an attribute of the Trouve itself.
+
 Each Trouve holds these attributes. A `Source` holds these only.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `physical_address` | `TrouveAddress` | The address that routing gives. clair uses it in the SQL and the DDL. |
-| `logical_address` | `TrouveAddress` | The address that the file system gives. clair uses it for the DAG edges and the selectors. |
+| `physical_address` | `TrouveAddress` | The address that the routing entry of the run gives. clair writes there. |
 | `file_path` | `Path` | The path of the Trouve file, relative to the project root |
 | `module_name` | `str` | The module name of the Trouve file |
 | `imports` | `list[str]` | The logical addresses of the upstream Trouves |

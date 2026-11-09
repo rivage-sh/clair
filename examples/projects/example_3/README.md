@@ -75,7 +75,7 @@ rule that gives an invalid name, and two Trouves that go to one target:
 ```bash
 cd examples/projects/example_3
 
-clair validate
+clair validate --env dev
 clair validate --env prod
 ```
 
@@ -94,10 +94,10 @@ All commands run from the repo root (`clair/`).
 cd examples/projects/example_3
 
 # Preview full-refresh SQL (default)
-clair compile
+clair compile --env dev
 
 # Preview incremental SQL — shows INSERT INTO and MERGE statements with <run_id> placeholder
-clair compile --run-mode incremental
+clair compile --env dev --run-mode incremental
 ```
 
 ### 2. Full refresh run (first run)

@@ -87,33 +87,31 @@ class BuildPlanProblem(BaseModel):
 def collect_build_plan_problems(trouves: list[TrouveAbc]) -> list[BuildPlanProblem]:
     """Make the plan of each SQL Trouve for each run that it can get, and report each fault.
 
-    A run gets a staging address when it runs the tests, thus clair makes each
-    plan with a staging address and without one. A staged plan must name the
-    staging address. A plan that does not writes to the physical object, before
-    the tests and without the promotion.
+    A run with tests writes to the staging address, and a run without tests
+    writes to the physical address. Thus clair makes each plan with each target
+    address, and the plan must name the address that it got. A staged plan that
+    does not writes to the physical object, before the tests and without the
+    promotion.
     """
     problems: list[BuildPlanProblem] = []
     for trouve in trouves:
         if not isinstance(trouve, SqlTrouve) or trouve.compiled is None:
             continue
-        logical_address = str(trouve.compiled.logical_address)
+        logical_address = str(trouve.logical_address)
         effective_modes = sorted(
             {resolve_effective_mode(trouve, run_mode) for run_mode in RunMode}
         )
+        physical_address = trouve.compiled.physical_address
+        staging_address = make_staging_address(physical_address, VALIDATION_RUN_ID)
         for effective_mode in effective_modes:
-            staging_address = make_staging_address(
-                trouve.compiled.physical_address, VALIDATION_RUN_ID
-            )
-            for candidate_staging_address in (staging_address, None):
-                detail = _build_plan_fault(
-                    trouve, effective_mode, candidate_staging_address
-                )
+            for target_address in (staging_address, physical_address):
+                detail = _build_plan_fault(trouve, effective_mode, target_address)
                 if detail is not None:
                     problems.append(
                         BuildPlanProblem(
                             logical_address=logical_address,
                             run_mode=effective_mode,
-                            staged=candidate_staging_address is not None,
+                            staged=target_address == staging_address,
                             detail=detail,
                         )
                     )
@@ -121,22 +119,22 @@ def collect_build_plan_problems(trouves: list[TrouveAbc]) -> list[BuildPlanProbl
 
 
 def _build_plan_fault(
-    trouve: SqlTrouve, effective_mode: RunMode, staging_address: TrouveAddress | None
+    trouve: SqlTrouve, effective_mode: RunMode, target_address: TrouveAddress
 ) -> str | None:
     """Give the fault of one plan, or None if the plan is correct."""
     try:
         plan = trouve.build_sql(
-            effective_mode, run_id=VALIDATION_RUN_ID, staging_address=staging_address
+            effective_mode, run_id=VALIDATION_RUN_ID, target_address=target_address
         )
     except Exception as error:  # noqa: BLE001 — an override is user code, and it can raise anything
         return f"build_sql() raised {type(error).__name__}: {error}"
-    if staging_address is None or not plan.statements:
+    if not plan.statements:
         return None
-    if not any(str(staging_address) in statement for statement in plan.statements):
+    if not any(str(target_address) in statement for statement in plan.statements):
         return (
-            f"build_sql() got the staging address {staging_address}, and no statement "
-            "names it. The plan then writes to the physical object before the tests run. "
-            "Write to `staging_address or self.physical_address`."
+            f"build_sql() got the target address {target_address}, and no statement "
+            "names it. The plan then writes to a different object, and a staged run "
+            "writes to the physical object before the tests run. Write to `target_address`."
         )
     return None
 
@@ -214,7 +212,7 @@ def validate_project(project_root: Path, env_name: str) -> ValidationReport:
     # Keep the (logical address, type) pair, and not the Trouve. The address is
     # the only part that the collision report needs, and here it is never None.
     routable = [
-        (trouve.compiled.logical_address, trouve.type)
+        (trouve.logical_address, trouve.type)
         for trouve in discovered
         if trouve.compiled is not None
     ]

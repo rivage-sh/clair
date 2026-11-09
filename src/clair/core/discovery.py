@@ -92,21 +92,6 @@ def find_project_root(start_directory: Path) -> Path:
     raise ProjectRootNotFoundError(str(start_directory), ROUTING_FILE_NAME)
 
 
-def compute_logical_address(file_path: Path) -> TrouveAddress:
-    """Make the logical address from the last three parts of the path.
-
-    Example: .../database_name/schema_name/table_name.py becomes
-    database_name.schema_name.table_name
-
-    A directory above the database directory takes no part in the address. Thus
-    a project inside a larger repository keeps the addresses that it declares.
-    Call ``describe_shallow_trouve`` first: this function reads the parts of the
-    path, and a file too near the root would take a part from outside the
-    project.
-    """
-    return TrouveAddress.parse(".".join(file_path.with_suffix("").parts[-3:]))
-
-
 def describe_shallow_trouve(file_path: Path, project_root: Path) -> str | None:
     """Tell you why a file is too near the project root, or give None.
 
@@ -171,7 +156,7 @@ def _resolve_config(
     The Trouve is the last level. ``_compile_trouve`` applies it.
 
     The function starts at the file and moves up, in the same direction as
-    ``compute_logical_address``. The schema directory is the parent of the file,
+    ``TrouveAddress.from_file_path``. The schema directory is the parent of the file,
     and the database directory is the parent of the schema directory. Thus a
     project below other directories keeps its config, and the config directory
     is always the directory that the address names.
@@ -271,7 +256,6 @@ def _compile_trouve(
         ]
         trouve_obj.compiled = CompiledDataframe(
             physical_address=physical,
-            logical_address=logical,
             resolved_transform=trouve_obj.source_text(),
             file_path=relative_file_path,
             module_name=module_name,
@@ -282,7 +266,6 @@ def _compile_trouve(
     elif isinstance(trouve_obj, SqlTrouve):
         trouve_obj.compiled = CompiledSql(
             physical_address=physical,
-            logical_address=logical,
             resolved_sql=resolve_sql(trouve_obj.sql, logical_addresses, this_address=logical),
             file_path=relative_file_path,
             module_name=module_name,
@@ -295,7 +278,6 @@ def _compile_trouve(
         # A Source holds no SQL, thus only its sample can read another Trouve.
         trouve_obj.compiled = CompiledAttributes(
             physical_address=physical,
-            logical_address=logical,
             file_path=relative_file_path,
             module_name=module_name,
             imports=sample_imports,
@@ -418,7 +400,7 @@ def discover_project(
             continue
 
         collected.append(
-            (trouve_obj, compute_logical_address(file_path), file_path, module_name)
+            (trouve_obj, TrouveAddress.from_file_path(file_path), file_path, module_name)
         )
 
     # Phase A: make the logical address and the physical address of each Trouve.

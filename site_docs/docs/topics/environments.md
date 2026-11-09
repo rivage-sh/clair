@@ -134,16 +134,21 @@ each thread.
 
 ## Select an environment
 
-clair resolves the environment name in this order:
-
-1. `--env` CLI flag
-2. `CLAIR_ENV` environment variable
-3. `"dev"` (default)
+You always name the environment. Give `--env`, or set `CLAIR_ENV`. `--env` wins if you set
+both, and a command with neither stops before it reads the project.
 
 ```bash
 clair run --env prod
 CLAIR_ENV=prod clair run
 ```
+
+clair selects no default environment. An environment without a routing entry writes to the
+logical addresses, and those are the production addresses. A default name would therefore
+let a command that you forgot to configure write to production. See
+[Routing](routing.md).
+
+The Python API takes the environment as an argument, and it does not read `CLAIR_ENV`.
+The CLI reads the variable, in the same way that it reads `~/.clair/environments.yml`.
 
 ## CI usage
 

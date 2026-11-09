@@ -331,6 +331,38 @@ def module_for_file(file_path: Path) -> ModuleType | None:
     return module
 
 
+def files_that_define(trouve_object: object) -> list[Path]:
+    """Give the file of each module that holds *trouve_object* as its ``trouve``.
+
+    A Trouve file declares its Trouve as the module attribute ``trouve``, and
+    the file path gives the logical address. An import outside discovery, for
+    example in a notebook, does not tell clair the file. The module that holds
+    the object tells it. ``__main__`` is never a Trouve file: a script or a
+    notebook that runs ``from mydb.refined.orders import trouve`` holds the
+    object under the same name.
+
+    One file that runs under two names gives one path. The caller decides what
+    an empty list, or two paths, means.
+    """
+    # multiprocessing gives the main module a second name, __mp_main__, thus
+    # the loop compares the object and not the name.
+    main_module = sys.modules.get("__main__")
+    file_paths: set[Path] = set()
+    for module in list(sys.modules.values()):
+        if module is main_module:
+            continue
+        # A module can give each attribute from a __getattr__ of its own, and
+        # that function can raise any type.
+        try:
+            holds_the_object = getattr(module, "trouve", None) is trouve_object
+        except Exception:  # noqa: BLE001 -- the code of a third-party module is unknown
+            holds_the_object = False
+        module_file = getattr(module, "__file__", None)
+        if holds_the_object and module_file:
+            file_paths.add(_resolve(module_file))
+    return sorted(file_paths)
+
+
 def _is_below_a_watched_root(file_path: Path) -> bool:
     for project_root in _watched_project_roots:
         if file_path.is_relative_to(project_root):
