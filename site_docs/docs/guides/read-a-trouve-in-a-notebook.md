@@ -12,15 +12,25 @@ tests, and promotes the object after they pass. See [Staging](../topics/staging.
 
 ## 1. Make the project importable
 
-A Trouve file imports the Trouves upstream of it by their path below the project root, for
-example `from example_4_database.refined.events import trouve`. Thus the project root must
-be on `sys.path`. Start Jupyter in the project root, or add the root:
+The notebook imports a Trouve file with the name that the project gives it. The Trouve
+files of your project import each other in one of two ways, and that way tells you where
+to start Jupyter.
+
+| The Trouve files import each other | Example | Start Jupyter |
+|---|---|---|
+| Through a Python package. The project root holds `__init__.py`. | `from clair_projects.analytics.source.orders.raw import trouve` | At any directory from which Python imports the package, for example the root of the repository. You change no `sys.path`. |
+| From the project root | `from example_4_database.refined.events import trouve` | In the project root, or add the project root to `sys.path` |
+
+`example_4` uses the second way, thus a notebook outside its root adds the root:
 
 ```python
 import sys
 
 sys.path.insert(0, "/path/to/examples/projects/example_4")
 ```
+
+See [Two names for one file](../topics/project-layout.md#two-names-for-one-file) for a
+project inside a package.
 
 ## 2. Import the Trouve, and read its address
 

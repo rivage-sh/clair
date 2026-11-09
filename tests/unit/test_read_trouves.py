@@ -148,6 +148,33 @@ class TestTheAddressOfAnImportedTrouve:
         with pytest.raises(ProjectRootNotFoundError):
             events.get_physical_address("dev")
 
+    def test_a_project_inside_a_package_imports_from_the_repository_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A kernel at the repository root needs no sys.path entry for the project root."""
+        repository_root = tmp_path / "repository"
+        for relative_path, text in [
+            ("clair_projects/__init__.py", ""),
+            ("clair_projects/analytics/__init__.py", ""),
+            ("clair_projects/analytics/__routing__.py", ROUTING_FILE),
+            ("clair_projects/analytics/analytics/source/events.py", SOURCE_FILE),
+            (
+                "clair_projects/analytics/analytics/derived/orders.py",
+                TABLE_FILE.replace(
+                    "from analytics.source.events", "from clair_projects.analytics.analytics.source.events"
+                ),
+            ),
+        ]:
+            file_path = repository_root / relative_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(text)
+        monkeypatch.syspath_prepend(str(repository_root))
+
+        orders = import_trouve("clair_projects.analytics.analytics.derived.orders")
+
+        assert str(orders.logical_address) == "analytics.derived.orders"
+        assert str(orders.get_physical_address("dev")) == "analytics_dev.derived.orders"
+
     def test_a_trouve_without_a_file_has_no_physical_address(self):
         with pytest.raises(TrouveFileNotFoundError):
             Table(sql="select 1 as n").get_physical_address("dev")
