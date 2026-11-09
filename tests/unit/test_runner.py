@@ -118,7 +118,7 @@ class TestRunner:
 class TestRunnerFailureHandling:
     def test_downstream_skipped_on_failure(self):
         """When a Trouve fails, clair skips each Trouve downstream of it."""
-        from clair.trouves.trouve import TrouveType
+        from clair.trouves.trouve_type import TrouveType
 
         trouves = []
         for name, ttype, imports, sql in [

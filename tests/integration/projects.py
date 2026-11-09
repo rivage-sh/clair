@@ -12,7 +12,8 @@ from pathlib import Path
 
 from clair import TrouveAddress
 from clair.core.discovery import discover_project
-from clair.trouves.trouve import TrouveAbc, TrouveType
+from clair.trouves.trouve import TrouveAbc
+from clair.trouves.trouve_type import TrouveType
 from tests.integration.config import DATABASE_NAME
 from tests.integration.routing_rule import make_table_name
 

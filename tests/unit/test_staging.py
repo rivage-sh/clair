@@ -17,12 +17,8 @@ from clair.core.staging import (
 )
 from clair.environments.routing import TrouveAddress
 from clair.trouves.run_config import Append, Incremental, RunMode, Upsert
-from clair.trouves.trouve import (
-    Table,
-    TableOptions,
-    TrouveAbc,
-    TrouveType,
-)
+from clair.trouves.trouve import Table, TableOptions, TrouveAbc
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import compile_trouve, unstaged_plan
 
 RUN_ID = "0195aabbccddeeff0011223344556677"

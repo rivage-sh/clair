@@ -17,12 +17,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
+import structlog
+
 from clair.core.project_imports import load_support_file
 from clair.environments.routing import RoutingEntry, RoutingTable
-from clair.exceptions import InvalidRoutingFileError
+from clair.exceptions import InvalidRoutingFileError, ProjectRootNotFoundError
 
 ROUTING_FILE_NAME = "__routing__.py"
 ROUTING_TABLE_ATTRIBUTE = "routing"
+
+logger = structlog.get_logger()
 
 # Cache key is (resolved path, modification time), so an edit reloads the file
 # but repeated loads in one process do not run the file again. An entry that
@@ -129,6 +133,41 @@ def load_project_routing(project_root: Path, env_name: str) -> ProjectRouting:
         environment_names=table.environment_names,
         has_entry=entry is not None,
     )
+
+
+def find_project_root(start_directory: Path) -> Path:
+    """Give the first directory at or above *start_directory* with ``__routing__.py``.
+
+    That file sits at the root of every clair project, thus it marks the root,
+    in the same way that ``.git`` marks a git repository. A user therefore runs
+    a clair command from any directory of the project.
+
+    Raises:
+        ProjectRootNotFoundError: No directory at or above *start_directory*
+            holds the marker file.
+    """
+    start_directory = start_directory.resolve()
+    for directory in [start_directory, *start_directory.parents]:
+        if (directory / ROUTING_FILE_NAME).is_file():
+            return directory
+    raise ProjectRootNotFoundError(str(start_directory), ROUTING_FILE_NAME)
+
+
+def routing_entry_of(project_root: Path, env_name: str) -> RoutingEntry | None:
+    """Give the routing entry of *env_name*, and warn about an absent entry.
+
+    Each caller that routes an address calls this function: a run, a compile,
+    and ``Trouve.get_physical_address()``. Thus each one gives the same address.
+
+    A routing file that does not name the environment is almost always a typo.
+    Passthrough routing then gives the production names, so clair tells the
+    user.
+    """
+    project_routing = load_project_routing(project_root, env_name)
+    warning = describe_unnamed_environment(project_routing, env_name)
+    if warning:
+        logger.warning("routing.unnamed_environment", env=env_name, detail=warning)
+    return project_routing.entry
 
 
 def describe_unnamed_environment(

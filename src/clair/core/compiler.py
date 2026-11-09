@@ -24,7 +24,8 @@ from clair.exceptions import CompileError
 from clair.trouves.address import NodeAddresses
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, SqlTrouve, TrouveType, table_options_of
+from clair.trouves.trouve import ExecutionType, SqlTrouve, table_options_of
+from clair.trouves.trouve_type import TrouveType
 
 
 class CompiledNodeInfo(BaseModel):

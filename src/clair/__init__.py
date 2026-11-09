@@ -68,6 +68,8 @@ the project.
 from __future__ import annotations
 
 from clair._version import __version__
+from clair.adapters.base import WarehouseAdapter
+from clair.adapters.snowflake import SnowflakeAdapter
 from clair.api import catalog, clean, compile, docs, run, test, validate
 from clair.environments.environments import (
     Authenticator,
@@ -75,6 +77,7 @@ from clair.environments.environments import (
     Environment,
     Password,
     PrivateKey,
+    load_environment,
 )
 from clair.environments.routing import RoutingEntry, RoutingTable
 from clair.trouves.address import NodeAddresses, TrouveAddress
@@ -105,16 +108,8 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import (
-    BuildPlan,
-    Iceberg,
-    Source,
-    SqlTrouve,
-    Table,
-    TrouveAbc,
-    TrouveType,
-    View,
-)
+from clair.trouves.trouve import BuildPlan, Iceberg, Source, SqlTrouve, Table, TrouveAbc, View
+from clair.trouves.trouve_type import TrouveType
 
 # discover_project() sets this before it loads the Trouve modules.
 # It stays None outside of a clair discovery run.
@@ -153,6 +148,7 @@ __all__ = [
     "RunMode",
     "SchemaDefaults",
     "SeedTable",
+    "SnowflakeAdapter",
     "Source",
     "SqlTrouve",
     "Table",
@@ -167,11 +163,13 @@ __all__ = [
     "TrouveType",
     "Upsert",
     "View",
+    "WarehouseAdapter",
     "__version__",
     "catalog",
     "clean",
     "compile",
     "docs",
+    "load_environment",
     "run",
     "test",
     "validate",

@@ -27,7 +27,7 @@ import pytest
 from clair.core.dag import ClairDag
 from clair.exceptions import ProjectDiscoveryError
 from clair.lineage import get_dag
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import resolved_sql_of
 
 SOURCE_ADDRESS = "source.raw.orders"

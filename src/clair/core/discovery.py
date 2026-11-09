@@ -42,7 +42,6 @@ from clair.exceptions import (
     DiscoveryError,
     NotAProjectRootError,
     ProjectDiscoveryError,
-    ProjectRootNotFoundError,
 )
 from clair.trouves._refs import clear as clear_refs
 from clair.trouves.config import DatabaseDefaults, ResolvedConfig, SchemaDefaults
@@ -72,24 +71,6 @@ TROUVE_DEPTH = 3
 The parts are database_name/schema_name/table_name.py. A file above that depth
 holds no schema name and no database name, thus clair cannot make its address.
 """
-
-
-def find_project_root(start_directory: Path) -> Path:
-    """Give the first directory at or above *start_directory* with ``__routing__.py``.
-
-    That file sits at the root of every clair project, thus it marks the root,
-    in the same way that ``.git`` marks a git repository. A user therefore runs
-    a clair command from any directory of the project.
-
-    Raises:
-        ProjectRootNotFoundError: No directory at or above *start_directory*
-            holds the marker file.
-    """
-    start_directory = start_directory.resolve()
-    for directory in [start_directory, *start_directory.parents]:
-        if (directory / ROUTING_FILE_NAME).is_file():
-            return directory
-    raise ProjectRootNotFoundError(str(start_directory), ROUTING_FILE_NAME)
 
 
 def describe_shallow_trouve(file_path: Path, project_root: Path) -> str | None:

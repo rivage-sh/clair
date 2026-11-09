@@ -21,7 +21,8 @@ from clair.core.dag_render import (
     render_dag,
 )
 from clair.exceptions import ClairError
-from clair.trouves.trouve import ExecutionType, TrouveType
+from clair.trouves.trouve import ExecutionType
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import build_dag_of, make_compiled_seed_table
 
 # The shapes that the tests share. A name says what the shape proves.

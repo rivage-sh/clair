@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from clair.environments.environments import Environment
 from clair.trouves.address import TrouveAddress
+from clair.trouves.trouve import TrouveAbc
 
 
 class StatementStatus(StrEnum):
@@ -188,12 +189,35 @@ class WarehouseAdapter(ABC):
         """Close the connection."""
         ...
 
-    @abstractmethod
     def fetch_dataframe(
+        self, source: TrouveAbc | TrouveAddress, sample_query: str | None = None
+    ) -> pd.DataFrame:
+        """Read a Trouve or an address into a pandas DataFrame.
+
+        A Trouve reads its logical address, which is the production address.
+        To read the object of a different environment, give
+        ``trouve.get_physical_address(env_name)``. clair applies no row limit,
+        in the same way as the pandas API of the Snowflake connector.
+
+        Args:
+            source: A Trouve, for example one that a notebook imports, or an
+                address.
+            sample_query: The subquery of a sampled run, which the adapter
+                reads in place of the complete table. None reads each row.
+
+        Raises:
+            TrouveFileNotFoundError: If *source* is a Trouve that no file defines.
+        """
+        address = source.logical_address if isinstance(source, TrouveAbc) else source
+        return self.read_table(address, sample_query)
+
+    @abstractmethod
+    def read_table(
         self, address: TrouveAddress, sample_query: str | None = None
     ) -> pd.DataFrame:
-        """Read a table into a pandas DataFrame.
+        """Read the object at *address* into a pandas DataFrame.
 
+        Each adapter implements this method, and ``fetch_dataframe`` calls it.
         *sample_query* is the subquery of a sampled run, which the adapter
         reads in place of the complete table at *address*. None reads each row.
         """

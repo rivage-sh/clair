@@ -14,7 +14,7 @@ from clair.environments.project_routing import (
 )
 from clair.environments.routing import route
 from clair.exceptions import InvalidRoutingFileError
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve_type import TrouveType
 
 # A routing file needs an entry class. This prelude gives the tests one.
 _PRELUDE = """\

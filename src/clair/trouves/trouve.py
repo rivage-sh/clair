@@ -22,12 +22,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import ClassVar, Generic, Self
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, field_validator, model_validator
 
 # typing.TypeVar takes a default from Python 3.13 only.
 from typing_extensions import TypeVar
 
 from clair.core import project_imports
+from clair.environments.project_routing import find_project_root, routing_entry_of
+from clair.environments.routing import route
 from clair.exceptions import CompileError, TrouveFileNotFoundError, TrouveNotCompiledError
 from clair.trouves._refs import THIS_PLACEHOLDER, register
 from clair.trouves.address import TrouveAddress
@@ -45,6 +47,7 @@ from clair.trouves.run_config import (
     Upsert,
 )
 from clair.trouves.test import AnyTest
+from clair.trouves.trouve_type import TrouveType
 
 
 class BuildPlan(BaseModel):
@@ -106,12 +109,6 @@ class UpsertPlan(BaseModel):
         return ", ".join(
             f"{SOURCE}.{column_name}" for column_name in self.insert_column_names
         )
-
-
-class TrouveType(StrEnum):
-    SOURCE = "source"
-    TABLE = "table"
-    VIEW = "view"
 
 
 class ExecutionType(StrEnum):
@@ -335,6 +332,11 @@ class TrouveAbc(SessionConfig, ABC, Generic[CompiledT_co]):
     sample_sql: str | None = Field(default=None, exclude=True)
     compiled: CompiledT_co | None = None
 
+    # The file of an object never changes. A discovery runs each file again, and
+    # the module then holds a new object. The cache lets a Trouve that a
+    # notebook imported before that discovery keep its address.
+    _defining_file_cache: Path | None = PrivateAttr(default=None)
+
     # "forbid" makes a keyword that the class does not read an error, for
     # example a run_config on a View.
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
@@ -406,12 +408,38 @@ class TrouveAbc(SessionConfig, ABC, Generic[CompiledT_co]):
         # needs no search of the module table.
         if self.compiled is not None:
             return TrouveAddress.from_file_path(self.compiled.file_path)
+        return TrouveAddress.from_file_path(self._defining_file())
+
+    def get_physical_address(self, env_name: str) -> TrouveAddress:
+        """Give the address that the routing entry of *env_name* gives.
+
+        ``clair run --env <env_name>`` writes this Trouve there. The method does
+        the steps of a run with no discovery and no connection: it finds the
+        project root above the file, loads the entry of ``__routing__.py``, and
+        routes the logical address. A routing file that does not name
+        *env_name* gives passthrough, and clair warns as a run does.
+
+        Raises:
+            TrouveFileNotFoundError: If no file, or two files, define this Trouve.
+            ProjectRootNotFoundError: If no directory above the file holds
+                ``__routing__.py``.
+            InvalidRoutingConfigError: If the routing entry fails.
+        """
+        file_path = self._defining_file()
+        routing = routing_entry_of(find_project_root(file_path.parent), env_name)
+        return route(TrouveAddress.from_file_path(file_path), self.type, routing)
+
+    def _defining_file(self) -> Path:
+        """Give the absolute path of the one file that defines this Trouve."""
+        if self._defining_file_cache is not None:
+            return self._defining_file_cache
         file_paths = project_imports.files_that_define(self)
         if len(file_paths) != 1:
             raise TrouveFileNotFoundError(
                 type(self).__name__, [str(file_path) for file_path in file_paths]
             )
-        return TrouveAddress.from_file_path(file_paths[0])
+        self._defining_file_cache = file_paths[0]
+        return self._defining_file_cache
 
     def sample(self, sample_rows: int) -> str:
         """Give the subquery that a sampled run reads in place of this Trouve.

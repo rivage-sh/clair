@@ -50,28 +50,21 @@ from clair.core.artifacts import (
 )
 from clair.core.compiler import CompileOutput, write_compile_output
 from clair.core.dag import ClairDag, build_dag
-from clair.core.discovery import (
-    ARTIFACTS_DIR_NAME,
-    discover_project,
-    find_project_root,
-)
+from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.references import recompile_for_selection
 from clair.core.runner import RunResult, RunSkip, RunSummary, run_project
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import SampleScope, TestResult, TestSummary, run_tests
 from clair.core.validation import ValidationReport, validate_project
 from clair.environments.environments import Environment
-from clair.environments.project_routing import (
-    describe_unnamed_environment,
-    load_project_routing,
-)
+from clair.environments.project_routing import find_project_root, routing_entry_of
 from clair.environments.routing import (
-    RoutingEntry,
     detect_routing_collisions_of_trouves,
 )
 from clair.exceptions import SampleTargetsProductionError
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, TrouveAbc, TrouveType
+from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, TrouveAbc
+from clair.trouves.trouve_type import TrouveType
 from clair.web_ui.catalog import build_catalog
 from clair.web_ui.server import serve
 
@@ -102,20 +95,6 @@ def _env_name_of(env: EnvSpec) -> str:
     if isinstance(env, Environment):
         return env.name
     return env
-
-
-def _resolve_routing(project_root: Path, env_name: str) -> RoutingEntry | None:
-    """Give the routing entry of *env_name*, and warn about an absent entry.
-
-    A routing file that does not name the active environment is almost always a
-    typo. Passthrough routing then writes to the production names, so clair
-    tells the user before any SQL runs.
-    """
-    project_routing = load_project_routing(project_root, env_name)
-    warning = describe_unnamed_environment(project_routing, env_name)
-    if warning:
-        logger.warning("routing.unnamed_environment", env=env_name, detail=warning)
-    return project_routing.entry
 
 
 def _warn_about_routing_collisions(trouves: list[TrouveAbc], env_name: str) -> None:
@@ -179,7 +158,7 @@ def _discover(
         if environment is None
         else {"warehouse": environment.connection.warehouse, "role": environment.connection.role}
     )
-    routing = _resolve_routing(project_root, env_name)
+    routing = routing_entry_of(project_root, env_name)
     trouves = discover_project(
         project_root,
         profile_defaults,

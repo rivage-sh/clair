@@ -42,7 +42,7 @@ The `name` selects the routing entry in `__routing__.py`. See
 To read the file yourself, call `load_environment()`:
 
 ```python
-from clair.environments.environments import load_environment
+from clair import load_environment
 
 environment = load_environment("prod")
 ```
@@ -448,9 +448,39 @@ import structlog
 structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))
 ```
 
+## Read a Trouve into pandas
+
+```python
+class SnowflakeAdapter(WarehouseAdapter):
+    @classmethod
+    def connected(cls, environment: Environment) -> SnowflakeAdapter: ...
+
+class WarehouseAdapter(ABC):
+    def fetch_dataframe(
+        self, source: TrouveAbc | TrouveAddress, sample_query: str | None = None
+    ) -> pd.DataFrame: ...
+```
+
+`SnowflakeAdapter.connected()` makes an adapter and connects it. Call `close()` at the end.
+`fetch_dataframe()` reads a Trouve at its logical address, the production address, or it
+reads the address that you give. It applies no row limit. An adapter implements
+`read_table(address, sample_query)`, and `fetch_dataframe()` calls it.
+
+```python
+from clair import SnowflakeAdapter, load_environment
+from example_4_database.derived.daily_event_counts import trouve as daily_event_counts
+
+warehouse = SnowflakeAdapter.connected(load_environment("dev"))
+production_rows = warehouse.fetch_dataframe(daily_event_counts)
+dev_rows = warehouse.fetch_dataframe(daily_event_counts.get_physical_address("dev"))
+warehouse.close()
+```
+
+See [Read a Trouve into pandas](../guides/read-a-trouve-in-a-notebook.md).
+
 ## Notebooks
 
-`examples/notebooks/` holds four notebooks that run each operation above. None of
+`examples/notebooks/` holds five notebooks that run each operation above. None of
 them opens a warehouse connection:
 
 | Notebook | Shows |
@@ -459,3 +489,4 @@ them opens a warehouse connection:
 | `02_lineage_and_impact.ipynb` | the DAG as a networkx graph: the blast radius of a source, the build order, and the parallel groups |
 | `03_run_without_snowflake.ipynb` | `run()` against a `WarehouseAdapter` that holds its tables in memory |
 | `04_author_trouves.ipynb` | a `PandasTable` transform under test, a `SeedTable`, and a project that the notebook writes |
+| `05_read_trouves_into_pandas.ipynb` | import a Trouve, give its address in each environment, and read it into a DataFrame |

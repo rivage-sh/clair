@@ -14,7 +14,8 @@ from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
 from clair.trouves.run_config import Append, Incremental
 from clair.trouves.seed_table import SeedTable
-from clair.trouves.trouve import CompiledDataframe, ExecutionType, TrouveType
+from clair.trouves.trouve import CompiledDataframe, ExecutionType
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import resolved_sql_of
 
 FAKE_RUN_ID = "0" * 32

@@ -14,7 +14,7 @@ from clair.core.dag import (
 )
 from clair.core.discovery import discover_project
 from clair.exceptions import CyclicDependencyError, ProjectDiscoveryError
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import make_compiled_trouve
 
 

@@ -17,7 +17,7 @@ from clair.environments.routing import (
     route,
 )
 from clair.exceptions import InvalidRoutingConfigError, InvalidTrouveAddressError
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import (
     DatabaseOverrideRouting,
     SchemaIsolationRouting,

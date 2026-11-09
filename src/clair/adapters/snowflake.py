@@ -30,6 +30,17 @@ class SnowflakeAdapter(WarehouseAdapter):
         self._conn: snowflake.connector.SnowflakeConnection | None = None
         self._environment: Environment | None = None
 
+    @classmethod
+    def connected(cls, environment: Environment) -> SnowflakeAdapter:
+        """Make an adapter and connect it to *environment*: one line in a notebook.
+
+        ``SnowflakeAdapter.connected(load_environment("dev"))`` reads
+        ``~/.clair/environments.yml`` and connects. Call ``close()`` at the end.
+        """
+        adapter = cls()
+        adapter.connect(environment)
+        return adapter
+
     def connect(self, environment: Environment) -> None:
         """Connect to Snowflake with the connection and the authentication of the environment."""
         connection = environment.connection
@@ -65,9 +76,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         """Make a second SnowflakeAdapter with the same environment, and connect it."""
         if self._environment is None:
             raise RuntimeError("Not connected. Call connect() first.")
-        adapter = SnowflakeAdapter()
-        adapter.connect(self._environment)
-        return adapter
+        return SnowflakeAdapter.connected(self._environment)
 
     def execute(self, sql: str) -> Statement:
         """Execute the SQL and give a Statement with the query ID and the URL."""
@@ -236,7 +245,7 @@ class SnowflakeAdapter(WarehouseAdapter):
         finally:
             cursor.close()
 
-    def fetch_dataframe(
+    def read_table(
         self, address: TrouveAddress, sample_query: str | None = None
     ) -> pd.DataFrame:
         """Read a Snowflake table, or the sample of a sampled run, into a pandas DataFrame."""

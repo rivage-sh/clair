@@ -19,7 +19,7 @@ Each step below links to its source code.
 
 ## 0. Find the project root
 
-*Source: [`core/discovery.py`][discovery-py] — `find_project_root()`*
+*Source: [`environments/project_routing.py`][project-routing-py] — `find_project_root()`*
 
 Each step below takes a project root. `__routing__.py` marks it: clair walks up from the
 working directory to the first one, in the same way that git finds `.git`. Thus you run a
@@ -27,9 +27,9 @@ command from any directory of the project. A directory that holds no `__routing_
 no parent with one, stops the command. See
 [Project Layout](project-layout.md#the-project-root).
 
-The search reads the file system, thus it belongs to the one file system reader of
-`core/`. It runs before the pipeline: it produces the `project_dir` that step 2 and step 3
-then take.
+The search reads the file system, and it looks for one file only: `__routing__.py`. Thus it
+sits beside `load_project_routing()`, the function that reads that file in step 2. It runs
+before the pipeline: it produces the `project_dir` that step 2 and step 3 then take.
 
 ## 1. Load the environment
 

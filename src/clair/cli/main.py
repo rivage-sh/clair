@@ -14,11 +14,7 @@ from clair._version import __version__
 from clair.core.artifacts import InvalidBeforeSpecError
 from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
-from clair.core.discovery import (
-    ARTIFACTS_DIR_NAME,
-    discover_project,
-    find_project_root,
-)
+from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.environments.environments import (
     DEFAULT_THREADS,
@@ -29,7 +25,7 @@ from clair.environments.environments import (
     PrivateKey,
     load_environment,
 )
-from clair.environments.project_routing import ROUTING_FILE_NAME
+from clair.environments.project_routing import ROUTING_FILE_NAME, find_project_root
 from clair.exceptions import (
     ClairError,
     EnvironmentsFileNotFoundError,

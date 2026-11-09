@@ -42,7 +42,7 @@ Packages inside `src/clair/`:
 | Package | Holds |
 |---------|-------|
 | `cli/` | `main.py` — the click entrypoint. Read first for any CLI change. |
-| `trouves/` | The domain models: `trouve.py`, `column.py`, `test.py`, `config.py`, `run_config.py`, `_refs.py`. |
+| `trouves/` | The domain models: `trouve.py`, `trouve_type.py`, `column.py`, `test.py`, `config.py`, `run_config.py`, `_refs.py`. |
 | `core/` | The pipeline: `discovery.py`, `project_imports.py`, `references.py`, `dag.py`, `compiler.py`, `runner.py`, `test_runner.py`, `dag_render.py`, `selector.py`, `scaffold.py`. |
 | `adapters/` | `base.py` holds the `WarehouseAdapter` ABC. `snowflake.py` is the only implementation. |
 | `environments/` | `environments.py` reads `~/.clair/environments.yml`. `routing.py` remaps targets. |

@@ -22,7 +22,7 @@ from pydantic import BaseModel, ValidationError, model_validator
 
 from clair.exceptions import InvalidRoutingConfigError, InvalidTrouveAddressError
 from clair.trouves.address import TrouveAddress, first_error_message
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve_type import TrouveType
 
 if TYPE_CHECKING:
     from clair.trouves.trouve import TrouveAbc

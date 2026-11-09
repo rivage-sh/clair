@@ -14,7 +14,8 @@ from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag
 from clair.core.references import render_sample
 from clair.trouves.address import TrouveAddress
-from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, TrouveType
+from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
+from clair.trouves.trouve_type import TrouveType
 
 logger = structlog.get_logger()
 

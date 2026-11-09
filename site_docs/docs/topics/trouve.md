@@ -174,6 +174,9 @@ A Trouve holds two kinds of attributes.
 - **What the file decides.** `trouve.logical_address` comes from the file path, such as
   `refined.orders.daily`. It is the production address. No run and no environment changes
   it, thus a Trouve that you import in a notebook has it too.
+  `trouve.get_physical_address("dev")` gives the address that `clair run --env dev` writes
+  to. It reads `__routing__.py`, and it needs no run either. See
+  [Read a Trouve into pandas](../guides/read-a-trouve-in-a-notebook.md).
 - **What one run decides.** Discovery sets `trouve.compiled`: the record of one run. It
   holds `physical_address`, the address that the routing entry of the run gives, and the
   SQL with each reference resolved for the selection. `trouve.is_compiled` is `True` after

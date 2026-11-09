@@ -20,7 +20,8 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import TrouveAbc, TrouveType
+from clair.trouves.trouve import TrouveAbc
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import RecordingAdapter, compile_trouve, make_test_result, make_trouve
 
 

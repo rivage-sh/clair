@@ -7,7 +7,7 @@ from pathlib import Path
 from clair.core.compiler import write_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve_type import TrouveType
 
 FAKE_RUN_ID = "0" * 32
 
