@@ -1,13 +1,18 @@
 """Clair routing -- gives each environment its physical write target.
 
+This file also marks the root of the clair project. Each clair command walks up
+from the working directory to this file, in the same way that git finds .git.
+Keep the file at the project root, also when it holds no entry.
+
 Each entry names one environment. The name matches a top-level key in
 ~/.clair/environments.yml. The route method accepts the logical TrouveAddress
 and gives the physical TrouveAddress.
 
 This file starts with one entry, and that entry changes nothing: the physical
-name stays equal to the logical name. Change the route method when you want a
-separate target for an environment, for example one database for each person.
-See https://clair.rivage.sh/guides/routing/
+address stays equal to the logical address, which is the production address.
+Change the route method for a separate target for an environment, for example
+one database for each person.
+See https://rivage-sh.github.io/clair/topics/routing/
 """
 
 from enum import StrEnum
@@ -24,8 +29,8 @@ class EnvironmentName(StrEnum):
     DEV = "dev"
 
 
-class DevelopmentRouting(RoutingEntry):
-    """Write to the logical names, thus the address stays the same."""
+class PassthroughRouting(RoutingEntry):
+    """Write to the logical address, thus the address stays the same."""
 
     environment_name: str = EnvironmentName.DEV.value
 
@@ -35,4 +40,4 @@ class DevelopmentRouting(RoutingEntry):
         return trouve_address
 
 
-routing = RoutingTable(entries=[DevelopmentRouting()])
+routing = RoutingTable(entries=[PassthroughRouting()])

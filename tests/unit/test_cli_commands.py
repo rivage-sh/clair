@@ -21,8 +21,10 @@ from click.testing import CliRunner
 
 from clair.cli.main import cli
 from clair.core.runner import RunResult, RunStatus, RunSummary
+from clair.core.scaffold import write_environments_yml
 from clair.core.test_runner import TestSummary
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey, load_environment
+from clair.environments.project_routing import load_project_routing
 from clair.exceptions import ClairError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
@@ -486,3 +488,44 @@ class TestInitWritesAnEnvironmentThatLoads:
         assert environment.authentication == expected_authentication
         assert environment.connection.role is None
         assert environment.connection.account_locator == "abc12345"
+
+
+class TestInitNamesTheEnvironmentOfTheUser:
+    """The routing file and the next steps of `clair init` name the chosen environment."""
+
+    SESSION_ANSWERS = ("COMPUTE_WH", "", "us-east-1", "abc12345", "4", "source.orders.raw")
+
+    def test_a_new_file_gives_its_environment_to_the_routing_file(
+        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+        project_dir = tmp_path_factory.mktemp("init") / "proj"
+        answers = ["local", "myorg-myaccount", "me@example.com", "3", *self.SESSION_ANSWERS]
+
+        result = CliRunner().invoke(
+            cli, ["init", "--project", str(project_dir)], input="\n".join(answers) + "\n"
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "clair run --env local" in result.output
+        assert load_project_routing(project_dir, "local").entry is not None
+
+    def test_an_existing_file_asks_again_for_a_name_that_it_does_not_hold(
+        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+    ):
+        home_dir = tmp_path_factory.mktemp("home")
+        monkeypatch.setenv("HOME", str(home_dir))
+        # This test reads the file that it writes, thus it gives back the real loader.
+        monkeypatch.setattr("clair.cli.main.load_environment", load_environment)
+        write_environments_yml(make_environment(name="local"), home_dir=home_dir)
+        project_dir = tmp_path_factory.mktemp("init") / "proj"
+        answers = ["dev", "local", "source.orders.raw"]
+
+        result = CliRunner().invoke(
+            cli, ["init", "--project", str(project_dir)], input="\n".join(answers) + "\n"
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "cannot find the environment 'dev'" in result.output
+        assert "clair compile --env local" in result.output
+        assert load_project_routing(project_dir, "local").entry is not None

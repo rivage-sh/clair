@@ -28,6 +28,7 @@ from clair.environments.environments import (
 from clair.environments.project_routing import ROUTING_FILE_NAME, find_project_root
 from clair.exceptions import (
     ClairError,
+    EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
     InvalidRoutingConfigError,
     InvalidTrouveAddressError,
@@ -124,17 +125,13 @@ def init(project: str | None) -> None:
         )
         sys.exit(1)
 
-    # Step 2 -- The environment.
+    # Step 2 -- The environment. The routing file and the next steps name it.
     environments_path = Path.home() / ".clair" / "environments.yml"
-    environments_existed = environments_path.exists()
-    skip_environments_in_scaffold = False
-
-    if environments_existed:
+    if environments_path.exists():
         click.echo("  ~/.clair/environments.yml exists. Clair keeps it.")
-        skip_environments_in_scaffold = True
+        env_name = _prompt_for_existing_environment(environments_path)
     else:
-        skip_environments_in_scaffold = True
-        _prompt_and_write_environment()
+        env_name = _prompt_and_write_environment()
 
     # Step 3 -- The source table.
     source_full_table_name: str = click.prompt(
@@ -154,16 +151,14 @@ def init(project: str | None) -> None:
         source_database_name=source_database_name,
         source_schema_name=source_schema_name,
         source_table_name=source_table_name,
-        # The code above wrote the profiles, or found them. Give a home_dir
-        # that lets the scaffold find that file and report "skipped". The real
-        # home directory holds the real file.
+        env_name=env_name,
     )
 
     click.echo("")
     for status, filepath in results:
         # Hide the environments.yml line. The code above found that file, or
         # the user gave the values for it.
-        if skip_environments_in_scaffold and filepath == str(environments_path):
+        if filepath == str(environments_path):
             continue
         click.echo(f"  {status}  {filepath}")
     click.echo("")
@@ -179,13 +174,33 @@ def init(project: str | None) -> None:
     click.echo("")
     click.echo("Next steps:")
     click.echo(f"  1. cd {project_dir}")
-    click.echo("  2. clair compile --env dev")
-    click.echo("  3. clair run --env dev")
+    click.echo(f"  2. clair compile --env {env_name}")
+    click.echo(f"  3. clair run --env {env_name}")
     click.echo("")
 
 
-def _prompt_and_write_environment() -> None:
-    """Ask the user for the Snowflake connection data and write environments.yml."""
+def _prompt_for_existing_environment(environments_path: Path) -> str:
+    """Ask for an environment of the existing environments.yml, and give its name."""
+    click.echo("")
+    while True:
+        env_name = click.prompt("Environment name", default="dev", type=str)
+        try:
+            load_environment(env_name, environments_path=environments_path)
+        except EnvironmentNotFoundError as exc:
+            click.echo(str(exc), err=True)
+            continue
+        except ClairError as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(1)
+        return env_name
+
+
+def _prompt_and_write_environment() -> str:
+    """Ask the user for the Snowflake connection data and write environments.yml.
+
+    Returns:
+        The name of the new environment.
+    """
 
     def _hint(sql: str) -> None:
         click.echo(f"  hint: select {sql};", err=True)
@@ -270,6 +285,7 @@ def _prompt_and_write_environment() -> None:
     )
     click.echo("")
     write_environments_yml(environment)
+    return env_name
 
 
 @cli.command(name="compile")

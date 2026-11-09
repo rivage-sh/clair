@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -31,9 +32,10 @@ Each entry names one environment. The name matches a top-level key in
 and gives the physical TrouveAddress.
 
 This file starts with one entry, and that entry changes nothing: the physical
-address stays equal to the logical address. Change the route method for a
-separate target for an environment, for example one database for each person.
-See https://clair.rivage.sh/guides/routing/
+address stays equal to the logical address, which is the production address.
+Change the route method for a separate target for an environment, for example
+one database for each person.
+See https://rivage-sh.github.io/clair/topics/routing/
 """
 
 from enum import StrEnum
@@ -47,13 +49,13 @@ class EnvironmentName(StrEnum):
     Each member matches a top-level key in ~/.clair/environments.yml.
     """
 
-    DEV = "dev"
+    {member_name} = "{env_name}"
 
 
-class DevelopmentRouting(RoutingEntry):
+class PassthroughRouting(RoutingEntry):
     """Write to the logical address, thus the address stays the same."""
 
-    environment_name: str = EnvironmentName.DEV.value
+    environment_name: str = EnvironmentName.{member_name}.value
 
     def route(
         self, trouve_address: TrouveAddress, trouve_type: TrouveType
@@ -61,15 +63,15 @@ class DevelopmentRouting(RoutingEntry):
         return trouve_address
 
 
-routing = RoutingTable(entries=[DevelopmentRouting()])
+routing = RoutingTable(entries=[PassthroughRouting()])
 '''
 
 _ENVIRONMENTS_TEMPLATE = '''\
 # The Clair environments. Each environment has its own connection settings.
 # Routing is not here. It lives in the project __routing__.py file.
-# Reference: https://github.com/rivage-sh/clair
+# Reference: https://rivage-sh.github.io/clair/topics/environments/
 
-dev:
+{env_name}:
   connection:
     account: your-org-your-account   # for example, myorg-myaccount
     user: your@email.com
@@ -96,6 +98,14 @@ dev:
 '''
 
 
+def _enum_member_name(env_name: str) -> str:
+    """Give the StrEnum member name of *env_name*, for example ``DEV`` for ``dev``."""
+    member_name = re.sub(r"\W", "_", env_name).upper()
+    if not member_name[:1].isalpha():
+        member_name = f"ENV_{member_name}"
+    return member_name
+
+
 def _write_if_missing(path: Path, content: str) -> bool:
     """Write *content* to *path*. Make each parent directory that is absent.
 
@@ -114,6 +124,7 @@ def scaffold_project(
     source_database_name: str,
     source_schema_name: str,
     source_table_name: str,
+    env_name: str,
     home_dir: Path | None = None,
 ) -> list[tuple[str, str]]:
     """Make a new Clair project in *project_dir*.
@@ -127,6 +138,8 @@ def scaffold_project(
         source_database_name: The name of the source database directory.
         source_schema_name: The name of the source schema directory.
         source_table_name: The name of the source table file.
+        env_name: The environment of the routing entry. It is a top-level key
+            of environments.yml.
         home_dir: A replacement for ``Path.home()``. The tests use it.
 
     Returns:
@@ -138,7 +151,12 @@ def scaffold_project(
     # Each project file, as a (relative_path, template_content) pair.
     project_files: list[tuple[str, str]] = [
         (f"{source_database_name}/{source_schema_name}/{source_table_name}.py", _SOURCE_TROUVE_TEMPLATE),
-        (ROUTING_FILE_NAME, _ROUTING_TEMPLATE),
+        (
+            ROUTING_FILE_NAME,
+            _ROUTING_TEMPLATE.format(
+                member_name=_enum_member_name(env_name), env_name=env_name
+            ),
+        ),
     ]
 
     results: list[tuple[str, str]] = []
@@ -152,7 +170,9 @@ def scaffold_project(
     # The global environments.yml file in ~/.clair/
     effective_home = home_dir if home_dir is not None else Path.home()
     environments_path = effective_home / ".clair" / "environments.yml"
-    created = _write_if_missing(environments_path, _ENVIRONMENTS_TEMPLATE)
+    created = _write_if_missing(
+        environments_path, _ENVIRONMENTS_TEMPLATE.format(env_name=env_name)
+    )
     status = "created" if created else "skipped"
     results.append((status, str(environments_path)))
 
