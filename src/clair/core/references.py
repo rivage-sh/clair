@@ -38,13 +38,8 @@ from clair.exceptions import CompileError
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import (
-    DEFAULT_SAMPLE_ROWS,
-    DataframeInput,
-    SqlTrouve,
-    TrouveAbc,
-    TrouveType,
-)
+from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, DataframeInput, SqlTrouve, TrouveAbc
+from clair.trouves.trouve_type import TrouveType
 
 _PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 

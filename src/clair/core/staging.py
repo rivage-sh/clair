@@ -44,7 +44,8 @@ from pydantic import ValidationError
 from clair.adapters.base import WarehouseObjectType
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError
-from clair.trouves.trouve import TableOptions, TrouveType
+from clair.trouves.trouve import TableOptions
+from clair.trouves.trouve_type import TrouveType
 
 STAGING_SUFFIX = "__clair_"
 

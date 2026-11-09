@@ -38,14 +38,8 @@ from clair.exceptions import ClairError, ResultNotFoundError, RunError
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import (
-    ExecutionType,
-    SqlTrouve,
-    Table,
-    TrouveAbc,
-    TrouveType,
-    table_options_of,
-)
+from clair.trouves.trouve import ExecutionType, SqlTrouve, Table, TrouveAbc, table_options_of
+from clair.trouves.trouve_type import TrouveType
 
 
 class RunStatus(StrEnum):

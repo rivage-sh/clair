@@ -8,7 +8,8 @@ import networkx as nx
 
 from clair.exceptions import CyclicDependencyError
 from clair.trouves.address import NodeAddresses, TrouveAddress
-from clair.trouves.trouve import TrouveAbc, TrouveType
+from clair.trouves.trouve import TrouveAbc
+from clair.trouves.trouve_type import TrouveType
 
 
 class ClairDag(nx.DiGraph):

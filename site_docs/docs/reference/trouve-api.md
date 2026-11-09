@@ -88,6 +88,7 @@ Write `isinstance(obj, TrouveAbc)` to accept a Trouve of any class.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
+| `get_physical_address(env_name)` | `TrouveAddress` | The address that `clair run --env <env_name>` writes to. clair finds `__routing__.py` above the file of the Trouve, and it routes the logical address. It needs no discovery and no connection. Raises `TrouveFileNotFoundError` or `ProjectRootNotFoundError`. |
 | `require_compiled()` | `CompiledAttributes` | The record of the run that loaded this Trouve: `trouve.compiled`. Raises `TrouveNotCompiledError` if discovery did not load it. |
 | `sample(sample_rows)` | `str` | The subquery that `--sample` reads in place of this Trouve: `({sample_sql})`, or `(SELECT * FROM {THIS} LIMIT <sample_rows>)`. clair replaces `{THIS}` with the address that the reader reads. Override it in a subclass to change the sample of many Trouves. |
 

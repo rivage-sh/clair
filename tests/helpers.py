@@ -47,9 +47,9 @@ from clair.trouves.trouve import (
     SqlTrouve,
     Table,
     TrouveAbc,
-    TrouveType,
     View,
 )
+from clair.trouves.trouve_type import TrouveType
 
 PASSTHROUGH_ROUTING_FILE = """\
 from clair import RoutingTable
@@ -516,7 +516,7 @@ class RecordingAdapter(WarehouseAdapter):
 
     # The DataFrames.
 
-    def fetch_dataframe(
+    def read_table(
         self, address: TrouveAddress, sample_query: str | None = None
     ) -> pd.DataFrame:
         self.fetched_addresses.append(str(address))

@@ -232,7 +232,7 @@ class TestTheCompiledFieldsOfTheCatalog:
 
     def test_each_trouve_gives_the_field_of_its_backend(self, tmp_path):
         from clair.core.dag import build_dag
-        from clair.trouves.trouve import TrouveType
+        from clair.trouves.trouve_type import TrouveType
         from clair.web_ui.catalog import build_catalog
         from tests.helpers import make_compiled_seed_table, make_compiled_trouve
 

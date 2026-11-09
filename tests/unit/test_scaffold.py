@@ -9,7 +9,7 @@ from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.environments.environments import Authenticator, load_environment
 from clair.environments.project_routing import load_project_routing
 from clair.environments.routing import route
-from clair.trouves.trouve import TrouveType
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import make_environment
 
 # ---------------------------------------------------------------------------

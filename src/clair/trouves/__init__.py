@@ -11,7 +11,8 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import BuildPlan, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
+from clair.trouves.trouve import BuildPlan, Source, SqlTrouve, Table, TrouveAbc, View
+from clair.trouves.trouve_type import TrouveType
 
 __all__ = [
     "AnyTest",

@@ -7,13 +7,8 @@ from typing import ClassVar
 
 import pandas as pd
 
-from clair.trouves.trouve import (
-    CompiledDataframe,
-    ExecutionType,
-    TableOptions,
-    TrouveAbc,
-    TrouveType,
-)
+from clair.trouves.trouve import CompiledDataframe, ExecutionType, TableOptions, TrouveAbc
+from clair.trouves.trouve_type import TrouveType
 
 
 class DataframeTrouve(TrouveAbc[CompiledDataframe], TableOptions, ABC):

@@ -86,6 +86,7 @@ nav:
     - The Anatomy of a Run: topics/anatomy-of-a-run.md
   - Guides:
     - Write your own build: guides/custom-build-sql.md
+    - Read a Trouve into pandas: guides/read-a-trouve-in-a-notebook.md
   - CLI:
     - cli/overview.md
     - clair init: cli/init.md

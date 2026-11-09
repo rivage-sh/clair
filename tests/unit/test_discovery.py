@@ -18,7 +18,8 @@ from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
 from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
-from clair.trouves.trouve import CompiledAttributes, SqlTrouve, Table, TrouveAbc, TrouveType
+from clair.trouves.trouve import CompiledAttributes, SqlTrouve, Table, TrouveAbc
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import (
     DatabaseOverrideRouting,
     SchemaIsolationRouting,

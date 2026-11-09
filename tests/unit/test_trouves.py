@@ -25,7 +25,8 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import CompiledSql, ExecutionType, Source, Table, TrouveAbc, TrouveType, View
+from clair.trouves.trouve import CompiledSql, ExecutionType, Source, Table, TrouveAbc, View
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import compile_trouve, unstaged_plan
 
 # ---------------------------------------------------------------------------

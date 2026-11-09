@@ -18,7 +18,8 @@ from pydantic import BaseModel, computed_field
 from clair.core.dag import ClairDag
 from clair.exceptions import ClairError
 from clair.trouves.seed_table import SeedTable
-from clair.trouves.trouve import ExecutionType, TrouveType
+from clair.trouves.trouve import ExecutionType
+from clair.trouves.trouve_type import TrouveType
 
 # The text that marks a node that the tree already showed below another parent.
 REPEAT_MARKER = "(^)"

@@ -12,8 +12,9 @@ from click.testing import CliRunner
 import clair
 from clair.cli.main import cli
 from clair.core.dag import build_dag
-from clair.core.discovery import discover_project, find_project_root
+from clair.core.discovery import discover_project
 from clair.core.references import resolve_sql
+from clair.environments.project_routing import find_project_root
 from clair.exceptions import (
     CompileError,
     NotAProjectRootError,
