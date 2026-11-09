@@ -193,8 +193,8 @@ def load_environment(
     try:
         return Environment(name=env_name, **env_data)
     except ValidationError as exc:
-        # An unknown key is almost always a typo, or a routing block that the user
-        # did not move to __routing__.py. Both send writes to the wrong target.
+        # An unknown key is almost always a typo, or a routing block that belongs
+        # in __routing__.py. Both send writes to the wrong target.
         raise InvalidEnvironmentError(
             env_name, str(path), _first_error_message(exc)
         ) from exc

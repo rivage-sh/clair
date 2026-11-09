@@ -17,9 +17,6 @@ The environment name joins the two files. An entry with `environment_name = "dev
 
 The routing file holds no credentials, so you commit it and your team reviews it like other code. Because it is Python, one committed rule gives each developer a separate target.
 
-!!! warning
-    A `routing:` block in `environments.yml` is now an error. Move the rule to `__routing__.py`.
-
 ## The three types
 
 ```python
