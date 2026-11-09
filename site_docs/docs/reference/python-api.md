@@ -44,11 +44,16 @@ To read the file yourself, call `load_environment()`:
 ```python
 from clair.environments.environments import load_environment
 
-env_name, environment = load_environment("prod")
+environment = load_environment("prod")
 ```
 
 `clair.compile()` and `clair.validate()` make no connection. They accept the
-`Environment`, or the environment name alone. `None` gives the name `"dev"`.
+`Environment`, or the environment name alone.
+
+Each of the four functions needs `env`, and none of them gives a default. An
+environment without a routing entry writes to the production addresses, thus clair
+never selects one for you. The functions do not read `CLAIR_ENV`: that variable belongs
+to the CLI.
 
 | Function | The equivalent command |
 |----------|------------------------|
@@ -71,8 +76,8 @@ starts the root search: clair walks up from the working directory to the first
 `__routing__.py`. Give the path to name a project in a different directory.
 
 ```python
-clair.validate()                          # the project of the working directory
-clair.validate("~/projects/analytics")    # a project that you name
+clair.validate(env="dev")                          # the project of the working directory
+clair.validate("~/projects/analytics", env="dev")  # a project that you name
 ```
 
 A directory that holds many projects raises `NotAProjectRootError`, because it
@@ -263,9 +268,9 @@ class Statement(BaseModel):
 def compile(
     project_dir: str | Path | None = None,
     *,
+    env: Environment | str,
     select: Sequence[str] | None = None,
     exclude: Sequence[str] | None = None,
-    env: Environment | str | None = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     use_staging: bool = True,
     sample: bool = False,
@@ -280,7 +285,7 @@ warehouse connection.
 production. See [Sampled Runs](../topics/sampling.md).
 
 ```python
-output = clair.compile("~/projects/analytics")
+output = clair.compile("~/projects/analytics", env="dev")
 node = output.node("mydb.analytics.orders")
 print(node.addresses.physical, node.addresses.staging)
 print("\n\n".join(node.sql))
@@ -353,7 +358,7 @@ class TestResult(BaseModel):
 def validate(
     project_dir: str | Path | None = None,
     *,
-    env: Environment | str | None = None,
+    env: Environment | str,
 ) -> ValidationReport
 ```
 
@@ -368,7 +373,7 @@ connection. See [`clair validate`](../cli/validate.md).
 Each problem is an object, thus a caller reads the Trouve that holds it:
 
 ```python
-report = clair.validate("~/projects/analytics")
+report = clair.validate("~/projects/analytics", env="dev")
 for collision in report.collisions:
     print(collision.physical_address, collision.logical_addresses)
 for problem in report.address_problems:

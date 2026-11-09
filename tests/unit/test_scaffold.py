@@ -82,8 +82,8 @@ class TestFileContents:
         fake_home = tmp_path / "home"
         scaffold_project(tmp_path / "proj", **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
 
-        _name, environment = load_environment(
-            environments_path=fake_home / ".clair" / "environments.yml"
+        environment = load_environment(
+            "dev", environments_path=fake_home / ".clair" / "environments.yml"
         )
         assert environment.authentication == Authenticator(authenticator="externalbrowser")
 

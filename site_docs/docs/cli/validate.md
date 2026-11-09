@@ -5,16 +5,15 @@ Apply the routing entries in `__routing__.py` to every Trouve in the project, an
 This command needs no Snowflake credentials, so CI runs it on every change.
 
 ```bash
-clair validate
+clair validate --env dev
 clair validate --env prod
-clair validate
 ```
 
 ## Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--env` | `CLAIR_ENV` or `dev` | The environment to route for. It matches an entry in `__routing__.py`. |
+| `--env` | required | The environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py`. `CLAIR_ENV` gives it when you omit the flag. |
 
 ## What it examines
 

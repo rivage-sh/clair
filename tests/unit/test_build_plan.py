@@ -165,7 +165,7 @@ def test_the_example_override_compiles_its_window_plan(
     project_root = tmp_path / "example_3"
     shutil.copytree(EXAMPLE_3, project_root)
 
-    output = clair.compile(project_root, run_mode=RunMode.INCREMENTAL)
+    output = clair.compile(project_root, run_mode=RunMode.INCREMENTAL, env="dev")
 
     node = output.node("example_3_database.derived.daily_revenue")
     assert node is not None

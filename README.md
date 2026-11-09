@@ -231,7 +231,7 @@ trouve = Table(
 cd my_project
 
 # Inspect the generated SQL without touching Snowflake
-clair compile
+clair compile --env dev
 
 # Execute against Snowflake
 clair run --env=dev
@@ -258,7 +258,7 @@ clair init --project=./my_project
 ### `clair compile`
 Resolve the DAG and write SQL to `_clairtifacts/`. No Snowflake connection needed.
 ```bash
-clair compile [--select='db.schema.*'] [--run-mode=incremental]
+clair compile --env dev [--select='db.schema.*'] [--run-mode=incremental]
 ```
 
 ### `clair run`
@@ -431,7 +431,7 @@ clair run --env=dev --select='source.products.*'
 clair run --env=dev --select='derived.products.top_reviewed'
 
 # Compile only tables matching a name pattern across all schemas
-clair compile --select='*.*.top_*'
+clair compile --env dev --select='*.*.top_*'
 
 # Union multiple patterns -- select from two schemas at once
 clair run --env=dev --select='source.products.*' --select='derived.products.*'

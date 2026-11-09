@@ -28,7 +28,6 @@ from clair.environments.environments import (
     Password,
     PrivateKey,
     load_environment,
-    resolve_env_name,
 )
 from clair.environments.project_routing import ROUTING_FILE_NAME
 from clair.exceptions import (
@@ -44,6 +43,13 @@ from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
 logger = structlog.get_logger()
 
 # `clair compile`, `clair run` and `clair test` take the same sample options.
+_env_option = click.option(
+    "--env",
+    required=True,
+    envvar="CLAIR_ENV",
+    help="The environment name. It selects the entry of __routing__.py and the profile of ~/.clair/environments.yml. CLAIR_ENV gives it when you omit --env.",
+)
+
 _sample_rows_option = click.option(
     "--sample-rows",
     type=click.IntRange(min=1),
@@ -61,16 +67,16 @@ def _sample_rows(sample: bool, sample_rows: int | None) -> int:
     return sample_rows
 
 
-def _load_environment(env_name: str | None) -> Environment:
+def _load_environment(env_name: str) -> Environment:
     """Read ~/.clair/environments.yml, and give the environment of *env_name*.
 
     The CLI reads the file. The Python API functions accept the Environment
     object, thus a caller that holds the settings writes no file.
     """
-    return load_environment(env_name)[1]
+    return load_environment(env_name)
 
 
-def _load_environment_or_name(env_name: str | None) -> Environment | str:
+def _load_environment_or_name(env_name: str) -> Environment | str:
     """Give the Environment, or the name only if environments.yml is absent.
 
     `clair compile` and `clair validate` make no connection, thus they continue
@@ -83,7 +89,7 @@ def _load_environment_or_name(env_name: str | None) -> Environment | str:
             "cli.no_environments_file",
             detail="Clair continues without an environment. Run `clair init` to make environments.yml.",
         )
-        return resolve_env_name(env_name)
+        return env_name
 
 
 @click.group()
@@ -177,8 +183,8 @@ def init(project: str | None) -> None:
     click.echo("")
     click.echo("Next steps:")
     click.echo(f"  1. cd {project_dir}")
-    click.echo("  2. clair compile")
-    click.echo("  3. clair run")
+    click.echo("  2. clair compile --env dev")
+    click.echo("  3. clair run --env dev")
     click.echo("")
 
 
@@ -281,11 +287,7 @@ def _prompt_and_write_environment() -> None:
     multiple=True,
     help="Pattern that removes Trouves. The syntax is the same as --select. Clair applies it after the selection.",
 )
-@click.option(
-    "--env",
-    default=None,
-    help="Environment name from ~/.clair/environments.yml",
-)
+@_env_option
 @click.option(
     "--run-mode",
     type=click.Choice(["full_refresh", "incremental"], case_sensitive=False),
@@ -299,7 +301,7 @@ def _prompt_and_write_environment() -> None:
     help="Show the SQL of `clair run --sample`: each Trouve that the run does not build reads its sample.",
 )
 @_sample_rows_option
-def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, sample: bool, sample_rows: int | None) -> None:
+def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: str, sample: bool, sample_rows: int | None) -> None:
     """Compile the project and show the new SQL. This needs no Snowflake connection."""
     row_limit = _sample_rows(sample, sample_rows)
     try:
@@ -321,12 +323,8 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], env: str | No
 
 
 @cli.command()
-@click.option(
-    "--env",
-    default=None,
-    help="Environment name to route for; matches an entry in __routing__.py",
-)
-def validate(env: str | None) -> None:
+@_env_option
+def validate(env: str) -> None:
     """Apply the project routing entries to every Trouve.
 
     This command needs no Snowflake credentials, so CI runs it on every change.
@@ -408,11 +406,7 @@ def docs(port: int, host: str, no_browser: bool) -> None:
     multiple=True,
     help="Pattern that removes Trouves. The syntax is the same as --select. Clair applies it after the selection.",
 )
-@click.option(
-    "--env",
-    default=None,
-    help="Environment name from ~/.clair/environments.yml",
-)
+@_env_option
 @click.option(
     "--run-mode",
     type=click.Choice(["full_refresh", "incremental"], case_sensitive=False),
@@ -441,7 +435,7 @@ def docs(port: int, host: str, no_browser: bool) -> None:
     default=None,
     help="The number of Trouves that run at one time. The default comes from the environment.",
 )
-def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_mode: str, no_test: bool, sample: bool, sample_rows: int | None, threads: int | None) -> None:
+def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: str, no_test: bool, sample: bool, sample_rows: int | None, threads: int | None) -> None:
     """Run the Trouves on Snowflake. Then run the data quality tests."""
     row_limit = _sample_rows(sample, sample_rows)
     try:
@@ -483,11 +477,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_
     multiple=True,
     help="Pattern that removes Trouves. The syntax is the same as --select. Clair applies it after the selection.",
 )
-@click.option(
-    "--env",
-    default=None,
-    help="Environment name from ~/.clair/environments.yml",
-)
+@_env_option
 @click.option(
     "--sample",
     is_flag=True,
@@ -504,7 +494,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str | None, run_
 def test(
     select: tuple[str, ...],
     exclude: tuple[str, ...],
-    env: str | None,
+    env: str,
     sample: bool,
     sample_rows: int | None,
     threads: int | None,

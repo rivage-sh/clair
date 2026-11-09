@@ -96,29 +96,29 @@ class TestLoadEnvironment:
     def test_the_key_of_the_block_selects_the_method(
         self, environments_path: Path, env_name: str, expected_authentication
     ):
-        _name, environment = load_environment(env_name=env_name, environments_path=environments_path)
+        environment = load_environment(env_name=env_name, environments_path=environments_path)
         assert environment.authentication == expected_authentication
 
     def test_the_connection_block_holds_the_session_defaults(self, environments_path: Path):
-        _name, environment = load_environment(environments_path=environments_path)
+        environment = load_environment("dev", environments_path=environments_path)
         assert environment.connection.account == "test-account"
         assert environment.connection.role == "test_role"
         assert environment.connection.region is None
 
     def test_threads_stays_at_the_top_level(self, environments_path: Path):
-        _name, environment = load_environment(env_name="ci", environments_path=environments_path)
+        environment = load_environment(env_name="ci", environments_path=environments_path)
         assert environment.threads == 8
 
     def test_the_name_comes_from_the_key(self, environments_path: Path):
-        name, environment = load_environment(env_name="ci", environments_path=environments_path)
-        assert name == environment.name == "ci"
+        environment = load_environment(env_name="ci", environments_path=environments_path)
+        assert environment.name == "ci"
 
-    def test_the_environment_variable_selects_the_name(
+    def test_the_environment_variable_selects_nothing(
         self, environments_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
+        """The caller names the environment. CLAIR_ENV belongs to the CLI, and the loader ignores it."""
         monkeypatch.setenv("CLAIR_ENV", "ci")
-        assert load_environment(environments_path=environments_path)[0] == "ci"
-        assert load_environment(env_name="dev", environments_path=environments_path)[0] == "dev"
+        assert load_environment("dev", environments_path=environments_path).name == "dev"
 
     def test_a_missing_environment_raises(self, environments_path: Path):
         with pytest.raises(EnvironmentNotFoundError, match="nonexistent"):
@@ -126,7 +126,7 @@ class TestLoadEnvironment:
 
     def test_a_missing_file_raises(self, tmp_path: Path):
         with pytest.raises(EnvironmentsFileNotFoundError):
-            load_environment(environments_path=tmp_path / "nonexistent.yml")
+            load_environment("dev", environments_path=tmp_path / "nonexistent.yml")
 
 
 class TestABlockThatClairRejects:
@@ -168,7 +168,7 @@ class TestABlockThatClairRejects:
     def test_the_block_raises_and_names_the_key(self, tmp_path: Path, block: str, expected_message: str):
         path = write_one_environment(tmp_path, block)
         with pytest.raises(InvalidEnvironmentError, match=expected_message):
-            load_environment(environments_path=path)
+            load_environment("dev", environments_path=path)
 
     def test_the_error_of_an_unknown_key_names_the_routing_file(self, tmp_path: Path):
         """An old routing block in environments.yml belongs in __routing__.py now."""
@@ -176,7 +176,7 @@ class TestABlockThatClairRejects:
             tmp_path, CONNECTION_BLOCK + "  authentication:\n    password: p\n  routing: {}\n"
         )
         with pytest.raises(InvalidEnvironmentError, match=r"__routing__\.py"):
-            load_environment(environments_path=path)
+            load_environment("dev", environments_path=path)
 
 
 @pytest.mark.parametrize(
@@ -195,7 +195,7 @@ def test_the_writer_and_the_loader_give_the_same_environment(
     environment = make_environment(name="dev", authentication=authentication)
     path = write_environments_yml(environment, home_dir=tmp_path)
 
-    _name, loaded = load_environment(environments_path=path)
+    loaded = load_environment("dev", environments_path=path)
 
     assert loaded == environment
     assert isinstance(loaded, Environment)

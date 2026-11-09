@@ -173,7 +173,7 @@ trouve = ReplaceWindowTrouve(
 ## 3. Read the plan
 
 ```bash
-clair compile --run-mode incremental --select example_3_database.derived.daily_revenue
+clair compile --env dev --run-mode incremental --select example_3_database.derived.daily_revenue
 ```
 
 The compiled file shows the clone, the three statements, the cleanup, the test step, and
@@ -182,7 +182,7 @@ the promotion, in the order that clair executes them.
 ## 4. Validate the override
 
 ```bash
-clair validate
+clair validate --env dev
 ```
 
 `clair validate` calls `build_sql()` for each run mode, with a staging address and without

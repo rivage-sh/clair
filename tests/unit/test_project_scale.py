@@ -120,7 +120,7 @@ def seconds_to_compile(project_root: Path) -> float:
     durations: list[float] = []
     for _ in range(2):
         start = time.perf_counter()
-        clair.compile(project_root)
+        clair.compile(project_root, env="dev")
         durations.append(time.perf_counter() - start)
     return min(durations)
 
@@ -130,8 +130,8 @@ def test_the_generated_project_compiles(tmp_path: Path, trouve_count: int) -> No
     """The generated project is valid, thus the time test measures real work."""
     project_root = write_large_project(tmp_path / "project", trouve_count)
 
-    report = clair.validate(project_root)
-    output = clair.compile(project_root)
+    report = clair.validate(project_root, env="dev")
+    output = clair.compile(project_root, env="dev")
 
     schema_count = DATABASE_COUNT * SCHEMAS_PER_DATABASE
     assert report.is_valid

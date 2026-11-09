@@ -64,7 +64,7 @@ clair run --env=dev --select='derived.products.top_reviewed'
 **Name pattern across all databases and schemas:**
 
 ```bash
-clair compile --select='*.*.top_*'
+clair compile --env dev --select='*.*.top_*'
 ```
 
 **Exact database, any schema, name pattern:**

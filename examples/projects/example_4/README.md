@@ -77,7 +77,7 @@ rule that gives an invalid name, and two Trouves that go to one target:
 ```bash
 cd examples/projects/example_4
 
-clair validate
+clair validate --env dev
 clair validate --env prod
 ```
 
@@ -94,7 +94,7 @@ From the repository root:
 cd examples/projects/example_4
 
 # Compile (offline -- resolves the DAG and prints the generated SQL)
-clair compile
+clair compile --env dev
 
 # Run (executes against Snowflake)
 clair run --env dev

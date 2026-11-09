@@ -355,14 +355,14 @@ class TestTheCommands:
 
 
 class TestThePythonApi:
-    """clair.validate(None) starts the root search from the working directory."""
+    """clair.validate(None, env="dev") starts the root search from the working directory."""
 
     def test_none_starts_the_root_search(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         write_flat_project(tmp_path)
         monkeypatch.chdir(tmp_path / "shop")
-        report = clair.validate()
+        report = clair.validate(env="dev")
         assert report.is_valid
 
 

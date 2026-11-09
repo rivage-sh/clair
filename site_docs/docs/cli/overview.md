@@ -10,9 +10,9 @@ first `__routing__.py`, in the same way that git finds `.git`. Thus you run a co
 any directory of the project. `clair init` is the exception, because it makes the root.
 See [Project Layout](../topics/project-layout.md#the-project-root).
 
-All commands share one common flag:
+`compile`, `validate`, `run` and `test` need one flag:
 
-- `--env` — environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py` (default: `CLAIR_ENV` or `dev`)
+- `--env` — the environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py`. You must give it, or set `CLAIR_ENV`. clair selects no default, because an environment without a routing entry writes to the production addresses.
 
 ## Commands
 
@@ -31,7 +31,7 @@ All commands share one common flag:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CLAIR_ENV` | `dev` | Active environment name. This is the same as `--env` on every command. `--env` wins if you set both. |
+| `CLAIR_ENV` | — | The environment name, for each command that takes `--env`. `--env` wins if you set both. The Python API does not read it. |
 | `CLAIR_USER` | — | The `clair init` routing template reads this name. Give each variable that a routing entry reads the `CLAIR_` prefix. |
 | `CLAIR_LOG_FORMAT` | _(text)_ | Set to `json` to write structured JSON logs. Use this in CI/CD pipelines and in container environments that read JSON logs. |
 

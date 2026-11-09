@@ -3,7 +3,7 @@
 Run data quality tests against live Snowflake tables.
 
 ```bash
-clair test [--env NAME] [--select PATTERN]... [--sample [--sample-rows N]] [--threads N]
+clair test --env NAME [--select PATTERN]... [--sample [--sample-rows N]] [--threads N]
 ```
 
 ## Example
@@ -41,7 +41,7 @@ If you give `--sample`, each test reads the sample of its Trouve instead of the 
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--env` | `CLAIR_ENV` or `dev` | Environment name from `~/.clair/environments.yml` |
+| `--env` | required | The environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py`. `CLAIR_ENV` gives it when you omit the flag. |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
 | `--sample` | `false` | Run each test against the sample of its Trouve |
 | `--sample-rows` | `1000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |

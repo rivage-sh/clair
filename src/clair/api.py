@@ -81,8 +81,9 @@ Selectors = Sequence[str] | None
 
 # The environment of an operation. An Environment holds the connection settings.
 # A name selects the routing entry only, thus a function that needs no
-# connection accepts it.
-EnvSpec = Environment | str | None
+# connection accepts it. No operation gives a default: an environment without a
+# routing entry writes to the production addresses.
+EnvSpec = Environment | str
 
 
 def _resolve_project_root(project_dir: str | Path | None) -> Path:
@@ -97,10 +98,10 @@ def _resolve_project_root(project_dir: str | Path | None) -> Path:
 
 
 def _env_name_of(env: EnvSpec) -> str:
-    """Give the environment name of *env*. None gives "dev"."""
+    """Give the environment name of *env*."""
     if isinstance(env, Environment):
         return env.name
-    return env or "dev"
+    return env
 
 
 def _resolve_routing(project_root: Path, env_name: str) -> RoutingEntry | None:
@@ -232,9 +233,9 @@ def _plan(
 def compile(
     project_dir: str | Path | None = None,
     *,
+    env: EnvSpec,
     select: Selectors = None,
     exclude: Selectors = None,
-    env: EnvSpec = None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     use_staging: bool = True,
     sample: bool = False,
@@ -254,7 +255,7 @@ def compile(
         env: An Environment, or an environment name. This function reads no
             file: the caller parses environments.yml, or it makes the
             Environment itself. A name selects the routing entry, and it leaves
-            ``clair.env`` empty in each Trouve module. None gives the name "dev".
+            ``clair.env`` empty in each Trouve module.
         run_mode: The run mode for the new SQL statements.
         use_staging: If True, the plan shows the staged path.
         sample: If True, the plan shows the SQL of ``clair.run(sample=True)``:
@@ -635,7 +636,7 @@ def test(
 def validate(
     project_dir: str | Path | None = None,
     *,
-    env: EnvSpec = None,
+    env: EnvSpec,
 ) -> ValidationReport:
     """Apply the project routing entries to each Trouve. This needs no connection.
 
@@ -643,7 +644,7 @@ def validate(
     address that an author wrote as text. A caller reads the lists, and it
     parses no text::
 
-        report = clair.validate("~/projects/analytics")
+        report = clair.validate("~/projects/analytics", env="dev")
         for collision in report.collisions:
             print(collision.physical_address, collision.logical_addresses)
 
@@ -652,7 +653,7 @@ def validate(
             root search: clair walks up from the working directory to the
             first ``__routing__.py``.
         env: An Environment, or an environment name. This function uses the
-            name only, because it makes no connection. None gives "dev".
+            name only, because it makes no connection.
 
     Returns:
         A ValidationReport. Read ``is_valid`` for the result of the command.

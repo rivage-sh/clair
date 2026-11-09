@@ -1,6 +1,6 @@
 """The tests of `clair validate`, through the Python API.
 
-``clair.validate()`` gives a ValidationReport. Each test reads the lists of that
+``clair.validate(, env="dev")`` gives a ValidationReport. Each test reads the lists of that
 report, thus a test names the Trouve that has the problem, and it parses no
 text. One class at the end covers the exit code of the CLI.
 """
@@ -153,14 +153,14 @@ class TestAValidProject:
     """A project with no problem gives an empty report."""
 
     def test_a_passthrough_entry_is_valid(self, project_with_trouves: Path):
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert report.is_valid is True
         assert report.problem_count == 0
         assert report.routing_file == project_with_trouves / "__routing__.py"
 
     def test_a_valid_entry_is_valid(self, project_with_trouves: Path):
         write_routing(project_with_trouves, DEV_SUFFIX_ENTRY)
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert report.is_valid is True
         assert report.address_problems == []
         assert report.collisions == []
@@ -170,24 +170,24 @@ class TestAValidProject:
         self, project_with_trouves: Path
     ):
         write_routing(project_with_trouves, DEV_SUFFIX_ENTRY)
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert report.env_name == "dev"
         # The description names the entry class, not the base class.
         assert "DevRouting" in report.routing_description
 
     def test_the_report_finds_the_routing_file(self, project_with_trouves: Path):
         write_routing(project_with_trouves, DEV_SUFFIX_ENTRY)
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert report.routing_file == project_with_trouves / "__routing__.py"
 
     def test_every_trouve_routes_and_a_source_is_not_an_exception(
         self, project_with_trouves: Path
     ):
-        assert clair.validate(project_with_trouves).routable_count == 3
+        assert clair.validate(project_with_trouves, env="dev").routable_count == 3
 
     def test_an_empty_project_routes_nothing(self, tmp_path: Path):
         project_dir = write_project_marker(tmp_path / "empty")
-        report = clair.validate(project_dir)
+        report = clair.validate(project_dir, env="dev")
         assert report.routable_count == 0
         assert report.is_valid is True
 
@@ -197,7 +197,7 @@ class TestAddressProblems:
 
     def test_an_invalid_identifier_is_a_problem(self, project_with_trouves: Path):
         write_routing(project_with_trouves, DASH_ENTRY)
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert report.is_valid is False
         assert len(report.address_problems) == 3
 
@@ -205,7 +205,7 @@ class TestAddressProblems:
         self, project_with_trouves: Path
     ):
         write_routing(project_with_trouves, DASH_ENTRY)
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert problem_addresses(report) == [
             "analytics.finance.revenue",
             "analytics.reports.revenue",
@@ -214,7 +214,7 @@ class TestAddressProblems:
 
     def test_each_problem_gives_the_reason(self, project_with_trouves: Path):
         write_routing(project_with_trouves, DASH_ENTRY)
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert all(problem.detail for problem in report.address_problems)
 
     def test_an_entry_that_raises_is_a_problem(
@@ -240,7 +240,7 @@ class TestAddressProblems:
             routing = RoutingTable(entries=[UserRouting()])
             """,
         )
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert report.is_valid is False
         assert len(report.address_problems) == 3
 
@@ -249,7 +249,7 @@ class TestAddressProblems:
     ):
         """Clair cannot make the physical addresses, thus it reports no collision."""
         write_routing(project_with_trouves, DASH_ENTRY)
-        assert clair.validate(project_with_trouves).collisions == []
+        assert clair.validate(project_with_trouves, env="dev").collisions == []
 
 
 class TestCollisions:
@@ -257,7 +257,7 @@ class TestCollisions:
 
     def test_a_collision_makes_the_project_invalid(self, project_with_trouves: Path):
         write_routing(project_with_trouves, COLLIDING_ENTRY)
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert report.is_valid is False
         assert len(report.collisions) == 1
 
@@ -265,7 +265,7 @@ class TestCollisions:
         self, project_with_trouves: Path
     ):
         write_routing(project_with_trouves, COLLIDING_ENTRY)
-        collision = clair.validate(project_with_trouves).collisions[0]
+        collision = clair.validate(project_with_trouves, env="dev").collisions[0]
         assert collision.physical_address == "DEV.shared.revenue"
         assert collision.logical_addresses == [
             "analytics.finance.revenue",
@@ -276,7 +276,7 @@ class TestCollisions:
         self, project_with_trouves: Path
     ):
         write_routing(project_with_trouves, DEV_SUFFIX_ENTRY)
-        assert clair.validate(project_with_trouves).collisions == []
+        assert clair.validate(project_with_trouves, env="dev").collisions == []
 
 
 class TestTextReferences:
@@ -289,7 +289,7 @@ class TestTextReferences:
             '    sql="SELECT * FROM source.raw.orders",\n'
             ")\n"
         )
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert report.is_valid is False
         assert len(report.text_references) == 1
 
@@ -357,7 +357,7 @@ class TestBuildPlans:
             project_with_trouves,
             'Table(sql="SELECT 1 AS x", run_config=Incremental())',
         )
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
 
         assert build_plan_faults(report) == INCREMENTAL_FAULTS
         assert "names no strategy" in report.build_plan_problems[0].detail
@@ -367,7 +367,7 @@ class TestBuildPlans:
             project_with_trouves,
             'RaisingTrouve(sql="SELECT 1 AS x", run_config=Incremental())',
         )
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
 
         assert build_plan_faults(report) == INCREMENTAL_FAULTS
         assert "KeyError" in report.build_plan_problems[0].detail
@@ -380,14 +380,14 @@ class TestBuildPlans:
             project_with_trouves,
             'PhysicalOnlyTrouve(sql="SELECT 1 AS x", run_config=Incremental())',
         )
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
 
         assert build_plan_faults(report) == [("analytics.finance.revenue", "incremental", True)]
 
     def test_a_full_refresh_trouve_makes_no_incremental_plan(self, project_with_trouves: Path):
         """A Trouve gets only the modes that resolve_effective_mode() can give it."""
         write_revenue(project_with_trouves, 'RaisingTrouve(sql="SELECT 1 AS x")')
-        assert clair.validate(project_with_trouves).build_plan_problems == []
+        assert clair.validate(project_with_trouves, env="dev").build_plan_problems == []
 
     def test_the_example_override_is_correct(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -398,14 +398,14 @@ class TestBuildPlans:
         project_root = tmp_path / "example_3"
         shutil.copytree(example_3, project_root)
 
-        assert clair.validate(project_root).build_plan_problems == []
+        assert clair.validate(project_root, env="dev").build_plan_problems == []
 
 
 class TestProblemCount:
     """The count adds the problems of each kind."""
 
     def test_a_valid_project_counts_zero(self, project_with_trouves: Path):
-        assert clair.validate(project_with_trouves).problem_count == 0
+        assert clair.validate(project_with_trouves, env="dev").problem_count == 0
 
     def test_the_count_adds_each_kind(self, project_with_trouves: Path):
         write_routing(project_with_trouves, COLLIDING_ENTRY)
@@ -415,7 +415,7 @@ class TestProblemCount:
             '    sql="SELECT * FROM source.raw.orders",\n'
             ")\n"
         )
-        report = clair.validate(project_with_trouves)
+        report = clair.validate(project_with_trouves, env="dev")
         assert report.problem_count == len(report.collisions) + len(
             report.text_references
         )
@@ -426,7 +426,7 @@ class TestTheEnvironment:
     """The environment selects the routing entry."""
 
     def test_the_default_environment_is_dev(self, project_with_trouves: Path):
-        assert clair.validate(project_with_trouves).env_name == "dev"
+        assert clair.validate(project_with_trouves, env="dev").env_name == "dev"
 
     def test_the_argument_selects_the_environment(self, project_with_trouves: Path):
         write_routing(project_with_trouves, entry_for_environment("prod"))
@@ -447,7 +447,7 @@ class TestTheEnvironment:
     ):
         """The function reads no environment variable. The CLI resolves the name."""
         monkeypatch.setenv("CLAIR_ENV", "staging")
-        assert clair.validate(project_with_trouves).env_name == "dev"
+        assert clair.validate(project_with_trouves, env="dev").env_name == "dev"
 
     def test_a_file_that_omits_the_environment_warns(self, project_with_trouves: Path):
         """An absent entry is almost always a typo, and clair says so."""
@@ -465,7 +465,7 @@ class TestTheEnvironment:
     def test_a_file_that_names_the_environment_gives_no_warning(
         self, project_with_trouves: Path
     ):
-        assert clair.validate(project_with_trouves).unnamed_environment_warning is None
+        assert clair.validate(project_with_trouves, env="dev").unnamed_environment_warning is None
 
 
 class TestBadInput:
@@ -474,7 +474,7 @@ class TestBadInput:
     def test_a_broken_routing_file_raises(self, project_with_trouves: Path):
         write_routing(project_with_trouves, "routing = [\n", prelude=False)
         with pytest.raises(ClairError):
-            clair.validate(project_with_trouves)
+            clair.validate(project_with_trouves, env="dev")
 
     def test_a_duplicate_environment_name_raises(self, project_with_trouves: Path):
         write_routing(
@@ -493,7 +493,7 @@ class TestBadInput:
             """,
         )
         with pytest.raises(ClairError):
-            clair.validate(project_with_trouves)
+            clair.validate(project_with_trouves, env="dev")
 
     def test_a_bad_directory_name_raises(self, tmp_path: Path):
         """A directory that Snowflake cannot use as a name stops validate."""
@@ -504,7 +504,7 @@ class TestBadInput:
             'trouve = Table(sql="SELECT 1 AS x")\n'
         )
         with pytest.raises(ClairError):
-            clair.validate(project_dir)
+            clair.validate(project_dir, env="dev")
 
 
 class TestTheCommand:
@@ -524,22 +524,22 @@ class TestTheCommand:
         assert "staging" in self.run_command(project_with_trouves).output
 
     def test_a_valid_project_exits_zero(self, project_with_trouves: Path):
-        assert self.run_command(project_with_trouves).exit_code == 0
+        assert self.run_command(project_with_trouves, "--env", "dev").exit_code == 0
 
     @pytest.mark.parametrize("entry", [DASH_ENTRY, COLLIDING_ENTRY])
     def test_a_problem_exits_one(self, project_with_trouves: Path, entry: str):
         write_routing(project_with_trouves, entry)
-        assert self.run_command(project_with_trouves).exit_code == 1
+        assert self.run_command(project_with_trouves, "--env", "dev").exit_code == 1
 
     def test_a_broken_routing_file_exits_one(self, project_with_trouves: Path):
         write_routing(project_with_trouves, "routing = [\n", prelude=False)
-        assert self.run_command(project_with_trouves).exit_code == 1
+        assert self.run_command(project_with_trouves, "--env", "dev").exit_code == 1
 
     def test_the_command_shows_the_report(self, project_with_trouves: Path):
         # Make the report first. The CLI runner closes the stream that it
         # captured, and a later call of the API then writes to a closed file.
-        expected = clair.validate(project_with_trouves).render()
-        result = self.run_command(project_with_trouves)
+        expected = clair.validate(project_with_trouves, env="dev").render()
+        result = self.run_command(project_with_trouves, "--env", "dev")
         assert expected in result.output
 
 
@@ -549,16 +549,16 @@ class TestTheReportText:
     def test_a_valid_report_says_that_each_address_is_valid(
         self, project_with_trouves: Path
     ):
-        assert "✓" in clair.validate(project_with_trouves).render()
+        assert "✓" in clair.validate(project_with_trouves, env="dev").render()
 
     def test_a_report_with_one_problem_uses_the_singular_word(
         self, project_with_trouves: Path
     ):
         write_routing(project_with_trouves, COLLIDING_ENTRY)
-        assert "1 problem found." in clair.validate(project_with_trouves).render()
+        assert "1 problem found." in clair.validate(project_with_trouves, env="dev").render()
 
     def test_a_report_with_more_problems_uses_the_plural_word(
         self, project_with_trouves: Path
     ):
         write_routing(project_with_trouves, DASH_ENTRY)
-        assert "3 problems found." in clair.validate(project_with_trouves).render()
+        assert "3 problems found." in clair.validate(project_with_trouves, env="dev").render()

@@ -353,7 +353,7 @@ class TestASampledTestRun:
 
 
 class TestASampledCompile:
-    """``clair.compile(sample=True)`` writes the SQL of a sampled run, with no connection."""
+    """``clair.compile(sample=True, env="dev")`` writes the SQL of a sampled run, with no connection."""
 
     def compiled_sql_of(self, project: Path, address: str, **options: Any) -> str:
         output = clair.compile(project, env="dev", **options)
