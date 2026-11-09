@@ -36,9 +36,10 @@ a later change can trade it away by accident. Do not. It is the reason that clai
 `dbt_project.yml`, and it does three things that no Python API gives you for free:
 
 - **A duplicate address is impossible to write.** Two Trouves cannot hold one address,
-  because two files cannot hold one path. `compute_logical_address()` in
-  `core/discovery.py` reads the last three parts of the path, thus the file system is the
-  name table, and clair maintains none.
+  because two files cannot hold one path. `TrouveAddress.from_file_path()` in
+  `trouves/address.py` reads the last three parts of the path, thus the file system is the
+  name table, and clair maintains none. `Trouve.logical_address` is that address: the
+  file alone decides it, and no run or environment changes it.
 - **A reviewer reads the DAG from `tree`.** The shape of the project is the shape of the
   directory, and a person sees it before they open one file.
 - **The configuration inherits with no configuration language.** `_resolve_config()` moves

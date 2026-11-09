@@ -224,7 +224,7 @@ def collect_routing_problems(
     for trouve in trouves:
         if not trouve.compiled:
             continue
-        logical_address = trouve.compiled.logical_address
+        logical_address = trouve.logical_address
         try:
             route(logical_address, trouve.type, routing)
         except (InvalidRoutingConfigError, InvalidTrouveAddressError) as exc:
@@ -274,7 +274,7 @@ def detect_routing_collisions_of_trouves(
     each Trouve.
     """
     logical_to_physical = {
-        str(trouve.compiled.logical_address): str(trouve.compiled.physical_address)
+        str(trouve.logical_address): str(trouve.compiled.physical_address)
         for trouve in trouves
         if trouve.compiled and trouve.type != TrouveType.SOURCE
     }

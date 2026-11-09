@@ -30,7 +30,7 @@ def compiled_of(trouves: list[TrouveAbc], logical_address: str) -> CompiledAttri
     """Give the compiled attributes of one Trouve, by its logical address."""
     for trouve in trouves:
         assert trouve.compiled is not None
-        if str(trouve.compiled.logical_address) == logical_address:
+        if str(trouve.logical_address) == logical_address:
             return trouve.compiled
     raise AssertionError(f"the project holds no Trouve at {logical_address}")
 

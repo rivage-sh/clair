@@ -529,8 +529,8 @@ def _refuse_a_sampled_production_write(
         trouve = dag.get_trouve(node_name)
         if trouve.type == TrouveType.SOURCE or trouve.compiled is None:
             continue
-        if trouve.compiled.physical_address == trouve.compiled.logical_address:
-            production_addresses.append(str(trouve.compiled.logical_address))
+        if trouve.compiled.physical_address == trouve.logical_address:
+            production_addresses.append(str(trouve.logical_address))
     if production_addresses:
         raise SampleTargetsProductionError(env_name, sorted(production_addresses))
 

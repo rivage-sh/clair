@@ -262,7 +262,7 @@ class TestTheDagOfASampleSql:
         trouves = discover_project(project)
 
         imports_of = {
-            str(trouve.compiled.logical_address): trouve.compiled.imports
+            str(trouve.logical_address): trouve.compiled.imports
             for trouve in trouves
             if trouve.compiled is not None
         }

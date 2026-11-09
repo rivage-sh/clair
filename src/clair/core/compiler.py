@@ -159,7 +159,7 @@ def build_statements(
     physical_address = trouve.compiled.physical_address
 
     if not use_staging:
-        plan = trouve.build_sql(effective_mode, run_id=run_id)
+        plan = trouve.build_sql(effective_mode, run_id=run_id, target_address=physical_address)
         return [
             build_type_change_comment(wanted_object_type(trouve), physical_address),
             *plan.statements,
@@ -180,7 +180,7 @@ def build_statements(
         statements.append(
             build_clone_statement(physical_address, staging_address, table_options=table_options)
         )
-    plan = trouve.build_sql(effective_mode, run_id=run_id, staging_address=staging_address)
+    plan = trouve.build_sql(effective_mode, run_id=run_id, target_address=staging_address)
     statements.extend(plan.statements)
     statements.extend(
         build_cluster_by_statements(
@@ -287,13 +287,13 @@ def write_compile_output(
                     pass
 
             input_lines = [
-                f"#   {parameter_name}  ->  {upstream.physical_address}"
+                f"#   {parameter_name}  ->  {upstream.require_compiled().physical_address}"
                 for parameter_name, upstream in zip(
                     trouve.parameter_names(), trouve.upstream_trouves()
                 )
             ]
 
-            header = f"# clair compiled: {trouve.physical_address}\n# execution_type: pandas\n"
+            header = f"# clair compiled: {trouve.require_compiled().physical_address}\n# execution_type: pandas\n"
             if input_lines:
                 header += "# inputs:\n" + "\n".join(input_lines) + "\n"
             header += "\n"

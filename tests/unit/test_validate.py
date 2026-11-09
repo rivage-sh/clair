@@ -306,18 +306,18 @@ from clair import BuildPlan, RunMode, Table, TrouveAddress
 class PhysicalOnlyTrouve(Table):
     """An override that writes to the physical address, also in a staged run."""
 
-    def build_sql(self, effective_mode, run_id, staging_address=None, target_column_names=None):
+    def build_sql(self, effective_mode, run_id, target_address, target_column_names=None):
         if effective_mode == RunMode.FULL_REFRESH:
-            return super().build_sql(effective_mode, run_id, staging_address)
-        return BuildPlan(statements=[f"DELETE FROM {self.physical_address}"])
+            return super().build_sql(effective_mode, run_id, target_address)
+        return BuildPlan(statements=[f"DELETE FROM {self.require_compiled().physical_address}"])
 
 
 class RaisingTrouve(Table):
     """An override with a bug in its incremental branch."""
 
-    def build_sql(self, effective_mode, run_id, staging_address=None, target_column_names=None):
+    def build_sql(self, effective_mode, run_id, target_address, target_column_names=None):
         if effective_mode == RunMode.FULL_REFRESH:
-            return super().build_sql(effective_mode, run_id, staging_address)
+            return super().build_sql(effective_mode, run_id, target_address)
         raise KeyError("window_column")
 '''
 
@@ -372,7 +372,7 @@ class TestBuildPlans:
         assert build_plan_faults(report) == INCREMENTAL_FAULTS
         assert "KeyError" in report.build_plan_problems[0].detail
 
-    def test_an_override_that_ignores_the_staging_address_is_a_problem(
+    def test_an_override_that_ignores_the_target_address_is_a_problem(
         self, project_with_trouves: Path
     ):
         """Without staging, the physical address is correct. With staging, the tests come too late."""

@@ -125,7 +125,7 @@ def trouves_of(project_path: Path) -> list[TrouveAbc]:
 def source_logical_names(trouves: list[TrouveAbc]) -> list[str]:
     """Give the logical name of each SOURCE Trouve."""
     return [
-        str(trouve.compiled.logical_address)
+        str(trouve.logical_address)
         for trouve in trouves
         if trouve.compiled is not None and trouve.type == TrouveType.SOURCE
     ]
@@ -134,7 +134,7 @@ def source_logical_names(trouves: list[TrouveAbc]) -> list[str]:
 def model_logical_names(trouves: list[TrouveAbc]) -> list[str]:
     """Give the logical name of each Trouve that clair builds."""
     return [
-        str(trouve.compiled.logical_address)
+        str(trouve.logical_address)
         for trouve in trouves
         if trouve.compiled is not None and trouve.type != TrouveType.SOURCE
     ]

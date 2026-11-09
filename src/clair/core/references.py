@@ -214,7 +214,7 @@ def _reference_addresses_for_selection(
         if trouve.type == TrouveType.SOURCE or this_run_builds_it:
             reference_addresses[id(trouve)] = trouve.compiled.physical_address
         else:
-            reference_addresses[id(trouve)] = trouve.compiled.logical_address
+            reference_addresses[id(trouve)] = trouve.logical_address
     return reference_addresses
 
 

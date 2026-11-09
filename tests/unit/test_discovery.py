@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-from clair.core.discovery import (
-    compute_logical_address,
-    discover_project,
-)
+from clair.core.discovery import discover_project
+from clair.core.project_imports import files_that_define
 from clair.core.references import recompile_for_selection
 from clair.environments.routing import detect_routing_collisions_of_trouves
-from clair.exceptions import ProjectDiscoveryError
+from clair.exceptions import ProjectDiscoveryError, TrouveFileNotFoundError
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX
+from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
 from clair.trouves.trouve import CompiledAttributes, SqlTrouve, Table, TrouveAbc, TrouveType
@@ -28,20 +28,23 @@ from tests.helpers import (
 )
 
 
-class TestComputeLogicalAddress:
-    def test_standard_three_level(self):
-        file_path = Path("/some/project/root/analytics/revenue/daily_orders.py")
-        assert str(compute_logical_address(file_path)) == "analytics.revenue.daily_orders"
-
-    def test_deep_path(self):
-        file_path = Path("/a/b/c/d/database/schema/table.py")
-        assert str(compute_logical_address(file_path)) == "database.schema.table"
+class TestTheAddressOfAFilePath:
+    @pytest.mark.parametrize(
+        ("file_path", "expected_address"),
+        [
+            ("/some/project/root/analytics/revenue/daily_orders.py", "analytics.revenue.daily_orders"),
+            ("/a/b/c/d/database/schema/table.py", "database.schema.table"),
+            ("database/schema/table.py", "database.schema.table"),
+        ],
+    )
+    def test_the_last_three_parts_give_the_address(self, file_path: str, expected_address: str):
+        assert str(TrouveAddress.from_file_path(Path(file_path))) == expected_address
 
 
 class TestDiscovery:
     def test_discovers_simple_project(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        names = {str(t.physical_address) for t in trouves}
+        names = {str(t.require_compiled().physical_address) for t in trouves}
 
         assert "source.raw.orders" in names
         assert "analytics.revenue.daily_orders" in names
@@ -49,46 +52,46 @@ class TestDiscovery:
 
     def test_source_trouve_has_correct_type(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        source = next(t for t in trouves if str(t.physical_address) == "source.raw.orders")
+        source = next(t for t in trouves if str(t.require_compiled().physical_address) == "source.raw.orders")
         assert source.type == TrouveType.SOURCE
 
     def test_table_trouve_has_correct_type(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if str(t.physical_address) == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if str(t.require_compiled().physical_address) == "analytics.revenue.daily_orders")
         assert table.type == TrouveType.TABLE
 
     def test_address_set_on_compiled(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        source = next(t for t in trouves if str(t.physical_address) == "source.raw.orders")
-        assert str(source.physical_address) == "source.raw.orders"
+        source = next(t for t in trouves if str(t.require_compiled().physical_address) == "source.raw.orders")
+        assert str(source.require_compiled().physical_address) == "source.raw.orders"
 
     def test_import_detection(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if str(t.physical_address) == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if str(t.require_compiled().physical_address) == "analytics.revenue.daily_orders")
         assert table.compiled is not None
         assert "source.raw.orders" in table.compiled.imports
 
     def test_resolved_sql_contains_address(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if str(t.physical_address) == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if str(t.require_compiled().physical_address) == "analytics.revenue.daily_orders")
         assert table.compiled is not None
         assert "source.raw.orders" in resolved_sql_of(table)
 
     def test_raw_sql_contains_placeholder(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if str(t.physical_address) == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if str(t.require_compiled().physical_address) == "analytics.revenue.daily_orders")
         assert isinstance(table, Table)
         assert TROUVE_PLACEHOLDER_PREFIX in table.sql
 
     def test_config_resolution(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        table = next(t for t in trouves if str(t.physical_address) == "analytics.revenue.daily_orders")
+        table = next(t for t in trouves if str(t.require_compiled().physical_address) == "analytics.revenue.daily_orders")
         assert table.compiled is not None
         assert table.compiled.config.warehouse == "reporting_wh"
 
     def test_skips_underscore_files(self, simple_project: Path):
         trouves = discover_project(simple_project)
-        names = {str(t.physical_address) for t in trouves}
+        names = {str(t.require_compiled().physical_address) for t in trouves}
         assert not any("schema_config" in name for name in names)
         assert not any("database_config" in name for name in names)
 
@@ -104,7 +107,7 @@ class TestDiscovery:
             trouve = Source()
         """))
         trouves = discover_project(tmp_path)
-        names = {str(t.compiled.logical_address) for t in trouves if t.compiled}
+        names = {str(t.logical_address) for t in trouves if t.compiled}
         assert "mydb.myschema.real_table" in names
         assert not any("_ignored_table" in name for name in names)
 
@@ -122,7 +125,7 @@ class TestDiscovery:
             trouve = Source()
         """))
         trouves = discover_project(tmp_path)
-        names = {str(t.compiled.logical_address) for t in trouves if t.compiled}
+        names = {str(t.logical_address) for t in trouves if t.compiled}
         assert "mydb.myschema.real_table" in names
         assert not any("_ignored_schema" in name for name in names)
 
@@ -143,7 +146,7 @@ class TestDiscoveryWithRouting:
         trouves = discover_project(simple_project, routing=routing)
         table = next(t for t in trouves if t.type == TrouveType.TABLE)
 
-        assert str(table.physical_address) == "MYDEV.revenue.daily_orders"
+        assert str(table.require_compiled().physical_address) == "MYDEV.revenue.daily_orders"
 
     def test_database_override_reroutes_a_source_too(self, simple_project: Path):
         """The entry sees every Trouve, thus this entry moves the SOURCE too."""
@@ -151,7 +154,7 @@ class TestDiscoveryWithRouting:
         trouves = discover_project(simple_project, routing=routing)
         source = next(t for t in trouves if t.type == TrouveType.SOURCE)
 
-        assert str(source.physical_address) == "MYDEV.raw.orders"
+        assert str(source.require_compiled().physical_address) == "MYDEV.raw.orders"
 
     def test_a_source_aware_entry_keeps_the_source(self, simple_project: Path):
         """An entry that examines the type keeps the SOURCE where it is."""
@@ -160,8 +163,8 @@ class TestDiscoveryWithRouting:
         source = next(t for t in trouves if t.type == TrouveType.SOURCE)
         table = next(t for t in trouves if t.type == TrouveType.TABLE)
 
-        assert str(source.physical_address) == "source.raw.orders"
-        assert str(table.physical_address) == "MYDEV.revenue.daily_orders"
+        assert str(source.require_compiled().physical_address) == "source.raw.orders"
+        assert str(table.require_compiled().physical_address) == "MYDEV.revenue.daily_orders"
 
     def test_database_override_logical_address_preserved(self, simple_project: Path):
         routing = DatabaseOverrideRouting(database_name="MYDEV")
@@ -169,7 +172,7 @@ class TestDiscoveryWithRouting:
         table = next(t for t in trouves if t.type == TrouveType.TABLE)
 
         assert table.compiled is not None
-        assert str(table.compiled.logical_address) == "analytics.revenue.daily_orders"
+        assert str(table.logical_address) == "analytics.revenue.daily_orders"
 
     def test_database_override_sql_uses_physical_addresses(self, simple_project: Path):
         routing = DatabaseOverrideRouting(database_name="MYDEV")
@@ -192,14 +195,14 @@ class TestDiscoveryWithRouting:
         trouves = discover_project(simple_project, routing=routing)
         table = next(t for t in trouves if t.type == TrouveType.TABLE)
 
-        assert str(table.physical_address) == "DEV.myschema.ANALYTICS_REVENUE_DAILY_ORDERS"
+        assert str(table.require_compiled().physical_address) == "DEV.myschema.ANALYTICS_REVENUE_DAILY_ORDERS"
 
     def test_no_routing_logical_and_address_equal(self, simple_project: Path):
         trouves = discover_project(simple_project, routing=None)
 
         for t in trouves:
             assert t.compiled is not None
-            assert t.physical_address == t.compiled.logical_address
+            assert t.require_compiled().physical_address == t.logical_address
 
     def test_routing_collision_continues_and_is_detectable(self, tmp_path: Path):
         source_dir = tmp_path / "shared" / "raw"
@@ -288,7 +291,7 @@ class TestRecompileForSelection:
         routing = DatabaseOverrideRouting(database_name="omer")
         trouves = discover_project(project, routing=routing)
 
-        daily = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.derived.daily")
+        daily = next(t for t in trouves if t.compiled and str(t.logical_address) == "mydb.derived.daily")
         assert daily.compiled is not None
         # Before the selection, refined.events keeps its logical address.
         assert "mydb.refined.events" in resolved_sql_of(daily)
@@ -305,7 +308,7 @@ class TestRecompileForSelection:
         selected = {"omer.derived.daily", "omer.derived.top"}
         recompile_for_selection(trouves, selected)
 
-        daily = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.derived.daily")
+        daily = next(t for t in trouves if t.compiled and str(t.logical_address) == "mydb.derived.daily")
         assert daily.compiled is not None
         # The selection omits refined.events, and thus it keeps its logical address.
         assert "mydb.refined.events" in resolved_sql_of(daily)
@@ -320,7 +323,7 @@ class TestRecompileForSelection:
         selected = {"omer.derived.daily", "omer.derived.top"}
         recompile_for_selection(trouves, selected)
 
-        top = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.derived.top")
+        top = next(t for t in trouves if t.compiled and str(t.logical_address) == "mydb.derived.top")
         assert top.compiled is not None
         # The selection contains daily, and thus top reads omer.derived.daily.
         assert "omer.derived.daily" in resolved_sql_of(top)
@@ -340,7 +343,7 @@ class TestRecompileForSelection:
         }
         recompile_for_selection(trouves, selected)
 
-        daily = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.derived.daily")
+        daily = next(t for t in trouves if t.compiled and str(t.logical_address) == "mydb.derived.daily")
         assert daily.compiled is not None
         # The selection contains refined.events, and thus daily reads omer.refined.events.
         assert "omer.refined.events" in resolved_sql_of(daily)
@@ -363,7 +366,7 @@ class TestRecompileForSelection:
         }
         recompile_for_selection(trouves, selected)
 
-        refined = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.refined.events")
+        refined = next(t for t in trouves if t.compiled and str(t.logical_address) == "mydb.refined.events")
         assert refined.compiled is not None
         assert "omer.source.events" in resolved_sql_of(refined)
         assert "mydb.source.events" not in resolved_sql_of(refined)
@@ -410,7 +413,7 @@ class TestRecompileForSelection:
 
         report = next(
             t for t in trouves
-            if t.compiled and str(t.compiled.logical_address) == "mydb.refined.report"
+            if t.compiled and str(t.logical_address) == "mydb.refined.report"
         )
         assert report.compiled is not None
         sql = resolved_sql_of(report)
@@ -433,7 +436,7 @@ class TestRecompileForSelection:
         }
         recompile_for_selection(trouves, selected)
 
-        refined = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.refined.events")
+        refined = next(t for t in trouves if t.compiled and str(t.logical_address) == "mydb.refined.events")
         assert refined.compiled is not None
         assert "mydb.source.events" in resolved_sql_of(refined)
         assert "omer.source.events" not in resolved_sql_of(refined)
@@ -444,7 +447,7 @@ class TestRecompileForSelection:
         trouves = discover_project(project, routing=None)
 
         sql_before = {
-            t.compiled.logical_address: resolved_sql_of(t)
+            t.logical_address: resolved_sql_of(t)
             for t in trouves if isinstance(t, SqlTrouve) and t.compiled
         }
         selected = {str(t.compiled.physical_address) for t in trouves if t.compiled}
@@ -452,7 +455,7 @@ class TestRecompileForSelection:
 
         for t in trouves:
             if isinstance(t, SqlTrouve) and t.compiled:
-                assert resolved_sql_of(t) == sql_before[t.compiled.logical_address]
+                assert resolved_sql_of(t) == sql_before[t.logical_address]
 
     def test_write_target_is_always_physical(self, tmp_path: Path):
         """The write target, physical_address, is always routed, whatever the selection is."""
@@ -501,7 +504,7 @@ class TestRecompileForSelectionTestSql:
         project = self._make_project_with_test_sql(tmp_path)
         trouves = discover_project(project)
 
-        orders = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.refined.orders")
+        orders = next(t for t in trouves if t.compiled and str(t.logical_address) == "mydb.refined.orders")
         test = orders.tests[0]
         assert isinstance(test, TestSql)
 
@@ -519,7 +522,7 @@ class TestRecompileForSelectionTestSql:
         routing = DatabaseOverrideRouting(database_name="dev")
         trouves = discover_project(project, routing=routing)
 
-        orders = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.refined.orders")
+        orders = next(t for t in trouves if t.compiled and str(t.logical_address) == "mydb.refined.orders")
         assert orders.compiled is not None
 
         # The selection holds orders only. A SOURCE is never in a selection.
@@ -568,7 +571,7 @@ class TestRecompileForSelectionTestSql:
         }
         recompile_for_selection(trouves, selected)
 
-        top = next(t for t in trouves if t.compiled and str(t.compiled.logical_address) == "mydb.derived.top")
+        top = next(t for t in trouves if t.compiled and str(t.logical_address) == "mydb.derived.top")
         test = top.tests[0]
         assert isinstance(test, TestSql)
         # The selection contains base, and thus the test SQL holds dev.refined.base.
@@ -651,7 +654,7 @@ class TestTwoProjectsInOneProcess:
             trouve
             for trouve in trouves
             if trouve.compiled is not None
-            and str(trouve.compiled.logical_address) == "mydb.refined.checked"
+            and str(trouve.logical_address) == "mydb.refined.checked"
         ]
         assert len(checked) == 1
         assert "second_project" in resolved_sql_of(checked[0])
@@ -716,7 +719,7 @@ class TestTheDepthOfATrouveFile:
 
         trouves = discover_project(tmp_path)
 
-        assert [str(_compiled_of(trouve).logical_address) for trouve in trouves] == [
+        assert [str(trouve.logical_address) for trouve in trouves] == [
             "mydb.myschema.orders"
         ]
 
@@ -728,7 +731,7 @@ class TestTheDepthOfATrouveFile:
 
         trouves = discover_project(tmp_path)
 
-        assert [str(_compiled_of(trouve).logical_address) for trouve in trouves] == [
+        assert [str(trouve.logical_address) for trouve in trouves] == [
             "mydb.myschema.orders"
         ]
 
@@ -824,3 +827,61 @@ class TestAFaultStopsDiscovery:
             discover_project(tmp_path)
 
         assert len(fault.value.faults) == 2
+
+
+class TestTheLogicalAddress:
+    """The file alone decides the logical address. No discovery and no environment take part."""
+
+    def test_a_plain_import_gives_the_address_of_its_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        _write_trouve(tmp_path, "analytics/revenue/orders.py")
+        monkeypatch.syspath_prepend(str(tmp_path))
+
+        trouve = importlib.import_module("analytics.revenue.orders").trouve
+
+        assert trouve.compiled is None
+        assert str(trouve.logical_address) == "analytics.revenue.orders"
+
+    def test_a_trouve_without_a_file_raises(self):
+        with pytest.raises(TrouveFileNotFoundError) as raised:
+            _ = Table(sql="select 1 as n").logical_address
+        assert raised.value.file_paths == []
+
+    def test_two_files_that_hold_one_object_raise_and_name_both(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        _write_trouve(tmp_path, "analytics/revenue/orders.py")
+        copy_path = tmp_path / "analytics" / "revenue" / "orders_copy.py"
+        copy_path.write_text("from analytics.revenue.orders import trouve\n")
+        monkeypatch.syspath_prepend(str(tmp_path))
+
+        trouve = importlib.import_module("analytics.revenue.orders_copy").trouve
+
+        with pytest.raises(TrouveFileNotFoundError) as raised:
+            _ = trouve.logical_address
+        assert [Path(file_path).name for file_path in raised.value.file_paths] == [
+            "orders.py",
+            "orders_copy.py",
+        ]
+
+    def test_the_main_module_is_never_a_trouve_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A notebook or a script that imports a Trouve holds it as `trouve` too."""
+        _write_trouve(tmp_path, "analytics/revenue/orders.py")
+        monkeypatch.syspath_prepend(str(tmp_path))
+        trouve = importlib.import_module("analytics.revenue.orders").trouve
+        monkeypatch.setattr(sys.modules["__main__"], "trouve", trouve, raising=False)
+
+        assert str(trouve.logical_address) == "analytics.revenue.orders"
+
+    def test_discovery_and_the_module_table_give_one_address(self, tmp_path: Path):
+        _write_trouve(tmp_path, "analytics/revenue/orders.py")
+        _write_trouve(tmp_path, "analytics/refined/customers.py")
+
+        trouves = discover_project(tmp_path)
+
+        for trouve in trouves:
+            (file_path,) = files_that_define(trouve)
+            assert TrouveAddress.from_file_path(file_path) == trouve.logical_address

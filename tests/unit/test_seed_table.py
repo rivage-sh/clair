@@ -135,7 +135,7 @@ class TestSeedTableDiscovery:
         seeds = [trouve for trouve in trouves if isinstance(trouve, SeedTable)]
         assert len(seeds) == 1
         assert seeds[0].compiled is not None
-        assert str(seeds[0].compiled.logical_address) == "mydb.reference.tax_rates"
+        assert str(seeds[0].logical_address) == "mydb.reference.tax_rates"
 
     def test_the_seed_compiles_with_no_input_address(self, tmp_path: Path):
         project_root = _make_seed_project(tmp_path)
@@ -155,7 +155,7 @@ class TestSeedTableDiscovery:
         orders = next(
             trouve for trouve in trouves
             if trouve.compiled
-            and str(trouve.compiled.logical_address).endswith("orders")
+            and str(trouve.logical_address).endswith("orders")
         )
 
         assert orders.compiled is not None

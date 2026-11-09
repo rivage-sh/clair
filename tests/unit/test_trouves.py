@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from clair.exceptions import TrouveNotCompiledError
 from clair.trouves._refs import TROUVE_PLACEHOLDER_PREFIX, _registry, clear
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
@@ -25,7 +26,7 @@ from clair.trouves.test import (
     TestUniqueColumns,
 )
 from clair.trouves.trouve import CompiledSql, ExecutionType, Source, Table, TrouveAbc, TrouveType, View
-from tests.helpers import compile_trouve
+from tests.helpers import compile_trouve, unstaged_plan
 
 # ---------------------------------------------------------------------------
 # The helper functions.
@@ -41,10 +42,9 @@ def _compiled_sql(
     """Make a CompiledSql with good default values."""
     return CompiledSql(
         physical_address=TrouveAddress.parse(physical_address),
-        logical_address=TrouveAddress.parse(physical_address),
         resolved_sql=resolved_sql,
-        file_path=Path("/fake/db/schema/my_table.py"),
-        module_name="db.schema.my_table",
+        file_path=Path(f"/fake/{physical_address.replace('.', '/')}.py"),
+        module_name=physical_address,
         imports=[],
         config=ResolvedConfig(),
     )
@@ -164,14 +164,13 @@ class TestTrouveConstruction:
         trouve = compile_trouve(Source())
         assert trouve.is_compiled is True
 
-    def test_address_raises_when_not_compiled(self):
-        trouve = Source()
-        with pytest.raises(RuntimeError, match="physical_address is not set"):
-            _ = trouve.physical_address
+    def test_the_record_of_the_run_raises_when_not_compiled(self):
+        with pytest.raises(TrouveNotCompiledError):
+            Source().require_compiled()
 
     def test_address_returns_compiled_value(self):
         trouve = compile_trouve(Source(), "prod.analytics.orders")
-        assert str(trouve.physical_address) == "prod.analytics.orders"
+        assert str(trouve.require_compiled().physical_address) == "prod.analytics.orders"
 
 
 class TestTableIncremental:
@@ -263,20 +262,13 @@ class TestRefsRegistration:
 # ---------------------------------------------------------------------------
 
 
-class TestBuildSqlNotCompiled:
-    def test_raises_runtime_error_when_not_compiled(self):
-        trouve = Table(sql="SELECT 1")
-        with pytest.raises(RuntimeError, match="build_sql\\(\\) needs a compiled Trouve"):
-            trouve.build_sql(RunMode.FULL_REFRESH, "run_001")
-
-
 class TestBuildSqlFullRefresh:
     def test_table_creates_table(self):
         trouve = _compiled_trouve(
             physical_address="prod.analytics.orders",
             resolved_sql="SELECT * FROM raw.orders",
         )
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001").all_statements
+        statements = unstaged_plan(trouve, RunMode.FULL_REFRESH, "run_001").all_statements
 
         assert len(statements) == 1
         assert statements[0] == (
@@ -290,7 +282,7 @@ class TestBuildSqlFullRefresh:
             physical_address="prod.analytics.orders_view",
             resolved_sql="SELECT * FROM raw.orders",
         )
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001").all_statements
+        statements = unstaged_plan(trouve, RunMode.FULL_REFRESH, "run_001").all_statements
 
         assert len(statements) == 1
         assert statements[0] == (
@@ -301,7 +293,7 @@ class TestBuildSqlFullRefresh:
     def test_resolved_sql_is_stripped(self):
         """The code removes each space at the start and at the end of resolved_sql."""
         trouve = _compiled_trouve(resolved_sql="  \n  SELECT 1  \n  ")
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, "run_001").all_statements
+        statements = unstaged_plan(trouve, RunMode.FULL_REFRESH, "run_001").all_statements
         assert "SELECT 1" in statements[0]
         assert "  \n  SELECT 1" not in statements[0]
 
@@ -313,7 +305,7 @@ class TestBuildSqlAppend:
             resolved_sql="SELECT * FROM staging.events WHERE ts > '2024-01-01'",
             run_config=Incremental(strategy=Append()),
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_002").all_statements
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_002").all_statements
 
         assert len(statements) == 1
         assert statements[0].startswith("INSERT INTO prod.analytics.events")
@@ -337,7 +329,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
             columns=self.columns,
             run_config=self.run_config,
         )
-        self.statements = self.trouve.build_sql(RunMode.INCREMENTAL, "abc123").all_statements
+        self.statements = unstaged_plan(self.trouve, RunMode.INCREMENTAL, "abc123").all_statements
 
     def test_produces_three_statements(self):
         assert len(self.statements) == 3
@@ -387,7 +379,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_99").all_statements
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_99").all_statements
         merge_stmt = statements[1]
 
         assert "ON target.region = source.region AND target.product_id = source.product_id" in merge_stmt
@@ -405,7 +397,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_99").all_statements
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_99").all_statements
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -431,7 +423,7 @@ class TestBuildSqlUpsertWithJoinSql:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_j1").all_statements
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_j1").all_statements
         merge_stmt = statements[1]
 
         assert "ON target.id = source.id AND target.name IS NOT NULL" in merge_stmt
@@ -450,7 +442,7 @@ class TestBuildSqlUpsertWithJoinSql:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_j2").all_statements
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_j2").all_statements
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -475,7 +467,7 @@ class TestBuildSqlUpsertColumnOverrides:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_uc1").all_statements
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_uc1").all_statements
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -496,7 +488,7 @@ class TestBuildSqlUpsertColumnOverrides:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_uc2").all_statements
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_uc2").all_statements
         merge_stmt = statements[1]
 
         assert "INSERT (id, name)" in merge_stmt
@@ -518,7 +510,7 @@ class TestBuildSqlUpsertColumnOverrides:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "run_uc3").all_statements
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_uc3").all_statements
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -535,7 +527,7 @@ class TestBuildSqlUpsertErrors:
             run_config=run_config,
         )
         with pytest.raises(ValueError, match="the upsert strategy needs columns on the Trouve"):
-            trouve.build_sql(RunMode.INCREMENTAL, "run_err")
+            unstaged_plan(trouve, RunMode.INCREMENTAL, "run_err")
 
 
 class TestBuildSqlStagingTableName:
@@ -548,7 +540,7 @@ class TestBuildSqlStagingTableName:
             columns=columns,
             run_config=run_config,
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, "unique_run_42").all_statements
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "unique_run_42").all_statements
 
         staging_name = "db.schema.target_table__clair_new_rows_unique_run_42"
         assert staging_name in statements[0]

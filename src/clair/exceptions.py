@@ -146,6 +146,39 @@ class CompileError(ClairError):
     """Clair raises this error when it cannot compile the SQL."""
 
 
+class TrouveNotCompiledError(ClairError):
+    """A caller read the compiled attributes of a Trouve that discovery did not load."""
+
+    def __init__(self, trouve_class_name: str) -> None:
+        self.trouve_class_name = trouve_class_name
+        super().__init__(
+            f"This {trouve_class_name} holds no compiled attributes. Discovery sets them "
+            "for each Trouve of a project, in clair.compile(), clair.run() and clair.test()."
+        )
+
+
+class TrouveFileNotFoundError(ClairError):
+    """Clair cannot find the one file that defines a Trouve, thus the Trouve has no logical address."""
+
+    def __init__(self, trouve_class_name: str, file_paths: list[str]) -> None:
+        self.trouve_class_name = trouve_class_name
+        self.file_paths = file_paths
+        if file_paths:
+            detail = (
+                "Each of these modules holds the object as `trouve`: "
+                f"{', '.join(file_paths)}. Give the object to one file only."
+            )
+        else:
+            detail = (
+                "No imported module holds the object as `trouve`. A Trouve that a "
+                "notebook or a test makes has no file. Import it from its Trouve file."
+            )
+        super().__init__(
+            f"Clair cannot find the file of this {trouve_class_name}, thus it cannot "
+            f"give its logical address. {detail}"
+        )
+
+
 class RunError(ClairError):
     """Clair raises this error for a fatal runner fault, not for a Trouve failure."""
 
