@@ -24,15 +24,17 @@ they need no home directory: the CLI parses ~/.clair/environments.yml, and it
 gives the object to these functions.
 
 Each function gives a result object with the complete data of the operation. No
-function writes to stdout, and no function stops the process. A fault raises a
-:class:`~clair.exceptions.ClairError`.
+function writes to stdout, no function writes an artifact file, and no function
+stops the process. A fault raises a :class:`~clair.exceptions.ClairError`. The
+caller decides where the bytes go: the CLI gives each result to a writer of
+:mod:`clair.core.artifacts`.
 """
 
 from __future__ import annotations
 
 import shutil
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -48,7 +50,7 @@ from clair.core.artifacts import (
     parse_before_spec,
     select_runs_to_remove,
 )
-from clair.core.compiler import CompileOutput, write_compile_output
+from clair.core.compiler import CompileOutput, build_compile_output
 from clair.core.dag import ClairDag, build_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.references import recompile_for_selection
@@ -220,10 +222,11 @@ def compile(
     sample: bool = False,
     sample_rows: int = DEFAULT_SAMPLE_ROWS,
 ) -> CompileOutput:
-    """Compile a project and write the SQL to the artifacts directory.
+    """Compile a project, and give the SQL that a run sends. This writes no file.
 
     This function needs no warehouse connection. It gives you the statements of
-    each Trouve, the physical address, and the staging address.
+    each Trouve, the physical address, and the staging address. Give the output
+    to :func:`clair.core.artifacts.write_compile_output` to write the files.
 
     Args:
         project_dir: The root directory of the project. None starts the
@@ -276,24 +279,22 @@ def compile(
         sample_rows=plan.sample_rows,
     )
 
-    output = write_compile_output(
-        dag,
-        plan.selected,
-        project_root,
-        on_node_compiled=lambda node_info: logger.info(
+    output = build_compile_output(
+        dag, plan.selected, run_mode=run_mode, run_id=run_id, use_staging=use_staging
+    ).model_copy(
+        update={
+            "project_root": project_root,
+            "env_name": env_name,
+            "sample_rows": plan.sample_rows,
+        }
+    )
+    for node_info in output.compiled_nodes:
+        logger.info(
             "compile.node",
             trouve=str(node_info.addresses.physical),
             dependencies=node_info.dependencies,
-            artifact_file=str(node_info.artifact_path),
-        ),
-        run_mode=run_mode,
-        run_id=run_id,
-        use_staging=use_staging,
-    )
-    output = output.model_copy(
-        update={"env_name": env_name, "sample_rows": plan.sample_rows}
-    )
-    logger.info("compile.complete", run_id=run_id, artifacts_dir=str(output.artifacts_dir))
+        )
+    logger.info("compile.complete", run_id=run_id, trouves=len(output.compiled_nodes))
     return output
 
 
@@ -309,6 +310,7 @@ def run(
     sample_rows: int = DEFAULT_SAMPLE_ROWS,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
+    on_result: Callable[[str, RunResult], object] | None = None,
 ) -> RunSummary:
     """Run the Trouves of a project on the warehouse, and test them.
 
@@ -342,6 +344,11 @@ def run(
         adapter: A connected warehouse adapter. The default makes a
             SnowflakeAdapter, connects it, and closes it at the end. A parallel
             run opens one more connection for each other thread.
+        on_result: An optional callback. Clair calls it with the run ID and
+            the RunResult of each Trouve, when the Trouve completes, in the
+            thread that called this function. The CLI gives
+            :func:`clair.core.artifacts.write_run_result`, thus the artifacts
+            directory fills while the run continues. None writes no file.
 
     Returns:
         A RunSummary with one RunResult for each Trouve. Each result holds the
@@ -394,9 +401,6 @@ def run(
 
     if sample:
         logger.info("run.sample", sample_rows=sample_rows)
-    write_compile_output(
-        dag, selected, project_root, run_mode=run_mode, run_id=run_id, use_staging=use_staging
-    )
 
     # An empty account_locator leaves each query URL empty.
     if not environment.connection.account_locator:
@@ -464,6 +468,8 @@ def run(
                     update={"test_results": test_results_of_node[str(result.addresses.physical)]}
                 )
             results.append(result)
+            if on_result is not None:
+                on_result(run_id, result)
     finally:
         if owns_adapter:
             warehouse_adapter.close()

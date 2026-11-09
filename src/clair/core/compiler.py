@@ -1,16 +1,14 @@
-"""The compiler. It completes the SQL and writes the compile output."""
+"""The compiler. It completes the SQL of each selected Trouve, and it writes no file."""
 
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel
 
 from clair.core.comments import build_comment_statements
 from clair.core.dag import ClairDag, addresses_of
-from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.core.runner import resolve_effective_mode, wanted_object_type
 from clair.core.staging import (
     build_clone_statement,
@@ -42,7 +40,9 @@ class CompiledNodeInfo(BaseModel):
         dependencies: The physical address of each upstream Trouve.
         sql: The statements, in the order that clair executes them. A pandas
             Trouve has no statements.
-        artifact_path: The file that holds the compiled text.
+        python_source: The Python text of a pandas Trouve: a header that names
+            each input, the imports of its module, and its function. None for
+            a SQL Trouve.
     """
 
     addresses: NodeAddresses
@@ -51,7 +51,7 @@ class CompiledNodeInfo(BaseModel):
     effective_run_mode: RunMode = RunMode.FULL_REFRESH
     dependencies: list[str]
     sql: list[str]
-    artifact_path: Path | None = None
+    python_source: str | None = None
 
 
 class CompileOutput(BaseModel):
@@ -62,7 +62,6 @@ class CompileOutput(BaseModel):
         source_count: The number of sources in the DAG.
         compiled_nodes: One entry for each Trouve that clair compiled, in the
             order that clair executes them.
-        artifacts_dir: The directory that holds the compiled text.
         run_id: The UUIDv7 hex string that identifies this compile run.
         project_root: The root directory of the project.
         env_name: The name of the active environment.
@@ -74,7 +73,6 @@ class CompileOutput(BaseModel):
     trouve_count: int
     source_count: int
     compiled_nodes: list[CompiledNodeInfo]
-    artifacts_dir: Path
     run_id: str = ""
     project_root: Path | None = None
     env_name: str = ""
@@ -123,19 +121,12 @@ class CompileOutput(BaseModel):
             lines.append("")
         return "\n".join(lines)
 
-    @staticmethod
-    def render_footer(artifacts_dir: Path) -> str:
-        """Make the last line of the compile summary."""
-        return f"Clair wrote the compiled SQL to {artifacts_dir}/"
-
     def render(self) -> str:
         """Make the complete summary text for stdout."""
         parts = [self.render_header(self.trouve_count, self.source_count, self.compiled_nodes)]
 
         for node in self.compiled_nodes:
             parts.append(self.render_node(node))
-
-        parts.append(self.render_footer(self.artifacts_dir))
 
         return "\n".join(parts)
 
@@ -208,25 +199,22 @@ def build_statements(
     return statements
 
 
-def write_compile_output(
+def build_compile_output(
     dag: ClairDag,
     selected: list[str],
-    project_root: Path,
-    on_node_compiled: Callable[[CompiledNodeInfo], None] = lambda _: None,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     run_id: str = "",
     use_staging: bool = True,
 ) -> CompileOutput:
-    """Write the compiled SQL to _clairtifacts/<run_id>/ and give the output.
+    """Give the compile output of the selected Trouves. This function writes no file.
+
+    A caller that wants the artifacts gives the output to
+    ``clair.core.artifacts.write_compile_output``.
 
     Args:
         dag: The complete project DAG.
         selected: The names to compile, in topological order. The list holds no
             SOURCE Trouve.
-        project_root: The root directory of the project.
-        on_node_compiled: A callback. Clair calls it after it compiles a node
-            and writes the node to the disk. Thus the caller can show the
-            output immediately.
         run_mode: The run mode for the new SQL statements.
         run_id: The UUIDv7 hex string that identifies this compile run.
         use_staging: If True, the plan shows the staged path: the build at the
@@ -236,9 +224,6 @@ def write_compile_output(
     Returns:
         A CompileOutput. It holds the data and supplies a .render() method.
     """
-    artifacts_dir = project_root / ARTIFACTS_DIR_NAME / run_id
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-
     source_count = sum(
         1
         for node in dag.nodes
@@ -252,21 +237,13 @@ def write_compile_output(
         deps = list(dag.predecessors(name))
 
         assert trouve.compiled is not None, f"Clair did not compile {name}"
-        # The artifact path follows the physical address: one directory for the
-        # database name, one for the schema name, and the table name as the file.
         physical_address = trouve.compiled.physical_address
-        artifact_directory = (
-            artifacts_dir
-            / physical_address.database_name
-            / physical_address.schema_name
-        )
         addresses = addresses_of(
             dag,
             name,
             make_staging_address(physical_address, run_id) if use_staging else None,
         )
 
-        node_info = None
         if isinstance(trouve, DataframeTrouve):
             body_source = trouve.source_text()
 
@@ -298,55 +275,34 @@ def write_compile_output(
             if input_lines:
                 header += "# inputs:\n" + "\n".join(input_lines) + "\n"
             header += "\n"
-            artifact_content = header + imports_section + body_source
-
-            artifact_path = artifact_directory / f"{physical_address.table_name}.py"
-
-            node_info = CompiledNodeInfo(
+            compiled_nodes.append(CompiledNodeInfo(
                 addresses=addresses,
                 type=trouve.type,
                 execution_type=ExecutionType.PANDAS,
                 effective_run_mode=RunMode.FULL_REFRESH,
                 dependencies=deps,
                 sql=[],
-                artifact_path=artifact_path,
-            )
-            compiled_nodes.append(node_info)
-
-            artifact_path.parent.mkdir(parents=True, exist_ok=True)
-            artifact_path.write_text(artifact_content)
+                python_source=header + imports_section + body_source,
+            ))
         elif isinstance(trouve, SqlTrouve):
             statements = build_statements(
                 trouve, run_mode, run_id, use_staging=use_staging
             )
-
-            sql_file = artifact_directory / f"{physical_address.table_name}.sql"
-
-            node_info = CompiledNodeInfo(
+            compiled_nodes.append(CompiledNodeInfo(
                 addresses=addresses,
                 type=trouve.type,
                 execution_type=ExecutionType.SNOWFLAKE,
                 effective_run_mode=resolve_effective_mode(trouve, run_mode),
                 dependencies=deps,
                 sql=statements,
-                artifact_path=sql_file,
-            )
-            compiled_nodes.append(node_info)
-
-            sql_file.parent.mkdir(parents=True, exist_ok=True)
-            sql_content = "\n\n---\n\n".join(s.strip() for s in statements)
-            sql_file.write_text(sql_content + "\n")
+            ))
         else:
             raise CompileError(f"Clair cannot compile the Trouve class {type(trouve).__name__} of {name}")
-
-        on_node_compiled(node_info)
 
     return CompileOutput(
         trouve_count=trouve_count,
         source_count=source_count,
         compiled_nodes=compiled_nodes,
-        artifacts_dir=artifacts_dir,
         run_id=run_id,
-        project_root=project_root,
         run_mode=run_mode,
     )

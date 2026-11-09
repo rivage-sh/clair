@@ -89,6 +89,13 @@ The tests read the complete object that the run built. clair skips each test
 that can fail on a sample when the complete data obeys it: `TestRowCount` and
 `TestSql`, and each test that gives `run_with_sample=False`.
 
+## Artifacts
+
+`clair run` writes the statements of each Trouve to `_clairtifacts/<run_id>/` when
+the Trouve completes. Each statement shows its status, its query ID and its error.
+At the end, the run writes `run_summary.json`. See
+[Artifacts](../topics/dag.md#artifacts).
+
 ## Flags
 
 | Flag | Default | Description |

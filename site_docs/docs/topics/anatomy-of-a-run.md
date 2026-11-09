@@ -323,7 +323,7 @@ the node that caused it, thus one look at the summary gives you the first fault.
 
 clair makes one `run_id` for each run: the hex form of a UUIDv7. A UUIDv7 starts with a
 millisecond timestamp, thus the identifiers sort by time. The `run_id` names the staging
-objects (`<table>__clair_<run_id>`) and the artifact directory
+objects (`<table>__clair_<run_id>`) and the artifact directory that the CLI writes
 (`_clairtifacts/<run_id>/`). Two runs at the same time therefore never write to the same
 staging object, and you can find the artifacts of a run from the name of a table that it
 left.
@@ -339,10 +339,12 @@ left.
 
 ## The related commands
 
-*Source: [`cli/main.py`][cli-main-py], and [`core/compiler.py`][compiler-py] — `write_compile_output()`*
+*Source: [`cli/main.py`][cli-main-py], [`core/compiler.py`][compiler-py] — `build_compile_output()`, and [`core/artifacts.py`][artifacts-py]*
 
-`clair compile` does steps 1 to 6, and it writes the SQL to `_clairtifacts/`. It does not
-connect to Snowflake. Run it to read the SQL that a run executes. `clair.compile()` and
+`clair compile` does steps 1 to 6. It does not connect to Snowflake. `clair.compile()`
+gives the SQL, and the CLI writes it to `_clairtifacts/`. No operation in `api.py` writes
+a file: `clair run` gives `on_result` to `clair.run()`, and the writer puts the result of
+each Trouve on disk when the Trouve completes. Run it to read the SQL that a run executes. `clair.compile()` and
 `clair.run()` get their plan from one function, `_plan()` in `api.py`, thus the two cannot
 give different SQL for the same arguments, a sample too.
 
@@ -365,6 +367,7 @@ address, a collision, and an address that you type as text.
 [staging-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/staging.py
 [cli-main-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/cli/main.py
 [compiler-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/compiler.py
+[artifacts-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/artifacts.py
 [trouve-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/trouves/trouve.py
 [test-runner-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/core/test_runner.py
 [pool-py]: https://github.com/rivage-sh/clair/blob/main/src/clair/adapters/pool.py

@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from clair.core.compiler import write_compile_output
+from clair.core.compiler import build_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
 from clair.trouves.run_config import Append, Incremental
@@ -170,9 +170,7 @@ class TestSeedTableCompiler:
         dag = build_dag(discover_project(project_root))
         selected = get_executable_nodes(dag)
 
-        output = write_compile_output(
-            dag, selected, tmp_path, run_id=FAKE_RUN_ID
-        )
+        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID)
 
         seed_node = next(
             node for node in output.compiled_nodes
@@ -180,9 +178,9 @@ class TestSeedTableCompiler:
         )
         assert seed_node.execution_type == ExecutionType.PANDAS
         assert seed_node.sql == []
-        assert seed_node.artifact_path is not None
+        assert seed_node.python_source is not None
 
-        artifact_text = Path(seed_node.artifact_path).read_text()
+        artifact_text = seed_node.python_source
         assert "execution_type: pandas" in artifact_text
         assert "country_code" in artifact_text
         assert "US" in artifact_text

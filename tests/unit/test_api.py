@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import clair
+from clair.core.runner import RunResult
 from clair.environments.environments import Environment
 from clair.exceptions import ResultNotFoundError
 from clair.trouves.run_config import RunMode
@@ -93,12 +94,13 @@ class TestCompile:
         assert node is not None
         assert node.addresses.staging is None
 
-    def test_it_writes_the_artifact_file(self, project: Path, environment: Environment):
+    def test_it_writes_no_file(self, project: Path, environment: Environment):
+        """The caller decides where the bytes go. The CLI gives the output to a writer."""
         node = clair.compile(project, env=environment).node(DAILY_ORDERS)
 
         assert node is not None
-        assert node.artifact_path is not None
-        assert node.artifact_path.read_text()
+        assert node.sql
+        assert not (project / "_clairtifacts").exists()
 
     def test_exclude_removes_a_trouve(self, project: Path, environment: Environment):
         output = clair.compile(project, env=environment, exclude=[DAILY_ORDERS])
@@ -119,6 +121,29 @@ class TestRun:
         result = success_of(summary, DAILY_ORDERS)
         assert [s for s in result.statements if s.query_id]
         assert result.row_count == 42
+
+    def test_it_writes_no_file(self, project: Path, environment: Environment):
+        """A notebook that gives no writer leaves the project as it was."""
+        clair.run(project, env=environment, adapter=RecordingAdapter(), test=False)
+
+        assert not (project / "_clairtifacts").exists()
+
+    def test_on_result_gets_each_result_with_the_run_id(
+        self, project: Path, environment: Environment
+    ):
+        events: list[tuple[str, RunResult]] = []
+
+        summary = clair.run(
+            project,
+            env=environment,
+            adapter=RecordingAdapter(),
+            on_result=lambda run_id, result: events.append((run_id, result)),
+        )
+
+        assert [run_id for run_id, _ in events] == [summary.run_id] * len(summary.results)
+        # The event holds the complete result: the test results too.
+        assert [result for _, result in events] == summary.results
+        assert success_of(summary, DAILY_ORDERS).test_results
 
     def test_the_result_holds_the_sql_that_clair_executed(
         self, project: Path, environment: Environment

@@ -29,7 +29,7 @@ Each plan shows the staged path: the build at the staging address, a comment tha
 1. Discovers all Trouves in the project
 2. Resolves import references and builds the DAG
 3. Replaces the f-string placeholders with real Snowflake names. It applies the routing entry of `--env`.
-4. Writes SQL files to `_clairtifacts/<run_id>/`
+4. Writes one file for each Trouve to `_clairtifacts/<run_id>/`: a `.sql` file for a SQL Trouve, and a `.py` file for a pandas Trouve
 
 ## Artifact layout
 

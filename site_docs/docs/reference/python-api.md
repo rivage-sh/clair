@@ -99,6 +99,7 @@ def run(
     sample_rows: int = 1_000,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
+    on_result: Callable[[str, RunResult], object] | None = None,
 ) -> RunSummary
 ```
 
@@ -139,6 +140,11 @@ for result in summary.failed:
 
 A Trouve that fails gives a `RunFailure`, and raises no error. The other branches
 of the DAG continue.
+
+`clair.run()` writes no file. Give `on_result` to get each `RunResult` when its
+Trouve completes. clair calls it with the `run_id` and the result, in the thread
+that called `clair.run()`. The result holds its test results. See
+[Artifacts](#artifacts) for the writer that `clair run` gives.
 
 ## `RunSummary`
 
@@ -278,8 +284,8 @@ def compile(
 ) -> CompileOutput
 ```
 
-Compile the project and write the SQL to `_clairtifacts/<run_id>/`. This needs no
-warehouse connection.
+Compile the project, and give the SQL that a run sends. This writes no file, and
+it needs no warehouse connection. See [Artifacts](#artifacts) to write the files.
 
 `sample=True` gives the SQL of `clair.run(sample=True)`, with the same rule for
 production. See [Sampled Runs](../topics/sampling.md).
@@ -292,14 +298,45 @@ print("\n\n".join(node.sql))
 ```
 
 `CompileOutput` holds `compiled_nodes`, `trouve_count`, `source_count`,
-`artifacts_dir`, `run_id`, `project_root`, `env_name`, `run_mode` and
-`sample_rows`. `sample_rows` is `None` for a plan that reads each row. The method
+`run_id`, `project_root`, `env_name`, `run_mode` and `sample_rows`. `sample_rows` is `None` for a plan that reads each row. The method
 `node(address)` finds one `CompiledNodeInfo` by its logical address or its
 physical address.
 
 `CompiledNodeInfo` holds `addresses` (a `NodeAddresses`), `type`,
 `execution_type`, `effective_run_mode`, `dependencies`, `sql` and
-`artifact_path`.
+`python_source`. `python_source` is the Python text of a pandas Trouve: a header
+that names each input, the imports of its module, and its function. It is `None`
+for a SQL Trouve.
+
+## Artifacts
+
+An operation gives a result object, and it writes no file. The writers in
+`clair.core.artifacts` put a result below an artifacts directory that you name.
+`clair compile` and `clair run` name `<project_root>/_clairtifacts`. See
+[Artifacts](../topics/dag.md#artifacts) for the layout.
+
+| Writer | Writes |
+|--------|--------|
+| `write_compile_output(artifacts_dir, output)` | One file for each compiled Trouve. It gives the run directory. |
+| `write_run_result(artifacts_dir, run_id, result)` | The statements of one Trouve that ran. A skipped Trouve gives no file. |
+| `write_run_summary(artifacts_dir, summary)` | `run_summary.json`. `RunSummary.model_validate_json()` reads it back. |
+
+`clair run` gives `write_run_result` to `on_result`, thus the directory fills
+while the run continues. A notebook does the same:
+
+```python
+from pathlib import Path
+
+from clair.core.artifacts import write_run_result, write_run_summary
+
+artifacts_dir = Path("~/projects/analytics/_clairtifacts").expanduser()
+summary = clair.run(
+    "~/projects/analytics",
+    env=environment,
+    on_result=lambda run_id, result: write_run_result(artifacts_dir, run_id, result),
+)
+write_run_summary(artifacts_dir, summary)
+```
 
 ## `clair.test()`
 
