@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from clair.core.discovery import discover_project
 from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.environments.environments import Authenticator, load_environment
@@ -24,6 +26,7 @@ DEFAULT_SOURCE_ARGS = {
     "source_database_name": "source",
     "source_schema_name": "raw",
     "source_table_name": "orders",
+    "env_name": "dev",
 }
 
 
@@ -100,6 +103,20 @@ class TestFileContents:
         )
         assert str(physical_address) == "analytics.orders.daily"
 
+    @pytest.mark.parametrize("env_name", ["local", "omer-dev", "2026_sandbox"])
+    def test_routing_file_names_the_environment_that_it_gets(
+        self, tmp_path: Path, env_name: str
+    ) -> None:
+        """A name other than dev gives an entry for that name, and no entry for dev."""
+        project_dir = tmp_path / "proj"
+        fake_home = tmp_path / "home"
+        source_args = {**DEFAULT_SOURCE_ARGS, "env_name": env_name}
+        scaffold_project(project_dir, **source_args, home_dir=fake_home)
+
+        assert load_project_routing(project_dir, env_name).entry is not None
+        assert load_project_routing(project_dir, "dev").entry is None
+        load_environment(env_name, environments_path=fake_home / ".clair" / "environments.yml")
+
 
 class TestDoesNotOverwriteExistingFiles:
     def test_skips_existing_project_file(self, tmp_path: Path) -> None:
@@ -145,6 +162,7 @@ class TestCustomSourceDbName:
             source_database_name="mydb",
             source_schema_name="myschema",
             source_table_name="mytable",
+            env_name="dev",
             home_dir=tmp_path / "home",
         )
 

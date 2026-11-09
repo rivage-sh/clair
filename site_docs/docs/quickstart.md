@@ -4,12 +4,15 @@ This guide shows you how to build your first clair project and how to run it.
 
 ## 1. Set up an environment
 
-Run `clair init`. The command asks for your Snowflake connection details, then writes `~/.clair/environments.yml`:
+Run `clair init`. The command asks for an environment name and your Snowflake connection details. It writes
+`~/.clair/environments.yml`, and a `__routing__.py` file with one entry for that environment:
 
 ```
 $ clair init
 
 Project directory [.]: ./my_project
+
+Environment name [dev]: dev
 
   hint: select concat(current_organization_name(), '-', current_account_name()) as account;
 Snowflake account (e.g. myorg-myaccount): myorg-myaccount
@@ -21,12 +24,12 @@ Authentication method:
   1. Private key
   2. Password
   3. SSO (externalbrowser)
-Enter choice [1]: 3
+Enter choice (1, 2, 3) [1]: 3
 
   hint: select current_warehouse() as warehouse;
 Warehouse: my_warehouse
 
-Role (leave blank to use user default): analyst
+Role (leave empty to use the default role of the user): analyst
 
   hint: select current_region() as region;
 Region (e.g. us-east-1): us-east-1
@@ -39,8 +42,9 @@ Trouves that run at one time (threads) [4]: 4
 Give an example Snowflake table that contains source data (for example source.orders.raw) [source]: source.products.catalog
 
   created  /path/to/my_project/source/products/catalog.py
+  created  /path/to/my_project/__routing__.py
+
   created  /path/to/my_project/.gitignore
-  created  ~/.clair/environments.yml
 
 ✓ Project ready.
 
@@ -50,12 +54,16 @@ Next steps:
   3. clair run --env dev
 ```
 
+Each command after this one names the environment with `--env`. Give the name that you
+gave to `clair init`.
+
 ## 2. Create a project
 
 Each directory level maps to one part of the Snowflake name: `database / schema / table`.
 
 ```
 my_project/
+├── __routing__.py                 # the project root, and the routing of each environment
 ├── source/
 │   └── products/
 │       ├── catalog.py             # source.products.catalog
@@ -82,6 +90,21 @@ trouve = Source(
         Column(name="name",         type=ColumnType.STRING),
         Column(name="category",     type=ColumnType.STRING),
         Column(name="price",        type=ColumnType.FLOAT),
+    ],
+)
+```
+
+**`source/products/reviews.py`** — declares a second table that already exists:
+
+```python
+from clair import Column, ColumnType, Source
+
+trouve = Source(
+    columns=[
+        Column(name="review_id",    type=ColumnType.STRING),
+        Column(name="product_id",   type=ColumnType.STRING),
+        Column(name="rating",       type=ColumnType.INTEGER),
+        Column(name="review_date",  type=ColumnType.DATE),
     ],
 )
 ```
@@ -158,6 +181,10 @@ clair compile --env dev
 # Run against Snowflake
 clair run --env dev
 ```
+
+The `dev` entry of `__routing__.py` changes no address. Thus `clair run --env dev` writes to
+`refined.products.catalog`, which is also the production address. To give `dev` its own
+database or schema, change the `route` method. See [Routing](topics/routing.md).
 
 ## Next steps
 
