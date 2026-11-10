@@ -11,7 +11,12 @@ import structlog
 from clair import api as clair_api
 from clair._logging import configure_logging
 from clair._version import __version__
-from clair.core.artifacts import InvalidBeforeSpecError
+from clair.core.artifacts import (
+    InvalidBeforeSpecError,
+    write_compile_output,
+    write_run_result,
+    write_run_summary,
+)
 from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
@@ -62,6 +67,14 @@ def _sample_rows(sample: bool, sample_rows: int | None) -> int:
     if not sample:
         raise click.UsageError("--sample-rows needs --sample.")
     return sample_rows
+
+
+def _artifacts_dir_of(project_root: Path) -> Path:
+    """Give the directory that holds the artifacts of each compile and each run.
+
+    The API writes no file. The CLI is the caller that decides where the bytes go.
+    """
+    return project_root / ARTIFACTS_DIR_NAME
 
 
 def _load_environment(env_name: str) -> Environment:
@@ -317,7 +330,9 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run
     """Compile the project and show the new SQL. This needs no Snowflake connection."""
     row_limit = _sample_rows(sample, sample_rows)
     try:
-        clair_api.compile(
+        project_root = find_project_root(Path.cwd())
+        output = clair_api.compile(
+            project_root,
             select=select,
             exclude=exclude,
             env=_load_environment_or_name(env),
@@ -332,6 +347,9 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run
     except ClairError as e:
         logger.error("compile.error", error=str(e))
         sys.exit(1)
+
+    run_dir = write_compile_output(_artifacts_dir_of(project_root), output)
+    logger.info("compile.artifacts", artifacts_dir=str(run_dir))
 
 
 @cli.command()
@@ -451,7 +469,10 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: s
     """Run the Trouves on Snowflake. Then run the data quality tests."""
     row_limit = _sample_rows(sample, sample_rows)
     try:
-        summary = clair_api.run(
+        project_root = find_project_root(Path.cwd())
+        artifacts_dir = _artifacts_dir_of(project_root)
+        with clair_api.start_run(
+            project_root,
             select=select,
             exclude=exclude,
             env=_load_environment(env),
@@ -460,7 +481,12 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: s
             sample=sample,
             sample_rows=row_limit,
             threads=threads,
-        )
+        ) as run_handle:
+            # The file of each Trouve is on disk when the Trouve completes, thus
+            # a run that stops keeps the files of each Trouve before it.
+            for result in run_handle:
+                write_run_result(artifacts_dir, run_handle.run_id, result)
+        summary = run_handle.summary
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
         logger.error("run.routing_error", error=str(e))
         click.echo("\n  Run `clair validate` to see every routing problem.\n", err=True)
@@ -472,6 +498,9 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: s
     if not summary.results:
         click.echo("Clair found no Trouves to run.")
         return
+
+    summary_file = write_run_summary(artifacts_dir, summary)
+    logger.info("run.artifacts", artifacts_dir=str(summary_file.parent))
 
     failed_tests = [t for t in summary.test_results if not t.passed]
     if summary.failed_count or failed_tests:

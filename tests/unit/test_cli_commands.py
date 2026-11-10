@@ -11,15 +11,18 @@ The integration tests run the API against Snowflake. The API tests in
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import pytest
 import structlog
 from click.testing import CliRunner
 
 from clair.cli.main import cli
+from clair.core.artifacts import RUN_SUMMARY_FILE_NAME
+from clair.core.compiler import CompiledNodeInfo, CompileOutput
 from clair.core.runner import RunResult, RunStatus, RunSummary
 from clair.core.scaffold import write_environments_yml
 from clair.core.test_runner import TestSummary
@@ -27,8 +30,10 @@ from clair.environments.environments import Authenticator, Environment, Password
 from clair.environments.project_routing import load_project_routing
 from clair.exceptions import ClairError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
+from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, ExecutionType
+from clair.trouves.trouve_type import TrouveType
 from tests.helpers import (
+    addresses_of_text,
     make_environment,
     make_run_failure,
     make_run_skip,
@@ -99,6 +104,33 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return {}
 
 
+class _FalseRunHandle:
+    """A RunHandle that gives the results of one RunSummary, and runs nothing.
+
+    *after_each_result* gets each result after the loop body of the caller ran.
+    """
+
+    def __init__(
+        self,
+        summary: RunSummary,
+        after_each_result: Callable[[RunResult], None] = lambda _: None,
+    ) -> None:
+        self.run_id = summary.run_id
+        self.summary = summary
+        self._after_each_result = after_each_result
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exception_info: object) -> None:
+        pass
+
+    def __iter__(self) -> Iterator[RunResult]:
+        for result in self.summary.results:
+            yield result
+            self._after_each_result(result)
+
+
 def _give_api(
     monkeypatch: pytest.MonkeyPatch,
     calls: dict[str, Any],
@@ -106,7 +138,15 @@ def _give_api(
     result: Any = None,
     error: Exception | None = None,
 ) -> None:
-    """Replace one function of `clair.api` with a false function."""
+    """Replace one function of `clair.api` with a false function.
+
+    The `run` command calls `clair.api.start_run`, thus for the name "run" this
+    function replaces `start_run`, and it gives the RunSummary in a false handle.
+    """
+    if name == "run":
+        name = "start_run"
+        if result is not None:
+            result = _FalseRunHandle(result)
 
     def fake(project_dir: str | Path | None = None, **keyword_arguments: Any) -> Any:
         calls["project_dir"] = project_dir
@@ -118,13 +158,31 @@ def _give_api(
     monkeypatch.setattr(f"clair.api.{name}", fake)
 
 
-def _result_of_command(command_name: str) -> RunSummary | TestSummary | None:
+def _compile_output() -> CompileOutput:
+    """Give a compile output with one SQL Trouve."""
+    return CompileOutput(
+        trouve_count=1,
+        source_count=0,
+        compiled_nodes=[
+            CompiledNodeInfo(
+                addresses=addresses_of_text("mydb.analytics.orders"),
+                type=TrouveType.TABLE,
+                execution_type=ExecutionType.SNOWFLAKE,
+                dependencies=[],
+                sql=["create table mydb.analytics.orders as select 1"],
+            )
+        ],
+        run_id="abc",
+    )
+
+
+def _result_of_command(command_name: str) -> RunSummary | TestSummary | CompileOutput:
     """Give a result that the API function of *command_name* can return."""
     if command_name == "run":
         return RunSummary(results=[], env_name="dev", run_id="abc")
     if command_name == "test":
         return TestSummary(results=[])
-    return None
+    return _compile_output()
 
 
 class TestTheEnvironmentOption:
@@ -259,9 +317,9 @@ class TestRunCommand:
             ],
         )
 
-        # The CLI passes no directory. The API walks up from the working
-        # directory to the project root.
-        assert calls["project_dir"] is None
+        # The CLI finds the project root, because it names the artifacts
+        # directory. It gives the same root to the API.
+        assert calls["project_dir"] == tmp_path.resolve()
         assert calls["select"] == ("+mydb.analytics.orders",)
         assert calls["exclude"] == ("mydb.reports.*",)
         assert isinstance(calls["env"], Environment)
@@ -370,7 +428,7 @@ class TestCompileCommand:
     def test_the_command_gives_the_run_mode_to_the_api(
         self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path
     ):
-        _give_api(monkeypatch, calls, "compile", result=None)
+        _give_api(monkeypatch, calls, "compile", result=_compile_output())
 
         result = CliRunner().invoke(
             cli, ["compile", "--env", "dev", "--run-mode", "incremental"]
@@ -382,7 +440,7 @@ class TestCompileCommand:
     def test_the_command_gives_the_parsed_environment_to_the_api(
         self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path
     ):
-        _give_api(monkeypatch, calls, "compile", result=None)
+        _give_api(monkeypatch, calls, "compile", result=_compile_output())
 
         CliRunner().invoke(cli, ["compile", "--env", "prod"])
 
@@ -398,7 +456,7 @@ class TestCompileCommand:
             raise EnvironmentsFileNotFoundError("/home/analyst/.clair/environments.yml")
 
         monkeypatch.setattr("clair.cli.main.load_environment", fake_load)
-        _give_api(monkeypatch, calls, "compile", result=None)
+        _give_api(monkeypatch, calls, "compile", result=_compile_output())
 
         result = CliRunner().invoke(
             cli, ["compile", "--env", "prod"]
@@ -406,6 +464,53 @@ class TestCompileCommand:
 
         assert result.exit_code == 0
         assert calls["env"] == "prod"
+
+
+    def test_the_command_writes_the_artifacts_below_the_project_root(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path
+    ):
+        _give_api(monkeypatch, calls, "compile", result=_compile_output())
+
+        result = CliRunner().invoke(cli, ["compile", "--env", "dev"])
+
+        assert result.exit_code == 0
+        sql_file = tmp_path / "_clairtifacts" / "abc" / "mydb" / "analytics" / "orders.sql"
+        assert "create table mydb.analytics.orders" in sql_file.read_text()
+
+
+class TestTheRunArtifacts:
+    """The run command writes each result in its loop, and the summary at the end."""
+
+    def test_each_result_and_the_summary_go_below_the_project_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        results = [_run_result(RunStatus.SUCCESS), _run_result(RunStatus.SKIPPED)]
+        files_after_each_result: list[set[Path]] = []
+        artifacts_dir = tmp_path / "_clairtifacts"
+        run_handle = _FalseRunHandle(
+            RunSummary(results=results, env_name="dev", run_id="abc"),
+            after_each_result=lambda _: files_after_each_result.append(
+                set(artifacts_dir.rglob("*.sql"))
+            ),
+        )
+        monkeypatch.setattr("clair.api.start_run", lambda *_, **__: run_handle)
+
+        CliRunner().invoke(cli, ["run", "--env", "dev"])
+
+        orders_file = artifacts_dir / "abc" / "mydb" / "analytics" / "orders.sql"
+        # The file exists after the first result, before the run gives the next one.
+        assert files_after_each_result[0] == {orders_file}
+        summary_file = artifacts_dir / "abc" / RUN_SUMMARY_FILE_NAME
+        assert RunSummary.model_validate_json(summary_file.read_text()).results == results
+
+    def test_a_run_with_no_trouves_writes_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path
+    ):
+        _give_api(monkeypatch, calls, "run", RunSummary(results=[], env_name="dev", run_id="abc"))
+
+        CliRunner().invoke(cli, ["run", "--env", "dev"])
+
+        assert not (tmp_path / "_clairtifacts").exists()
 
 
 class TestDocsCommand:

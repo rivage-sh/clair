@@ -5,7 +5,8 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from clair.core.compiler import write_compile_output
+from clair.core.artifacts import write_compile_output
+from clair.core.compiler import build_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
 from clair.trouves.trouve import ExecutionType
@@ -105,7 +106,7 @@ class TestPandasTableArtifactFile:
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        write_compile_output(tmp_path / "_clairtifacts", build_compile_output(dag, selected, run_id=FAKE_RUN_ID))
 
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         assert py_file.exists()
@@ -114,7 +115,7 @@ class TestPandasTableArtifactFile:
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        write_compile_output(tmp_path / "_clairtifacts", build_compile_output(dag, selected, run_id=FAKE_RUN_ID))
 
         sql_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.sql"
         assert not sql_file.exists()
@@ -123,7 +124,7 @@ class TestPandasTableArtifactFile:
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        write_compile_output(tmp_path / "_clairtifacts", build_compile_output(dag, selected, run_id=FAKE_RUN_ID))
 
         json_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.json"
         assert not json_file.exists()
@@ -134,7 +135,7 @@ class TestPandasTableArtifactContent:
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        write_compile_output(tmp_path / "_clairtifacts", build_compile_output(dag, selected, run_id=FAKE_RUN_ID))
 
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         return py_file.read_text()
@@ -162,7 +163,7 @@ class TestPandasTableCompiledNodeInfo:
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID)
 
         pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
         assert pandas_node.execution_type == ExecutionType.PANDAS
@@ -171,7 +172,7 @@ class TestPandasTableCompiledNodeInfo:
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID)
 
         pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
         assert pandas_node.sql == []
@@ -180,7 +181,7 @@ class TestPandasTableCompiledNodeInfo:
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID)
 
         pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
         assert "mydb.source.events" in pandas_node.dependencies
@@ -191,7 +192,7 @@ class TestSqlTrouveRegression:
         project = _make_mixed_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        write_compile_output(tmp_path / "_clairtifacts", build_compile_output(dag, selected, run_id=FAKE_RUN_ID))
 
         sql_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "refined" / "events.sql"
         assert sql_file.exists()
@@ -201,7 +202,7 @@ class TestSqlTrouveRegression:
         project = _make_mixed_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID)
 
         sql_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.refined.events"))
         assert sql_node.type == TrouveType.TABLE
@@ -210,7 +211,7 @@ class TestSqlTrouveRegression:
         project = _make_mixed_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        output = write_compile_output(dag, selected, tmp_path, on_node_compiled=lambda _: None, run_id=FAKE_RUN_ID)
+        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID)
 
         node_names = {str(n.addresses.physical) for n in output.compiled_nodes}
         assert "mydb.refined.events" in node_names

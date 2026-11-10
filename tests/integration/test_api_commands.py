@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 import clair
+from clair.core.artifacts import write_compile_output
+from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
@@ -192,11 +194,11 @@ class TestCompile:
         model_count = len(model_logical_names(trouves_of(project_source_path)))
 
         output = clair.compile(project_copy, env=environment)
+        run_dir = write_compile_output(project_copy / ARTIFACTS_DIR_NAME, output)
 
         assert len(output.compiled_nodes) == model_count
-        for node in output.compiled_nodes:
-            assert node.artifact_path is not None
-            assert node.artifact_path.exists()
+        artifact_files = [path for path in run_dir.rglob("*") if path.is_file()]
+        assert len(artifact_files) == model_count
 
     def test_compile_routes_each_address_to_the_schema_of_the_run(
         self,
@@ -222,14 +224,15 @@ class TestClean:
         clair_environment: IntegrationConfig,
         environment: Environment,
     ) -> None:
-        """A compile writes one run directory, and clean removes it."""
+        """The compile writer makes one run directory, and clean removes it."""
         destination = tmp_path_factory.mktemp("clean_project")
         project_path = next(
             path for path in example_project_paths() if path.name == PROJECT_NAME
         )
         copy_path = copy_with_ci_routing(project_path, destination)
 
-        clair.compile(copy_path, env=environment, run_mode=RunMode.FULL_REFRESH)
+        output = clair.compile(copy_path, env=environment, run_mode=RunMode.FULL_REFRESH)
+        write_compile_output(copy_path / ARTIFACTS_DIR_NAME, output)
         plan = clair.clean(copy_path, dry_run=True)
         assert plan.run_count >= 1
 

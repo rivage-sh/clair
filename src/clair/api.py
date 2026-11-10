@@ -24,18 +24,21 @@ they need no home directory: the CLI parses ~/.clair/environments.yml, and it
 gives the object to these functions.
 
 Each function gives a result object with the complete data of the operation. No
-function writes to stdout, and no function stops the process. A fault raises a
-:class:`~clair.exceptions.ClairError`.
+function writes to stdout, no function writes an artifact file, and no function
+stops the process. A fault raises a :class:`~clair.exceptions.ClairError`. The
+caller decides where the bytes go: the CLI gives each result to a writer of
+:mod:`clair.core.artifacts`. ``start_run`` gives a RunHandle, thus the caller
+gets each result of a run while the run continues.
 """
 
 from __future__ import annotations
 
 import shutil
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Generator, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Self
 
 import structlog
 import uuid6
@@ -48,7 +51,7 @@ from clair.core.artifacts import (
     parse_before_spec,
     select_runs_to_remove,
 )
-from clair.core.compiler import CompileOutput, write_compile_output
+from clair.core.compiler import CompileOutput, build_compile_output
 from clair.core.dag import ClairDag, build_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.references import recompile_for_selection
@@ -61,7 +64,7 @@ from clair.environments.project_routing import find_project_root, routing_entry_
 from clair.environments.routing import (
     detect_routing_collisions_of_trouves,
 )
-from clair.exceptions import SampleTargetsProductionError
+from clair.exceptions import RunError, SampleTargetsProductionError
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, TrouveAbc
 from clair.trouves.trouve_type import TrouveType
@@ -220,10 +223,11 @@ def compile(
     sample: bool = False,
     sample_rows: int = DEFAULT_SAMPLE_ROWS,
 ) -> CompileOutput:
-    """Compile a project and write the SQL to the artifacts directory.
+    """Compile a project, and give the SQL that a run sends. This writes no file.
 
     This function needs no warehouse connection. It gives you the statements of
-    each Trouve, the physical address, and the staging address.
+    each Trouve, the physical address, and the staging address. Give the output
+    to :func:`clair.core.artifacts.write_compile_output` to write the files.
 
     Args:
         project_dir: The root directory of the project. None starts the
@@ -276,25 +280,275 @@ def compile(
         sample_rows=plan.sample_rows,
     )
 
-    output = write_compile_output(
-        dag,
-        plan.selected,
-        project_root,
-        on_node_compiled=lambda node_info: logger.info(
+    output = build_compile_output(
+        dag, plan.selected, run_mode=run_mode, run_id=run_id, use_staging=use_staging
+    ).model_copy(
+        update={
+            "project_root": project_root,
+            "env_name": env_name,
+            "sample_rows": plan.sample_rows,
+        }
+    )
+    for node_info in output.compiled_nodes:
+        logger.info(
             "compile.node",
             trouve=str(node_info.addresses.physical),
             dependencies=node_info.dependencies,
-            artifact_file=str(node_info.artifact_path),
-        ),
-        run_mode=run_mode,
-        run_id=run_id,
-        use_staging=use_staging,
-    )
-    output = output.model_copy(
-        update={"env_name": env_name, "sample_rows": plan.sample_rows}
-    )
-    logger.info("compile.complete", run_id=run_id, artifacts_dir=str(output.artifacts_dir))
+        )
+    logger.info("compile.complete", run_id=run_id, trouves=len(output.compiled_nodes))
     return output
+
+
+class RunHandle:
+    """One planned run. Iterate over it to execute the run.
+
+    :func:`start_run` makes the handle. The handle gives each RunResult when its
+    Trouve completes, thus the caller decides what to do with each result while
+    the run continues::
+
+        with clair.start_run(project_dir, env=environment) as run:
+            for result in run:
+                print(result.addresses.physical, result.status)
+        summary = run.summary
+
+    The handle executes the run one time. It opens the connection at the first
+    result, and it closes the connection after the last result, or when the
+    ``with`` block ends. Thus a loop that stops early closes each connection.
+
+    Attributes:
+        run_id: The UUIDv7 hex string that identifies this run. The staging
+            addresses hold it.
+    """
+
+    def __init__(
+        self,
+        plan: _Plan,
+        *,
+        environment: Environment,
+        run_id: str,
+        run_mode: RunMode,
+        test: bool,
+        sample: bool,
+        threads: int,
+        adapter: WarehouseAdapter | None,
+    ) -> None:
+        self.run_id = run_id
+        self._plan = plan
+        self._environment = environment
+        self._run_mode = run_mode
+        self._test = test
+        self._sample = sample
+        self._threads = threads
+        self._adapter = adapter
+        self._owns_adapter = adapter is None
+        self._results: list[RunResult] = []
+        self._result_generator: Generator[RunResult] | None = None
+        self._complete = False
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exception_info: object) -> None:
+        self.close()
+
+    def __iter__(self) -> Iterator[RunResult]:
+        """Execute the run, and give each result when its Trouve completes.
+
+        Raises:
+            RunError: If the caller iterates over the handle a second time.
+            ClairError: If the connection fails. A Trouve that fails gives a
+                RunFailure, and raises no error.
+        """
+        if self._result_generator is not None:
+            raise RunError("A run handle executes one time. Call clair.start_run() again.")
+        self._result_generator = self._execute()
+        return self._result_generator
+
+    @property
+    def summary(self) -> RunSummary:
+        """The RunSummary of the complete run.
+
+        Raises:
+            RunError: If the loop did not get the last result. A summary of
+                part of a run would look complete, thus clair gives none.
+        """
+        if not self._complete:
+            raise RunError(
+                "The run did not complete. Iterate over each result before you read the summary."
+            )
+        project = self._plan.project
+        return RunSummary(
+            results=self._results,
+            env_name=project.env_name,
+            run_id=self.run_id,
+            project_root=project.project_root,
+            run_mode=self._run_mode,
+            sample_rows=self._plan.sample_rows,
+        )
+
+    def close(self) -> None:
+        """Stop the run, and close each connection that the handle opened."""
+        if self._result_generator is not None:
+            # The finally block of run_project closes the thread pool.
+            self._result_generator.close()
+        self._close_adapter()
+
+    def _close_adapter(self) -> None:
+        if self._owns_adapter and self._adapter is not None:
+            self._adapter.close()
+            self._adapter = None
+
+    def _connect(self) -> WarehouseAdapter:
+        """Give the adapter of the caller, or make a SnowflakeAdapter and connect it."""
+        if self._adapter is None:
+            snowflake_adapter = SnowflakeAdapter()
+            snowflake_adapter.connect(self._environment)
+            self._adapter = snowflake_adapter
+        return self._adapter
+
+    def _execute(self) -> Generator[RunResult]:
+        project_root, env_name, _, dag = self._plan.project
+        selected = self._plan.selected
+        if not selected:
+            logger.info("run.no_trouves_selected")
+            self._complete = True
+            return
+
+        # An empty account_locator leaves each query URL empty.
+        if not self._environment.connection.account_locator:
+            logger.warning(
+                "run.no_account_locator", env=env_name, detail="Clair cannot show the query URLs."
+            )
+
+        test_results_of_node: dict[str, list[TestResult]] = defaultdict(list)
+        sample_scope = SampleScope.RUN_INPUTS if self._sample else SampleScope.NONE
+
+        def on_node_success(
+            node_name: str, query_address: str, node_adapter: WarehouseAdapter
+        ) -> bool:
+            # node_adapter is the connection of the thread that ran the node. A
+            # parallel run must not send these test queries on a different
+            # connection, because that connection holds a different context.
+            node_test_results = run_tests(
+                dag,
+                [node_name],
+                node_adapter,
+                sample_scope=sample_scope,
+                query_addresses={node_name: query_address},
+            )
+            # list.extend is atomic, thus the threads need no lock here. Each
+            # thread writes to the entry of its own node.
+            test_results_of_node[node_name].extend(node_test_results)
+            return all(test_result.passed for test_result in node_test_results)
+
+        # A connection that no Trouve uses gives nothing. A connection costs one
+        # login, not credits: Snowflake bills the warehouse per second while it
+        # runs, and an idle session starts no warehouse.
+        thread_count = min(self._threads, len(selected))
+
+        try:
+            warehouse_adapter = self._connect()
+            logger.info(
+                "run.start",
+                run_id=self.run_id,
+                env=env_name,
+                project=str(project_root),
+                trouves=len(selected),
+                run_mode=self._run_mode.value,
+                use_staging=self._test,
+                threads=thread_count,
+            )
+            for result in run_project(
+                dag,
+                selected,
+                warehouse_adapter,
+                run_mode=self._run_mode,
+                run_id=self.run_id,
+                after_node_success=on_node_success if self._test else None,
+                use_staging=self._test,
+                threads=thread_count,
+                environment_name=env_name,
+            ):
+                # A skipped Trouve ran no test, thus its result has no test results.
+                if not isinstance(result, RunSkip):
+                    result = result.model_copy(
+                        update={"test_results": test_results_of_node[str(result.addresses.physical)]}
+                    )
+                self._results.append(result)
+                yield result
+            self._complete = True
+        finally:
+            # A generator cannot close itself, thus this block closes the
+            # adapter only. close() closes the generator.
+            self._close_adapter()
+
+        summary = self.summary
+        logger.info(
+            "run.complete",
+            run_id=self.run_id,
+            succeeded=summary.succeeded_count,
+            failed=summary.failed_count,
+            skipped=summary.skipped_count,
+        )
+
+
+def start_run(
+    project_dir: str | Path | None = None,
+    *,
+    env: Environment,
+    select: Selectors = None,
+    exclude: Selectors = None,
+    run_mode: RunMode = RunMode.FULL_REFRESH,
+    test: bool = True,
+    sample: bool = False,
+    sample_rows: int = DEFAULT_SAMPLE_ROWS,
+    threads: int | None = None,
+    adapter: WarehouseAdapter | None = None,
+) -> RunHandle:
+    """Plan a run, and give the RunHandle that executes it. This opens no connection.
+
+    Iterate over the handle to get each RunResult when its Trouve completes. The
+    arguments are the arguments of :func:`run`. Use this function when you do
+    something with each result while the run continues: ``clair run`` writes the
+    artifact file of each Trouve. Use :func:`run` when the summary is enough.
+
+    This function does each step that can fail before the connection:
+    discovery, routing, the selection, and the rule for a sample in
+    production. Thus a fault in the project raises here, and not in the loop.
+
+    Raises:
+        SampleTargetsProductionError: If *sample* is True, and a selected
+            Trouve writes to its logical address.
+        ValueError: If *sample_rows* is less than 1.
+        ClairError: If discovery or routing fails.
+    """
+    if not test:
+        logger.warning(
+            "run.staging_disabled",
+            reason="test=False skips the tests that decide the promotion, so clair writes to each physical address directly",
+        )
+    plan = _plan(
+        project_dir,
+        env=env,
+        select=select,
+        exclude=exclude,
+        run_mode=run_mode,
+        sample=sample,
+        sample_rows=sample_rows,
+    )
+    if sample:
+        logger.info("run.sample", sample_rows=sample_rows)
+    return RunHandle(
+        plan,
+        environment=env,
+        run_id=uuid6.uuid7().hex,
+        run_mode=run_mode,
+        test=test,
+        sample=sample,
+        # The caller replaces the thread count of the environment.
+        threads=threads if threads is not None else env.threads,
+        adapter=adapter,
+    )
 
 
 def run(
@@ -316,6 +570,9 @@ def run(
     quality tests there, and promotes the object after the tests pass. The tests
     give that guarantee, so ``test=False`` also stops the staging step: clair
     then writes to each physical address directly.
+
+    This function writes no file. To get each result while the run continues,
+    use :func:`start_run`.
 
     Args:
         project_dir: The root directory of the project. None starts the
@@ -357,133 +614,21 @@ def run(
             that fails gives a RunResult with the FAILURE status, and raises no
             error, because the other branches of the DAG continue.
     """
-    run_id = uuid6.uuid7().hex
-    use_staging = test
-    if not test:
-        logger.warning(
-            "run.staging_disabled",
-            reason="test=False skips the tests that decide the promotion, so clair writes to each physical address directly",
-        )
-
-    # `environment` names the object, and `env` names the argument.
-    environment = env
-    # The caller replaces the thread count of the environment.
-    thread_count = threads if threads is not None else environment.threads
-    plan = _plan(
+    with start_run(
         project_dir,
-        env=environment,
+        env=env,
         select=select,
         exclude=exclude,
         run_mode=run_mode,
+        test=test,
         sample=sample,
         sample_rows=sample_rows,
-    )
-    project_root, env_name, _, dag = plan.project
-    selected = plan.selected
-    run_sample_rows = plan.sample_rows
-    if not selected:
-        logger.info("run.no_trouves_selected")
-        return RunSummary(
-            results=[],
-            env_name=env_name,
-            run_id=run_id,
-            project_root=project_root,
-            run_mode=run_mode,
-            sample_rows=run_sample_rows,
-        )
-
-    if sample:
-        logger.info("run.sample", sample_rows=sample_rows)
-    write_compile_output(
-        dag, selected, project_root, run_mode=run_mode, run_id=run_id, use_staging=use_staging
-    )
-
-    # An empty account_locator leaves each query URL empty.
-    if not environment.connection.account_locator:
-        logger.warning(
-            "run.no_account_locator", env=env_name, detail="Clair cannot show the query URLs."
-        )
-
-    warehouse_adapter = adapter
-    owns_adapter = warehouse_adapter is None
-    if warehouse_adapter is None:
-        warehouse_adapter = SnowflakeAdapter()
-        warehouse_adapter.connect(environment)
-
-    test_results_of_node: dict[str, list[TestResult]] = defaultdict(list)
-
-    def on_node_success(
-        node_name: str, query_address: str, node_adapter: WarehouseAdapter
-    ) -> bool:
-        # node_adapter is the connection of the thread that ran the node. A
-        # parallel run must not send these test queries on a different
-        # connection, because that connection holds a different context.
-        node_test_results = run_tests(
-            dag,
-            [node_name],
-            node_adapter,
-            sample_scope=SampleScope.RUN_INPUTS if sample else SampleScope.NONE,
-            query_addresses={node_name: query_address},
-        )
-        # list.extend is atomic, thus the threads need no lock here. Each thread
-        # writes to the entry of its own node.
-        test_results_of_node[node_name].extend(node_test_results)
-        return all(test_result.passed for test_result in node_test_results)
-
-    # A connection that no Trouve uses gives nothing. A connection costs one
-    # login, not credits: Snowflake bills the warehouse per second while it
-    # runs, and an idle session starts no warehouse.
-    thread_count = min(thread_count, len(selected))
-
-    try:
-        logger.info(
-            "run.start",
-            run_id=run_id,
-            env=env_name,
-            project=str(project_root),
-            trouves=len(selected),
-            run_mode=run_mode.value,
-            use_staging=use_staging,
-            threads=thread_count,
-        )
-        results: list[RunResult] = []
-        for result in run_project(
-            dag,
-            selected,
-            warehouse_adapter,
-            run_mode=run_mode,
-            run_id=run_id,
-            after_node_success=on_node_success if test else None,
-            use_staging=use_staging,
-            threads=thread_count,
-            environment_name=env_name,
-        ):
-            # A skipped Trouve ran no test, thus its result has no test results.
-            if not isinstance(result, RunSkip):
-                result = result.model_copy(
-                    update={"test_results": test_results_of_node[str(result.addresses.physical)]}
-                )
-            results.append(result)
-    finally:
-        if owns_adapter:
-            warehouse_adapter.close()
-
-    summary = RunSummary(
-        results=results,
-        env_name=env_name,
-        run_id=run_id,
-        project_root=project_root,
-        run_mode=run_mode,
-        sample_rows=run_sample_rows,
-    )
-    logger.info(
-        "run.complete",
-        run_id=run_id,
-        succeeded=summary.succeeded_count,
-        failed=summary.failed_count,
-        skipped=summary.skipped_count,
-    )
-    return summary
+        threads=threads,
+        adapter=adapter,
+    ) as run_handle:
+        for _ in run_handle:
+            pass
+    return run_handle.summary
 
 
 def _require_a_positive_sample_rows(sample_rows: int) -> None:
@@ -747,4 +892,14 @@ def docs(
     serve(project_catalog, host=host, port=port, open_browser=open_browser)
 
 
-__all__ = ["catalog", "clean", "compile", "docs", "run", "test", "validate"]
+__all__ = [
+    "RunHandle",
+    "catalog",
+    "clean",
+    "compile",
+    "docs",
+    "run",
+    "start_run",
+    "test",
+    "validate",
+]

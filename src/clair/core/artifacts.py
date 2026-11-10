@@ -1,8 +1,17 @@
-"""The artifacts directory: read the run times, and choose the runs to remove.
+"""The artifacts directory: write the result of an operation, and remove the old runs.
 
-`clair clean` deletes the compiled artifacts of the old runs. Each function here
-is pure: ``parse_before_spec`` takes the current time as an argument, and it
-reads no clock. Thus a test gives a fixed time, and it patches nothing.
+An operation in ``clair.api`` gives a result object, and it writes no file. The
+writers here put that result on disk, below an artifacts directory that the
+caller names. The CLI names ``<project_root>/_clairtifacts``. A notebook that
+calls no writer writes nothing.
+
+Each run has one directory, ``<artifacts_dir>/<run_id>/``. Below it, the file of
+a Trouve follows the physical address: one directory for the database name, one
+for the schema name, and the table name as the file name.
+
+`clair clean` deletes the artifacts of the old runs. ``parse_before_spec`` takes
+the current time as an argument, and it reads no clock. Thus a test gives a
+fixed time, and it patches nothing.
 """
 
 from __future__ import annotations
@@ -13,7 +22,11 @@ from pathlib import Path
 
 from pydantic import BaseModel, computed_field
 
+from clair.adapters.base import Statement
+from clair.core.compiler import CompiledNodeInfo, CompileOutput
+from clair.core.runner import RunFailure, RunResult, RunSkip, RunSummary
 from clair.exceptions import ClairError
+from clair.trouves.address import NodeAddresses
 
 # The number of hex characters of a UUIDv7 that hold the milliseconds.
 _RUN_ID_TIME_LENGTH = 12
@@ -23,6 +36,12 @@ _RUN_ID_LENGTH = 32
 
 # A --before value that names a time span, for example "7d", "24h" or "30m".
 _DURATION_PATTERN = re.compile(r"^(\d+)([dhm])$")
+
+# The file below the run directory that holds the complete RunSummary as JSON.
+RUN_SUMMARY_FILE_NAME = "run_summary.json"
+
+# The text between two statements of one artifact file.
+_STATEMENT_SEPARATOR = "\n\n---\n\n"
 
 BEFORE_SPEC_HELP = (
     "Use 'today', 'yesterday', 'last_week', a duration such as '7d' or '24h', "
@@ -185,3 +204,111 @@ def select_runs_to_remove(
         for run in runs
         if run.created_at is not None and run.created_at < cutoff
     ]
+
+
+def run_directory(artifacts_dir: Path, run_id: str) -> Path:
+    """Give the directory of one run below *artifacts_dir*."""
+    return artifacts_dir / run_id
+
+
+def _node_file(run_dir: Path, addresses: NodeAddresses, suffix: str) -> Path:
+    """Give the artifact file of one Trouve. Its path follows the physical address."""
+    physical_address = addresses.physical
+    return (
+        run_dir
+        / physical_address.database_name
+        / physical_address.schema_name
+        / f"{physical_address.table_name}{suffix}"
+    )
+
+
+def _write_text(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def _render_compiled_node(node: CompiledNodeInfo) -> str:
+    """Give the text of the artifact file of one compiled Trouve."""
+    if node.python_source is not None:
+        return node.python_source
+    return _STATEMENT_SEPARATOR.join(statement.strip() for statement in node.sql) + "\n"
+
+
+def write_compile_output(artifacts_dir: Path, output: CompileOutput) -> Path:
+    """Write one file for each compiled Trouve, and give the run directory.
+
+    A SQL Trouve gives a ``.sql`` file that holds its statements. A pandas
+    Trouve gives a ``.py`` file that holds its Python text.
+    """
+    run_dir = run_directory(artifacts_dir, output.run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    for node in output.compiled_nodes:
+        suffix = ".py" if node.python_source is not None else ".sql"
+        _write_text(_node_file(run_dir, node.addresses, suffix), _render_compiled_node(node))
+    return run_dir
+
+
+def _comment_lines(label: str, text: str) -> list[str]:
+    """Give *text* as SQL comment lines. Each line of a long message stays a comment."""
+    lines = text.strip().splitlines() or [""]
+    return [f"-- {label}: {lines[0]}", *(f"--   {line}" for line in lines[1:])]
+
+
+def _render_statement(statement: Statement, index: int, total: int) -> str:
+    """Give one executed statement, with a comment that holds the answer of the warehouse."""
+    header = f"-- statement {index}/{total}: {statement.status.value}"
+    if statement.query_id:
+        header += f", query ID {statement.query_id}"
+    lines = [header]
+    if statement.query_url:
+        lines.append(f"-- URL: {statement.query_url}")
+    if statement.error:
+        lines.extend(_comment_lines("error", statement.error))
+    lines.append(statement.sql.strip())
+    return "\n".join(lines)
+
+
+def _render_run_result(result: RunResult) -> str:
+    """Give the text of the artifact file of one Trouve that clair ran."""
+    assert not isinstance(result, RunSkip)
+    lines = [
+        f"-- clair run: {result.addresses.physical}",
+        f"-- status: {result.status.value}",
+    ]
+    if isinstance(result, RunFailure):
+        lines.extend(_comment_lines("error", result.error))
+    total = len(result.statements)
+    parts = ["\n".join(lines)]
+    parts.extend(
+        _render_statement(statement, index, total)
+        for index, statement in enumerate(result.statements, 1)
+    )
+    return _STATEMENT_SEPARATOR.join(parts) + "\n"
+
+
+def write_run_result(artifacts_dir: Path, run_id: str, result: RunResult) -> Path | None:
+    """Write the statements of one Trouve that clair ran, and give the file.
+
+    A ``RunHandle`` gives each result when its Trouve completes, thus the
+    caller calls this function in its loop over the handle. The directory then
+    fills while the run continues, and a run that stops keeps the files of each
+    Trouve that completed.
+
+    The ``.sql`` file holds each statement, with its status, its query ID and
+    its error. A skipped Trouve sent no statement, thus it gives no file and
+    this function gives None. The run summary names it.
+    """
+    if isinstance(result, RunSkip):
+        return None
+    run_dir = run_directory(artifacts_dir, run_id)
+    return _write_text(_node_file(run_dir, result.addresses, ".sql"), _render_run_result(result))
+
+
+def write_run_summary(artifacts_dir: Path, summary: RunSummary) -> Path:
+    """Write the complete RunSummary as JSON, and give the file.
+
+    ``RunSummary.model_validate_json`` reads the file back.
+    """
+    run_dir = run_directory(artifacts_dir, summary.run_id)
+    return _write_text(run_dir / RUN_SUMMARY_FILE_NAME, summary.model_dump_json(indent=2) + "\n")

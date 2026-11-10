@@ -304,12 +304,13 @@ object that holds each fact, and a separate writer puts that result on disk. The
 the operation, then the writer — in the same way that the CLI reads
 `~/.clair/environments.yml` into an `Environment` and gives the object to the API.
 
-`write_compile_output` breaks this rule today, and the quality bar is not the current
-code. `api.run()` calls it in the middle of the run, and it makes the
-`project_root / _clairtifacts` path by itself. The data is already pure: `RunSummary`
-holds each statement, each query ID, each address, and each status. Only the write is in
-the wrong place. A writer that must fill a directory as the run continues takes an event
-for each node; it does not become a call inside the runner.
+`clair.compile()` and `clair.run()` follow this rule: the writers are in
+`core/artifacts.py`, and the CLI names `<project_root>/_clairtifacts`. A writer that must
+fill a directory as the run continues gets each result in a loop that the caller owns:
+`clair.start_run()` gives a `RunHandle`, and the CLI writes each result that the handle
+yields. The writer does not become a call inside the runner, and the API takes no
+callback. `clair.clean()` still finds the directory by itself, because its only
+work is to remove files.
 
 ---
 

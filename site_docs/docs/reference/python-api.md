@@ -140,6 +140,45 @@ for result in summary.failed:
 A Trouve that fails gives a `RunFailure`, and raises no error. The other branches
 of the DAG continue.
 
+`clair.run()` writes no file. To get each `RunResult` while the run continues,
+use [`clair.start_run()`](#clairstart_run).
+
+## `clair.start_run()`
+
+```python
+def start_run(
+    project_dir: str | Path | None = None,
+    *,
+    env: Environment,
+    # ... the other arguments of clair.run()
+) -> RunHandle
+```
+
+Plan a run, and give the `RunHandle` that executes it. The arguments are the
+arguments of `clair.run()`. Iterate over the handle: it gives each `RunResult`
+when its Trouve completes, with its test results. Your loop runs in your thread,
+while the other Trouves continue to run on the pool threads.
+
+```python
+with clair.start_run("~/projects/analytics", env=environment) as run:
+    for result in run:
+        print(result.addresses.physical, result.status)
+
+summary = run.summary
+```
+
+`start_run()` opens no connection. It does discovery, routing, the selection,
+and the rule for a sample in production, thus a fault in the project raises at
+the call, and not in the loop. The handle connects at the first result.
+`clair.run()` is this loop, with an empty body.
+
+| Member | Gives |
+|--------|-------|
+| `run_id` | The UUIDv7 hex string of the run. The staging addresses and the artifact directory hold it. |
+| iteration | Each `RunResult`, in completion order. A handle executes one time: a second iteration raises `RunError`. |
+| `summary` | The `RunSummary`, after the last result. Before that it raises `RunError`, because a summary of part of a run would look complete. |
+| `close()` | Stop the run, and close each connection that the handle opened. The `with` block calls it, thus a loop that stops early closes each connection. A connection that you give as `adapter` stays open. |
+
 ## `RunSummary`
 
 ```python
@@ -278,8 +317,8 @@ def compile(
 ) -> CompileOutput
 ```
 
-Compile the project and write the SQL to `_clairtifacts/<run_id>/`. This needs no
-warehouse connection.
+Compile the project, and give the SQL that a run sends. This writes no file, and
+it needs no warehouse connection. See [Artifacts](#artifacts) to write the files.
 
 `sample=True` gives the SQL of `clair.run(sample=True)`, with the same rule for
 production. See [Sampled Runs](../topics/sampling.md).
@@ -292,14 +331,44 @@ print("\n\n".join(node.sql))
 ```
 
 `CompileOutput` holds `compiled_nodes`, `trouve_count`, `source_count`,
-`artifacts_dir`, `run_id`, `project_root`, `env_name`, `run_mode` and
-`sample_rows`. `sample_rows` is `None` for a plan that reads each row. The method
+`run_id`, `project_root`, `env_name`, `run_mode` and `sample_rows`. `sample_rows` is `None` for a plan that reads each row. The method
 `node(address)` finds one `CompiledNodeInfo` by its logical address or its
 physical address.
 
 `CompiledNodeInfo` holds `addresses` (a `NodeAddresses`), `type`,
 `execution_type`, `effective_run_mode`, `dependencies`, `sql` and
-`artifact_path`.
+`python_source`. `python_source` is the Python text of a pandas Trouve: a header
+that names each input, the imports of its module, and its function. It is `None`
+for a SQL Trouve.
+
+## Artifacts
+
+An operation gives a result object, and it writes no file. The writers in
+`clair.core.artifacts` put a result below an artifacts directory that you name.
+`clair compile` and `clair run` name `<project_root>/_clairtifacts`. See
+[Artifacts](../topics/dag.md#artifacts) for the layout.
+
+| Writer | Writes |
+|--------|--------|
+| `write_compile_output(artifacts_dir, output)` | One file for each compiled Trouve. It gives the run directory. |
+| `write_run_result(artifacts_dir, run_id, result)` | The statements of one Trouve that ran. A skipped Trouve gives no file. |
+| `write_run_summary(artifacts_dir, summary)` | `run_summary.json`. `RunSummary.model_validate_json()` reads it back. |
+
+`clair run` calls `write_run_result` in its loop over a `RunHandle`, thus the
+directory fills while the run continues. A notebook does the same:
+
+```python
+from pathlib import Path
+
+from clair.core.artifacts import write_run_result, write_run_summary
+
+artifacts_dir = Path("~/projects/analytics/_clairtifacts").expanduser()
+with clair.start_run("~/projects/analytics", env=environment) as run:
+    for result in run:
+        write_run_result(artifacts_dir, run.run_id, result)
+
+write_run_summary(artifacts_dir, run.summary)
+```
 
 ## `clair.test()`
 

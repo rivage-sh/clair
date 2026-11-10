@@ -14,8 +14,8 @@ gives a result object with the complete data of the operation::
     summary = clair.run("~/projects/analytics", env=environment)
     print(summary.succeeded_count, summary.failed_count)
 
-``clair.run()``, ``clair.compile()``, ``clair.test()``, ``clair.docs()`` and
-``clair.catalog()`` come from :mod:`clair.api`.
+``clair.run()``, ``clair.start_run()``, ``clair.compile()``, ``clair.test()``,
+``clair.docs()`` and ``clair.catalog()`` come from :mod:`clair.api`.
 
 ``clair.run()`` and ``clair.test()`` accept an
 :class:`~clair.environments.environments.Environment`, and they read no file. A
@@ -70,7 +70,17 @@ from __future__ import annotations
 from clair._version import __version__
 from clair.adapters.base import WarehouseAdapter
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.api import catalog, clean, compile, docs, run, test, validate
+from clair.api import (
+    RunHandle,
+    catalog,
+    clean,
+    compile,
+    docs,
+    run,
+    start_run,
+    test,
+    validate,
+)
 from clair.environments.environments import (
     Authenticator,
     Connection,
@@ -145,6 +155,7 @@ __all__ = [
     "RoutingEntry",
     "RoutingTable",
     "RunConfig",
+    "RunHandle",
     "RunMode",
     "SchemaDefaults",
     "SeedTable",
@@ -171,6 +182,7 @@ __all__ = [
     "docs",
     "load_environment",
     "run",
+    "start_run",
     "test",
     "validate",
 ]
