@@ -96,6 +96,22 @@ system better. Add no deprecation shim, no alias, and no migration path. Delete 
 code path — do not keep it beside the new one. Name each behaviour change in the PR
 description.
 
+## Release
+
+A git tag publishes a version. `.github/workflows/release.yml` holds the steps.
+
+1. In a PR, run `uv version <new_version>`. It changes `pyproject.toml` and `uv.lock`.
+   A version below 1.0 gets a new minor number for a breaking change: `0.2.0` follows
+   `0.1.1`. A release with fixes only gets a new patch number.
+2. Merge the PR.
+3. Tag the merge commit on main, and push the tag:
+   `git tag v<new_version> origin/main && git push origin v<new_version>`.
+
+The workflow stops if the tag is not `v` + the version in `pyproject.toml`, or if main
+does not hold the tagged commit. Then it runs the unit tests, uploads the build to PyPI
+through trusted publishing, and makes a GitHub release with the notes of each merged PR.
+Do not upload with `uv publish --token`. A manual upload makes a version that has no tag.
+
 ## Documentation
 
 Point to the source of truth. Do not copy it: a copy becomes wrong when the source
