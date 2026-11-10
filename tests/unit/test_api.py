@@ -8,9 +8,8 @@ from pathlib import Path
 import pytest
 
 import clair
-from clair.core.runner import RunResult
 from clair.environments.environments import Environment
-from clair.exceptions import ResultNotFoundError
+from clair.exceptions import ResultNotFoundError, RunError
 from clair.trouves.run_config import RunMode
 from tests.helpers import RecordingAdapter, make_environment, success_of
 
@@ -128,23 +127,6 @@ class TestRun:
 
         assert not (project / "_clairtifacts").exists()
 
-    def test_on_result_gets_each_result_with_the_run_id(
-        self, project: Path, environment: Environment
-    ):
-        events: list[tuple[str, RunResult]] = []
-
-        summary = clair.run(
-            project,
-            env=environment,
-            adapter=RecordingAdapter(),
-            on_result=lambda run_id, result: events.append((run_id, result)),
-        )
-
-        assert [run_id for run_id, _ in events] == [summary.run_id] * len(summary.results)
-        # The event holds the complete result: the test results too.
-        assert [result for _, result in events] == summary.results
-        assert success_of(summary, DAILY_ORDERS).test_results
-
     def test_the_result_holds_the_sql_that_clair_executed(
         self, project: Path, environment: Environment
     ):
@@ -233,6 +215,79 @@ class TestRun:
 
         with pytest.raises(ResultNotFoundError, match="no result for"):
             summary.result("no.such.trouve")
+
+
+def _record_each_snowflake_adapter(monkeypatch: pytest.MonkeyPatch) -> list[RecordingAdapter]:
+    """Make clair build a RecordingAdapter where it builds a SnowflakeAdapter. Give each one."""
+    made_adapters: list[RecordingAdapter] = []
+
+    def make_adapter() -> RecordingAdapter:
+        adapter = RecordingAdapter()
+        made_adapters.append(adapter)
+        return adapter
+
+    monkeypatch.setattr("clair.api.SnowflakeAdapter", make_adapter)
+    return made_adapters
+
+
+class TestStartRun:
+    """`clair.start_run()` gives a handle. The caller iterates over it, and owns the loop."""
+
+    def test_the_handle_gives_each_result_and_then_the_summary(
+        self, project: Path, environment: Environment
+    ):
+        with clair.start_run(project, env=environment, adapter=RecordingAdapter()) as run:
+            results = list(run)
+
+        assert run.summary.run_id == run.run_id
+        assert run.summary.results == results
+        # Each result holds its test results when the loop gets it.
+        assert success_of(run.summary, DAILY_ORDERS).test_results
+
+    def test_start_run_opens_no_connection(
+        self, project: Path, environment: Environment, monkeypatch: pytest.MonkeyPatch
+    ):
+        made_adapters = _record_each_snowflake_adapter(monkeypatch)
+
+        clair.start_run(project, env=environment)
+
+        assert made_adapters == []
+
+    def test_a_loop_that_stops_early_closes_the_connection_and_gives_no_summary(
+        self, project: Path, environment: Environment, monkeypatch: pytest.MonkeyPatch
+    ):
+        made_adapters = _record_each_snowflake_adapter(monkeypatch)
+
+        with clair.start_run(project, env=environment) as run:
+            for _ in run:
+                break
+
+        assert [adapter.is_open for adapter in made_adapters] == [False]
+        with pytest.raises(RunError):
+            _ = run.summary
+
+    def test_the_connection_of_the_caller_stays_open(
+        self, project: Path, environment: Environment
+    ):
+        adapter = RecordingAdapter()
+
+        with clair.start_run(project, env=environment, adapter=adapter) as run:
+            list(run)
+
+        assert adapter.is_open
+
+    def test_the_summary_raises_before_the_run(self, project: Path, environment: Environment):
+        run = clair.start_run(project, env=environment, adapter=RecordingAdapter())
+
+        with pytest.raises(RunError):
+            _ = run.summary
+
+    def test_a_handle_runs_one_time(self, project: Path, environment: Environment):
+        run = clair.start_run(project, env=environment, adapter=RecordingAdapter())
+        list(run)
+
+        with pytest.raises(RunError):
+            iter(run)
 
 
 class TestTest:

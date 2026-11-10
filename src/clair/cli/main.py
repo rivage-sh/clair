@@ -471,7 +471,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: s
     try:
         project_root = find_project_root(Path.cwd())
         artifacts_dir = _artifacts_dir_of(project_root)
-        summary = clair_api.run(
+        with clair_api.start_run(
             project_root,
             select=select,
             exclude=exclude,
@@ -481,8 +481,12 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: s
             sample=sample,
             sample_rows=row_limit,
             threads=threads,
-            on_result=lambda run_id, result: write_run_result(artifacts_dir, run_id, result),
-        )
+        ) as run_handle:
+            # The file of each Trouve is on disk when the Trouve completes, thus
+            # a run that stops keeps the files of each Trouve before it.
+            for result in run_handle:
+                write_run_result(artifacts_dir, run_handle.run_id, result)
+        summary = run_handle.summary
     except (InvalidRoutingConfigError, InvalidTrouveAddressError) as e:
         logger.error("run.routing_error", error=str(e))
         click.echo("\n  Run `clair validate` to see every routing problem.\n", err=True)

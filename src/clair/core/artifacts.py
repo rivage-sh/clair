@@ -290,9 +290,9 @@ def _render_run_result(result: RunResult) -> str:
 def write_run_result(artifacts_dir: Path, run_id: str, result: RunResult) -> Path | None:
     """Write the statements of one Trouve that clair ran, and give the file.
 
-    The run gives each result when its Trouve completes, thus the caller gives
-    this function to ``clair.run(on_result=...)``. The directory then fills
-    while the run continues, and a run that stops keeps the files of each
+    A ``RunHandle`` gives each result when its Trouve completes, thus the
+    caller calls this function in its loop over the handle. The directory then
+    fills while the run continues, and a run that stops keeps the files of each
     Trouve that completed.
 
     The ``.sql`` file holds each statement, with its status, its query ID and

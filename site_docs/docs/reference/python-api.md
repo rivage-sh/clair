@@ -99,7 +99,6 @@ def run(
     sample_rows: int = 1_000,
     threads: int | None = None,
     adapter: WarehouseAdapter | None = None,
-    on_result: Callable[[str, RunResult], object] | None = None,
 ) -> RunSummary
 ```
 
@@ -141,10 +140,44 @@ for result in summary.failed:
 A Trouve that fails gives a `RunFailure`, and raises no error. The other branches
 of the DAG continue.
 
-`clair.run()` writes no file. Give `on_result` to get each `RunResult` when its
-Trouve completes. clair calls it with the `run_id` and the result, in the thread
-that called `clair.run()`. The result holds its test results. See
-[Artifacts](#artifacts) for the writer that `clair run` gives.
+`clair.run()` writes no file. To get each `RunResult` while the run continues,
+use [`clair.start_run()`](#clairstart_run).
+
+## `clair.start_run()`
+
+```python
+def start_run(
+    project_dir: str | Path | None = None,
+    *,
+    env: Environment,
+    # ... the other arguments of clair.run()
+) -> RunHandle
+```
+
+Plan a run, and give the `RunHandle` that executes it. The arguments are the
+arguments of `clair.run()`. Iterate over the handle: it gives each `RunResult`
+when its Trouve completes, with its test results. Your loop runs in your thread,
+while the other Trouves continue to run on the pool threads.
+
+```python
+with clair.start_run("~/projects/analytics", env=environment) as run:
+    for result in run:
+        print(result.addresses.physical, result.status)
+
+summary = run.summary
+```
+
+`start_run()` opens no connection. It does discovery, routing, the selection,
+and the rule for a sample in production, thus a fault in the project raises at
+the call, and not in the loop. The handle connects at the first result.
+`clair.run()` is this loop, with an empty body.
+
+| Member | Gives |
+|--------|-------|
+| `run_id` | The UUIDv7 hex string of the run. The staging addresses and the artifact directory hold it. |
+| iteration | Each `RunResult`, in completion order. A handle executes one time: a second iteration raises `RunError`. |
+| `summary` | The `RunSummary`, after the last result. Before that it raises `RunError`, because a summary of part of a run would look complete. |
+| `close()` | Stop the run, and close each connection that the handle opened. The `with` block calls it, thus a loop that stops early closes each connection. A connection that you give as `adapter` stays open. |
 
 ## `RunSummary`
 
@@ -321,8 +354,8 @@ An operation gives a result object, and it writes no file. The writers in
 | `write_run_result(artifacts_dir, run_id, result)` | The statements of one Trouve that ran. A skipped Trouve gives no file. |
 | `write_run_summary(artifacts_dir, summary)` | `run_summary.json`. `RunSummary.model_validate_json()` reads it back. |
 
-`clair run` gives `write_run_result` to `on_result`, thus the directory fills
-while the run continues. A notebook does the same:
+`clair run` calls `write_run_result` in its loop over a `RunHandle`, thus the
+directory fills while the run continues. A notebook does the same:
 
 ```python
 from pathlib import Path
@@ -330,12 +363,11 @@ from pathlib import Path
 from clair.core.artifacts import write_run_result, write_run_summary
 
 artifacts_dir = Path("~/projects/analytics/_clairtifacts").expanduser()
-summary = clair.run(
-    "~/projects/analytics",
-    env=environment,
-    on_result=lambda run_id, result: write_run_result(artifacts_dir, run_id, result),
-)
-write_run_summary(artifacts_dir, summary)
+with clair.start_run("~/projects/analytics", env=environment) as run:
+    for result in run:
+        write_run_result(artifacts_dir, run.run_id, result)
+
+write_run_summary(artifacts_dir, run.summary)
 ```
 
 ## `clair.test()`

@@ -341,10 +341,14 @@ left.
 
 *Source: [`cli/main.py`][cli-main-py], [`core/compiler.py`][compiler-py] — `build_compile_output()`, and [`core/artifacts.py`][artifacts-py]*
 
-`clair compile` does steps 1 to 6. It does not connect to Snowflake. `clair.compile()`
-gives the SQL, and the CLI writes it to `_clairtifacts/`. No operation in `api.py` writes
-a file: `clair run` gives `on_result` to `clair.run()`, and the writer puts the result of
-each Trouve on disk when the Trouve completes. Run it to read the SQL that a run executes. `clair.compile()` and
+`clair compile` does steps 1 to 6. It does not connect to Snowflake. Run it to read the
+SQL that a run executes. `clair.compile()` gives the SQL, and the CLI writes it to
+`_clairtifacts/`.
+
+No operation in `api.py` writes a file. `clair run` iterates over the `RunHandle` of
+`clair.start_run()`. `run_project()` gives each result to the handle with `yield`, and
+the handle gives it to the loop of the CLI. The loop writes the file of each Trouve when
+the Trouve completes, and it writes the summary after the last one. `clair.compile()` and
 `clair.run()` get their plan from one function, `_plan()` in `api.py`, thus the two cannot
 give different SQL for the same arguments, a sample too.
 

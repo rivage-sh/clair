@@ -306,9 +306,10 @@ the operation, then the writer — in the same way that the CLI reads
 
 `clair.compile()` and `clair.run()` follow this rule: the writers are in
 `core/artifacts.py`, and the CLI names `<project_root>/_clairtifacts`. A writer that must
-fill a directory as the run continues takes an event for each node: `clair.run()` calls
-`on_result(run_id, result)` when a Trouve completes. The writer does not become a call
-inside the runner. `clair.clean()` still finds the directory by itself, because its only
+fill a directory as the run continues gets each result in a loop that the caller owns:
+`clair.start_run()` gives a `RunHandle`, and the CLI writes each result that the handle
+yields. The writer does not become a call inside the runner, and the API takes no
+callback. `clair.clean()` still finds the directory by itself, because its only
 work is to remove files.
 
 ---

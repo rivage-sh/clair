@@ -11,9 +11,10 @@ The integration tests run the API against Snowflake. The API tests in
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import pytest
 import structlog
@@ -103,6 +104,33 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return {}
 
 
+class _FalseRunHandle:
+    """A RunHandle that gives the results of one RunSummary, and runs nothing.
+
+    *after_each_result* gets each result after the loop body of the caller ran.
+    """
+
+    def __init__(
+        self,
+        summary: RunSummary,
+        after_each_result: Callable[[RunResult], None] = lambda _: None,
+    ) -> None:
+        self.run_id = summary.run_id
+        self.summary = summary
+        self._after_each_result = after_each_result
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exception_info: object) -> None:
+        pass
+
+    def __iter__(self) -> Iterator[RunResult]:
+        for result in self.summary.results:
+            yield result
+            self._after_each_result(result)
+
+
 def _give_api(
     monkeypatch: pytest.MonkeyPatch,
     calls: dict[str, Any],
@@ -110,7 +138,15 @@ def _give_api(
     result: Any = None,
     error: Exception | None = None,
 ) -> None:
-    """Replace one function of `clair.api` with a false function."""
+    """Replace one function of `clair.api` with a false function.
+
+    The `run` command calls `clair.api.start_run`, thus for the name "run" this
+    function replaces `start_run`, and it gives the RunSummary in a false handle.
+    """
+    if name == "run":
+        name = "start_run"
+        if result is not None:
+            result = _FalseRunHandle(result)
 
     def fake(project_dir: str | Path | None = None, **keyword_arguments: Any) -> Any:
         calls["project_dir"] = project_dir
@@ -284,7 +320,6 @@ class TestRunCommand:
         # The CLI finds the project root, because it names the artifacts
         # directory. It gives the same root to the API.
         assert calls["project_dir"] == tmp_path.resolve()
-        assert callable(calls["on_result"])
         assert calls["select"] == ("+mydb.analytics.orders",)
         assert calls["exclude"] == ("mydb.reports.*",)
         assert isinstance(calls["env"], Environment)
@@ -444,28 +479,27 @@ class TestCompileCommand:
 
 
 class TestTheRunArtifacts:
-    """The run command gives a writer to the API, and it writes the summary at the end."""
+    """The run command writes each result in its loop, and the summary at the end."""
 
     def test_each_result_and_the_summary_go_below_the_project_root(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ):
         results = [_run_result(RunStatus.SUCCESS), _run_result(RunStatus.SKIPPED)]
-        files_at_each_event: list[set[Path]] = []
+        files_after_each_result: list[set[Path]] = []
         artifacts_dir = tmp_path / "_clairtifacts"
-
-        def fake_run(project_dir: Path, **keyword_arguments: Any) -> RunSummary:
-            for result in results:
-                keyword_arguments["on_result"]("abc", result)
-                files_at_each_event.append(set(artifacts_dir.rglob("*.sql")))
-            return RunSummary(results=results, env_name="dev", run_id="abc")
-
-        monkeypatch.setattr("clair.api.run", fake_run)
+        run_handle = _FalseRunHandle(
+            RunSummary(results=results, env_name="dev", run_id="abc"),
+            after_each_result=lambda _: files_after_each_result.append(
+                set(artifacts_dir.rglob("*.sql"))
+            ),
+        )
+        monkeypatch.setattr("clair.api.start_run", lambda *_, **__: run_handle)
 
         CliRunner().invoke(cli, ["run", "--env", "dev"])
 
         orders_file = artifacts_dir / "abc" / "mydb" / "analytics" / "orders.sql"
-        # The file exists after the first event, before the run gives its summary.
-        assert files_at_each_event[0] == {orders_file}
+        # The file exists after the first result, before the run gives the next one.
+        assert files_after_each_result[0] == {orders_file}
         summary_file = artifacts_dir / "abc" / RUN_SUMMARY_FILE_NAME
         assert RunSummary.model_validate_json(summary_file.read_text()).results == results
 
