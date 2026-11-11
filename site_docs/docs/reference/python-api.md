@@ -521,8 +521,9 @@ Drop each object that one run left in the warehouse: each name that ends with
 [`clair prune`](../cli/prune.md).
 
 `PruneSummary` holds `run_id`, `dry_run` and `objects`. Each `PrunedObject` holds
-the `warehouse_object` and the DROP `statement`, which is `None` in a dry run.
-`failed` gives each object whose DROP failed.
+the `warehouse_object` and the DROP `statement`; a dry run gives each statement with
+the status `NOT_RUN`. `sql` gives the text of each DROP, and `failed` gives each
+object whose DROP failed.
 
 ```python
 summary = clair.prune(env=environment, run_id=failed_run.run_id)

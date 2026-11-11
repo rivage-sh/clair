@@ -15,7 +15,7 @@ from click.testing import CliRunner
 
 import clair
 from clair.adapters.base import NamedWarehouseObject
-from clair.adapters.objects import WarehouseObjectType
+from clair.adapters.objects import StatementStatus, WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.cli.main import cli
 from clair.core.prune import InvalidRunIdError, PruneSummary
@@ -73,14 +73,18 @@ def test_a_prune_never_touches_a_physical_table_or_another_run():
     assert dropped_addresses == {str(pruned.address) for pruned in OBJECTS_OF_THE_RUN}
 
 
-def test_a_dry_run_names_the_objects_and_drops_nothing():
+def test_a_dry_run_gives_the_sql_and_executes_none_of_it():
     adapter = _adapter()
 
-    summary = clair.prune(env=make_environment(), run_id=RUN_ID, dry_run=True, adapter=adapter)
+    dry_run = clair.prune(env=make_environment(), run_id=RUN_ID, dry_run=True, adapter=adapter)
 
-    assert len(summary.objects) == len(OBJECTS_OF_THE_RUN)
-    assert all(pruned.statement is None for pruned in summary.objects)
     assert adapter.record.statements == []
+    assert all(pruned.statement.status == StatementStatus.NOT_RUN for pruned in dry_run.objects)
+    assert dry_run.failed == []
+    # The SQL of the dry run is the SQL that a prune executes.
+    clair.prune(env=make_environment(), run_id=RUN_ID, adapter=adapter)
+    assert dry_run.sql == adapter.record.statements
+    assert all(f"{sql};" in dry_run.render() for sql in dry_run.sql)
 
 
 def test_an_upper_case_run_id_finds_the_same_objects():

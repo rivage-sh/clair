@@ -23,7 +23,7 @@ Run it after the run ends. A run that continues needs its objects.
 ## Example
 
 ```bash
-# Show what clair will drop
+# Print the DROP statements, and execute none of them
 clair prune --env prod --run-id 01a1c8936b5175e3b0622ff0eb45d9cc --dry-run
 
 # Drop after you confirm
@@ -50,7 +50,7 @@ command before it connects, because a short text would match the names of many o
 |--------|-------------|
 | `--env` | The environment, which gives the connection. `CLAIR_ENV` gives it when you omit it. |
 | `--run-id` | The id of the run. |
-| `--dry-run` | Show the objects, and drop nothing. |
+| `--dry-run` | Print the DROP statements, and execute none of them. Execute them yourself, if you prefer. |
 | `--yes` | Do not ask for confirmation. |
 
 The status code is 1 if a `DROP` fails.

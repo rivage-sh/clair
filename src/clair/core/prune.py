@@ -21,7 +21,7 @@ import re
 from pydantic import BaseModel
 
 from clair.adapters.base import NamedWarehouseObject, WarehouseAdapter
-from clair.adapters.objects import Statement, WarehouseObjectType
+from clair.adapters.objects import Statement, StatementStatus, WarehouseObjectType
 from clair.core.staging import STAGING_SUFFIX
 from clair.exceptions import ClairError
 from clair.trouves.trouve import NEW_ROWS_SUFFIX
@@ -40,11 +40,12 @@ class PrunedObject(BaseModel):
 
     Attributes:
         warehouse_object: The address and the type of the object.
-        statement: The DROP statement and its result. None in a dry run.
+        statement: The DROP statement. A dry run gives it with the status
+            NOT_RUN, thus you can execute its SQL yourself.
     """
 
     warehouse_object: NamedWarehouseObject
-    statement: Statement | None = None
+    statement: Statement
 
 
 class PruneSummary(BaseModel):
@@ -58,22 +59,24 @@ class PruneSummary(BaseModel):
     def failed(self) -> list[PrunedObject]:
         """Each object whose DROP statement failed."""
         return [
-            pruned
-            for pruned in self.objects
-            if pruned.statement is not None and not pruned.statement.success
+            pruned for pruned in self.objects if pruned.statement.status == StatementStatus.FAILURE
         ]
+
+    @property
+    def sql(self) -> list[str]:
+        """The DROP statement of each object, in order. A dry run executes none of them."""
+        return [pruned.statement.sql for pruned in self.objects]
 
     def render(self) -> str:
         """Make the text for stdout."""
         if not self.objects:
             return f"Clair found no object of the run {self.run_id}."
-        verb = "Clair will drop" if self.dry_run else "Clair dropped"
-        lines = [f"{verb} {len(self.objects)} object(s) of the run {self.run_id}:"]
+        verb = "Clair will execute" if self.dry_run else "Clair executed"
+        lines = [f"-- {verb} {len(self.objects)} statement(s) for the run {self.run_id}:"]
         for pruned in self.objects:
-            warehouse_object = pruned.warehouse_object
-            line = f"  {warehouse_object.object_type.value.upper()} {warehouse_object.address}"
-            if pruned.statement is not None and not pruned.statement.success:
-                line += f" ... FAILED: {pruned.statement.error}"
+            line = f"{pruned.statement.sql};"
+            if pruned.statement.status == StatementStatus.FAILURE:
+                line += f"  -- FAILED: {pruned.statement.error}"
             lines.append(line)
         return "\n".join(lines)
 
@@ -138,11 +141,13 @@ def prune_run(adapter: WarehouseAdapter, run_id: str, *, dry_run: bool = False) 
     ]
     found.sort(key=lambda warehouse_object: str(warehouse_object.address))
 
-    pruned_objects = [
-        PrunedObject(
-            warehouse_object=warehouse_object,
-            statement=None if dry_run else adapter.execute(_drop_statement(warehouse_object)),
+    pruned_objects: list[PrunedObject] = []
+    for warehouse_object in found:
+        drop_sql = _drop_statement(warehouse_object)
+        statement = (
+            Statement(sql=drop_sql, status=StatementStatus.NOT_RUN)
+            if dry_run
+            else adapter.execute(drop_sql)
         )
-        for warehouse_object in found
-    ]
+        pruned_objects.append(PrunedObject(warehouse_object=warehouse_object, statement=statement))
     return PruneSummary(run_id=run_id, dry_run=dry_run, objects=pruned_objects)
