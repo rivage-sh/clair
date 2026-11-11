@@ -39,7 +39,7 @@ from clair.exceptions import ClairError, ResultNotFoundError, RunError
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, SqlTrouve, Table, TrouveAbc, table_options_of
+from clair.trouves.trouve import ExecutionType, SqlTrouve, Table, TrouveAbc, View, table_options_of
 from clair.trouves.trouve_type import TrouveType
 
 
@@ -580,7 +580,7 @@ def _promote_or_keep(
             trouve.type,
             staging_address=staging_address,
             physical_address=physical_address,
-            resolved_sql=trouve.full_refresh_sql() if isinstance(trouve, SqlTrouve) else "",
+            resolved_sql=trouve.full_refresh_sql() if isinstance(trouve, View) else "",
             table_options=table_options_of(trouve),
         ),
         *build_comment_statements(physical_address, trouve, current_comments),

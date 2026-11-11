@@ -196,3 +196,101 @@ def test_a_warehouse_that_cannot_describe_the_target_fails_the_node_and_writes_n
     assert result.statements == []
     assert not any("recent_orders" in sql and "CREATE" in sql for sql in adapter.record.statements)
     assert isinstance(summary.result(DOWNSTREAM), RunSkip)
+
+
+# Each file of these projects writes its module name to a list of the builtins
+# module, thus a test counts how many times each file runs.
+_RUN_LOG = "_clair_test_file_runs"
+_COUNTING_LINE = f"import builtins\nbuiltins.__dict__.setdefault('{_RUN_LOG}', []).append(__name__)\n"
+
+
+@pytest.fixture
+def file_runs():
+    import builtins
+
+    runs: list[str] = []
+    setattr(builtins, _RUN_LOG, runs)
+    yield runs
+    delattr(builtins, _RUN_LOG)
+
+
+def _write_counting_project(project_root: Path, table_names: list[str]) -> Path:
+    """Write one source, and one filtered incremental Table for each name."""
+    write_project_marker(project_root)
+    (project_root / "db" / "raw").mkdir(parents=True)
+    (project_root / "db" / "derived").mkdir(parents=True)
+    (project_root / "db" / "raw" / "orders.py").write_text(
+        _COUNTING_LINE + "from clair import Source\ntrouve = Source()\n"
+    )
+    for table_name in table_names:
+        (project_root / "db" / "derived" / f"{table_name}.py").write_text(
+            _COUNTING_LINE + _filtered_trouve_file(APPEND)
+        )
+    return project_root
+
+
+def test_only_the_file_of_a_node_that_falls_back_runs_again(tmp_path, file_runs):
+    project_root = _write_counting_project(tmp_path / "project", ["new_table", "old_table"])
+    adapter = RecordingAdapter(existing_tables=["db.derived.old_table"])
+
+    summary = _run(project_root, adapter, RunMode.INCREMENTAL)
+
+    assert sorted(file_runs) == [
+        "db.derived.new_table",
+        "db.derived.new_table",
+        "db.derived.old_table",
+        "db.raw.orders",
+    ]
+    new_table = summary.result("db.derived.new_table")
+    assert isinstance(new_table, RunSuccess)
+    assert INCREMENTAL_FILTER not in _build_sql_of(new_table)
+
+
+def test_a_full_refresh_run_runs_each_file_one_time(tmp_path, file_runs):
+    project_root = _write_counting_project(tmp_path / "project", ["new_table"])
+
+    _run(project_root, RecordingAdapter(existing_tables=[]), RunMode.FULL_REFRESH)
+
+    assert sorted(file_runs) == ["db.derived.new_table", "db.raw.orders"]
+
+
+def test_parallel_nodes_that_fall_back_each_get_the_full_refresh_sql(tmp_path, file_runs):
+    table_names = [f"table_{index}" for index in range(8)]
+    project_root = _write_counting_project(tmp_path / "project", table_names)
+
+    summary = clair.run(
+        project_root,
+        env=make_environment(),
+        run_mode=RunMode.INCREMENTAL,
+        adapter=RecordingAdapter(existing_tables=[]),
+        threads=8,
+    )
+
+    for table_name in table_names:
+        result = summary.result(f"db.derived.{table_name}")
+        assert isinstance(result, RunSuccess)
+        assert INCREMENTAL_FILTER not in _build_sql_of(result)
+    # The run mode of the run comes back after each second run of a file.
+    assert clair.run_mode == RunMode.INCREMENTAL
+
+
+def test_a_later_discovery_in_the_process_does_not_change_the_addresses(tmp_path):
+    # A notebook plans a run, then compiles the project again before it runs.
+    # The second discovery makes new Trouve objects, and the full refresh SQL
+    # of the planned run must still read the addresses of that run.
+    project_root = _write_project(tmp_path / "project", APPEND)
+    run_handle = clair.start_run(
+        project_root,
+        env=make_environment(),
+        run_mode=RunMode.INCREMENTAL,
+        adapter=RecordingAdapter(existing_tables=[]),
+    )
+    clair.compile(project_root, env="dev", run_mode=RunMode.INCREMENTAL)
+
+    results = {str(result.addresses.logical): result for result in run_handle}
+
+    target = results[TARGET]
+    assert isinstance(target, RunSuccess)
+    build_sql = _build_sql_of(target)
+    assert "from db.raw.orders" in build_sql
+    assert INCREMENTAL_FILTER not in build_sql

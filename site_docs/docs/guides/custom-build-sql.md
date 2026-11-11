@@ -60,7 +60,8 @@ address, as `window_rows` does below. The staging address already holds the run 
 
 `resolved_sql` holds the SQL of the run mode of the command line. A full refresh must read
 `self.full_refresh_sql()` instead, because a first run of `--run-mode incremental` is a
-full refresh too. `super().build_sql()` reads it for you.
+full refresh too, and the SQL obeys the effective mode. `super().build_sql()` reads it for
+you.
 
 ## 1. Write the subclass
 

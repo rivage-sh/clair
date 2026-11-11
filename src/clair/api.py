@@ -73,7 +73,7 @@ from clair.environments.routing import (
 )
 from clair.exceptions import RunError, SampleTargetsProductionError
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, SqlTrouve, TrouveAbc
+from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, TrouveAbc
 from clair.trouves.trouve_type import TrouveType
 from clair.web_ui.catalog import build_catalog
 from clair.web_ui.server import serve
@@ -161,27 +161,23 @@ def _discover(
     none. A name gives the routing entry only.
     """
     project_root = _resolve_project_root(project_dir)
-    env_name = _env_name_of(env)
-    trouves = _discover_trouves(project_root, env, run_mode)
-    _warn_about_routing_collisions(trouves, env_name)
-    return _DiscoveredProject(project_root, env_name, trouves, build_dag(trouves))
-
-
-def _discover_trouves(project_root: Path, env: EnvSpec, run_mode: RunMode) -> list[TrouveAbc]:
-    """Import each Trouve of the project, with ``clair.run_mode`` set to *run_mode*."""
     environment = env if isinstance(env, Environment) else None
+    env_name = _env_name_of(env)
     profile_defaults = (
         None
         if environment is None
         else {"warehouse": environment.connection.warehouse, "role": environment.connection.role}
     )
-    return discover_project(
+    routing = routing_entry_of(project_root, env_name)
+    trouves = discover_project(
         project_root,
         profile_defaults,
-        routing=routing_entry_of(project_root, _env_name_of(env)),
+        routing=routing,
         environment=environment,
         run_mode=run_mode,
     )
+    _warn_about_routing_collisions(trouves, env_name)
+    return _DiscoveredProject(project_root, env_name, trouves, build_dag(trouves))
 
 
 class _Plan(NamedTuple):
@@ -214,47 +210,13 @@ def _plan(
         ValueError: If *sample_rows* is less than 1.
     """
     _require_a_positive_sample_rows(sample_rows)
-    # A module reads clair.run_mode at import time. An incremental run thus
-    # imports the project two times, because a node of that run can make its
-    # object again, and that build needs the SQL of the full refresh mode.
-    full_refresh_trouves = None
-    if run_mode == RunMode.INCREMENTAL:
-        full_refresh_trouves = _discover_trouves(
-            _resolve_project_root(project_dir), env, RunMode.FULL_REFRESH
-        )
     project = _discover(project_dir, env, run_mode)
     selected = _select_nodes(project.dag, select, exclude)
     plan_sample_rows = sample_rows if sample else None
     if sample:
         _refuse_a_sampled_production_write(project.dag, selected, project.env_name)
     recompile_for_selection(project.trouves, set(selected), sample_rows=plan_sample_rows)
-    if full_refresh_trouves is not None:
-        recompile_for_selection(
-            full_refresh_trouves, set(selected), sample_rows=plan_sample_rows
-        )
-        _attach_full_refresh_sql(project.trouves, full_refresh_trouves)
     return _Plan(project, selected, plan_sample_rows)
-
-
-def _attach_full_refresh_sql(
-    trouves: Sequence[TrouveAbc], full_refresh_trouves: Sequence[TrouveAbc]
-) -> None:
-    """Give each SQL Trouve the SQL that its module gives in the full refresh mode.
-
-    The two lists come from two imports of one project, thus the logical
-    address joins them: the file decides it.
-    """
-    full_refresh_sql_of = {
-        trouve.logical_address: trouve.resolved_sql()
-        for trouve in full_refresh_trouves
-        if isinstance(trouve, SqlTrouve)
-    }
-    for trouve in trouves:
-        if not isinstance(trouve, SqlTrouve):
-            continue
-        trouve.compiled = trouve.require_compiled().model_copy(
-            update={"full_refresh_sql": full_refresh_sql_of[trouve.logical_address]}
-        )
 
 
 def compile(

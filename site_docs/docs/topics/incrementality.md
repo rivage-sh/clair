@@ -365,7 +365,7 @@ column lists from Snowflake.
 
 On the first run, the target table does not exist. clair then does a full refresh, and it ignores your strategy. The runs after the first one use your incremental mode.
 
-The full refresh uses the SQL that your module gives when `clair.run_mode` is `FULL_REFRESH`. Thus the first run of `clair run --run-mode incremental` holds each row, and not only the rows of the incremental filter. To get that SQL, clair imports the project two times in an incremental run: one time in each mode. The same SQL builds each Trouve of the run that has no incremental mode: a `View`, and a `Table` with `FullRefresh()`.
+The effective mode of that node is `FULL_REFRESH`, and its SQL obeys the effective mode: clair runs the file of that one Trouve again with `clair.run_mode` set to `FULL_REFRESH`, and builds from that SQL. Thus the first run of `clair run --run-mode incremental` holds each row, and not only the rows of the incremental filter. No other file runs again. The same rule builds each Trouve of the run whose effective mode is `FULL_REFRESH`: a `View`, and a `Table` with `FullRefresh()`.
 
 If Snowflake cannot tell clair whether the table exists, the Trouve fails and clair writes nothing. A table that clair cannot see is not a table that does not exist.
 

@@ -15,7 +15,10 @@ after it takes objects. See ``site_docs/docs/topics/anatomy-of-a-run.md``.
 
 from __future__ import annotations
 
+import functools
 import os
+import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +33,7 @@ from clair.core import project_imports
 from clair.core.references import (
     describe_unresolved_tokens,
     detect_imports,
+    full_refresh_renderer,
     resolve_sql,
 )
 from clair.environments.project_routing import ROUTING_FILE_NAME
@@ -212,6 +216,39 @@ def _merge_imports(imports: list[str], sample_imports: list[str]) -> list[str]:
     return list(dict.fromkeys([*imports, *sample_imports]))
 
 
+# A second run of a Trouve file sets clair.run_mode, which is global, and the
+# threads of a run can ask for it at one time.
+_RUN_MODE_LOCK = threading.Lock()
+
+
+def _full_refresh_tokens_of(source: str, file_path: Path, module_name: str) -> Callable[[], str]:
+    """Give the function that runs one Trouve file again, with ``clair.run_mode`` as FULL_REFRESH.
+
+    A module reads the run mode at import time, for example to add an
+    incremental filter. A node whose effective mode is a full refresh needs
+    the SQL without it. Only that file runs again, and only when a node asks:
+    each import of the file resolves to the module that discovery loaded.
+    """
+
+    @functools.cache
+    def full_refresh_tokens() -> str:
+        with _RUN_MODE_LOCK:
+            run_mode_of_the_run = _clair_pkg.run_mode
+            _clair_pkg.run_mode = RunMode.FULL_REFRESH
+            try:
+                names = project_imports.run_source_again(source, file_path, module_name)
+            finally:
+                _clair_pkg.run_mode = run_mode_of_the_run
+        rendered = names.get("trouve")
+        if not isinstance(rendered, SqlTrouve):
+            raise DiscoveryError(
+                str(file_path), "the file gives no SQL Trouve when clair.run_mode is FULL_REFRESH."
+            )
+        return rendered.sql
+
+    return full_refresh_tokens
+
+
 def _compile_trouve(
     trouve_obj: TrouveAbc,
     *,
@@ -221,6 +258,7 @@ def _compile_trouve(
     logical_addresses: dict[int, TrouveAddress],
     physical_addresses: dict[int, TrouveAddress],
     profile_defaults: dict[str, str | None] | None,
+    run_mode: RunMode | None,
 ) -> None:
     """Give one Trouve its compiled attributes, and resolve the SQL of each test.
 
@@ -263,7 +301,20 @@ def _compile_trouve(
             config=config,
         )
     elif isinstance(trouve_obj, SqlTrouve):
+        # The module saw INCREMENTAL, thus its SQL can hold an incremental
+        # filter. Keep its text, and render the full refresh SQL on demand.
+        full_refresh_tokens = None
+        full_refresh_render = None
+        if run_mode == RunMode.INCREMENTAL:
+            full_refresh_tokens = _full_refresh_tokens_of(file_path.read_text(), file_path, module_name)
+            full_refresh_render = full_refresh_renderer(
+                full_refresh_tokens,
+                {address: address for address in logical_addresses.values()},
+                logical,
+            )
         trouve_obj.compiled = CompiledSql(
+            full_refresh_tokens=full_refresh_tokens,
+            full_refresh_render=full_refresh_render,
             physical_address=physical,
             resolved_sql=resolve_sql(trouve_obj.sql, logical_addresses, this_address=logical),
             file_path=relative_file_path,
@@ -452,6 +503,7 @@ def discover_project(
             logical_addresses=logical_addresses,
             physical_addresses=physical_addresses,
             profile_defaults=profile_defaults,
+            run_mode=run_mode,
         )
 
     logger.info("discovery.complete", project_root=str(project_root), trouves=len(collected), errors=0)

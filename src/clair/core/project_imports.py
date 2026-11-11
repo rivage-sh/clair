@@ -233,6 +233,25 @@ def load_project_file(file_path: Path, module_name: str) -> ModuleType | None:
     return module
 
 
+def run_source_again(source: str, file_path: Path, module_name: str) -> dict[str, object]:
+    """Run the text of a project file one more time, and give the names that it defines.
+
+    The text runs in a new module object that no import can reach: the
+    function writes nothing to ``sys.modules``, thus the module of discovery
+    stays the module of the file. Each import of the text resolves in the
+    normal way, to a module that Python holds already, and runs no file again.
+
+    The caller keeps *source* from discovery, thus this function reads no file.
+
+    Raises the error of the text itself.
+    """
+    module = ModuleType(module_name)
+    module.__file__ = str(file_path)
+    module.__package__ = module_name.rpartition(".")[0]
+    exec(compile(source, str(file_path), "exec"), module.__dict__)  # noqa: S102 — the file of the author, which discovery ran already
+    return module.__dict__
+
+
 SUPPORT_MODULE_PREFIX = "_clair_support_"
 """The first part of the module name of each clair file that holds no Trouve."""
 

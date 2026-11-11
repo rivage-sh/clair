@@ -28,14 +28,15 @@ run builds is a sample already, thus a reference to it keeps the address.
 
 from __future__ import annotations
 
+import functools
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from clair.core.project_imports import names_of_files_that_ran_two_times
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import CompileError
-from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX
+from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX, registered
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.test import TestSql
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, DataframeInput, SqlTrouve, TrouveAbc
@@ -213,6 +214,56 @@ def _reference_addresses_for_selection(
     return reference_addresses
 
 
+def resolve_sql_by_logical_address(
+    sql: str,
+    address_of_logical: dict[TrouveAddress, TrouveAddress],
+    this_address: TrouveAddress,
+    sampled_reference_of_logical: dict[TrouveAddress, str] | None = None,
+) -> str:
+    """Render SQL whose tokens point to Trouve objects that are not the objects of the run.
+
+    A file that runs again for the full refresh mode interpolates the Trouve
+    objects that Python holds at that moment. A later discovery in the same
+    process can replace them, thus their ids are not the ids of the run. The
+    logical address names one Trouve in each discovery, thus it joins them.
+
+    Raises:
+        CompileError: If a token points to an object that is not a Trouve of
+            the run. See ``resolve_sql``.
+    """
+    sampled_references = sampled_reference_of_logical or {}
+    id_to_address: dict[int, TrouveAddress] = {}
+    id_to_sampled_reference: dict[int, str] = {}
+    for match in _PLACEHOLDER_RE.finditer(sql):
+        object_id = int(match.group(1))
+        referenced = registered(object_id)
+        if not isinstance(referenced, TrouveAbc):
+            continue
+        logical_address = referenced.logical_address
+        if logical_address in address_of_logical:
+            id_to_address[object_id] = address_of_logical[logical_address]
+        if logical_address in sampled_references:
+            id_to_sampled_reference[object_id] = sampled_references[logical_address]
+    return resolve_sql(sql, id_to_address, this_address, id_to_sampled_reference)
+
+
+def full_refresh_renderer(
+    full_refresh_tokens: Callable[[], str],
+    address_of_logical: dict[TrouveAddress, TrouveAddress],
+    this_address: TrouveAddress,
+    sampled_reference_of_logical: dict[TrouveAddress, str] | None = None,
+) -> Callable[[], str]:
+    """Give the function that renders the full refresh SQL of one Trouve, one time at most."""
+
+    @functools.cache
+    def render() -> str:
+        return resolve_sql_by_logical_address(
+            full_refresh_tokens(), address_of_logical, this_address, sampled_reference_of_logical
+        )
+
+    return render
+
+
 def render_sample(
     trouve: TrouveAbc,
     id_to_address: dict[int, TrouveAddress],
@@ -298,6 +349,19 @@ def recompile_for_selection(
     sampled_references = _sampled_references(
         trouves, selected_addresses, reference_addresses, sample_rows
     )
+    # The full refresh SQL of a node renders later, from a second run of its
+    # file, thus its tokens hold other ids. The logical address joins them.
+    logical_address_of_id = {
+        id(trouve): trouve.logical_address for trouve in trouves if trouve.compiled
+    }
+    address_of_logical = {
+        logical_address_of_id[object_id]: address
+        for object_id, address in reference_addresses.items()
+    }
+    sampled_reference_of_logical = {
+        logical_address_of_id[object_id]: sampled_reference
+        for object_id, sampled_reference in sampled_references.items()
+    }
 
     for trouve in trouves:
         if not trouve.compiled:
@@ -311,6 +375,7 @@ def recompile_for_selection(
         this_address = trouve.compiled.physical_address
 
         if isinstance(trouve, SqlTrouve):
+            full_refresh_tokens = trouve.compiled.full_refresh_tokens
             trouve.compiled = trouve.compiled.model_copy(
                 update={
                     "resolved_sql": resolve_sql(
@@ -318,7 +383,15 @@ def recompile_for_selection(
                         reference_addresses,
                         this_address=this_address,
                         id_to_sampled_reference=sampled_references,
-                    )
+                    ),
+                    "full_refresh_render": None
+                    if full_refresh_tokens is None
+                    else full_refresh_renderer(
+                        full_refresh_tokens,
+                        address_of_logical,
+                        this_address,
+                        sampled_reference_of_logical,
+                    ),
                 }
             )
         elif isinstance(trouve, DataframeTrouve):

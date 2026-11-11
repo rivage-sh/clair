@@ -22,6 +22,11 @@ def register(trouve: object) -> str:
     return f"{TROUVE_PLACEHOLDER_PREFIX}{id(trouve)}"
 
 
+def registered(object_id: int) -> object | None:
+    """Give the object that a token names, or None if the registry does not hold it."""
+    return _registry.get(object_id)
+
+
 def clear() -> None:
     """Empty the registry. discover_project() calls this before it starts."""
     _registry.clear()
