@@ -51,6 +51,11 @@ class SnowflakeAdapter(WarehouseAdapter):
             "account": connection.account,
             "user": connection.user,
             "warehouse": connection.warehouse,
+            # Snowflake ends a session after 4 hours with no query. The pool
+            # opens each connection when the run starts, and a thread can wait
+            # longer than that for a slow Trouve upstream. The connector then
+            # sends a heartbeat, thus a run can last for any time.
+            "client_session_keep_alive": True,
         }
         if connection.role:
             connect_args["role"] = connection.role

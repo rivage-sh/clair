@@ -221,6 +221,10 @@ The pool opens each connection when the run starts, and not at the first query o
 thread. SSO authentication opens a browser window, thus a lazy connection would ask you to
 authenticate in the middle of a run.
 
+Snowflake ends a session after 4 hours with no query, and a thread can wait that long for
+a slow Trouve upstream. Each connection therefore sets `client_session_keep_alive`: the
+connector sends a heartbeat, and a run can last for any time.
+
 clair makes each database and each schema of the run one time, before the threads start.
 Many Trouves write to one schema, and concurrent `CREATE SCHEMA IF NOT EXISTS` statements
 against one schema can collide in the warehouse.
