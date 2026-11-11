@@ -75,6 +75,12 @@ clair resolves the session of each Trouve in this order. A later value replaces 
 The `query_tags` labels merge by key: a lower level replaces the same key, and keeps the
 other keys.
 
+If no level sets a role or a warehouse, the Trouve runs with the role and the warehouse
+that the Snowflake session had when it opened: the default role of your user, if the
+environment names no role. A thread runs many Trouves on one session, and clair sets the
+context of each Trouve again before it starts. Thus the role of one Trouve never stays for
+the next Trouve, and the owner of each table does not depend on the order of the threads.
+
 ## Field reference
 
 `DatabaseDefaults`, `SchemaDefaults` and each Trouve have the same fields:

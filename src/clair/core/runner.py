@@ -633,8 +633,7 @@ def _run_node(
             query_tag=config.query_tag(run_id, environment_name, logical_address),
             statement_timeout_seconds=config.statement_timeout_seconds,
         )
-        if config.warehouse or config.role:
-            adapter.set_context(warehouse=config.warehouse, role=config.role)
+        adapter.set_context(warehouse=config.warehouse, role=config.role)
     except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
         logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=config.warehouse, role=config.role, error=str(e))
         return _NodeOutcome(
