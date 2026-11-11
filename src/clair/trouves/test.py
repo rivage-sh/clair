@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from enum import StrEnum
 from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -38,6 +39,21 @@ Put it in an f-string to point to the table that the test examines::
 
 
 
+class TestSeverity(StrEnum):
+    """What a test that finds rows does to the run.
+
+    ERROR stops the promotion of the Trouve and skips each Trouve downstream.
+    WARN reports the rows, and the run continues as if the test passed. A
+    test whose query fails stops the promotion with each severity, because
+    clair then knows nothing about the data.
+    """
+
+    __test__ = False  # pytest must not collect this class.
+
+    ERROR = "error"
+    WARN = "warn"
+
+
 class Test(BaseModel, ABC):
     """The abstract parent of all the data quality tests.
 
@@ -52,6 +68,8 @@ class Test(BaseModel, ABC):
     Attributes:
         run_with_sample: True runs the test on a sample, and False skips it.
             None takes the default of the class, ``is_run_with_sample_by_default``.
+        severity: ERROR stops the promotion when the test finds rows. WARN
+            reports the rows, and the run continues.
     """
 
     # A sample is correct input for a test that cannot fail on a sample when
@@ -60,6 +78,7 @@ class Test(BaseModel, ABC):
     is_run_with_sample_by_default: ClassVar[bool] = True
 
     run_with_sample: bool | None = None
+    severity: TestSeverity = TestSeverity.ERROR
 
     @abstractmethod
     def to_sql(self, physical_address: str) -> str:

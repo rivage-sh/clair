@@ -30,6 +30,7 @@ from clair.environments.environments import Authenticator, Environment, Password
 from clair.environments.project_routing import load_project_routing
 from clair.exceptions import ClairError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
+from clair.trouves.test import TestSeverity
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, ExecutionType
 from clair.trouves.trouve_type import TrouveType
 from tests.helpers import (
@@ -393,6 +394,49 @@ class TestTestCommand:
         result = CliRunner().invoke(cli, ["test", "--env", "dev"])
 
         assert result.exit_code == 0
+
+    @pytest.mark.parametrize(
+        ("severity", "expected_exit_code"),
+        [(TestSeverity.WARN, 0), (TestSeverity.ERROR, 1)],
+    )
+    def test_only_an_error_test_that_finds_rows_fails_the_command(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        calls: dict[str, Any],
+        tmp_path: Path,
+        severity: TestSeverity,
+        expected_exit_code: int,
+    ):
+        test_result = make_test_result(row_count=3).model_copy(update={"severity": severity})
+        _give_api(monkeypatch, calls, "test", TestSummary(results=[test_result]))
+
+        result = CliRunner().invoke(cli, ["test", "--env", "dev"])
+
+        assert result.exit_code == expected_exit_code
+
+    @pytest.mark.parametrize(
+        ("severity", "expected_exit_code"),
+        [(TestSeverity.WARN, 0), (TestSeverity.ERROR, 1)],
+    )
+    def test_a_run_fails_only_for_an_error_test_that_finds_rows(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        calls: dict[str, Any],
+        tmp_path: Path,
+        severity: TestSeverity,
+        expected_exit_code: int,
+    ):
+        test_result = make_test_result("mydb.analytics.orders", row_count=3).model_copy(
+            update={"severity": severity}
+        )
+        run_result = make_run_success("mydb.analytics.orders", test_results=[test_result])
+        _give_api(
+            monkeypatch, calls, "run", RunSummary(results=[run_result], env_name="dev", run_id="abc")
+        )
+
+        result = CliRunner().invoke(cli, ["run", "--env", "dev"])
+
+        assert result.exit_code == expected_exit_code
 
     def test_the_command_gives_each_option_to_the_api(
         self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path

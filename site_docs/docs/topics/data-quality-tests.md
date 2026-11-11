@@ -103,6 +103,32 @@ HAVING COUNT(*) > 1
 
 Every test generates a SQL query. **Zero rows in the result = pass. One row or more = fail.**
 
+## Severity
+
+A failed test stops the promotion of its Trouve, and clair skips each Trouve downstream.
+Some conditions deserve a message, and not a stop: a few late rows, or a count that
+drifts. Give such a test `severity=TestSeverity.WARN`:
+
+```python
+from clair import Table, TestRowCount, TestSeverity, TestUnique
+
+trouve = Table(
+    sql=f"SELECT * FROM {orders}",
+    tests=[
+        TestUnique(column="order_id"),
+        TestRowCount(min_rows=1000, severity=TestSeverity.WARN),
+    ],
+)
+```
+
+A WARN test that finds rows shows `WARN` with the row count, and the run continues as if
+the test passed: clair promotes the Trouve, runs each Trouve downstream, and the command
+gives the status code 0. Each result in the run summary holds `severity` and
+`is_blocking`, thus an orchestrator can send an alert for each warning.
+
+A WARN test whose query fails still stops the promotion. Then clair knows nothing about
+the data, and a query that fails is a fault in the test, not a condition of the data.
+
 ## Run the tests
 
 **Automatically after each successful node:**
