@@ -29,6 +29,9 @@ class SnowflakeAdapter(WarehouseAdapter):
     def __init__(self) -> None:
         self._conn: snowflake.connector.SnowflakeConnection | None = None
         self._environment: Environment | None = None
+        # The role and the warehouse that the session had before clair sent a
+        # USE statement. set_context() reads them one time.
+        self._opening_context: tuple[str | None, str | None] | None = None
 
     @classmethod
     def connected(cls, environment: Environment) -> SnowflakeAdapter:
@@ -209,19 +212,31 @@ class SnowflakeAdapter(WarehouseAdapter):
     ) -> None:
         """Set the session context with USE commands.
 
-        The method sends a USE statement only for a value that is not None and
-        not empty. It sends ROLE first, because the role controls the
-        permissions. Then it sends WAREHOUSE, then DATABASE.
+        A thread runs many Trouves on one session, and a USE statement stays
+        until the next one. Thus a role or a warehouse of None gives back the
+        value that the session had when it opened, and does not keep the value
+        of the Trouve before. The method sends ROLE first, because the role
+        controls the permissions. Then it sends WAREHOUSE, then DATABASE. A
+        database_name of None sends no USE DATABASE.
         """
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
         cursor = self._conn.cursor()
         try:
-            if role and role.strip():
-                cursor.execute(f"USE ROLE {role}")
-            if warehouse and warehouse.strip():
-                cursor.execute(f"USE WAREHOUSE {warehouse}")
+            if self._opening_context is None:
+                cursor.execute("SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE()")
+                opening_row = cursor.fetchone()
+                self._opening_context = (
+                    (opening_row[0], opening_row[1]) if opening_row else (None, None)
+                )
+            opening_role, opening_warehouse = self._opening_context
+            wanted_role = role if role and role.strip() else opening_role
+            wanted_warehouse = warehouse if warehouse and warehouse.strip() else opening_warehouse
+            if wanted_role:
+                cursor.execute(f"USE ROLE {wanted_role}")
+            if wanted_warehouse:
+                cursor.execute(f"USE WAREHOUSE {wanted_warehouse}")
             if database_name and database_name.strip():
                 cursor.execute(f"USE DATABASE {database_name}")
         finally:

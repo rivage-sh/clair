@@ -130,7 +130,12 @@ class WarehouseAdapter(ABC):
         role: str | None = None,
         database_name: str | None = None,
     ) -> None:
-        """Set the session context: the warehouse, the role and the database."""
+        """Set the session context: the warehouse, the role and the database.
+
+        A role or a warehouse of None gives back the value that the session had
+        when it opened. The runner calls this method for each Trouve, thus the
+        role of one Trouve never stays for the next Trouve on the same thread.
+        """
         ...
 
     @abstractmethod
