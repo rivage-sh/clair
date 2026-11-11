@@ -1,93 +1,64 @@
 """The tests of the selector, the glob match, and the graph operators."""
 
-import networkx as nx
 import pytest
 
+import clair
 from clair.core.selector import (
     ParsedSelector,
     expand_selector,
     expand_selectors,
-    filter_by_selector,
-    filter_by_selectors,
-    match_selector,
     parse_selector,
 )
+from clair.trouves.trouve_type import TrouveType
+from tests.helpers import build_dag_of, write_project_marker
+
+# A routing entry that moves each table to another database. A pattern names
+# the logical address, thus it selects the same Trouves in each environment.
+_SUFFIX_ROUTING = """
+from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
+
+class Suffix(RoutingEntry):
+    def route(self, address: TrouveAddress, trouve_type: TrouveType) -> TrouveAddress:
+        if trouve_type == TrouveType.SOURCE:
+            return address
+        return address.model_copy(update={"database_name": address.database_name + "_alice"})
+
+routing = RoutingTable(entries=[Suffix(environment_name="dev")])
+"""
 
 
-class TestMatchSelector:
-    def test_exact_match(self):
-        assert match_selector("mydb.analytics.orders", "mydb.analytics.orders")
-
-    def test_wildcard_table(self):
-        assert match_selector("mydb.analytics.orders", "mydb.analytics.*")
-
-    def test_wildcard_schema(self):
-        assert match_selector("mydb.analytics.orders", "mydb.*.orders")
-
-    def test_no_match(self):
-        assert not match_selector("mydb.staging.users", "mydb.analytics.*")
-
-    def test_wildcard_all(self):
-        assert match_selector("mydb.analytics.orders", "*.*.*")
-
-    def test_double_wildcard_schema_and_table(self):
-        assert match_selector("mydb.analytics.orders", "mydb.*.*")
+@pytest.fixture
+def routed_project(tmp_path):
+    project_root = write_project_marker(tmp_path / "project")
+    (project_root / "__routing__.py").write_text(_SUFFIX_ROUTING)
+    for schema_name in ("raw", "derived"):
+        (project_root / "db" / schema_name).mkdir(parents=True)
+    (project_root / "db" / "raw" / "events.py").write_text("from clair import Source\ntrouve = Source()\n")
+    for table_name in ("daily", "weekly"):
+        (project_root / "db" / "derived" / f"{table_name}.py").write_text(
+            "from clair import Table\n"
+            "from db.raw.events import trouve as events\n"
+            'trouve = Table(sql=f"select * from {events}")\n'
+        )
+    return project_root
 
 
-class TestFilterBySelector:
-    def test_none_pattern_returns_all(self):
-        names = ["a.b.c", "d.e.f"]
-        assert filter_by_selector(names, None) == names
+@pytest.mark.parametrize(
+    ("select", "exclude", "expected_physical"),
+    [
+        (["db.derived.daily"], None, ["db_alice.derived.daily"]),
+        (["db.derived.*"], ["db.derived.weekly"], ["db_alice.derived.daily"]),
+        (["+db.derived.weekly"], None, ["db_alice.derived.weekly"]),
+        # The physical address is not a name that a pattern matches.
+        (["db_alice.derived.daily"], None, []),
+    ],
+)
+def test_a_routed_environment_selects_by_the_logical_address(
+    routed_project, select, exclude, expected_physical
+):
+    output = clair.compile(routed_project, env="dev", select=select, exclude=exclude)
 
-    def test_filters_correctly(self):
-        names = ["mydb.analytics.orders", "mydb.staging.users", "mydb.analytics.revenue"]
-        result = filter_by_selector(names, "mydb.analytics.*")
-        assert result == ["mydb.analytics.orders", "mydb.analytics.revenue"]
-
-    def test_empty_result(self):
-        names = ["mydb.analytics.orders"]
-        result = filter_by_selector(names, "otherdb.*.*")
-        assert result == []
-
-
-class TestFilterBySelectors:
-    def test_none_returns_all(self):
-        names = ["a.b.c", "d.e.f"]
-        assert filter_by_selectors(names, None) == names
-
-    def test_empty_tuple_returns_all(self):
-        names = ["a.b.c", "d.e.f"]
-        assert filter_by_selectors(names, ()) == names
-
-    def test_single_pattern_matches(self):
-        names = ["mydb.analytics.orders", "mydb.staging.users", "mydb.analytics.revenue"]
-        result = filter_by_selectors(names, ("mydb.analytics.*",))
-        assert result == ["mydb.analytics.orders", "mydb.analytics.revenue"]
-
-    def test_multiple_patterns_union(self):
-        names = [
-            "mydb.analytics.orders",
-            "mydb.staging.users",
-            "mydb.analytics.revenue",
-            "mydb.reports.daily",
-        ]
-        result = filter_by_selectors(names, ("mydb.analytics.*", "mydb.reports.*"))
-        assert result == ["mydb.analytics.orders", "mydb.analytics.revenue", "mydb.reports.daily"]
-
-    def test_overlapping_patterns_no_duplicates(self):
-        names = ["mydb.analytics.orders", "mydb.analytics.revenue"]
-        result = filter_by_selectors(names, ("mydb.analytics.*", "mydb.*.orders"))
-        assert result == ["mydb.analytics.orders", "mydb.analytics.revenue"]
-
-    def test_preserves_original_order(self):
-        names = ["z.z.z", "a.a.a", "m.m.m"]
-        result = filter_by_selectors(names, ("m.m.m", "z.z.z"))
-        assert result == ["z.z.z", "m.m.m"]
-
-    def test_no_matches_returns_empty(self):
-        names = ["mydb.analytics.orders"]
-        result = filter_by_selectors(names, ("otherdb.*.*", "nope.*.*"))
-        assert result == []
+    assert [str(node.addresses.physical) for node in output.compiled_nodes] == expected_physical
 
 
 class TestParseSelector:
@@ -131,17 +102,33 @@ class TestParseSelector:
 
 @pytest.fixture
 def dag():
-    g = nx.DiGraph()
-    g.add_nodes_from([
-        "db.raw.source_a",
-        "db.raw.source_b",
-        "db.analytics.orders",
-        "db.analytics.revenue",
-    ])
-    g.add_edge("db.raw.source_a", "db.analytics.orders")
-    g.add_edge("db.raw.source_b", "db.analytics.orders")
-    g.add_edge("db.analytics.orders", "db.analytics.revenue")
-    return g
+    return build_dag_of(
+        [
+            ("db.raw.source_a", TrouveType.SOURCE),
+            ("db.raw.source_b", TrouveType.SOURCE),
+            ("db.analytics.orders", TrouveType.TABLE),
+            ("db.analytics.revenue", TrouveType.TABLE),
+        ],
+        [
+            ("db.raw.source_a", "db.analytics.orders"),
+            ("db.raw.source_b", "db.analytics.orders"),
+            ("db.analytics.orders", "db.analytics.revenue"),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        ("db.analytics.orders", {"db.analytics.orders"}),
+        ("db.analytics.*", {"db.analytics.orders", "db.analytics.revenue"}),
+        ("db.*.orders", {"db.analytics.orders"}),
+        ("*.*.*", {"db.raw.source_a", "db.raw.source_b", "db.analytics.orders", "db.analytics.revenue"}),
+        ("otherdb.*.*", set()),
+    ],
+)
+def test_a_glob_matches_the_logical_address(dag, pattern, expected):
+    assert expand_selector(dag, pattern) == expected
 
 
 class TestExpandSelector:

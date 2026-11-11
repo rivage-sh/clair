@@ -4,7 +4,7 @@ The `clair run`, `clair compile`, `clair test`, and `clair dag` commands accept 
 
 ## Syntax
 
-`--select` takes a glob pattern. clair matches the pattern against the fully-qualified name of the Trouve (`database.schema.table`). The `*` wildcard matches inside one segment.
+`--select` takes a glob pattern. clair matches the pattern against the logical address of the Trouve (`database.schema.table`): the address that its file path gives. Routing does not change it, thus one pattern selects the same Trouves in each environment. The `*` wildcard matches inside one segment.
 
 ```bash
 clair run --env=dev --select='refined.orders.*'
