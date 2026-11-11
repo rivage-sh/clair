@@ -131,6 +131,10 @@ Add a field for each value that the rule needs. Pydantic validates the fields, a
 | logical address | The address that the file path gives. The DAG edges, the `--select` patterns and the Trouve files use it. |
 | physical address | The address that clair writes to. Your routing entry makes it from the logical address. |
 
+`--select` and `--exclude` match the logical address, and never the physical address. Thus
+one pattern selects the same Trouves in each environment, whatever the routing entry does.
+See [Selectors](selectors.md).
+
 A third address, the staging address, holds the data until the tests pass. See [Staging](staging.md).
 
 In a partial run, a Trouve reads the physical address of an upstream Trouve that the run

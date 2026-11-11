@@ -1,5 +1,9 @@
 """Clair matches the glob patterns of --select and --exclude.
 
+A glob matches the logical address of a Trouve: the address that its file path
+gives. Thus one pattern selects the same Trouves in each environment, whatever
+the routing entry does to the physical address.
+
 A pattern can be a plain glob. A pattern can also contain a graph operator, as
 in dbt:
 
@@ -26,6 +30,8 @@ from fnmatch import fnmatch
 
 import networkx as nx
 
+from clair.core.dag import ClairDag
+
 
 @dataclass(frozen=True)
 class ParsedSelector:
@@ -40,42 +46,6 @@ class ParsedSelector:
     glob: str
     upstream_depth: int | None
     downstream_depth: int | None
-
-
-def match_selector(physical_address: str, pattern: str) -> bool:
-    """Compare the physical_address of a Trouve with a glob selector pattern.
-
-    The function applies the fnmatch rules to the dotted physical_address.
-
-    Examples:
-        match_selector("mydb.analytics.orders", "mydb.*.orders") -> True
-        match_selector("mydb.analytics.orders", "mydb.analytics.*") -> True
-        match_selector("mydb.analytics.orders", "mydb.analytics.orders") -> True
-        match_selector("mydb.staging.users", "mydb.analytics.*") -> False
-    """
-    return fnmatch(physical_address, pattern)
-
-
-def filter_by_selector(addresses: list[str], pattern: str | None) -> list[str]:
-    """Keep each physical_address that agrees with the glob pattern.
-
-    If the pattern is None, the function gives each name, with no change.
-    """
-    if pattern is None:
-        return addresses
-    return [name for name in addresses if match_selector(name, pattern)]
-
-
-def filter_by_selectors(addresses: list[str], patterns: tuple[str, ...] | None) -> list[str]:
-    """Keep each physical_address that agrees with one or more glob patterns.
-
-    If the patterns argument is None or an empty tuple, the function gives each
-    name, with no change. A name that agrees with one pattern is sufficient. The
-    function keeps the initial order of the names.
-    """
-    if not patterns:
-        return addresses
-    return [name for name in addresses if any(match_selector(name, pattern) for pattern in patterns)]
 
 
 def parse_selector(pattern: str) -> ParsedSelector:
@@ -169,14 +139,19 @@ def _traverse_downstream(dag: nx.DiGraph, start_nodes: set[str], depth: int) -> 
     return visited - start_nodes
 
 
-def expand_selector(dag: nx.DiGraph, pattern: str) -> set[str]:
+def expand_selector(dag: ClairDag, pattern: str) -> set[str]:
     """Apply one selector pattern to the DAG. The pattern can contain a + operator.
 
-    Returns the set of addresses that agree with the pattern.
+    The glob matches the logical address of each Trouve. The result holds the
+    DAG node of each match, which is its physical address.
     """
     parsed = parse_selector(pattern)
 
-    matched = {node for node in dag.nodes if fnmatch(node, parsed.glob)}
+    matched = {
+        node
+        for node in dag.nodes
+        if fnmatch(str(dag.get_trouve(node).logical_address), parsed.glob)
+    }
 
     extra: set[str] = set()
     if parsed.upstream_depth is not None:
@@ -187,7 +162,7 @@ def expand_selector(dag: nx.DiGraph, pattern: str) -> set[str]:
     return matched | extra
 
 
-def expand_selectors(dag: nx.DiGraph, patterns: Sequence[str] | None) -> list[str]:
+def expand_selectors(dag: ClairDag, patterns: Sequence[str] | None) -> list[str]:
     """Apply many selector patterns to the DAG and join the results.
 
     A pattern can be a plain glob or contain a + operator. If the patterns

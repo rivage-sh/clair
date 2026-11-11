@@ -156,17 +156,12 @@ class TestExample1(ExampleProjectTests):
     ) -> None:
         """`select` builds the named Trouve only.
 
-        A selector matches the physical address, thus the pattern is
-        `clair_pr_testing.<schema>.example_1_database__refined__events`, not the
-        logical name `example_1_database.refined.events`.
+        A selector matches the logical address, thus the pattern is the name
+        that the file path gives, also when routing moves the table.
         """
-        selector = str(
-            physical_address(
-                "example_1_database.refined.events", clair_environment.schema_name
-            )
+        summary = clair.run(
+            project_copy, env=environment, select=["example_1_database.refined.events"]
         )
-
-        summary = clair.run(project_copy, env=environment, select=[selector])
 
         assert summary.succeeded_count == 1
         assert str(summary.results[0].addresses.logical) == "example_1_database.refined.events"
