@@ -190,7 +190,7 @@ def build_statements(
             trouve.type,
             staging_address=staging_address,
             physical_address=physical_address,
-            resolved_sql=trouve.compiled.resolved_sql,
+            resolved_sql=trouve.full_refresh_sql(),
             table_options=table_options,
         )
     )

@@ -289,9 +289,15 @@ class CompiledSql(CompiledAttributes):
     Attributes:
         resolved_sql: The SQL of the author, with an address in place of each
             reference token.
+        full_refresh_sql: The resolved SQL that the module gives when
+            ``clair.run_mode`` is ``FULL_REFRESH``. An incremental run sets it,
+            because a node of that run can make its object again: the table
+            does not exist yet, the Trouve is a VIEW, or its run_config is
+            ``FullRefresh``. None means that ``resolved_sql`` is that SQL.
     """
 
     resolved_sql: str
+    full_refresh_sql: str | None = None
 
 
 class CompiledDataframe(CompiledAttributes):
@@ -551,6 +557,21 @@ class SqlTrouve(TrouveAbc[CompiledSql], ABC):
         """
         return self.require_compiled().resolved_sql.strip()
 
+    def full_refresh_sql(self) -> str:
+        """Give the resolved SQL that makes the object again from nothing.
+
+        A module can read ``clair.run_mode`` and add an incremental filter. A
+        node that makes its object again must not keep that filter, because
+        the object then holds the filtered rows only.
+
+        Raises:
+            TrouveNotCompiledError: If discovery did not load this Trouve.
+        """
+        compiled = self.require_compiled()
+        if compiled.full_refresh_sql is not None:
+            return compiled.full_refresh_sql.strip()
+        return compiled.resolved_sql.strip()
+
     def _full_refresh_plan(
         self,
         object_keyword: str,
@@ -558,7 +579,7 @@ class SqlTrouve(TrouveAbc[CompiledSql], ABC):
         create_parameters: str = "",
     ) -> BuildPlan:
         """Give the plan that makes the object again from the SQL."""
-        resolved_sql = self.resolved_sql()
+        resolved_sql = self.full_refresh_sql()
         return BuildPlan(statements=[
             f"CREATE OR REPLACE {object_keyword} {target_address}{create_parameters} AS (\n{resolved_sql}\n)"
         ])

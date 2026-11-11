@@ -379,6 +379,8 @@ class RecordingAdapter(WarehouseAdapter):
         fetch_error: The exception that a read of a DataFrame raises. This
             covers the error path of a warehouse that loses the connection.
         write_error: The exception that a write of a DataFrame raises.
+        describe_error: The exception that describe_object() raises. This
+            covers a warehouse that cannot answer the question.
         record: The shared record. None makes a new one.
     """
 
@@ -398,6 +400,7 @@ class RecordingAdapter(WarehouseAdapter):
         write_row_count: int = 42,
         fetch_error: Exception | None = None,
         write_error: Exception | None = None,
+        describe_error: Exception | None = None,
         record: StatementRecord | None = None,
     ) -> None:
         self.fail_on = list(fail_on)
@@ -413,6 +416,7 @@ class RecordingAdapter(WarehouseAdapter):
         self.write_row_count = write_row_count
         self.fetch_error = fetch_error
         self.write_error = write_error
+        self.describe_error = describe_error
         self.record = record or StatementRecord()
 
         self.environment: Environment | None = None
@@ -453,6 +457,7 @@ class RecordingAdapter(WarehouseAdapter):
             write_row_count=self.write_row_count,
             fetch_error=self.fetch_error,
             write_error=self.write_error,
+            describe_error=self.describe_error,
             record=self.record,
         )
 
@@ -509,6 +514,8 @@ class RecordingAdapter(WarehouseAdapter):
 
     def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
         self.described_addresses.append(str(address))
+        if self.describe_error is not None:
+            raise self.describe_error
         return self._object_at(address)
 
     def _object_at(self, address: TrouveAddress) -> WarehouseObject | None:
@@ -590,7 +597,7 @@ def compile_trouve(
     """
     directory_config = ResolvedConfig() if defaults is None else ResolvedConfig().apply(defaults)
     trouve_address = TrouveAddress.parse(address)
-    shared_fields = {
+    shared_fields: dict[str, Any] = {
         "physical_address": trouve_address,
         "file_path": Path(f"/fake/{address.replace('.', '/')}.py"),
         "module_name": address,

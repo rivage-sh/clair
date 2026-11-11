@@ -18,6 +18,7 @@ from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunFailure, RunSuccess, wanted_object_type
 from clair.core.staging import make_staging_address
 from clair.environments.routing import TrouveAddress
+from clair.exceptions import RunError
 from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import Append, Incremental, RunMode
 from clair.trouves.seed_table import SeedTable
@@ -320,13 +321,14 @@ class TestSnowflakeObjectType:
         adapter, _ = snowflake_adapter_that_answers([])
         assert adapter.object_type(TrouveAddress.parse(ADDRESS)) is None
 
-    def test_a_query_that_fails_means_the_address_holds_nothing(self):
-        # A database that does not exist makes the query fail. Clair then makes
-        # the object, and Snowflake gives the clear error.
+    def test_a_query_that_fails_raises_and_never_means_no_object(self):
+        # No object makes an incremental Trouve build its table again, thus a
+        # query that fails must not look like an empty address.
         adapter, cursor = snowflake_adapter_that_answers(
-            [], error=RuntimeError("Database 'ANALYTICS' does not exist")
+            [], error=RuntimeError("Network unreachable")
         )
-        assert adapter.object_type(TrouveAddress.parse(ADDRESS)) is None
+        with pytest.raises(RunError, match="Network unreachable"):
+            adapter.object_type(TrouveAddress.parse(ADDRESS))
         assert cursor.closed
 
     def test_the_query_reads_the_information_schema_of_the_database(self):

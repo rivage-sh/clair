@@ -580,7 +580,7 @@ def _promote_or_keep(
             trouve.type,
             staging_address=staging_address,
             physical_address=physical_address,
-            resolved_sql=trouve.compiled.resolved_sql if isinstance(trouve, SqlTrouve) else "",
+            resolved_sql=trouve.full_refresh_sql() if isinstance(trouve, SqlTrouve) else "",
             table_options=table_options_of(trouve),
         ),
         *build_comment_statements(physical_address, trouve, current_comments),
@@ -753,9 +753,16 @@ def _run_node(
 
     # One read of the physical object for each node. It gives the type for the
     # type test and for the incremental mode, and the comment of the object.
-    current_object = (
-        None if trouve.type == TrouveType.SOURCE else adapter.describe_object(addresses.physical)
-    )
+    try:
+        current_object = (
+            None if trouve.type == TrouveType.SOURCE else adapter.describe_object(addresses.physical)
+        )
+    except ClairError as describe_error:
+        logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(describe_error))
+        return _NodeOutcome(
+            RunFailure(addresses=addresses, error=str(describe_error)),
+            downstream_ok=False,
+        )
 
     # A run with no staging writes the physical address directly, thus it has no
     # candidate to keep. A Trouve that changed its type stops before any write.

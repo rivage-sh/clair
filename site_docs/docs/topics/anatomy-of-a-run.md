@@ -285,6 +285,12 @@ thus clair changes that node to the full refresh mode and writes
 `run.node.incremental_fallback` to the log. The first run of a new incremental Trouve needs
 no flag from you.
 
+That node builds from the SQL of the full refresh mode. A module reads `clair.run_mode` at
+import time, thus `_plan()` in `api.py` imports the project a second time with
+`FULL_REFRESH`, and keeps that SQL in `CompiledSql.full_refresh_sql`. `build_sql()` reads
+it for each full refresh. A query that cannot tell if the table exists fails the node: a
+fallback on a table that exists replaces its history with the incremental rows.
+
 For a table that exists, the runner then reads its columns with
 `WarehouseAdapter.describe_columns()`, and gives their names to `build_sql()` as data. The
 `INSERT` names each column, thus a new column order in the SQL cannot move a value into

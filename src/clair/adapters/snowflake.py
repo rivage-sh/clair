@@ -152,9 +152,11 @@ class SnowflakeAdapter(WarehouseAdapter):
         one, so this method reads each name that holds the word VIEW as a view.
         An Iceberg table is a ``BASE TABLE`` with ``IS_ICEBERG = 'YES'``.
 
-        The method gives None when the address holds no object, and also when
-        the query fails, for example because the database does not exist. A
-        caller must therefore make no decision that needs the object to exist.
+        The method gives None when the address holds no object.
+
+        Raises:
+            RunError: If the query fails. "No answer" is not "no object": an
+                incremental run that sees no object makes the table again.
         """
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
@@ -169,8 +171,8 @@ class SnowflakeAdapter(WarehouseAdapter):
                 f"AND TABLE_NAME = '{address.table_name.upper()}'"
             )
             row = cursor.fetchone()
-        except Exception:  # noqa: BLE001 — a query that fails means "clair sees no object"
-            return None
+        except Exception as error:
+            raise RunError(f"Clair cannot read the object at {address}: {error}") from error
         finally:
             cursor.close()
 
