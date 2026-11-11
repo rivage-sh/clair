@@ -94,7 +94,8 @@ that can fail on a sample when the complete data obeys it: `TestRowCount` and
 `clair run` writes the statements of each Trouve to `_clairtifacts/<run_id>/` when
 the Trouve completes. Each statement shows its status, its query ID and its error.
 At the end, the run writes `run_summary.json`. See
-[Artifacts](../topics/dag.md#artifacts).
+[Artifacts](../topics/dag.md#artifacts). An orchestrator reads it to retry only the
+Trouves that did not succeed: see [Retry the failed Trouves](../guides/retry-the-failed-trouves.md).
 
 ## Flags
 
