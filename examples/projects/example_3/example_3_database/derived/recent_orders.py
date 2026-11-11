@@ -1,7 +1,7 @@
 from example_3_database.refined.orders import trouve as refined_orders
 
 import clair
-from clair import Append, Column, ColumnType, Incremental, RunMode, Table
+from clair import THIS, Append, Column, ColumnType, Incremental, RunMode, Table
 
 sql = f"""
     select
@@ -14,17 +14,18 @@ sql = f"""
     from {refined_orders}
 """
 if clair.run_mode == RunMode.INCREMENTAL:
-    sql += """
-        where created_at > dateadd('day', -3, current_timestamp())
+    sql += f"""
+        where created_at > (select max(created_at) from {THIS})
     """
 
 trouve = Table(
     docs="""
-        Incremental append of the recent orders. In each incremental run, clair adds the
-        orders from the last 3 days. Thus the table keeps a log of the recent activity.
+        Incremental append of the orders. In each incremental run, clair adds each order
+        that is newer than the newest order of the table. Thus each order arrives one time.
 
-        Note: the lookback of 3 days gives a small overlap. The overlap catches the rows that
-        come late. In a full refresh, clair selects all rows and uses no date filter.
+        The filter is a strict greater than, with no tolerance for late rows. Append keeps
+        each row that it inserts, thus an overlap would insert a row two times. In a full
+        refresh, clair selects all rows and uses no filter.
     """,
     sql=sql,
     run_config=Incremental(strategy=Append()),
