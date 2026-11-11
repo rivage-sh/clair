@@ -62,6 +62,7 @@ to the CLI.
 | `clair.test()` | `clair test` |
 | `clair.validate()` | `clair validate` |
 | `clair.clean()` | `clair clean` |
+| `clair.prune()` | `clair prune` |
 | `clair.docs()` | `clair docs` |
 | `clair.catalog()` | the data behind `clair docs` |
 
@@ -502,6 +503,33 @@ and `dry_run`. It gives `run_count` and `run_ids`.
 plan = clair.clean("~/projects/analytics", before="7d", dry_run=True)
 print(plan.run_count, plan.run_ids)
 ```
+
+## `clair.prune()`
+
+```python
+def prune(
+    *,
+    env: Environment,
+    run_id: str,
+    dry_run: bool = False,
+    adapter: WarehouseAdapter | None = None,
+) -> PruneSummary
+```
+
+Drop each object that one run left in the warehouse: each name that ends with
+`__clair_<run_id>` or `__clair_new_rows_<run_id>`. It needs no project. See
+[`clair prune`](../cli/prune.md).
+
+`PruneSummary` holds `run_id`, `dry_run` and `objects`. Each `PrunedObject` holds
+the `warehouse_object` and the DROP `statement`, which is `None` in a dry run.
+`failed` gives each object whose DROP failed.
+
+```python
+summary = clair.prune(env=environment, run_id=failed_run.run_id)
+assert not summary.failed
+```
+
+A custom `WarehouseAdapter` needs `find_objects()` for this function only.
 
 ## `clair.docs()` and `clair.catalog()`
 

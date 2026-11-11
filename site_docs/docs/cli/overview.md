@@ -26,6 +26,7 @@ See [Project Layout](../topics/project-layout.md#the-project-root).
 | [`clair dag`](dag.md) | Print the dependency graph as an indented tree | No |
 | [`clair docs`](docs.md) | Start a local web UI for the DAG and the documentation | No |
 | [`clair clean`](clean.md) | Remove compiled artifacts from `_clairtifacts/` | No |
+| [`clair prune`](prune.md) | Drop the staging objects that one run left in Snowflake | **Yes** |
 
 ## Environment Variables
 

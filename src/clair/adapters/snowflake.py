@@ -11,8 +11,14 @@ import snowflake.connector
 from cryptography.hazmat.primitives import serialization
 from snowflake.connector.pandas_tools import write_pandas
 
-from clair.adapters.base import WarehouseAdapter
-from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, WarehouseObject, WarehouseObjectType
+from clair.adapters.base import NamedWarehouseObject, WarehouseAdapter
+from clair.adapters.objects import (
+    Statement,
+    StatementStatus,
+    WarehouseColumn,
+    WarehouseObject,
+    WarehouseObjectType,
+)
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey
 from clair.exceptions import RunError
 from clair.trouves.address import TrouveAddress
@@ -233,6 +239,55 @@ class SnowflakeAdapter(WarehouseAdapter):
             cursor.close()
 
         return _columns_of(rows)
+
+    def find_objects(self, name_suffix: str) -> list[NamedWarehouseObject]:
+        """Give each table and each view whose name ends with *name_suffix*. Reads SHOW ... IN ACCOUNT.
+
+        In a LIKE pattern, ``_`` matches any character, thus the pattern finds
+        more names than the suffix. The method keeps each name that ends with
+        the exact suffix, with no difference between upper and lower case.
+
+        Raises:
+            RunError: If a SHOW statement fails.
+        """
+        if self._conn is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+
+        like_pattern = f"%{name_suffix}".replace("'", "''")
+        found: list[NamedWarehouseObject] = []
+        for object_kind in ("TABLES", "VIEWS"):
+            cursor = self._conn.cursor()
+            try:
+                cursor.execute(f"SHOW {object_kind} LIKE '{like_pattern}' IN ACCOUNT")
+                column_names = [str(column[0]).lower() for column in cursor.description]
+                rows = cursor.fetchall()
+            except Exception as error:
+                raise RunError(f"Clair cannot list the {object_kind.lower()}: {error}") from error
+            finally:
+                cursor.close()
+
+            for row in rows:
+                record = dict(zip(column_names, row, strict=False))
+                name = str(record["name"])
+                if not name.upper().endswith(name_suffix.upper()):
+                    continue
+                if object_kind == "VIEWS":
+                    object_type = WarehouseObjectType.VIEW
+                elif str(record.get("is_iceberg", "")).upper() in ("Y", "YES", "TRUE"):
+                    object_type = WarehouseObjectType.ICEBERG_TABLE
+                else:
+                    object_type = WarehouseObjectType.TABLE
+                found.append(
+                    NamedWarehouseObject(
+                        address=TrouveAddress(
+                            database_name=str(record["database_name"]),
+                            schema_name=str(record["schema_name"]),
+                            table_name=name,
+                        ),
+                        object_type=object_type,
+                    )
+                )
+        return found
 
     def set_context(
         self,

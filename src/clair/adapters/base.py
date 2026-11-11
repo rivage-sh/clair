@@ -9,11 +9,24 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import pandas as pd
+from pydantic import BaseModel
 
 from clair.adapters.objects import Statement, WarehouseColumn, WarehouseObject, WarehouseObjectType
 from clair.environments.environments import Environment
 from clair.trouves.address import TrouveAddress
 from clair.trouves.trouve import TrouveAbc
+
+
+class NamedWarehouseObject(BaseModel):
+    """One object that a search by name found in the warehouse.
+
+    Attributes:
+        address: The database, the schema and the name of the object.
+        object_type: The type of the object.
+    """
+
+    address: TrouveAddress
+    object_type: WarehouseObjectType
 
 
 class WarehouseAdapter(ABC):
@@ -120,6 +133,21 @@ class WarehouseAdapter(ABC):
         thus an adapter that cannot cancel lets one statement complete, and the
         result is still correct. The default does nothing.
         """
+
+    def find_objects(self, name_suffix: str) -> list[NamedWarehouseObject]:
+        """Give each table and each view whose name ends with *name_suffix*.
+
+        The search covers each database that the role of the session sees.
+        Only ``clair.prune()`` calls this method, thus an adapter that never
+        prunes needs no implementation.
+
+        Raises:
+            NotImplementedError: If the adapter cannot search by name.
+            RunError: If the warehouse cannot answer.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} cannot search the warehouse for objects by name."
+        )
 
     @abstractmethod
     def close(self) -> None:

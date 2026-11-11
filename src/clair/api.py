@@ -54,6 +54,7 @@ from clair.core.artifacts import (
 from clair.core.compiler import CompileOutput, build_compile_output
 from clair.core.dag import ClairDag, build_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
+from clair.core.prune import PruneSummary, prune_run, require_a_run_id
 from clair.core.references import recompile_for_selection
 from clair.core.runner import (
     RunCancel,
@@ -811,6 +812,48 @@ def validate(
     project_root = _resolve_project_root(project_dir)
     env_name = _env_name_of(env)
     return validate_project(project_root, env_name)
+
+
+def prune(
+    *,
+    env: Environment,
+    run_id: str,
+    dry_run: bool = False,
+    adapter: WarehouseAdapter | None = None,
+) -> PruneSummary:
+    """Drop each object that one run left in the warehouse.
+
+    A run that fails keeps its staging objects, and a run that stops keeps
+    the new rows table of an incremental Trouve. Each name ends with the run
+    id, thus this function finds them in each database that the role sees,
+    also for a Trouve that the project no longer holds. It needs no project.
+
+    Run it after the run ends. A run that continues needs its objects.
+
+    Args:
+        env: The Environment of the run, which holds the connection settings.
+        run_id: The run id: 32 hexadecimal characters, as a staging name and
+            the artifact directory show it.
+        dry_run: If True, clair names the objects, and it drops nothing.
+        adapter: A connected warehouse adapter. The default makes a
+            SnowflakeAdapter, connects it, and closes it at the end.
+
+    Returns:
+        A PruneSummary that names each object and the statement that dropped it.
+
+    Raises:
+        InvalidRunIdError: If *run_id* is not a run id. Clair raises it before
+            it connects.
+        ClairError: If the connection or the search fails.
+    """
+    require_a_run_id(run_id)
+    owns_adapter = adapter is None
+    warehouse_adapter = adapter if adapter is not None else SnowflakeAdapter.connected(env)
+    try:
+        return prune_run(warehouse_adapter, run_id, dry_run=dry_run)
+    finally:
+        if owns_adapter:
+            warehouse_adapter.close()
 
 
 def clean(

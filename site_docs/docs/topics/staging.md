@@ -246,11 +246,13 @@ db.schema.orders ... FAILED in test (2.4s)
 
 This is the fastest path to a diagnosis. The candidate holds the exact data that failed the test. To make it again, you must run each upstream Trouve again.
 
-The cost is that a failed run leaves objects. A staging table from a full refresh is a complete copy. A staging table from an incremental run starts with the micro-partitions of the physical table, and it uses more storage as the two tables diverge. Drop the objects when you do not need them:
+The cost is that a failed run leaves objects. A staging table from a full refresh is a complete copy. A staging table from an incremental run starts with the micro-partitions of the physical table, and it uses more storage as the two tables diverge. Drop the objects of a run when you do not need them:
 
-```sql
-SHOW TABLES LIKE '%__clair_%' IN SCHEMA db.schema;
+```bash
+clair prune --env prod --run-id <run_id>
 ```
+
+See [`clair prune`](../cli/prune.md).
 
 ## The costs
 

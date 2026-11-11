@@ -17,8 +17,14 @@ from typing import Any, TypeVar, cast
 
 import pandas as pd
 
-from clair.adapters.base import WarehouseAdapter
-from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, WarehouseObject, WarehouseObjectType
+from clair.adapters.base import NamedWarehouseObject, WarehouseAdapter
+from clair.adapters.objects import (
+    Statement,
+    StatementStatus,
+    WarehouseColumn,
+    WarehouseObject,
+    WarehouseObjectType,
+)
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.dag import ClairDag, build_dag, get_executable_nodes
 from clair.core.runner import RunFailure, RunSkip, RunSuccess, RunSummary, run_project
@@ -379,6 +385,7 @@ class RecordingAdapter(WarehouseAdapter):
         describe_error: The exception that describe_object() raises. This
             covers a warehouse that cannot answer the question.
         record: The shared record. None makes a new one.
+        named_objects: The objects that find_objects() searches by name.
     """
 
     def __init__(
@@ -399,6 +406,7 @@ class RecordingAdapter(WarehouseAdapter):
         write_error: Exception | None = None,
         describe_error: Exception | None = None,
         record: StatementRecord | None = None,
+        named_objects: Sequence[NamedWarehouseObject] = (),
     ) -> None:
         self.fail_on = list(fail_on)
         self.existing_tables = None if existing_tables is None else set(existing_tables)
@@ -415,6 +423,7 @@ class RecordingAdapter(WarehouseAdapter):
         self.write_error = write_error
         self.describe_error = describe_error
         self.record = record or StatementRecord()
+        self.named_objects = list(named_objects)
 
         self.environment: Environment | None = None
         self.contexts: list[dict[str, str | None]] = []
@@ -526,6 +535,13 @@ class RecordingAdapter(WarehouseAdapter):
         else:
             return None
         return WarehouseObject(object_type=object_type, comment=self.object_comment)
+
+    def find_objects(self, name_suffix: str) -> list[NamedWarehouseObject]:
+        return [
+            named_object
+            for named_object in self.named_objects
+            if named_object.address.table_name.upper().endswith(name_suffix.upper())
+        ]
 
     def describe_columns(self, address: TrouveAddress) -> list[WarehouseColumn] | None:
         warehouse_object = self._object_at(address)

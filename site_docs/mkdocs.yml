@@ -98,6 +98,7 @@ nav:
     - clair dag: cli/dag.md
     - clair docs: cli/docs.md
     - clair clean: cli/clean.md
+    - clair prune: cli/prune.md
   - Reference:
     - reference/index.md
     - Python API: reference/python-api.md

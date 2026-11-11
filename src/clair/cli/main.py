@@ -25,6 +25,7 @@ from clair.core.artifacts import (
 from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
+from clair.core.prune import InvalidRunIdError
 from clair.core.scaffold import scaffold_project, write_environments_yml
 from clair.environments.environments import (
     DEFAULT_THREADS,
@@ -608,6 +609,52 @@ def test(
         sys.exit(1)
 
     if summary.blocking_results:
+        sys.exit(1)
+
+
+@cli.command()
+@_env_option
+@click.option(
+    "--run-id",
+    required=True,
+    help="The id of the run: the 32 hexadecimal characters at the end of a staging name <table>__clair_<run_id>.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show the objects to drop, but do not drop them.",
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Do not ask for confirmation.",
+)
+def prune(env: str, run_id: str, dry_run: bool, yes: bool) -> None:
+    """Drop the objects that one run left in Snowflake."""
+    try:
+        environment = _load_environment(env)
+        # A dry run first. The user confirms, and clair then drops the objects.
+        plan = clair_api.prune(env=environment, run_id=run_id, dry_run=True)
+    except InvalidRunIdError as error:
+        raise click.BadParameter(str(error), param_hint="--run-id") from None
+    except ClairError as error:
+        logger.error("prune.error", error=str(error))
+        sys.exit(1)
+
+    click.echo(plan.render())
+    if dry_run or not plan.objects:
+        return
+
+    if not yes:
+        click.confirm(f"\nDrop {len(plan.objects)} object(s)?", abort=True)
+
+    try:
+        summary = clair_api.prune(env=environment, run_id=run_id)
+    except ClairError as error:
+        logger.error("prune.error", error=str(error))
+        sys.exit(1)
+    click.echo(summary.render())
+    if summary.failed:
         sys.exit(1)
 
 
