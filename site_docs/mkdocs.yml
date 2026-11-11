@@ -87,6 +87,7 @@ nav:
   - Guides:
     - Write your own build: guides/custom-build-sql.md
     - Read a Trouve into pandas: guides/read-a-trouve-in-a-notebook.md
+    - Retry the failed Trouves: guides/retry-the-failed-trouves.md
   - CLI:
     - cli/overview.md
     - clair init: cli/init.md
