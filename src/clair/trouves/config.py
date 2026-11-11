@@ -1,7 +1,9 @@
-"""The session configuration of a Trouve: the warehouse, the role, the query tag and the timeout.
+"""The configuration of a Trouve: the session settings, and the kind of table.
 
-Three levels can set it: ``__database_config__.py``, ``__schema_config__.py``,
-and the Trouve. Each level replaces the values of the level above it.
+The session settings are the warehouse, the role, the query tag and the
+timeout. The kind of table is permanent or transient. Three levels can set
+each value: ``__database_config__.py``, ``__schema_config__.py``, and the
+Trouve. Each level replaces the values of the level above it.
 """
 
 from __future__ import annotations
@@ -46,19 +48,40 @@ class SessionConfig(BaseModel):
         return query_tags
 
 
+class TableDefaults(BaseModel):
+    """The table settings that a database, a schema, or a Trouve that makes a table can set.
+
+    Attributes:
+        transient: True makes each table a TRANSIENT table, and False makes a
+            permanent table. None takes the value of the level above. A View
+            and a Source ignore the value of a directory.
+    """
+
+    transient: bool | None = None
+
+
 class ResolvedConfig(SessionConfig):
-    """The final session configuration of one Trouve.
+    """The final configuration of one Trouve.
 
     Discovery makes this object. It starts from the environment defaults, and
     applies __database_config__.py, __schema_config__.py and the Trouve.
+
+    Attributes:
+        transient: True if a run makes the table of this Trouve TRANSIENT. A
+            View and a Source make no table, and ignore it.
     """
+
+    transient: bool = False
 
     def apply(self, layer: SessionConfig) -> ResolvedConfig:
         """Give a copy in which each value that *layer* sets replaces the value here.
 
-        A blank warehouse or role sets nothing. The labels merge by key.
+        A blank warehouse or role sets nothing. The labels merge by key. A
+        layer that is also ``TableDefaults`` can set ``transient``.
         """
         resolved = self.model_copy(deep=True)
+        if isinstance(layer, TableDefaults) and layer.transient is not None:
+            resolved.transient = layer.transient
         if layer.warehouse and layer.warehouse.strip():
             resolved.warehouse = layer.warehouse
         if layer.role and layer.role.strip():
@@ -85,14 +108,14 @@ class ResolvedConfig(SessionConfig):
         return json.dumps(tag, sort_keys=True)
 
 
-class DatabaseDefaults(SessionConfig):
+class DatabaseDefaults(SessionConfig, TableDefaults):
     """The defaults for each Trouve in a database directory.
 
     Set these values in __database_config__.py in the database directory.
     """
 
 
-class SchemaDefaults(SessionConfig):
+class SchemaDefaults(SessionConfig, TableDefaults):
     """The defaults for each Trouve in a schema directory.
 
     Set these values in __schema_config__.py in the schema directory. Each value

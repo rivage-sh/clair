@@ -2,10 +2,13 @@
 
 Snowflake cannot clone a transient table into a permanent one. Thus one
 statement with the wrong kind breaks the run, or changes the kind of the
-production table.
+production table. ``__database_config__.py`` and ``__schema_config__.py`` can
+set the kind for each table below them.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -13,13 +16,16 @@ from pydantic import ValidationError
 
 from clair.adapters.base import WarehouseColumn
 from clair.core.compiler import build_statements
+from clair.core.discovery import discover_project
 from clair.core.runner import RunSuccess
 from clair.core.staging import make_staging_address
+from clair.exceptions import TrouveNotCompiledError
 from clair.trouves.address import TrouveAddress
+from clair.trouves.config import SchemaDefaults
 from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import Append, Incremental, RunMode
 from clair.trouves.seed_table import SeedTable
-from clair.trouves.trouve import Source, Table, TrouveAbc, View, table_options_of
+from clair.trouves.trouve import Source, SqlTrouve, Table, TrouveAbc, View, table_options_of
 from tests.helpers import (
     TEST_ADDRESS,
     TEST_RUN_ID,
@@ -27,6 +33,7 @@ from tests.helpers import (
     compile_trouve,
     executed_sql,
     run_one_trouve,
+    write_layered_project,
 )
 
 PHYSICAL_ADDRESS = TrouveAddress.parse(TEST_ADDRESS)
@@ -65,8 +72,8 @@ class TestTheOption:
         assert table_options is not None
         assert table_options.transient
 
-    def test_a_table_is_permanent_by_default(self):
-        assert not Table(sql="SELECT 1 AS id").transient
+    def test_a_table_takes_the_directory_value_by_default(self):
+        assert Table(sql="SELECT 1 AS id").transient is None
 
     def test_a_view_rejects_it(self):
         with pytest.raises(ValidationError, match="transient"):
@@ -146,3 +153,93 @@ class TestTheRun:
             f"CREATE OR REPLACE {table_keyword_of(transient)} {PHYSICAL_ADDRESS} "
             f"CLONE {STAGING_ADDRESS} COPY GRANTS",
         )
+
+
+def discovered_trouve(root: Path) -> SqlTrouve:
+    (trouve,) = discover_project(root)
+    assert isinstance(trouve, SqlTrouve)
+    return trouve
+
+
+class TestTheDirectoryDefault:
+    @pytest.mark.parametrize(
+        ("database_text", "schema_text", "trouve_text", "expected_transient"),
+        [
+            ("", "", "", False),
+            ("transient=True", "", "", True),
+            ("", "transient=True", "", True),
+            ("transient=True", "transient=False", "", False),
+            ("", "transient=True", "transient=False", False),
+            ("transient=False", "", "transient=True", True),
+        ],
+        ids=[
+            "no-level",
+            "database",
+            "schema",
+            "schema-replaces-database",
+            "trouve-replaces-schema",
+            "trouve-replaces-database",
+        ],
+    )
+    def test_the_lowest_level_that_sets_it_wins(
+        self, tmp_path, database_text, schema_text, trouve_text, expected_transient
+    ):
+        root = write_layered_project(
+            tmp_path, database_text, schema_text, f'Table(sql="select 1 as n", {trouve_text})'
+        )
+        trouve = discovered_trouve(root)
+
+        assert isinstance(trouve, Table)
+        assert trouve.is_transient == expected_transient
+
+    def test_a_directory_default_makes_each_create_transient(self, tmp_path):
+        root = write_layered_project(tmp_path, "", "transient=True", 'Table(sql="select 1 as n")')
+        trouve = discovered_trouve(root)
+        assert trouve.compiled is not None
+        physical_address = trouve.compiled.physical_address
+        staging_address = make_staging_address(physical_address, TEST_RUN_ID)
+
+        statements = build_statements(trouve, RunMode.FULL_REFRESH, TEST_RUN_ID, use_staging=True)
+
+        assert contains_statement(
+            statements, f"CREATE OR REPLACE TRANSIENT TABLE {staging_address} AS"
+        )
+        assert contains_statement(
+            statements,
+            f"CREATE OR REPLACE TRANSIENT TABLE {physical_address} CLONE {staging_address} COPY GRANTS",
+        )
+
+    @pytest.mark.parametrize(
+        ("trouve_expression", "expected_keyword"),
+        [
+            ('View(sql="select 1 as n")', "VIEW"),
+            ('Table(sql="select 1 as n", iceberg=Iceberg())', "ICEBERG TABLE"),
+        ],
+        ids=["View", "Iceberg"],
+    )
+    def test_an_object_that_cannot_be_transient_ignores_it(
+        self, tmp_path, trouve_expression, expected_keyword
+    ):
+        root = write_layered_project(tmp_path, "transient=True", "", trouve_expression)
+        trouve = discovered_trouve(root)
+        assert trouve.compiled is not None
+
+        statements = build_statements(trouve, RunMode.FULL_REFRESH, TEST_RUN_ID, use_staging=False)
+
+        assert not trouve.compiled.config.transient
+        assert contains_statement(
+            statements, f"CREATE OR REPLACE {expected_keyword} {trouve.compiled.physical_address}"
+        )
+
+    def test_a_seed_writes_a_transient_table(self):
+        adapter = RecordingAdapter()
+        seed = SeedTable(dataframe=pd.DataFrame({"id": [1]}))
+
+        result = run_one_trouve(seed, adapter, defaults=SchemaDefaults(transient=True))
+
+        assert isinstance(result, RunSuccess)
+        assert adapter.transient_addresses == [str(STAGING_ADDRESS)]
+
+    def test_the_resolved_value_needs_discovery(self):
+        with pytest.raises(TrouveNotCompiledError):
+            _ = Table(sql="SELECT 1 AS id").is_transient

@@ -1,6 +1,6 @@
 # Per-Database & Schema Config
 
-You can set the warehouse, the role, the query tag labels and the statement timeout for each database directory, each schema directory, or one Trouve. Then different parts of your project can use different compute or permissions. You do not change `~/.clair/environments.yml`.
+You can set the warehouse, the role, the query tag labels, the statement timeout and the kind of table for each database directory, each schema directory, or one Trouve. Then different parts of your project can use different compute, permissions or storage. You do not change `~/.clair/environments.yml`.
 
 clair reads the two files from the directories of the Trouve: the schema directory is the
 parent of the Trouve file, and the database directory is the parent of the schema
@@ -85,6 +85,7 @@ other keys.
 | `role` | `str \| None` | The Snowflake role |
 | `query_tags` | `dict[str, str]` | Labels that clair adds to the query tag. See [The query tag](#the-query-tag). |
 | `statement_timeout_seconds` | `int \| None` | Snowflake cancels a statement that runs longer. `None` keeps the value of the account or the user. |
+| `transient` | `bool \| None` | `True` makes each table a TRANSIENT table. With no level that sets it, the table is permanent. Only a `Table`, a `PandasTable` and a `SeedTable` take it. A View, a Source and an Iceberg table ignore the value of a directory. See [A transient table](staging.md#a-transient-table). |
 
 If you do not set a field, it stays `None`. clair then uses the value from the level above.
 

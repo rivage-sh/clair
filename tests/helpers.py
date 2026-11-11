@@ -33,7 +33,7 @@ from clair.environments.environments import Authentication, Authenticator, Conne
 from clair.environments.routing import RoutingEntry, TrouveAddress
 from clair.exceptions import RunError
 from clair.trouves.address import NodeAddresses
-from clair.trouves.config import ResolvedConfig
+from clair.trouves.config import ResolvedConfig, SessionConfig
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
 from clair.trouves.seed_table import SeedTable
@@ -71,6 +71,31 @@ def write_project_marker(project_root: Path) -> Path:
     if not marker_path.exists():
         marker_path.write_text(PASSTHROUGH_ROUTING_FILE)
     return project_root
+
+
+def write_layered_project(
+    root: Path, database_text: str, schema_text: str, trouve_expression: str
+) -> Path:
+    """Write the Trouve ``mydb.myschema.orders`` with a database config and a schema config above it.
+
+    *database_text* and *schema_text* are the arguments of ``DatabaseDefaults``
+    and ``SchemaDefaults``. *trouve_expression* makes the Trouve, for example
+    ``Table(sql="select 1 as n")``. The file imports ``Iceberg``, ``Table``
+    and ``View``.
+    """
+    write_project_marker(root)
+    schema_directory = root / "mydb" / "myschema"
+    schema_directory.mkdir(parents=True)
+    (root / "mydb" / "__database_config__.py").write_text(
+        f"from clair import DatabaseDefaults\ndefaults = DatabaseDefaults({database_text})\n"
+    )
+    (schema_directory / "__schema_config__.py").write_text(
+        f"from clair import SchemaDefaults\ndefaults = SchemaDefaults({schema_text})\n"
+    )
+    (schema_directory / "orders.py").write_text(
+        f"from clair import Iceberg, Table, View\ntrouve = {trouve_expression}\n"
+    )
+    return root
 
 
 class DatabaseOverrideRouting(RoutingEntry):
@@ -555,19 +580,22 @@ def compile_trouve(
     *,
     imports: list[str] | None = None,
     inputs: list[DataframeInput] | None = None,
+    defaults: SessionConfig | None = None,
 ) -> AnyTrouve:
     """Give the Trouve the compiled attributes that discovery gives its class.
 
     A SQL Trouve gets its own SQL as the resolved SQL. A DataFrame Trouve gets
-    *inputs*, or no input.
+    *inputs*, or no input. *defaults* is the config of the directories above
+    the Trouve, for example ``SchemaDefaults(transient=True)``.
     """
+    directory_config = ResolvedConfig() if defaults is None else ResolvedConfig().apply(defaults)
     trouve_address = TrouveAddress.parse(address)
     shared_fields = {
         "physical_address": trouve_address,
         "file_path": Path(f"/fake/{address.replace('.', '/')}.py"),
         "module_name": address,
         "imports": imports or [],
-        "config": ResolvedConfig().apply(trouve),
+        "config": directory_config.apply(trouve),
     }
     if isinstance(trouve, SqlTrouve):
         trouve.compiled = CompiledSql(resolved_sql=trouve.sql, **shared_fields)
@@ -610,10 +638,12 @@ def run_one_trouve(
     run_mode: RunMode = RunMode.FULL_REFRESH,
     tests_passed: bool = True,
     tested_addresses: list[str] | None = None,
+    defaults: SessionConfig | None = None,
 ) -> RunSuccess | RunFailure:
     """Run one Trouve at TEST_ADDRESS, and give its result.
 
     A run of one Trouve has no upstream Trouve, thus it never gives a RunSkip.
+    *defaults* is the config of the directories above the Trouve.
 
     *tested_addresses* receives the address of each object that the data
     quality tests examined.
@@ -624,7 +654,7 @@ def run_one_trouve(
             tested_addresses.append(address)
         return tests_passed
 
-    dag = build_dag([compile_trouve(trouve)])
+    dag = build_dag([compile_trouve(trouve, defaults=defaults)])
     selected = get_executable_nodes(dag)
     results = list(
         run_project(
