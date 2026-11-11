@@ -83,9 +83,7 @@ class TestExclude:
         clair_environment: IntegrationConfig,
         environment: Environment,
     ) -> None:
-        excluded = str(
-            physical_address(LEAF_LOGICAL_NAME, clair_environment.schema_name)
-        )
+        excluded = LEAF_LOGICAL_NAME
 
         summary = clair.run(project_copy, env=environment, exclude=[excluded])
 
@@ -100,9 +98,7 @@ class TestExclude:
         clair_environment: IntegrationConfig,
         environment: Environment,
     ) -> None:
-        excluded = str(
-            physical_address(LEAF_LOGICAL_NAME, clair_environment.schema_name)
-        )
+        excluded = LEAF_LOGICAL_NAME
         model_count = len(model_logical_names(trouves_of(project_source_path)))
 
         summary = clair.run(project_copy, env=environment, exclude=[excluded])
@@ -124,16 +120,14 @@ class TestExcludeAMiddleTrouve:
         clair_environment: IntegrationConfig,
         environment: Environment,
     ) -> None:
-        excluded = str(
-            physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)
-        )
+        excluded = MIDDLE_LOGICAL_NAME
 
         output = clair.compile(project_copy, env=environment, exclude=[excluded])
 
         node = output.node(DEPENDENT_LOGICAL_NAME)
         assert node is not None
         assert MIDDLE_LOGICAL_NAME in node.sql[0]
-        assert excluded not in node.sql[0]
+        assert str(physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)) not in node.sql[0]
 
     def test_compile_leaves_out_the_excluded_trouve(
         self,
@@ -141,9 +135,7 @@ class TestExcludeAMiddleTrouve:
         clair_environment: IntegrationConfig,
         environment: Environment,
     ) -> None:
-        excluded = str(
-            physical_address(MIDDLE_LOGICAL_NAME, clair_environment.schema_name)
-        )
+        excluded = MIDDLE_LOGICAL_NAME
 
         output = clair.compile(project_copy, env=environment, exclude=[excluded])
 
