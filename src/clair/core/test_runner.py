@@ -14,6 +14,7 @@ from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag
 from clair.core.references import render_sample
 from clair.trouves.address import TrouveAddress
+from clair.trouves.test import TestSeverity
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS
 from clair.trouves.trouve_type import TrouveType
 
@@ -50,6 +51,7 @@ class TestResult(BaseModel):
         column_name: The column that the test examines. It is None for a test
             on the full table.
         statement: The test query, and what the warehouse answered.
+        severity: The severity of the test.
     """
 
     address: TrouveAddress
@@ -57,12 +59,27 @@ class TestResult(BaseModel):
     test_type: str
     column_name: str | None
     statement: Statement
+    severity: TestSeverity = TestSeverity.ERROR
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def passed(self) -> bool:
         """True if the test query gave zero rows. Thus the data is correct."""
         return self.statement.success and self.statement.row_count == 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_blocking(self) -> bool:
+        """True if this result stops the promotion and fails the command.
+
+        A test that passed never blocks. A WARN test that found rows does not
+        block. A query that failed blocks with each severity.
+        """
+        if self.passed:
+            return False
+        if self.error:
+            return True
+        return self.severity == TestSeverity.ERROR
 
     @property
     def failing_row_count(self) -> int:
@@ -86,8 +103,26 @@ class TestSummary(BaseModel):
 
     @property
     def failed_results(self) -> list[TestResult]:
-        """Each test that the data did not obey. A query that failed is not here."""
-        return [r for r in self.results if not r.passed and not r.error]
+        """Each ERROR test that the data did not obey. A query that failed is not here."""
+        return [
+            result
+            for result in self.results
+            if not result.passed and not result.error and result.severity == TestSeverity.ERROR
+        ]
+
+    @property
+    def warned_results(self) -> list[TestResult]:
+        """Each WARN test that the data did not obey. These do not fail the command."""
+        return [
+            result
+            for result in self.results
+            if not result.passed and not result.error and result.severity == TestSeverity.WARN
+        ]
+
+    @property
+    def blocking_results(self) -> list[TestResult]:
+        """Each result that fails the command: a failed ERROR test, or a query that failed."""
+        return [result for result in self.results if result.is_blocking]
 
     @property
     def error_results(self) -> list[TestResult]:
@@ -101,6 +136,10 @@ class TestSummary(BaseModel):
     @property
     def failed_count(self) -> int:
         return len(self.failed_results)
+
+    @property
+    def warned_count(self) -> int:
+        return len(self.warned_results)
 
     @property
     def error_count(self) -> int:
@@ -127,8 +166,9 @@ class TestSummary(BaseModel):
             elif r.passed:
                 lines.append(f"[{i}/{total}] {label} ... PASS")
             else:
+                outcome = "WARN" if r.severity == TestSeverity.WARN else "FAIL"
                 lines.append(
-                    f"[{i}/{total}] {label} ... FAIL ({r.failing_row_count} failing row{'s' if r.failing_row_count != 1 else ''})"
+                    f"[{i}/{total}] {label} ... {outcome} ({r.failing_row_count} failing row{'s' if r.failing_row_count != 1 else ''})"
                 )
 
             if r.statement.query_id:
@@ -139,8 +179,8 @@ class TestSummary(BaseModel):
             lines.append("")
 
         lines.append(
-            f"=== Done: {self.passed_count} passed, {self.failed_count} failed, "
-            f"{self.error_count} errors ==="
+            f"=== Done: {self.passed_count} passed, {self.warned_count} warned, "
+            f"{self.failed_count} failed, {self.error_count} errors ==="
         )
 
         return "\n".join(lines)
@@ -223,6 +263,7 @@ def _run_trouve_tests(
                 test_type=test.label,
                 column_name=column_name,
                 statement=statement,
+                severity=test.severity,
             )
         )
 

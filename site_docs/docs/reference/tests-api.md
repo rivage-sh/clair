@@ -11,6 +11,14 @@ sample, `False` skips it, and `None` takes the default of the class. The default
 skips a test that can fail on a sample when the complete data obeys it. See
 [Sampled Runs](../topics/sampling.md).
 
+Each test also takes `severity: TestSeverity = TestSeverity.ERROR`. See
+[Severity](../topics/data-quality-tests.md#severity).
+
+| `TestSeverity` | A test that finds rows | A test whose query fails |
+|----------------|------------------------|--------------------------|
+| `ERROR` | Stops the promotion, skips each Trouve downstream, status code 1 | The same |
+| `WARN` | Shows `WARN`. The run continues as if the test passed, status code 0 | Stops the promotion, as `ERROR` does |
+
 ## `TestUnique`
 
 Assert that a column has no duplicate values.

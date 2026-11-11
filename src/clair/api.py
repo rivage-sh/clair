@@ -439,7 +439,7 @@ class RunHandle:
             # list.extend is atomic, thus the threads need no lock here. Each
             # thread writes to the entry of its own node.
             test_results_of_node[node_name].extend(node_test_results)
-            return all(test_result.passed for test_result in node_test_results)
+            return not any(test_result.is_blocking for test_result in node_test_results)
 
         # A connection that no Trouve uses gives nothing. A connection costs one
         # login, not credits: Snowflake bills the warehouse per second while it
@@ -751,6 +751,7 @@ def test(
     logger.info(
         "test.complete",
         passed=summary.passed_count,
+        warned=summary.warned_count,
         failed=summary.failed_count,
         errors=summary.error_count,
     )

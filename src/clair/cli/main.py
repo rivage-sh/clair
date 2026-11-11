@@ -502,8 +502,8 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: s
     summary_file = write_run_summary(artifacts_dir, summary)
     logger.info("run.artifacts", artifacts_dir=str(summary_file.parent))
 
-    failed_tests = [t for t in summary.test_results if not t.passed]
-    if summary.failed_count or failed_tests:
+    blocking_tests = [test_result for test_result in summary.test_results if test_result.is_blocking]
+    if summary.failed_count or blocking_tests:
         sys.exit(1)
 
 
@@ -555,7 +555,7 @@ def test(
         logger.error("test.error", error=str(e))
         sys.exit(1)
 
-    if any(not test_result.passed for test_result in summary.results):
+    if summary.blocking_results:
         sys.exit(1)
 
 
