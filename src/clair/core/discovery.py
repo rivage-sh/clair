@@ -60,7 +60,6 @@ from clair.trouves.trouve import (
 )
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
-_SKIP_DIRS = {"clair", "tests", ARTIFACTS_DIR_NAME, "__pycache__", ".git", ".venv", "node_modules"}
 _CONFIG_FILES = {"__database_config__.py", "__schema_config__.py"}
 
 logger = structlog.get_logger()
@@ -298,6 +297,23 @@ def _compile_trouve(
             )
 
 
+def _is_read_by_discovery(directory: Path) -> bool:
+    """Tell if discovery reads the files of a directory.
+
+    Discovery skips a name that starts with ``.``, such as ``.git`` or
+    ``.venv``, and a name that starts with ``_``, which is a helper that you
+    import yourself. It also skips each virtual environment, whatever its
+    name, for example ``venv.nosync``: a virtual environment holds thousands of
+    modules that discovery must not import. ``pyvenv.cfg`` marks one (PEP 405).
+
+    Each other directory is read, thus a database directory with a name that
+    Snowflake cannot use stops the run, and does not disappear.
+    """
+    if directory.name.startswith((".", "_")):
+        return False
+    return not (directory / "pyvenv.cfg").is_file()
+
+
 def _collect_candidate_files(project_root: Path) -> list[Path]:
     """Give each Python file that can hold a Trouve, in path order.
 
@@ -306,11 +322,7 @@ def _collect_candidate_files(project_root: Path) -> list[Path]:
     """
     candidates: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
-        dirnames[:] = [
-            name
-            for name in dirnames
-            if name not in _SKIP_DIRS and not name.startswith("_")
-        ]
+        dirnames[:] = [name for name in dirnames if _is_read_by_discovery(Path(dirpath) / name)]
         for filename in filenames:
             file_path = Path(dirpath) / filename
             if _is_trouve_candidate(file_path):
