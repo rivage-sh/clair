@@ -147,6 +147,19 @@ my_project/
 
 See [Per-Database & Schema Config](per-database-schema-config.md) for details.
 
+## The directories that discovery reads
+
+Discovery reads each directory below the project root, and no name is special: a database
+or a schema can be called `tests` or `clair`. Discovery skips three kinds of directory:
+
+- a name that starts with `.`, such as `.git` or `.venv`,
+- a name that starts with `_` (see below),
+- a virtual environment, whatever its name, such as `venv.nosync`. A `pyvenv.cfg` file
+  marks it. Thus discovery never imports the modules of an environment beside your Trouves.
+
+A database directory with a name that Snowflake cannot use, such as `my-db`, stops the run
+with an error. It does not disappear from the DAG.
+
 ## Files starting with `_`
 
 Discovery skips any file or directory with a name that starts with `_`. Use this for shared utilities or helper modules that are not Trouves:
