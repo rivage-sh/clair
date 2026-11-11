@@ -42,11 +42,17 @@ pytestmark = pytest.mark.integration
 #   rate        float64         -> a floating point column
 #   is_active   bool            -> BOOLEAN
 #   valid_from  datetime64[ns]  -> a timestamp column
+#   price       decimal128(18, 2)[pyarrow], one null -> NUMBER(18,2)
 #
 # The nullable Int64 dtype is the interesting one. Plain pandas turns
 # [10, 20, None] into float64, and the values reach Snowflake as 10.0 and 20.0.
+# The Arrow decimal dtype is the only way to an exact decimal column, because
+# the numpy dtypes of pandas hold no decimal.
 SEED_FILE = '''\
+from decimal import Decimal
+
 import pandas as pd
+import pyarrow as pa
 
 from clair import Column, ColumnType, SeedTable
 
@@ -57,6 +63,9 @@ labels = pd.DataFrame(
         "rate": [%(rates)s],
         "is_active": [%(flags)s],
         "valid_from": [%(dates)s],
+        "price": pd.Series(
+            [%(prices)s], dtype=pd.ArrowDtype(pa.decimal128(18, 2))
+        ),
     }
 )
 labels["code"] = labels["code"].astype("string")
@@ -76,6 +85,7 @@ THREE_ROWS = {
     "rates": "0.0, 0.20, 0.10",
     "flags": "True, False, True",
     "dates": '"2024-01-01", "2024-01-01", "2025-04-01"',
+    "prices": 'Decimal("19.99"), Decimal("0.10"), None',
 }
 
 FOUR_ROWS = {
@@ -84,6 +94,7 @@ FOUR_ROWS = {
     "rates": "0.0, 0.20, 0.10, 0.19",
     "flags": "True, False, True, True",
     "dates": '"2024-01-01", "2024-01-01", "2025-04-01", "2026-01-01"',
+    "prices": 'Decimal("19.99"), Decimal("0.10"), None, Decimal("5.00")',
 }
 
 
@@ -305,6 +316,32 @@ class TestTheDtypeGivesTheSnowflakeType:
         )
 
         assert rows == [("2025-04-01",)]
+
+    def test_an_arrow_decimal_dtype_gives_a_fixed_point_column(
+        self, adapter: SnowflakeAdapter, seed_table: TrouveAddress
+    ) -> None:
+        """The precision and the scale of the dtype reach Snowflake."""
+        rows = query_rows(
+            adapter,
+            "SELECT DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE FROM "
+            f"{seed_table.database_name}.INFORMATION_SCHEMA.COLUMNS "
+            f"WHERE TABLE_SCHEMA = '{seed_table.schema_name.upper()}' "
+            f"AND TABLE_NAME = '{seed_table.table_name.upper()}' "
+            "AND COLUMN_NAME = 'PRICE'",
+        )
+
+        assert rows == [("NUMBER", 18, 2)]
+
+    def test_a_decimal_keeps_its_exact_value(
+        self, adapter: SnowflakeAdapter, seed_table: TrouveAddress
+    ) -> None:
+        """A float column would hold 0.1 as 0.1000000000000000055511151231257827."""
+        rows = query_rows(
+            adapter,
+            f"SELECT code, TO_VARCHAR(price) FROM {seed_table} ORDER BY code",
+        )
+
+        assert rows == [("FR", "0.10"), ("JP", None), ("US", "19.99")]
 
     def test_an_integer_keeps_no_decimal_part(
         self, adapter: SnowflakeAdapter, seed_table: TrouveAddress

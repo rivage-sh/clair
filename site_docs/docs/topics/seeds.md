@@ -95,7 +95,8 @@ for every other Trouve.
 
 A text dtype gives a text column, an integer dtype gives a number column, a float dtype
 gives a floating point column, a boolean dtype gives BOOLEAN, and a datetime dtype gives a
-timestamp column.
+timestamp column. An Arrow decimal dtype gives a `NUMBER(precision, scale)` column: see
+[An exact decimal](#an-exact-decimal).
 
 To control a type, set the dtype in Python:
 
@@ -108,8 +109,43 @@ frame["valid_from"] = pd.to_datetime(frame["valid_from"])
     pandas turns `[1, 2, None]` into the `float64` dtype, and the ids reach Snowflake as
     `1.0` and `2.0`. The nullable `Int64` dtype keeps them as integers.
 
-pandas has no decimal dtype, thus a seed cannot make a `NUMBER(18,2)` column. For an exact
-decimal, cast in a Trouve that reads the seed.
+### An exact decimal
+
+A float dtype gives a `FLOAT` column. A `FLOAT` holds `0.1` as an approximation, thus it is
+not correct for money or for a rate that must add up. For an exact value, Snowflake uses
+a `NUMBER(18,2)` column.
+
+The usual pandas dtypes hold no decimal. Use the Arrow decimal dtype. It sets the
+precision and the scale, and Snowflake makes a column with the same precision and scale:
+
+```python
+from decimal import Decimal
+
+import pandas as pd
+import pyarrow as pa
+
+frame = pd.DataFrame(
+    {
+        "country_code": ["US", "FR"],
+        "tax_rate": pd.Series(
+            [Decimal("0.0725"), Decimal("0.2000")],
+            dtype=pd.ArrowDtype(pa.decimal128(18, 4)),
+        ),
+    }
+)
+```
+
+This seed gives a `NUMBER(18,4)` column. clair installs `pyarrow` with the Snowflake
+connector, thus you add no package.
+
+Give each value as a `Decimal` built from a string, for example `Decimal("0.0725")`. The
+text of the file then shows the exact value that Snowflake stores.
+
+!!! warning "Set the dtype, not only the values"
+    A column of `Decimal` objects with no dtype has the `object` dtype. Snowflake then
+    gets the smallest precision and scale that hold the values, for example
+    `NUMBER(3,2)` from `[Decimal("0.20"), Decimal("1.50")]`. Set the Arrow dtype, thus the
+    column type comes from the file and not from the rows.
 
 ## The shape of the data
 
