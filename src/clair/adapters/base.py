@@ -189,6 +189,14 @@ class WarehouseAdapter(ABC):
         """
         ...
 
+    def cancel(self) -> None:
+        """Cancel the statement that this connection runs now. Another thread calls it.
+
+        A run that is cancelled sends no new statement and promotes nothing,
+        thus an adapter that cannot cancel lets one statement complete, and the
+        result is still correct. The default does nothing.
+        """
+
     @abstractmethod
     def close(self) -> None:
         """Close the connection."""

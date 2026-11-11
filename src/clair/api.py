@@ -55,7 +55,14 @@ from clair.core.compiler import CompileOutput, build_compile_output
 from clair.core.dag import ClairDag, build_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.references import recompile_for_selection
-from clair.core.runner import RunResult, RunSkip, RunSummary, run_project
+from clair.core.runner import (
+    RunCancel,
+    RunCancellation,
+    RunResult,
+    RunSkip,
+    RunSummary,
+    run_project,
+)
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import SampleScope, TestResult, TestSummary, run_tests
 from clair.core.validation import ValidationReport, validate_project
@@ -344,6 +351,7 @@ class RunHandle:
         self._results: list[RunResult] = []
         self._result_generator: Generator[RunResult] | None = None
         self._complete = False
+        self._cancellation = RunCancellation()
 
     def __enter__(self) -> Self:
         return self
@@ -385,6 +393,22 @@ class RunHandle:
             run_mode=self._run_mode,
             sample_rows=self._plan.sample_rows,
         )
+
+    def cancel(self) -> None:
+        """Stop the run. Call it from another thread, or from a signal handler.
+
+        clair starts no new Trouve, cancels the statement of each connection,
+        and promotes nothing more. Each physical object keeps its data or its
+        promoted data. The loop then gives a result for each Trouve, with the
+        status CANCELLED for each one that did not start, and it ends. Thus
+        ``summary`` stays complete, and a retry can select from it.
+        """
+        self._cancellation.cancel()
+
+    @property
+    def is_cancelled(self) -> bool:
+        """True after a call of cancel()."""
+        return self._cancellation.is_cancelled
 
     def close(self) -> None:
         """Stop the run, and close each connection that the handle opened."""
@@ -468,9 +492,10 @@ class RunHandle:
                 use_staging=self._test,
                 threads=thread_count,
                 environment_name=env_name,
+                cancellation=self._cancellation,
             ):
-                # A skipped Trouve ran no test, thus its result has no test results.
-                if not isinstance(result, RunSkip):
+                # A Trouve that did not start ran no test, thus its result has no test results.
+                if not isinstance(result, RunSkip | RunCancel):
                     result = result.model_copy(
                         update={"test_results": test_results_of_node[str(result.addresses.physical)]}
                     )

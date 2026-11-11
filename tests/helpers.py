@@ -668,7 +668,7 @@ def run_one_trouve(
         )
     )
     (result,) = results
-    assert not isinstance(result, RunSkip)
+    assert isinstance(result, RunSuccess | RunFailure)
     return result
 
 

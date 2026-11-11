@@ -24,7 +24,7 @@ from pydantic import BaseModel, computed_field
 
 from clair.adapters.base import Statement
 from clair.core.compiler import CompiledNodeInfo, CompileOutput
-from clair.core.runner import RunFailure, RunResult, RunSkip, RunSummary
+from clair.core.runner import RunCancel, RunFailure, RunResult, RunSkip, RunSummary
 from clair.exceptions import ClairError
 from clair.trouves.address import NodeAddresses
 
@@ -271,7 +271,7 @@ def _render_statement(statement: Statement, index: int, total: int) -> str:
 
 def _render_run_result(result: RunResult) -> str:
     """Give the text of the artifact file of one Trouve that clair ran."""
-    assert not isinstance(result, RunSkip)
+    assert not isinstance(result, RunSkip | RunCancel)
     lines = [
         f"-- clair run: {result.addresses.physical}",
         f"-- status: {result.status.value}",
@@ -299,7 +299,7 @@ def write_run_result(artifacts_dir: Path, run_id: str, result: RunResult) -> Pat
     its error. A skipped Trouve sent no statement, thus it gives no file and
     this function gives None. The run summary names it.
     """
-    if isinstance(result, RunSkip):
+    if isinstance(result, RunSkip | RunCancel):
         return None
     run_dir = run_directory(artifacts_dir, run_id)
     return _write_text(_node_file(run_dir, result.addresses, ".sql"), _render_run_result(result))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
@@ -46,6 +47,7 @@ class RunStatus(StrEnum):
     SUCCESS = "success"
     FAILURE = "failure"
     SKIPPED = "skipped"
+    CANCELLED = "cancelled"
 
 
 class _RunResultBase(BaseModel):
@@ -127,9 +129,68 @@ class RunSkip(_RunResultBase):
     skipped_by: str
 
 
-# The result of one Trouve. The status field tells the three classes apart, thus
-# a pydantic model that holds a result reads it back from JSON.
-RunResult = RunSuccess | RunFailure | RunSkip
+class RunCancel(_RunResultBase):
+    """The result of a Trouve that clair did not start, because the run was cancelled.
+
+    The physical object keeps its data. A retry selects each result whose
+    status is not SUCCESS, thus it selects this Trouve too.
+    """
+
+    status: Literal[RunStatus.CANCELLED] = RunStatus.CANCELLED
+
+
+# The result of one Trouve. The status field tells the classes apart, thus a
+# pydantic model that holds a result reads it back from JSON.
+RunResult = RunSuccess | RunFailure | RunSkip | RunCancel
+
+# The error of a statement that clair did not send, because the run was cancelled.
+RUN_CANCELLED_ERROR = "the run was cancelled, thus clair did not send this statement"
+
+
+class RunCancellation:
+    """The request to stop a run, from a thread that does not run it.
+
+    A signal handler, or a caller of ``RunHandle.cancel()``, calls ``cancel()``.
+    The runner then starts no new Trouve, sends no new statement, and promotes
+    nothing. Each connection of the run also cancels the statement that it runs
+    now, thus a long build stops in the warehouse too.
+    """
+
+    def __init__(self) -> None:
+        self._cancelled = threading.Event()
+        self._lock = threading.Lock()
+        self._adapters: list[WarehouseAdapter] = []
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled.is_set()
+
+    def watch(self, adapter: WarehouseAdapter) -> None:
+        """Cancel the statements of *adapter* when the run is cancelled."""
+        with self._lock:
+            self._adapters.append(adapter)
+            cancelled = self._cancelled.is_set()
+        if cancelled:
+            _cancel_statement_of(adapter)
+
+    def cancel(self) -> None:
+        """Stop the run. A second call does nothing."""
+        with self._lock:
+            if self._cancelled.is_set():
+                return
+            self._cancelled.set()
+            adapters = list(self._adapters)
+        logger.warning("run.cancel", connections=len(adapters))
+        for adapter in adapters:
+            _cancel_statement_of(adapter)
+
+
+def _cancel_statement_of(adapter: WarehouseAdapter) -> None:
+    """Ask one connection to cancel its statement. A fault here must not stop the cancel."""
+    try:
+        adapter.cancel()
+    except Exception as cancel_error:  # noqa: BLE001 — the runner still sends nothing more
+        logger.warning("run.cancel_error", error=str(cancel_error))
 
 
 def _render_statements(statements: list[Statement]) -> list[str]:
@@ -187,7 +248,7 @@ class RunSummary(BaseModel):
         return [
             test_result
             for run_result in self.results
-            if not isinstance(run_result, RunSkip)
+            if isinstance(run_result, RunSuccess | RunFailure)
             for test_result in run_result.test_results
         ]
 
@@ -202,6 +263,14 @@ class RunSummary(BaseModel):
     @property
     def skipped(self) -> list[RunSkip]:
         return [r for r in self.results if isinstance(r, RunSkip)]
+
+    @property
+    def cancelled(self) -> list[RunCancel]:
+        return [r for r in self.results if isinstance(r, RunCancel)]
+
+    @property
+    def cancelled_count(self) -> int:
+        return len(self.cancelled)
 
     @property
     def succeeded_count(self) -> int:
@@ -233,6 +302,9 @@ class RunSummary(BaseModel):
         if isinstance(result, RunSkip):
             lines.append(f"[{index}/{total}] {name} ... SKIPPED")
             lines.append(f"      Reason: the upstream dependency {result.skipped_by} failed")
+        elif isinstance(result, RunCancel):
+            lines.append(f"[{index}/{total}] {name} ... CANCELLED")
+            lines.append("      Reason: the run was cancelled before this Trouve started")
         elif isinstance(result, RunSuccess):
             lines.append(
                 f"[{index}/{total}] {name} ... OK ({result.duration_seconds:.1f}s)"
@@ -255,9 +327,10 @@ class RunSummary(BaseModel):
         return "\n".join(lines)
 
     @staticmethod
-    def render_footer(succeeded: int, failed: int, skipped: int) -> str:
+    def render_footer(succeeded: int, failed: int, skipped: int, cancelled: int = 0) -> str:
         """Make the last line of the summary."""
-        return f"=== Done: {succeeded} succeeded, {failed} failed, {skipped} skipped ==="
+        cancelled_text = f", {cancelled} cancelled" if cancelled else ""
+        return f"=== Done: {succeeded} succeeded, {failed} failed, {skipped} skipped{cancelled_text} ==="
 
     def render(self) -> str:
         """Make the complete summary text for stdout."""
@@ -268,7 +341,7 @@ class RunSummary(BaseModel):
             parts.append(self.render_node(r, i, total))
 
         parts.append(self.render_footer(
-            self.succeeded_count, self.failed_count, self.skipped_count,
+            self.succeeded_count, self.failed_count, self.skipped_count, self.cancelled_count,
         ))
 
         return "\n".join(parts)
@@ -545,6 +618,14 @@ def _promote_or_keep(
     return statements, ""
 
 
+def _cancelled_before_promotion(addresses: NodeAddresses) -> str:
+    """Give the error of a node that built its candidate, and stopped before the promotion."""
+    return (
+        f"the run was cancelled before the promotion. {addresses.physical} keeps its "
+        f"data. The candidate stays at {addresses.staging}"
+    )
+
+
 class _NodeOutcome(NamedTuple):
     """The report of one node to the scheduler.
 
@@ -599,6 +680,7 @@ def _run_node(
     after_node_success: Callable[[str, str, WarehouseAdapter], bool] | None,
     use_staging: bool,
     environment_name: str,
+    cancellation: RunCancellation | None = None,
 ) -> _NodeOutcome:
     """Materialize one Trouve in the warehouse.
 
@@ -614,6 +696,8 @@ def _run_node(
         after_node_success: The callback that runs the data quality tests.
         use_staging: True if clair writes to a staging address first.
         environment_name: The environment of the run. The query tag holds it.
+        cancellation: The request to stop the run. After it, the node sends no
+            new statement and promotes nothing.
 
     Returns:
         A _NodeOutcome. It holds the result, and it tells you if clair can
@@ -626,6 +710,12 @@ def _run_node(
     logical_address = str(addresses.logical)
     trouve = dag.get_trouve(name)
     assert trouve.compiled is not None
+
+    def is_cancelled() -> bool:
+        return cancellation is not None and cancellation.is_cancelled
+
+    if is_cancelled():
+        return _NodeOutcome(RunCancel(addresses=addresses), downstream_ok=False)
 
     config = trouve.compiled.config
     try:
@@ -690,10 +780,15 @@ def _run_node(
 
         if isinstance(result, RunSuccess) and staging_address is not None:
             assert after_node_success is not None
-            tests_passed = after_node_success(name, str(staging_address), adapter)
-            promote_statements, staging_error = _promote_or_keep(
-                trouve, adapter, addresses, tests_passed, current_object
-            )
+            # A cancel can arrive while the tests run, thus clair asks again
+            # after them, just before the promotion.
+            tests_passed = not is_cancelled() and after_node_success(name, str(staging_address), adapter)
+            if is_cancelled():
+                promote_statements, staging_error = [], _cancelled_before_promotion(addresses)
+            else:
+                promote_statements, staging_error = _promote_or_keep(
+                    trouve, adapter, addresses, tests_passed, current_object
+                )
             statements = result.statements + promote_statements
             if staging_error:
                 result = RunFailure(
@@ -814,7 +909,12 @@ def _run_node(
     failed_at = None
 
     for statement_index, sql in enumerate(plan.statements):
-        statements.append(adapter.execute(sql))
+        if is_cancelled():
+            statements.append(
+                Statement(sql=sql, status=StatementStatus.FAILURE, error=RUN_CANCELLED_ERROR)
+            )
+        else:
+            statements.append(adapter.execute(sql))
         if not statements[-1].success:
             failed_at = statement_index
             break
@@ -842,11 +942,16 @@ def _run_node(
     staging_error = ""
     if failed_at is None and staging_address is not None:
         assert after_node_success is not None
-        tests_passed = after_node_success(name, str(staging_address), adapter)
-        promote_statements, staging_error = _promote_or_keep(
-            trouve, adapter, addresses, tests_passed, current_object, current_comments
-        )
-        statements.extend(promote_statements)
+        # A cancel can arrive while the tests run, thus clair asks again after
+        # them, just before the promotion.
+        tests_passed = not is_cancelled() and after_node_success(name, str(staging_address), adapter)
+        if is_cancelled():
+            staging_error = _cancelled_before_promotion(addresses)
+        else:
+            promote_statements, staging_error = _promote_or_keep(
+                trouve, adapter, addresses, tests_passed, current_object, current_comments
+            )
+            statements.extend(promote_statements)
 
     query_ids = [statement.query_id for statement in statements if statement.query_id]
 
@@ -899,6 +1004,7 @@ def run_project(
     use_staging: bool = False,
     threads: int = 1,
     environment_name: str = "",
+    cancellation: RunCancellation | None = None,
 ) -> Iterator[RunResult]:
     """Execute the selected Trouves. Give each result when the Trouve completes.
 
@@ -932,6 +1038,9 @@ def run_project(
             after_node_success.
         threads: The number of Trouves that clair runs at one time, and thus the
             number of warehouse connections.
+        cancellation: The request to stop the run. After it, clair starts no
+            new Trouve and gives a RunCancel for each one, and each Trouve that
+            runs stops before its next statement and before its promotion.
 
     Raises:
         RunError: If *use_staging* is True and *after_node_success* is None.
@@ -979,6 +1088,9 @@ def run_project(
                 ready.append(downstream)
 
     pool = AdapterPool(adapter, threads)
+    if cancellation is not None:
+        for pooled_adapter in pool.adapters:
+            cancellation.watch(pooled_adapter)
 
     def run_one(name: str) -> _NodeOutcome:
         """Run one node on the connection of this thread."""
@@ -991,6 +1103,7 @@ def run_project(
             after_node_success,
             use_staging,
             environment_name,
+            cancellation,
         )
 
     try:
@@ -1009,6 +1122,11 @@ def run_project(
                             addresses=addresses,
                             skipped_by=skip_reasons[name],
                         )
+                        release(name)
+                        continue
+
+                    if cancellation is not None and cancellation.is_cancelled:
+                        yield RunCancel(addresses=addresses_of(dag, name))
                         release(name)
                         continue
 

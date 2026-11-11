@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from types import FrameType
+from typing import Self
 
 import click
 import structlog
@@ -58,6 +63,49 @@ _sample_rows_option = click.option(
     default=None,
     help=f"The rows of each sample, for a Trouve without a sample_sql. The default is {DEFAULT_SAMPLE_ROWS}. It needs --sample.",
 )
+
+
+class _StopOnSignal:
+    """Stop a run gracefully at the first SIGINT or SIGTERM, and at once at the second.
+
+    The first signal cancels the run: clair starts no new Trouve, cancels the
+    statements that run now, promotes nothing more, and writes the summary.
+    The second signal ends the process at once. A statement that runs then can
+    continue in Snowflake, and clair writes no summary.
+    """
+
+    _SIGNALS = (signal.SIGINT, signal.SIGTERM)
+
+    def __init__(self, run_handle: clair_api.RunHandle) -> None:
+        self._run_handle = run_handle
+        self.signal_number: int | None = None
+        self._previous_handlers: dict[int, signal.Handlers | int | Callable[[int, FrameType | None], object] | None] = {}
+
+    def __enter__(self) -> Self:
+        for signal_number in self._SIGNALS:
+            self._previous_handlers[signal_number] = signal.signal(signal_number, self._handle)
+        return self
+
+    def __exit__(self, *exception_info: object) -> None:
+        for signal_number, previous_handler in self._previous_handlers.items():
+            # None means a handler that Python did not install. Python cannot
+            # restore it, thus the default handler takes its place.
+            signal.signal(signal_number, signal.SIG_DFL if previous_handler is None else previous_handler)
+
+    def _handle(self, signal_number: int, _frame: FrameType | None) -> None:
+        if self.signal_number is not None:
+            click.echo(
+                "\nclair stops at once. A statement that runs now can continue in Snowflake.",
+                err=True,
+            )
+            os._exit(128 + signal_number)
+        self.signal_number = signal_number
+        click.echo(
+            "\nclair stops: it cancels the statements that run now, and promotes nothing "
+            "more. Send the signal again to stop at once.",
+            err=True,
+        )
+        self._run_handle.cancel()
 
 
 def _sample_rows(sample: bool, sample_rows: int | None) -> int:
@@ -481,7 +529,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: s
             sample=sample,
             sample_rows=row_limit,
             threads=threads,
-        ) as run_handle:
+        ) as run_handle, _StopOnSignal(run_handle) as stop:
             # The file of each Trouve is on disk when the Trouve completes, thus
             # a run that stops keeps the files of each Trouve before it.
             for result in run_handle:
@@ -501,6 +549,10 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: s
 
     summary_file = write_run_summary(artifacts_dir, summary)
     logger.info("run.artifacts", artifacts_dir=str(summary_file.parent))
+
+    # The convention of a shell: a process that a signal stopped gives 128 plus its number.
+    if stop.signal_number is not None:
+        sys.exit(128 + stop.signal_number)
 
     blocking_tests = [test_result for test_result in summary.test_results if test_result.is_blocking]
     if summary.failed_count or blocking_tests:
