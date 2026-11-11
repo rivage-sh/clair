@@ -99,6 +99,19 @@ trouve = Table(
 )
 ```
 
+To make each table of a database or a schema transient, set the default in `__database_config__.py` or `__schema_config__.py`:
+
+```python
+# staging/__database_config__.py
+from clair import DatabaseDefaults
+
+defaults = DatabaseDefaults(transient=True)
+```
+
+A Trouve that gives `transient=False` stays permanent, and a schema config replaces the database config. See [Per-Database & Schema Config](per-database-schema-config.md#resolution-order). A View and a Source make no table, and ignore the default. An Iceberg table also ignores it, because clair makes no transient Iceberg table.
+
+The default is the option of each table, thus clair writes `TRANSIENT` in each statement. A transient schema in Snowflake does the same for each table in it, also for a table that clair does not make. Clair makes each schema that does not exist with `CREATE SCHEMA IF NOT EXISTS`, and that schema is permanent.
+
 Snowflake cannot clone a transient table into a permanent one. Thus each `CREATE` of the Trouve says `TRANSIENT`: the build at the staging address, the clone of an incremental run, and the promotion.
 
 When you change the option of a table that exists:

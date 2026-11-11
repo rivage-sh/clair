@@ -17,7 +17,7 @@ from clair.core.staging import (
 )
 from clair.environments.routing import TrouveAddress
 from clair.trouves.run_config import Append, Incremental, RunMode, Upsert
-from clair.trouves.trouve import Table, TableOptions, TrouveAbc
+from clair.trouves.trouve import Table, TrouveAbc
 from clair.trouves.trouve_type import TrouveType
 from tests.helpers import compile_trouve, unstaged_plan
 
@@ -75,7 +75,7 @@ class TestPromoteStatements:
             TrouveType.TABLE,
             staging_address=_address("db.s.t__staging"),
             physical_address=_address("db.s.t"),
-            table_options=TableOptions(),
+            table_options=_compile(Table(sql="SELECT 1 AS id"), "db.s.t"),
         ))
         assert "CREATE OR REPLACE TABLE db.s.t CLONE db.s.t__staging COPY GRANTS" in statement
 
@@ -85,7 +85,7 @@ class TestPromoteStatements:
             TrouveType.TABLE,
             staging_address=_address("db.s.t__staging"),
             physical_address=_address("db.s.t"),
-            table_options=TableOptions(),
+            table_options=_compile(Table(sql="SELECT 1 AS id"), "db.s.t"),
         ))
         assert "IF NOT EXISTS" not in statement
         assert "SWAP WITH" not in statement
@@ -112,7 +112,7 @@ class TestPromoteStatements:
 
     def test_clone_is_zero_copy(self):
         statement = build_clone_statement(
-            _address("db.s.t"), _address("db.s.t__staging"), table_options=TableOptions()
+            _address("db.s.t"), _address("db.s.t__staging"), table_options=_compile(Table(sql="SELECT 1 AS id"), "db.s.t")
         )
         assert "CREATE OR REPLACE TABLE db.s.t__staging CLONE db.s.t" in statement
 

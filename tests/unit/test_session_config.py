@@ -23,25 +23,8 @@ from tests.helpers import (
     RecordingAdapter,
     run_one_trouve,
     snowflake_adapter_that_answers,
-    write_project_marker,
+    write_layered_project,
 )
-
-
-def write_layered_project(root: Path, database_text: str, schema_text: str, trouve_text: str) -> Path:
-    """Write one Trouve with a database config and a schema config above it."""
-    write_project_marker(root)
-    schema_directory = root / "mydb" / "myschema"
-    schema_directory.mkdir(parents=True)
-    (root / "mydb" / "__database_config__.py").write_text(
-        f"from clair import DatabaseDefaults\ndefaults = DatabaseDefaults({database_text})\n"
-    )
-    (schema_directory / "__schema_config__.py").write_text(
-        f"from clair import SchemaDefaults\ndefaults = SchemaDefaults({schema_text})\n"
-    )
-    (schema_directory / "orders.py").write_text(
-        f'from clair import Table\ntrouve = Table(sql="select 1 as n", {trouve_text})\n'
-    )
-    return root
 
 
 def resolved_config_of(root: Path) -> ResolvedConfig:
@@ -63,7 +46,9 @@ class TestTheLevels:
     def test_the_lowest_level_that_sets_the_warehouse_wins(
         self, tmp_path, database_text, schema_text, trouve_text, expected_warehouse
     ):
-        root = write_layered_project(tmp_path, database_text, schema_text, trouve_text)
+        root = write_layered_project(
+            tmp_path, database_text, schema_text, f'Table(sql="select 1 as n", {trouve_text})'
+        )
         assert resolved_config_of(root).warehouse == expected_warehouse
 
     def test_the_labels_merge_by_key(self, tmp_path):
@@ -71,13 +56,16 @@ class TestTheLevels:
             tmp_path,
             'query_tags={"team": "data", "cost_center": "42"}',
             "",
-            'query_tags={"team": "finance"}',
+            'Table(sql="select 1 as n", query_tags={"team": "finance"})',
         )
         assert resolved_config_of(root).query_tags == {"team": "finance", "cost_center": "42"}
 
     def test_a_lower_level_timeout_replaces_the_higher_one(self, tmp_path):
         root = write_layered_project(
-            tmp_path, "statement_timeout_seconds=3600", "", "statement_timeout_seconds=60"
+            tmp_path,
+            "statement_timeout_seconds=3600",
+            "",
+            'Table(sql="select 1 as n", statement_timeout_seconds=60)',
         )
         assert resolved_config_of(root).statement_timeout_seconds == 60
 

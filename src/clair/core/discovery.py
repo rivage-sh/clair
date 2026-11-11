@@ -56,6 +56,7 @@ from clair.trouves.trouve import (
     Source,
     SqlTrouve,
     TrouveAbc,
+    table_options_of,
 )
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
@@ -134,7 +135,7 @@ def _resolve_config(
     2. __database_config__.py
     3. __schema_config__.py
 
-    The Trouve is the last level. ``_compile_trouve`` applies it.
+    The Trouve is the last level. ``_trouve_config`` applies it.
 
     The function starts at the file and moves up, in the same direction as
     ``TrouveAddress.from_file_path``. The schema directory is the parent of the file,
@@ -160,6 +161,24 @@ def _resolve_config(
     if isinstance(schema_defaults, SchemaDefaults):
         config = config.apply(schema_defaults)
 
+    return config
+
+
+def _trouve_config(
+    trouve_obj: TrouveAbc,
+    file_path: Path,
+    profile_defaults: dict[str, str | None] | None,
+) -> ResolvedConfig:
+    """Make the final config of one Trouve: the directory levels, and then the Trouve.
+
+    Only a standard table can be transient. A View and a Source make no table,
+    and Snowflake gives no TRANSIENT in the clone of an Iceberg table. Thus a
+    transient default of a directory does not apply to them.
+    """
+    config = _resolve_config(file_path, profile_defaults).apply(trouve_obj)
+    table_options = table_options_of(trouve_obj)
+    if table_options is None or table_options.iceberg_settings() is not None:
+        config.transient = False
     return config
 
 
@@ -214,7 +233,7 @@ def _compile_trouve(
     logical = logical_addresses[id(trouve_obj)]
     physical = physical_addresses[id(trouve_obj)]
     relative_file_path = file_path.relative_to(project_root)
-    config = _resolve_config(file_path, profile_defaults).apply(trouve_obj)
+    config = _trouve_config(trouve_obj, file_path, profile_defaults)
 
     # A sample can read another Trouve, for example a seed of test users. Each
     # run keeps the edge, thus --sample does not change the DAG.

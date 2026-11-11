@@ -80,7 +80,7 @@ trouve = Table(
 )
 ```
 
-Give `transient=True` to make a TRANSIENT table, with no Fail-safe storage. See [A transient table](staging.md#a-transient-table).
+Give `transient=True` to make a TRANSIENT table, with no Fail-safe storage. Give `transient=True` in `__database_config__.py` or `__schema_config__.py` to make each table below it transient. See [A transient table](staging.md#a-transient-table).
 
 Give `cluster_by=["order_date"]` to give the table a clustering key. See [A clustered table](staging.md#a-clustered-table).
 

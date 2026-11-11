@@ -365,7 +365,7 @@ def _run_dataframe_trouve(
 
     try:
         statement = adapter.write_dataframe(
-            dataframe=result_dataframe, address=address, transient=trouve.transient
+            dataframe=result_dataframe, address=address, transient=trouve.is_transient
         )
     except Exception as write_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
         return failure(f"Clair cannot write the DataFrame to {address}: {write_error}")

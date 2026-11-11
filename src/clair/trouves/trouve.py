@@ -34,7 +34,7 @@ from clair.exceptions import CompileError, TrouveFileNotFoundError, TrouveNotCom
 from clair.trouves._refs import THIS_PLACEHOLDER, register
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column
-from clair.trouves.config import ResolvedConfig, SessionConfig
+from clair.trouves.config import ResolvedConfig, SessionConfig, TableDefaults
 from clair.trouves.run_config import (
     SOURCE,
     TARGET,
@@ -159,24 +159,26 @@ class Iceberg(BaseModel):
         return external_volume
 
 
-class TableOptions(BaseModel):
+class TableOptions(TableDefaults):
     """The options of each Trouve that makes a TABLE: ``Table``, ``PandasTable``, ``SeedTable``.
 
     ``clair.core.staging`` tells how a run keeps each option on the physical table.
 
     Attributes:
-        transient: True makes a TRANSIENT table. Snowflake keeps no Fail-safe
-            copy of it, and its Time Travel lasts one day maximum. The table
-            costs less storage, and it can lose data that a permanent table
-            keeps.
+        transient: True makes a TRANSIENT table, and False makes a permanent
+            table. Snowflake keeps no Fail-safe copy of a transient table, and
+            its Time Travel lasts one day maximum. The table costs less
+            storage, and it can lose data that a permanent table keeps. None
+            takes the value of ``__schema_config__.py``, then of
+            ``__database_config__.py``, and then False. ``is_transient`` gives
+            the result.
         cluster_by: The clustering key, one column name or SQL expression for
             each part, for example ``["order_date", "customer_id"]``. Snowflake
             then reclusters the table in the background. An empty list gives
             no key.
     """
 
-    transient: bool = False
-    cluster_by: list[str] = []
+    cluster_by: list[str] = Field(default_factory=list)
 
     @field_validator("cluster_by")
     @classmethod
@@ -191,6 +193,22 @@ class TableOptions(BaseModel):
         """Give the Iceberg settings. Only a ``Table`` can make an Iceberg table."""
         return None
 
+    @abstractmethod
+    def require_compiled(self) -> CompiledAttributes:
+        """``TrouveAbc`` gives this method. Each class with table options is a Trouve."""
+
+    @property
+    def is_transient(self) -> bool:
+        """True if a run makes a TRANSIENT table.
+
+        Discovery resolves ``transient`` against ``__schema_config__.py`` and
+        ``__database_config__.py``. Thus the value exists only after discovery.
+
+        Raises:
+            TrouveNotCompiledError: If discovery did not load this Trouve.
+        """
+        return self.require_compiled().config.transient
+
     @property
     def table_keyword(self) -> str:
         """Give the object keyword of a CREATE statement.
@@ -199,7 +217,7 @@ class TableOptions(BaseModel):
         """
         if self.iceberg_settings() is not None:
             return "ICEBERG TABLE"
-        return "TRANSIENT TABLE" if self.transient else "TABLE"
+        return "TRANSIENT TABLE" if self.is_transient else "TABLE"
 
     @property
     def object_keyword(self) -> str:

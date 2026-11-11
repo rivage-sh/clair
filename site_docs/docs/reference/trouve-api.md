@@ -131,7 +131,7 @@ A table that Snowflake makes from the SQL.
 ```python
 class Table(SqlTrouve):
     run_config: RunConfig = FullRefresh()
-    transient: bool = False
+    transient: bool | None = None
     cluster_by: list[str] = []
     iceberg: Iceberg | None = None
 ```
@@ -139,9 +139,11 @@ class Table(SqlTrouve):
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `run_config` | `RunConfig` | full refresh | Materialization strategy. See [RunConfig](run-config-api.md). |
-| `transient` | `bool` | `False` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. See [A transient table](../topics/staging.md#a-transient-table). |
+| `transient` | `bool \| None` | `None` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. `False` makes a permanent table. `None` takes the value of `__schema_config__.py`, then of `__database_config__.py`, and then `False`. See [A transient table](../topics/staging.md#a-transient-table). |
 | `cluster_by` | `list[str]` | `[]` | The clustering key: a column name or an SQL expression for each part. Snowflake reclusters the table in the background. See [A clustered table](../topics/staging.md#a-clustered-table). |
 | `iceberg` | `Iceberg \| None` | `None` | `Iceberg(...)` makes a Snowflake-managed Iceberg table. A `transient` Iceberg table is rejected. See [An Iceberg table](../topics/staging.md#an-iceberg-table). |
+
+`Table`, `PandasTable` and `SeedTable` have the property `is_transient`: `True` if a run makes a TRANSIENT table. Discovery resolves it from `transient` and the directory configs. It raises `TrouveNotCompiledError` before discovery. An Iceberg table is never transient.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
@@ -224,7 +226,7 @@ the result. Its `execution_type` is always `PANDAS`.
 
 ```python
 class DataframeTrouve(TrouveAbc, ABC):
-    transient: bool = False
+    transient: bool | None = None
     cluster_by: list[str] = []
 
     def build_dataframe(self, *input_dataframes: pd.DataFrame) -> pd.DataFrame: ...
@@ -257,7 +259,7 @@ from clair import PandasTable
 |-------|------|---------|-------------|
 | `transform` | `Callable[..., pd.DataFrame]` | required | The function that gives the output DataFrame. |
 | `inputs` | `list[TrouveAbc]` | `[]` | The upstream Trouves. Clair binds them to the transform parameters by position. |
-| `transient` | `bool` | `False` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. See [A transient table](../topics/staging.md#a-transient-table). |
+| `transient` | `bool \| None` | `None` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. `False` makes a permanent table. `None` takes the value of `__schema_config__.py`, then of `__database_config__.py`, and then `False`. See [A transient table](../topics/staging.md#a-transient-table). |
 | `cluster_by` | `list[str]` | `[]` | The clustering key: a column name or an SQL expression for each part. Snowflake reclusters the table in the background. See [A clustered table](../topics/staging.md#a-clustered-table). |
 
 `TrouveAbc` holds the other fields: `columns`, `tests`, `docs`.
@@ -336,7 +338,7 @@ from clair import SeedTable
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `dataframe` | `pd.DataFrame` | required | The rows that clair writes. Clair reads it when it imports the file. |
-| `transient` | `bool` | `False` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. See [A transient table](../topics/staging.md#a-transient-table). |
+| `transient` | `bool \| None` | `None` | `True` makes a TRANSIENT table: no Fail-safe, and one day of Time Travel maximum. `False` makes a permanent table. `None` takes the value of `__schema_config__.py`, then of `__database_config__.py`, and then `False`. See [A transient table](../topics/staging.md#a-transient-table). |
 | `cluster_by` | `list[str]` | `[]` | The clustering key: a column name or an SQL expression for each part. Snowflake reclusters the table in the background. See [A clustered table](../topics/staging.md#a-clustered-table). |
 
 `TrouveAbc` holds the other fields: `columns`, `tests`, `docs`.
