@@ -23,14 +23,16 @@ CREATE OR REPLACE TABLE example_3_database.refined.orders AS (
 
 `Append` adds the new rows only on each incremental run. Use it for event streams and for logs that you add to.
 
-Read `clair.run_mode` to change the SQL between a full refresh and an incremental run:
+Read `clair.run_mode` to change the SQL between a full refresh and an incremental run.
+`{THIS}` gives the address of the table that the Trouve writes, thus the filter reads the
+newest row that the table holds:
 
 ```python
 # example_3_database/derived/recent_orders.py
 from example_3_database.refined.orders import trouve as refined_orders
 
 import clair
-from clair import Append, Column, ColumnType, Incremental, RunMode, Table
+from clair import THIS, Append, Column, ColumnType, Incremental, RunMode, Table
 
 sql = f"""
     select
@@ -43,17 +45,18 @@ sql = f"""
     from {refined_orders}
 """
 if clair.run_mode == RunMode.INCREMENTAL:
-    sql += """
-        where created_at > dateadd('day', -3, current_timestamp())
+    sql += f"""
+        where created_at > (select max(created_at) from {THIS})
     """
 
 trouve = Table(
     docs="""
-        Incremental append of the recent orders. In each incremental run, clair adds the
-        orders from the last 3 days. Thus the table keeps a log of the recent activity.
+        Incremental append of the orders. In each incremental run, clair adds each order
+        that is newer than the newest order of the table. Thus each order arrives one time.
 
-        Note: the lookback of 3 days gives a small overlap. The overlap catches the rows that
-        come late. In a full refresh, clair selects all rows and uses no date filter.
+        The filter is a strict greater than, with no tolerance for late rows. Append keeps
+        each row that it inserts, thus an overlap would insert a row two times. In a full
+        refresh, clair selects all rows and uses no filter.
     """,
     sql=sql,
     run_config=Incremental(strategy=Append()),
@@ -75,9 +78,30 @@ INSERT INTO example_3_database.derived.recent_orders ("ORDER_ID", "CUSTOMER_ID",
 SELECT "ORDER_ID", "CUSTOMER_ID", "ORDER_STATUS", "AMOUNT", "CREATED_AT", "CREATED_DATE" FROM (
     select order_id, customer_id, order_status, amount, created_at, created_date
     from example_3_database.refined.orders
-    where created_at > dateadd('day', -3, current_timestamp())
+    where created_at > (select max(created_at) from example_3_database.derived.recent_orders)
 )
 ```
+
+### Choose the filter for the strategy
+
+The strategy decides what an overlap does, thus it decides the filter.
+
+| Strategy | Filter | Why |
+|----------|--------|-----|
+| `Append` | `> (select max(<column>) from {THIS})`, with no tolerance | Append inserts each row that the filter gives. A row in two runs is two rows. |
+| `Upsert`, `DeleteInsert` | The newest value minus a tolerance, for example `>= dateadd('day', -3, (select max(<column>) from {THIS}))` | The key replaces a row that arrives again. An overlap thus costs a little work, and it catches the rows that arrive late. |
+
+For `Append`, filter on a column that only grows, such as the time when the loader wrote
+the row. A row that arrives late with an older value of the column never passes a strict
+greater than. If your rows can arrive late, give them a key and use `Upsert` or
+`DeleteInsert`.
+
+A filter on `current_timestamp()` in place of `{THIS}` depends on the schedule: a run that
+is late by more than the window loses rows, and a run that is early reads rows again.
+`{THIS}` depends on the data only.
+
+`{THIS}` reads the physical table as it was before the run. In a staged run, the staging
+copy starts as a clone of that table, thus the two hold the same rows.
 
 ### clair inserts each column by its name
 
@@ -101,7 +125,7 @@ columns.
 # example_3_database/derived/customer_order_summary.py
 from example_3_database.refined.orders import trouve as refined_orders
 
-from clair import Column, ColumnType, Incremental, Table, TrouveType, Upsert
+from clair import Column, ColumnType, Incremental, Table, Upsert
 
 trouve = Table(
     docs="""
@@ -209,6 +233,7 @@ from example_3_database.refined.orders import trouve as refined_orders
 
 import clair
 from clair import (
+    THIS,
     Column,
     ColumnType,
     DeleteInsert,
@@ -226,8 +251,8 @@ sql = f"""
     from {refined_orders}
 """
 if clair.run_mode == RunMode.INCREMENTAL:
-    sql += """
-        where created_date >= dateadd('day', -3, current_date())
+    sql += f"""
+        where created_date >= dateadd('day', -3, (select max(created_date) from {THIS}))
     """
 sql += """
     group by created_date
@@ -259,7 +284,7 @@ Generated SQL on an incremental run — 3 statements and 1 cleanup:
 CREATE OR REPLACE TABLE example_3_database.derived.daily_orders__clair_new_rows_<run_id> AS (
     select created_date, count(*) as order_count, sum(amount) as revenue
     from example_3_database.refined.orders
-    where created_date >= dateadd('day', -3, current_date())
+    where created_date >= dateadd('day', -3, (select max(created_date) from example_3_database.derived.daily_orders))
     group by created_date
 )
 

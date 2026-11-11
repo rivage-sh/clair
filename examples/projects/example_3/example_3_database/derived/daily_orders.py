@@ -2,6 +2,7 @@ from example_3_database.refined.orders import trouve as refined_orders
 
 import clair
 from clair import (
+    THIS,
     Column,
     ColumnType,
     DeleteInsert,
@@ -19,8 +20,8 @@ sql = f"""
     from {refined_orders}
 """
 if clair.run_mode == RunMode.INCREMENTAL:
-    sql += """
-        where created_date >= dateadd('day', -3, current_date())
+    sql += f"""
+        where created_date >= dateadd('day', -3, (select max(created_date) from {THIS}))
     """
 sql += """
     group by created_date
