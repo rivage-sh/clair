@@ -41,12 +41,18 @@ class AdapterPool:
             adapter.new_connection() for _ in range(size - 1)
         ]
 
+        self._first_adapter = adapter
         self._free: queue.SimpleQueue[WarehouseAdapter] = queue.SimpleQueue()
         self._free.put(adapter)
         for extra_adapter in self._opened:
             self._free.put(extra_adapter)
 
         self._thread_adapter = threading.local()
+
+    @property
+    def adapters(self) -> list[WarehouseAdapter]:
+        """Each connection of the pool: the one of the caller, and each one that the pool opened."""
+        return [self._first_adapter, *self._opened]
 
     def acquire(self) -> WarehouseAdapter:
         """Give the connection of the thread that calls this method.

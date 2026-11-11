@@ -109,12 +109,20 @@ Trouves that did not succeed: see [Retry the failed Trouves](../guides/retry-the
 | `--sample-rows` | `1000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |
 | `--threads` | the `threads` field of the environment, or `4` | The number of Trouves that run at one time. Each thread holds one Snowflake connection. |
 
+## Stop a run
+
+The first Ctrl+C or `SIGTERM` stops the run cleanly: clair starts no new Trouve, cancels
+each statement that runs, promotes nothing more, and writes the summary. A second signal
+stops the process at once. See
+[A signal stops the run](../topics/anatomy-of-a-run.md#a-signal-stops-the-run).
+
 ## Exit codes
 
 - `0` — all the Trouves ran, and all the tests passed
 - `1` — one or more Trouves failed, or one or more tests failed. A Trouve whose
   tests failed counts as a failure. Its physical object keeps the data that it
   had, and the rejected candidate stays for you to query.
+- `130` or `143` — a `SIGINT` or a `SIGTERM` stopped the run. See [Stop a run](#stop-a-run).
 
 ## See also
 

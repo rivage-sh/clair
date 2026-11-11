@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,11 @@ class SnowflakeAdapter(WarehouseAdapter):
         # The role and the warehouse that the session had before clair sent a
         # USE statement. set_context() reads them one time.
         self._opening_context: tuple[str | None, str | None] | None = None
+
+        # The text and the request id of the statement that runs now. cancel()
+        # reads them from another thread.
+        self._running_statement: tuple[str, uuid.UUID] | None = None
+        self._running_lock = threading.Lock()
 
     @classmethod
     def connected(cls, environment: Environment) -> SnowflakeAdapter:
@@ -92,8 +99,13 @@ class SnowflakeAdapter(WarehouseAdapter):
             raise RuntimeError("Not connected. Call connect() first.")
 
         cursor = self._conn.cursor()
+        # clair gives the request id, thus cancel() can name this statement
+        # while execute() waits for it.
+        request_id = uuid.uuid4()
+        with self._running_lock:
+            self._running_statement = (sql.strip(" \t\n\r"), request_id)
         try:
-            cursor.execute(sql)
+            cursor.execute(sql, _statement_params={"requestId": str(request_id)})
             query_id = cursor.sfqid or "unknown"
             return Statement(
                 sql=sql,
@@ -112,7 +124,23 @@ class SnowflakeAdapter(WarehouseAdapter):
                 error=str(e),
             )
         finally:
+            with self._running_lock:
+                self._running_statement = None
             cursor.close()
+
+    def cancel(self) -> None:
+        """Cancel the statement that execute() waits for now. Another thread calls it.
+
+        The connector cancels a statement by its text and its request id, in
+        the same way as for its own timeout. execute() then gives a Statement
+        that failed. With no statement, the method does nothing.
+        """
+        with self._running_lock:
+            running_statement = self._running_statement
+        if running_statement is None or self._conn is None:
+            return
+        sql, request_id = running_statement
+        self._conn._cancel_query(sql, request_id)
 
     def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
         """Give the type and the comment of the object at the address. Reads INFORMATION_SCHEMA.

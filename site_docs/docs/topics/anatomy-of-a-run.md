@@ -323,6 +323,30 @@ the node that caused it, thus one look at the summary gives you the first fault.
 `--no-test` removes the staging step, because the tests decide the promotion. A run with
 `--no-test` writes to each physical address directly.
 
+### A signal stops the run
+
+The first `SIGINT` (Ctrl+C) or `SIGTERM`, for example from an orchestrator that stops a
+task, cancels the run. clair says so on stderr, and then:
+
+1. It starts no new Trouve. Each Trouve that did not start gets the status `CANCELLED`.
+2. It asks each connection to cancel the statement that runs now. Snowflake stops it, and
+   the Trouve gets the status `FAILED`.
+3. It sends no new statement, and promotes nothing. A Trouve whose tests ran when the
+   signal came keeps its candidate at the staging address.
+4. It writes the run summary. The status code is 128 plus the number of the signal: 130
+   for `SIGINT`, and 143 for `SIGTERM`.
+
+Each physical object thus holds its data from before the run, or the data that a
+promotion before the signal gave it. A retry selects each result whose status is not
+`SUCCESS`. See [Retry the failed Trouves](../guides/retry-the-failed-trouves.md).
+
+A second signal ends the process at once. A statement that runs then can continue in
+Snowflake, and clair writes no summary.
+
+*Source: [`cli/main.py`][cli-main-py] — `_StopOnSignal`, and [`core/runner.py`][runner-py] — `RunCancellation`*
+
+`RunHandle.cancel()` does step 1 to 3 for a caller of the Python API, from any thread.
+
 ### The run id
 
 clair makes one `run_id` for each run: the hex form of a UUIDv7. A UUIDv7 starts with a
