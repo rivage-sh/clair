@@ -22,7 +22,7 @@ from clair.exceptions import CompileError
 from clair.trouves.address import NodeAddresses
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, SqlTrouve, table_options_of
+from clair.trouves.trouve import ExecutionType, SqlTrouve, View, table_options_of
 from clair.trouves.trouve_type import TrouveType
 
 
@@ -190,7 +190,7 @@ def build_statements(
             trouve.type,
             staging_address=staging_address,
             physical_address=physical_address,
-            resolved_sql=trouve.compiled.resolved_sql,
+            resolved_sql=trouve.full_refresh_sql() if isinstance(trouve, View) else "",
             table_options=table_options,
         )
     )

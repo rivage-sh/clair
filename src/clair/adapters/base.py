@@ -158,6 +158,11 @@ class WarehouseAdapter(ABC):
         Trouve that changes from a TABLE to a VIEW needs a drop first. The
         answer also tells the runner if an incremental Trouve has a base table,
         and if the comment of that table differs from the docs of the Trouve.
+
+        Raises:
+            RunError: If the warehouse cannot answer. An adapter must not give
+                None for a query that failed, because None makes an incremental
+                Trouve build its table again.
         """
         ...
 

@@ -285,6 +285,14 @@ thus clair changes that node to the full refresh mode and writes
 `run.node.incremental_fallback` to the log. The first run of a new incremental Trouve needs
 no flag from you.
 
+That node builds from the SQL of its effective mode. A module reads `clair.run_mode` at
+import time, thus discovery keeps the text of each Trouve file of an incremental run. At
+the first call of `SqlTrouve.full_refresh_sql()`, clair runs that one file again with
+`FULL_REFRESH`: each import of the file resolves to the module that discovery loaded, and
+no other file runs. The logical address joins the Trouves of that SQL to the addresses of
+the run. A query that cannot tell if the table exists fails the node: a fallback on a table
+that exists replaces its history with the incremental rows.
+
 For a table that exists, the runner then reads its columns with
 `WarehouseAdapter.describe_columns()`, and gives their names to `build_sql()` as data. The
 `INSERT` names each column, thus a new column order in the SQL cannot move a value into

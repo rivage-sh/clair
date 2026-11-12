@@ -18,6 +18,7 @@ The DataFrame backends stay in ``pandas_table.py`` and ``seed_table.py``.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import ClassVar, Generic, Self
@@ -289,9 +290,20 @@ class CompiledSql(CompiledAttributes):
     Attributes:
         resolved_sql: The SQL of the author, with an address in place of each
             reference token.
+        full_refresh_tokens: Gives the SQL of the author, with its tokens, as
+            the module writes it when ``clair.run_mode`` is ``FULL_REFRESH``.
+            Discovery sets it when the module saw ``INCREMENTAL``. The call
+            runs the file one more time, thus clair calls it only for a node
+            that makes its object again.
+        full_refresh_render: Gives that SQL with an address in place of each
+            token. Discovery sets it with the logical addresses, and
+            ``recompile_for_selection()`` sets it again for the selection.
+            None means that ``resolved_sql`` is the SQL of a full refresh.
     """
 
     resolved_sql: str
+    full_refresh_tokens: Callable[[], str] | None = Field(default=None, exclude=True, repr=False)
+    full_refresh_render: Callable[[], str] | None = Field(default=None, exclude=True, repr=False)
 
 
 class CompiledDataframe(CompiledAttributes):
@@ -551,6 +563,23 @@ class SqlTrouve(TrouveAbc[CompiledSql], ABC):
         """
         return self.require_compiled().resolved_sql.strip()
 
+    def full_refresh_sql(self) -> str:
+        """Give the resolved SQL that makes the object again from nothing.
+
+        A module can read ``clair.run_mode`` and add an incremental filter. A
+        node whose effective mode is ``FULL_REFRESH`` must not keep that
+        filter, because its object then holds the filtered rows only. In an
+        incremental run, clair thus renders the SQL of this one module in the
+        full refresh mode, at the first call.
+
+        Raises:
+            TrouveNotCompiledError: If discovery did not load this Trouve.
+        """
+        compiled = self.require_compiled()
+        if compiled.full_refresh_render is not None:
+            return compiled.full_refresh_render().strip()
+        return compiled.resolved_sql.strip()
+
     def _full_refresh_plan(
         self,
         object_keyword: str,
@@ -558,7 +587,7 @@ class SqlTrouve(TrouveAbc[CompiledSql], ABC):
         create_parameters: str = "",
     ) -> BuildPlan:
         """Give the plan that makes the object again from the SQL."""
-        resolved_sql = self.resolved_sql()
+        resolved_sql = self.full_refresh_sql()
         return BuildPlan(statements=[
             f"CREATE OR REPLACE {object_keyword} {target_address}{create_parameters} AS (\n{resolved_sql}\n)"
         ])

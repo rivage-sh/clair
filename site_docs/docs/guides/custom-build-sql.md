@@ -58,6 +58,11 @@ Trouve, with each reference resolved, and `physical_address` holds the address t
 run promotes to. Name an object that the plan makes for one run after the physical
 address, as `window_rows` does below. The staging address already holds the run id.
 
+`resolved_sql` holds the SQL of the run mode of the command line. A full refresh must read
+`self.full_refresh_sql()` instead, because a first run of `--run-mode incremental` is a
+full refresh too, and the SQL obeys the effective mode. `super().build_sql()` reads it for
+you.
+
 ## 1. Write the subclass
 
 Put the subclass in a file that starts with `_`. Discovery skips such a file, thus it
