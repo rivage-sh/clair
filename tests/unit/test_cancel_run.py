@@ -208,9 +208,11 @@ class _WaitingCursor:
         self.sfqid = "query-1"
         self.rowcount = 0
 
-    def execute(self, sql: str, _statement_params: dict[str, str] | None = None) -> None:
-        assert _statement_params is not None
-        self._connection.request_ids.append(_statement_params["requestId"])
+    def execute(self, sql: str, params: tuple[object, ...] | None = None) -> None:
+        if sql.startswith("SELECT SYSTEM$CANCEL_ALL_QUERIES"):
+            self._connection.cancel_calls.append((sql, params))
+            self._connection.cancelled.set()
+            return
         self._connection.running.set()
         assert self._connection.cancelled.wait(timeout=5)
         raise RuntimeError("SQL execution canceled")
@@ -223,15 +225,11 @@ class _CancellingConnection:
     def __init__(self) -> None:
         self.running = threading.Event()
         self.cancelled = threading.Event()
-        self.request_ids: list[str] = []
-        self.cancel_calls: list[tuple[str, str]] = []
+        self.session_id = 42
+        self.cancel_calls: list[tuple[str, tuple[object, ...] | None]] = []
 
     def cursor(self) -> _WaitingCursor:
         return _WaitingCursor(self)
-
-    def _cancel_query(self, sql: str, request_id: object) -> None:
-        self.cancel_calls.append((sql, str(request_id)))
-        self.cancelled.set()
 
 
 def test_the_snowflake_adapter_cancels_the_statement_that_it_waits_for():
@@ -251,8 +249,8 @@ def test_the_snowflake_adapter_cancels_the_statement_that_it_waits_for():
     adapter.cancel()
     worker.join(timeout=5)
 
-    # The connector names the statement by the text that it sends, and by the request id.
-    assert connection.cancel_calls == [("SELECT SYSTEM$WAIT(60)", connection.request_ids[0])]
+    # A second cursor cancels each query of the session, by its session id.
+    assert connection.cancel_calls == [("SELECT SYSTEM$CANCEL_ALL_QUERIES(%s)", (42,))]
     (statement,) = results
     assert not statement.success
 

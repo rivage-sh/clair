@@ -1,7 +1,7 @@
 """Snowflake stops the statement that a cancelled run waits for.
 
-``SnowflakeAdapter.cancel()`` names the statement by its text and its request
-id, through the connector. Only Snowflake can tell that the cancel reaches it,
+``SnowflakeAdapter.cancel()`` sends ``SYSTEM$CANCEL_ALL_QUERIES`` for the
+session of the statement. Only Snowflake can tell that the cancel reaches it,
 thus this test waits for a statement that runs for a long time, and cancels it.
 """
 
