@@ -1,7 +1,7 @@
 from clair import PlanContext, RunMode, Table
 
 
-class MirroredUpsert(Table):
+class MirroredUpsertTable(Table):
     """An Upsert that keeps the production table object.
 
     clair tests the MERGE on a clone of production. The promotion then runs the

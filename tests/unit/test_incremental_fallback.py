@@ -300,7 +300,7 @@ _ALWAYS_INCREMENTAL_MODULE = """
 from clair import RunMode, Table
 
 
-class AlwaysIncremental(Table):
+class AlwaysIncrementalTable(Table):
     def effective_mode(self, requested_mode, current_object):
         if current_object is None:
             return RunMode.FULL_REFRESH
@@ -317,11 +317,11 @@ def test_a_node_that_a_policy_makes_incremental_keeps_the_filter_in_a_full_refre
     """
     project_root = _write_project(
         tmp_path / "project",
-        f"AlwaysIncremental(sql=sql, run_config=Incremental(strategy={strategy}), columns=[Column(name='id', type='NUMBER')])",
+        f"AlwaysIncrementalTable(sql=sql, run_config=Incremental(strategy={strategy}), columns=[Column(name='id', type='NUMBER')])",
     )
-    (project_root / "_always_incremental.py").write_text(_ALWAYS_INCREMENTAL_MODULE)
+    (project_root / "_always_incremental_table.py").write_text(_ALWAYS_INCREMENTAL_MODULE)
     trouve_file = project_root / "db" / "derived" / "recent_orders.py"
-    trouve_file.write_text("from _always_incremental import AlwaysIncremental\n" + trouve_file.read_text())
+    trouve_file.write_text("from _always_incremental_table import AlwaysIncrementalTable\n" + trouve_file.read_text())
 
     summary = _run(project_root, RecordingAdapter(), RunMode.FULL_REFRESH)
 

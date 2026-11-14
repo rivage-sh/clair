@@ -123,16 +123,16 @@ is fast for a table of each size, but it is a new object. A Snowflake feature th
 to the object, and not to the name, starts again at each run: Time Travel before the run,
 a stream, and the change tracking of a dynamic table.
 
-`MirroredUpsert` keeps the object. clair tests the `MERGE` on a clone of production, as
+`MirroredUpsertTable` keeps the object. clair tests the `MERGE` on a clone of production, as
 for each `Table`. The promotion then runs the same `MERGE` into production, from the same
 new rows table.
 
 ```python
-# _mirrored_upsert.py
+# _mirrored_upsert_table.py
 from clair import PlanContext, RunMode, Table
 
 
-class MirroredUpsert(Table):
+class MirroredUpsertTable(Table):
     """An Upsert that keeps the production table object.
 
     clair tests the MERGE on a clone of production. The promotion then runs the
@@ -155,16 +155,16 @@ class MirroredUpsert(Table):
 
 ```python
 # example_3_database/derived/customer_order_totals.py
-from _mirrored_upsert import MirroredUpsert
+from _mirrored_upsert_table import MirroredUpsertTable
 from example_3_database.refined.orders import trouve as refined_orders
 
 from clair import Column, ColumnType, Incremental, TestUnique, Upsert
 
-trouve = MirroredUpsert(
+trouve = MirroredUpsertTable(
     docs="""
         The totals of each customer, merged in place. A stream on this table keeps reading.
 
-        clair tests the MERGE on a clone, as for each Table. MirroredUpsert then runs the
+        clair tests the MERGE on a clone, as for each Table. MirroredUpsertTable then runs the
         same MERGE into this table, and does not replace it. Thus the table keeps its Time
         Travel history, and a stream or a dynamic table on it keeps working.
     """,
@@ -249,7 +249,7 @@ integration test of clair runs this Trouve, and reads the snapshot.
 ## 3. Always run a table incrementally
 
 Some tables must always run in the incremental mode: a full refresh costs too much, or
-the source no longer holds the old rows. `AlwaysIncremental` gives each run the
+the source no longer holds the old rows. `AlwaysIncrementalTable` gives each run the
 incremental mode, also under `--run-mode full_refresh`. The one exception is the first
 run, which makes the table:
 
@@ -257,7 +257,7 @@ run, which makes the table:
 from clair import RunMode, Table, WarehouseObject
 
 
-class AlwaysIncremental(Table):
+class AlwaysIncrementalTable(Table):
     """Run each run in the incremental mode. Only the first run makes the table."""
 
     def effective_mode(
@@ -288,7 +288,7 @@ compiled plan shows the incremental plan in each mode, as the run does.
 clair compile --env dev --run-mode incremental --select example_3_database.derived.customer_order_totals
 ```
 
-The compiled file names each phase, in the order of the run. For `MirroredUpsert`, the
+The compiled file names each phase, in the order of the run. For `MirroredUpsertTable`, the
 `promote` phase shows the `MERGE` into production in place of the clone:
 
 ```sql

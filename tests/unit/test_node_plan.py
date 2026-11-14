@@ -331,7 +331,7 @@ def test_a_staged_incremental_run_drops_the_new_rows_table_after_a_failure(
     assert adapter.record.statements[-1].endswith(f"DROP TABLE IF EXISTS {NEW_ROWS_TABLE}")
 
 
-class MirroredUpsert(Table):
+class MirroredUpsertTable(Table):
     """The double MERGE of the lifecycle guide: test on the clone, then merge into production."""
 
     def promote(self, context: PlanContext) -> list[str]:
@@ -346,7 +346,7 @@ class MirroredUpsert(Table):
 def test_a_promote_override_merges_into_production_and_does_not_replace_it() -> None:
     adapter = RecordingAdapter()
 
-    result = run_incremental(incremental_table(Upsert(primary_key_columns=["id"]), MirroredUpsert), adapter)
+    result = run_incremental(incremental_table(Upsert(primary_key_columns=["id"]), MirroredUpsertTable), adapter)
 
     assert isinstance(result, RunSuccess)
     merges = adapter.record.containing("MERGE INTO")
@@ -389,7 +389,7 @@ def test_the_example_overrides_compile_their_plans(
     )
 
 
-class AlwaysIncremental(Table):
+class AlwaysIncrementalTable(Table):
     """The policy of the lifecycle guide: each run is incremental, except the first run."""
 
     def effective_mode(self, requested_mode: RunMode, current_object: WarehouseObject | None) -> RunMode:
@@ -405,7 +405,7 @@ class AlwaysIncremental(Table):
 def test_an_effective_mode_override_decides_the_mode_of_a_full_refresh_run(
     existing_tables: list[str], expected_mode: RunMode
 ) -> None:
-    trouve = incremental_table(Upsert(primary_key_columns=["id"]), AlwaysIncremental)
+    trouve = incremental_table(Upsert(primary_key_columns=["id"]), AlwaysIncrementalTable)
     dag = build_dag([trouve])
 
     (result,) = run_project(

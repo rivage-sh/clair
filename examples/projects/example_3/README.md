@@ -2,7 +2,7 @@
 
 Integration test project for `run_mode` functionality. Demonstrates the three incremental
 strategies, `APPEND`, `UPSERT` and `DELETE_INSERT`, and two Trouve subclasses that change
-a phase of the lifecycle. `MirroredUpsert` overrides the promotion to merge into
+a phase of the lifecycle. `MirroredUpsertTable` overrides the promotion to merge into
 production, and keeps the table object. `AuditedTable` overrides the retire phase to keep
 each tested candidate as a snapshot. See the
 [lifecycle guide](../../../site_docs/docs/guides/control-the-lifecycle.md).
@@ -14,7 +14,7 @@ source.orders  (SOURCE)
     └── refined.orders             (TABLE, full refresh)
             ├── derived.recent_orders          (TABLE, INCREMENTAL APPEND)
             ├── derived.customer_order_summary (TABLE, INCREMENTAL UPSERT)
-            ├── derived.customer_order_totals  (TABLE, INCREMENTAL UPSERT, MirroredUpsert merges in place)
+            ├── derived.customer_order_totals  (TABLE, INCREMENTAL UPSERT, MirroredUpsertTable merges in place)
             ├── derived.daily_orders           (TABLE, INCREMENTAL DELETE_INSERT)
             └── derived.order_status_counts    (TABLE, full refresh, AuditedTable keeps a snapshot)
 ```
@@ -25,11 +25,11 @@ source.orders  (SOURCE)
 | `refined.orders` | Full refresh | Typed + date columns added |
 | `derived.recent_orders` | Incremental APPEND | Appends orders created in last 3 days |
 | `derived.customer_order_summary` | Incremental UPSERT on `customer_id` | Per-customer stats. The promotion replaces the table with a clone |
-| `derived.customer_order_totals` | Incremental UPSERT on `customer_id`, `MirroredUpsert` | Per-customer totals. The promotion merges into the table, thus a stream on it keeps reading |
+| `derived.customer_order_totals` | Incremental UPSERT on `customer_id`, `MirroredUpsertTable` | Per-customer totals. The promotion merges into the table, thus a stream on it keeps reading |
 | `derived.daily_orders` | Incremental DELETE_INSERT on `created_date` | Orders and revenue of each day; replaces the last 3 days |
 | `derived.order_status_counts` | Full refresh, `AuditedTable` | Orders in each status. Each run keeps its candidate as `order_status_counts__audit_<run_id>` |
 
-`_mirrored_upsert.py` holds `MirroredUpsert`, and `_audited_table.py` holds
+`_mirrored_upsert_table.py` holds `MirroredUpsertTable`, and `_audited_table.py` holds
 `AuditedTable`. Discovery skips a file that starts with `_`, thus each file holds Python
 that a Trouve file imports, and no Trouve.
 

@@ -222,7 +222,7 @@ class TestExample3(ExampleProjectTests):
         environment: Environment,
         adapter: SnowflakeAdapter,
     ) -> None:
-        """MirroredUpsert merges into production, and the clone promotion replaces it.
+        """MirroredUpsertTable merges into production, and the clone promotion replaces it.
 
         A stream attaches to the object, and not to the name. Thus the stream on
         the mirrored table must read the merged rows after an incremental run,
