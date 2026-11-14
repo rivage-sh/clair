@@ -7,11 +7,12 @@ from typing import ClassVar
 
 import pandas as pd
 
-from clair.trouves.trouve import CompiledDataframe, ExecutionType, TableOptions, TrouveAbc
+from clair.trouves.plan import PlanContext
+from clair.trouves.trouve import CompiledDataframe, ExecutionType, MaterializedTrouve, TableOptions
 from clair.trouves.trouve_type import TrouveType
 
 
-class DataframeTrouve(TrouveAbc[CompiledDataframe], TableOptions, ABC):
+class DataframeTrouve(MaterializedTrouve[CompiledDataframe], TableOptions, ABC):
     """The base of each Trouve that clair materializes from a DataFrame.
 
     Clair reads each upstream Trouve into a DataFrame, calls
@@ -39,6 +40,15 @@ class DataframeTrouve(TrouveAbc[CompiledDataframe], TableOptions, ABC):
             input_dataframes: One DataFrame for each Trouve that
                 ``upstream_trouves`` gives, in the same order.
         """
+
+    def build(self, context: PlanContext) -> list[str]:
+        """Give each statement to execute after clair writes the DataFrame. The default sends nothing.
+
+        The runner writes the DataFrame to ``context.target_address`` first,
+        with ``write_pandas``. That write is not SQL, thus an override cannot
+        change it. A statement here can change the table after the write.
+        """
+        return []
 
     def parameter_names(self) -> list[str]:
         """Give a name for each input DataFrame, in the order of the inputs.

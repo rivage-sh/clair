@@ -1,4 +1,4 @@
-from clair import BuildPlan, RunMode, Table, TrouveAddress
+from clair import PlanContext, RunMode, Table
 
 
 class ReplaceWindowTrouve(Table):
@@ -12,27 +12,25 @@ class ReplaceWindowTrouve(Table):
 
     window_column: str
 
-    def build_sql(
-        self,
-        effective_mode: RunMode,
-        run_id: str,
-        target_address: TrouveAddress,
-        target_column_names: list[str] | None = None,
-    ) -> BuildPlan:
-        if effective_mode == RunMode.FULL_REFRESH:
-            return super().build_sql(effective_mode, run_id, target_address)
+    def window_rows_address(self, run_id: str) -> str:
+        return f"{self.require_compiled().physical_address}__window_{run_id}"
 
-        compiled = self.require_compiled()
-        window_rows = f"{compiled.physical_address}__window_{run_id}"
-        create_window_rows = (
-            f"CREATE OR REPLACE TABLE {window_rows} AS (\n{compiled.resolved_sql}\n)"
-        )
+    def build(self, context: PlanContext) -> list[str]:
+        if context.effective_mode == RunMode.FULL_REFRESH:
+            return super().build(context)
+
+        window_rows = self.window_rows_address(context.run_id)
+        create_window_rows = f"CREATE OR REPLACE TABLE {window_rows} AS (\n{self.resolved_sql()}\n)"
         delete_window = (
-            f"DELETE FROM {target_address}\n"
+            f"DELETE FROM {context.target_address}\n"
             f"WHERE {self.window_column} >= (SELECT MIN({self.window_column}) FROM {window_rows})"
         )
-        insert_window = self.insert_statement(str(target_address), window_rows, target_column_names)
-        return BuildPlan(
-            statements=[create_window_rows, delete_window, insert_window],
-            cleanup_statements=[f"DROP TABLE IF EXISTS {window_rows}"],
+        insert_window = self.insert_statement(
+            str(context.target_address), window_rows, context.target_column_names
         )
+        return [create_window_rows, delete_window, insert_window]
+
+    def cleanup(self, context: PlanContext) -> list[str]:
+        if context.effective_mode == RunMode.FULL_REFRESH:
+            return []
+        return [f"DROP TABLE IF EXISTS {self.window_rows_address(context.run_id)}"]

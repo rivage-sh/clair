@@ -22,17 +22,16 @@ from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, 
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.dag import ClairDag, build_dag, get_executable_nodes
 from clair.core.runner import RunFailure, RunSkip, RunSuccess, RunSummary, run_project
-from clair.core.test_runner import TestResult
 from clair.environments.environments import Authentication, Authenticator, Connection, Environment
 from clair.environments.routing import RoutingEntry, TrouveAddress
 from clair.exceptions import RunError
 from clair.trouves.address import NodeAddresses
 from clair.trouves.config import ResolvedConfig, SessionConfig
 from clair.trouves.dataframe_trouve import DataframeTrouve
+from clair.trouves.plan import NodePlan, PlanContext, TestQuery, TestResult
 from clair.trouves.run_config import RunMode
 from clair.trouves.seed_table import SeedTable
 from clair.trouves.trouve import (
-    BuildPlan,
     CompiledAttributes,
     CompiledDataframe,
     CompiledSql,
@@ -337,6 +336,10 @@ class StatementRecord:
         with self._lock:
             self.adapter_count += 1
 
+    def containing(self, text: str) -> list[str]:
+        """Give each statement that holds *text*."""
+        return self.statements_that_hold(text)
+
     def statements_that_hold(self, text: str) -> list[str]:
         """Give each statement that holds *text*."""
         return [statement for statement in self.statements if text in statement]
@@ -609,19 +612,55 @@ def compile_trouve(
     return trouve
 
 
+def _columns_named(column_names: list[str] | None) -> list[WarehouseColumn] | None:
+    """Give a warehouse column for each name, as the runner reads them."""
+    if column_names is None:
+        return None
+    return [WarehouseColumn(name=column_name, data_type="") for column_name in column_names]
+
+
 def unstaged_plan(
     trouve: SqlTrouve,
     effective_mode: RunMode,
     run_id: str,
     target_column_names: list[str] | None = None,
-) -> BuildPlan:
+) -> NodePlan:
     """Give the plan of a run without a staging step. The plan writes to the physical address."""
-    return trouve.build_sql(
-        effective_mode,
-        run_id,
-        target_address=trouve.require_compiled().physical_address,
-        target_column_names=target_column_names,
+    target_columns = _columns_named(target_column_names)
+    return trouve.plan(
+        PlanContext(
+            run_id=run_id,
+            effective_mode=effective_mode,
+            staged=False,
+            physical_address=trouve.require_compiled().physical_address,
+            target_columns=target_columns,
+        )
     )
+
+
+def staged_plan(
+    trouve: SqlTrouve,
+    effective_mode: RunMode,
+    run_id: str,
+    staging_address: TrouveAddress,
+    target_column_names: list[str] | None = None,
+) -> NodePlan:
+    """Give the plan of a staged run that builds at *staging_address*."""
+    return trouve.plan(
+        PlanContext(
+            run_id=run_id,
+            effective_mode=effective_mode,
+            staged=True,
+            physical_address=trouve.require_compiled().physical_address,
+            staging_address=staging_address,
+            target_columns=_columns_named(target_column_names),
+        )
+    )
+
+
+def build_and_cleanup(plan: NodePlan) -> list[str]:
+    """Give the statements of the build phase, then of the cleanup phase."""
+    return [*plan.build, *plan.cleanup]
 
 
 def resolved_sql_of(trouve: TrouveAbc) -> str:
@@ -638,7 +677,7 @@ def run_one_trouve(
     use_staging: bool = True,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     tests_passed: bool = True,
-    tested_addresses: list[str] | None = None,
+    tested_queries: list[TestQuery] | None = None,
     defaults: SessionConfig | None = None,
 ) -> RunSuccess | RunFailure:
     """Run one Trouve at TEST_ADDRESS, and give its result.
@@ -646,14 +685,24 @@ def run_one_trouve(
     A run of one Trouve has no upstream Trouve, thus it never gives a RunSkip.
     *defaults* is the config of the directories above the Trouve.
 
-    *tested_addresses* receives the address of each object that the data
-    quality tests examined.
+    *tests_passed* False makes the data quality tests give one blocking failure.
+    *tested_queries* receives each test query that the runner gave to the tests.
     """
 
-    def run_the_tests(name: str, address: str, _adapter: object) -> bool:
-        if tested_addresses is not None:
-            tested_addresses.append(address)
-        return tests_passed
+    def run_the_tests(name: str, queries: list[TestQuery], _adapter: object) -> list[TestResult]:
+        if tested_queries is not None:
+            tested_queries.extend(queries)
+        if tests_passed:
+            return []
+        return [
+            TestResult(
+                address=TrouveAddress.parse(name),
+                test_index=0,
+                test_type="unique",
+                column_name="id",
+                statement=Statement(sql="SELECT 1", status=StatementStatus.SUCCESS, row_count=1),
+            )
+        ]
 
     dag = build_dag([compile_trouve(trouve, defaults=defaults)])
     selected = get_executable_nodes(dag)
@@ -664,7 +713,7 @@ def run_one_trouve(
             adapter,
             run_mode=run_mode,
             run_id=TEST_RUN_ID,
-            after_node_success=run_the_tests if use_staging else None,
+            test_node=run_the_tests if use_staging else None,
             use_staging=use_staging,
         )
     )

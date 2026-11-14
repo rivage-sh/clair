@@ -36,6 +36,7 @@ from clair.core.runner import (
     RunSummary,
     run_project,
 )
+from clair.trouves.plan import TestQuery, TestResult
 from tests.helpers import RecordingAdapter, addresses_of_text, make_environment, write_project_marker
 
 FIRST = "db.derived.first"
@@ -148,13 +149,13 @@ def test_a_cancel_after_the_build_keeps_the_candidate_and_does_not_promote(proje
     adapter = RecordingAdapter()
     cancellation = RunCancellation()
 
-    def tests_that_see_a_cancel(name: str, address: str, _adapter: object) -> bool:
+    def tests_that_see_a_cancel(name: str, _queries: list[TestQuery], _adapter: object) -> list[TestResult]:
         if name == FIRST:
             cancellation.cancel()
-        return True
+        return []
 
     results = _run_directly(
-        project_root, adapter, cancellation, after_node_success=tests_that_see_a_cancel, use_staging=True
+        project_root, adapter, cancellation, test_node=tests_that_see_a_cancel, use_staging=True
     )
 
     (first,) = [result for result in results if str(result.addresses.logical) == FIRST]

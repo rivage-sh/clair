@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Literal, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 
 import networkx as nx
 import pandas as pd
@@ -17,24 +17,18 @@ import structlog
 from pydantic import BaseModel, Field
 
 from clair.adapters.base import WarehouseAdapter
-from clair.adapters.objects import Statement, StatementStatus, WarehouseObject, WarehouseObjectType
+from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn
 from clair.adapters.pool import AdapterPool
-from clair.core.comments import WarehouseComments, build_comment_statements
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.schema_change import read_incremental_columns
-from clair.core.staging import (
-    build_clone_statement,
-    build_cluster_by_statements,
-    build_drop_staging_statement,
-    build_promote_statements,
-    make_staging_address,
-)
-from clair.core.test_runner import TestResult
+from clair.core.staging import make_staging_address
 from clair.exceptions import ClairError, ResultNotFoundError, RunError
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
-from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, SqlTrouve, Table, TrouveAbc, View, table_options_of
+from clair.trouves.plan import PlanContext, TestQuery, TestResult
+from clair.trouves.run_config import Incremental, RunMode
+from clair.trouves.statements import WarehouseComments, type_change_error
+from clair.trouves.trouve import MaterializedTrouve, Table
 from clair.trouves.trouve_type import TrouveType
 
 
@@ -345,63 +339,26 @@ class RunSummary(BaseModel):
 logger = structlog.get_logger()
 
 
-def resolve_effective_mode(trouve: TrouveAbc, cli_run_mode: RunMode) -> RunMode:
-    """Find the effective run mode of a Trouve. This function needs no adapter.
+def _write_dataframe(
+    trouve: DataframeTrouve, adapter: WarehouseAdapter, address: TrouveAddress
+) -> tuple[Statement | None, str]:
+    """Read the inputs of a DataframeTrouve, build its DataFrame, and write it to *address*.
 
-    The compiler and the runner both call it. The compiler has no connection.
-    The runner also asks the warehouse if the table exists, before it accepts
-    the incremental mode.
+    The write takes the place of SQL statements in the build phase. The plan
+    statements of the build phase run after it.
+
+    Returns:
+        The statement of the write, and an empty error. Or None, and the error.
     """
-    # Only a Table holds a run_config. A View, a Source and a DataFrame Trouve
-    # always make the object again.
-    if not isinstance(trouve, Table) or trouve.run_config.run_mode != RunMode.INCREMENTAL:
-        return RunMode.FULL_REFRESH
-    if cli_run_mode != RunMode.INCREMENTAL:
-        return RunMode.FULL_REFRESH
-    return RunMode.INCREMENTAL
-
-
-def _run_dataframe_trouve(
-    trouve: DataframeTrouve,
-    adapter: WarehouseAdapter,
-    addresses: NodeAddresses,
-    effective_run_mode: RunMode,
-) -> RunSuccess | RunFailure:
-    """Execute a DataframeTrouve. Read the inputs, build the DataFrame, write it.
-
-    Clair writes the DataFrame to ``addresses.target``: the staging address of a
-    staged run, or the physical address.
-
-    Args:
-        trouve: The Trouve to execute.
-        adapter: A warehouse adapter with an open connection.
-        addresses: The addresses of the node.
-        effective_run_mode: The run mode of the result.
-
-    Returns a RunSuccess or a RunFailure.
-    """
-    start = time.monotonic()
-
-    def failure(message: str) -> RunFailure:
-        """Make the result of a DataframeTrouve that did not write its table."""
-        return RunFailure(
-            addresses=addresses,
-            effective_run_mode=effective_run_mode,
-            error=message,
-            duration_seconds=time.monotonic() - start,
-        )
-
     # 1. Read each input DataFrame. Clair keeps the order of the inputs.
-    input_dataframes: list[pd.DataFrame] = []
     # compiled.inputs holds the read of each input, in the order of the
     # inputs. recompile_for_selection() sets it: the physical address of an
     # input that this run builds, the logical production address of an input
     # that it does not build, and the filter of a sampled run.
-    assert trouve.compiled is not None
-    assert len(trouve.compiled.inputs) == len(trouve.upstream_trouves())
-    for parameter_name, dataframe_input in zip(
-        trouve.parameter_names(), trouve.compiled.inputs
-    ):
+    input_dataframes: list[pd.DataFrame] = []
+    compiled = trouve.require_compiled()
+    assert len(compiled.inputs) == len(trouve.upstream_trouves())
+    for parameter_name, dataframe_input in zip(trouve.parameter_names(), compiled.inputs):
         try:
             input_dataframes.append(
                 adapter.fetch_dataframe(
@@ -410,7 +367,7 @@ def _run_dataframe_trouve(
                 )
             )
         except Exception as fetch_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
-            return failure(
+            return None, (
                 f"Clair cannot read the input '{parameter_name}' ({dataframe_input.address}): {fetch_error}"
             )
 
@@ -418,199 +375,24 @@ def _run_dataframe_trouve(
     try:
         result_dataframe = trouve.build_dataframe(*input_dataframes)
     except Exception as transform_error:  # noqa: BLE001 — the user code is unknown
-        return failure(f"Clair cannot build the DataFrame: {transform_error}")
+        return None, f"Clair cannot build the DataFrame: {transform_error}"
 
-    # 3. Make sure that the result is a DataFrame.
     if not isinstance(result_dataframe, pd.DataFrame):
-        return failure(
+        return None, (
             f"The Trouve must give a pandas DataFrame, "
             f"but it gave {type(result_dataframe).__name__}"
         )
 
-    # 4. Write the result to Snowflake. A TrouveAddress is valid when it exists,
-    # so the three names need no test here.
-    address = addresses.target
-
+    # 3. Write the result to Snowflake.
     try:
         statement = adapter.write_dataframe(
             dataframe=result_dataframe, address=address, transient=trouve.is_transient
         )
     except Exception as write_error:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
-        return failure(f"Clair cannot write the DataFrame to {address}: {write_error}")
-
+        return None, f"Clair cannot write the DataFrame to {address}: {write_error}"
     if not statement.success:
-        return failure(statement.error or f"Clair cannot write the DataFrame to {address}")
-
-    # A staged run writes the comments after the promotion, in _promote_or_keep.
-    after_write_statements = build_cluster_by_statements(address, trouve)
-    if addresses.staging is None:
-        after_write_statements.extend(build_comment_statements(address, trouve))
-    statements = [statement]
-    for sql in after_write_statements:
-        statements.append(adapter.execute(sql))
-        if not statements[-1].success:
-            return failure(statements[-1].error or f"Clair cannot complete {address}")
-
-    return RunSuccess(
-        addresses=addresses,
-        statements=statements,
-        effective_run_mode=effective_run_mode,
-        duration_seconds=time.monotonic() - start,
-        row_count=statement.row_count,
-    )
-
-
-def wanted_object_type(trouve: TrouveAbc) -> WarehouseObjectType:
-    """Give the warehouse object type that the Trouve must have at its address.
-
-    Clair never materializes a SOURCE Trouve, thus a SOURCE never reaches this
-    function.
-    """
-    assert trouve.type != TrouveType.SOURCE, "clair does not materialize a SOURCE Trouve"
-    if trouve.type == TrouveType.VIEW:
-        return WarehouseObjectType.VIEW
-    table_options = table_options_of(trouve)
-    if table_options is not None and table_options.iceberg_settings() is not None:
-        return WarehouseObjectType.ICEBERG_TABLE
-    return WarehouseObjectType.TABLE
-
-
-def type_change_error(
-    trouve: TrouveAbc,
-    current_object: WarehouseObject | None,
-    physical_address: TrouveAddress,
-) -> str | None:
-    """Give the error that stops a Trouve whose type differs from the object at its address.
-
-    A warehouse replaces an object with an object of the same type only. A
-    Trouve that changes between a TABLE, an ICEBERG TABLE and a VIEW thus needs
-    a drop of the old object. Clair does not send that drop. A drop removes
-    each privilege on the object, and the role of the run often cannot grant
-    them again, for example in a managed access schema. The person who changed
-    the type must drop the object, and decide about the grants.
-
-    The runner asks the warehouse for the type one time for each node, because
-    the compiler opens no connection and cannot know it.
-
-    Args:
-        trouve: The Trouve as it is now.
-        current_object: The object at the physical address, as the runner read
-            it at the start of the node. None means that the address holds nothing.
-        physical_address: The address that clair writes to.
-
-    Returns:
-        The error message, or None when the address holds nothing or an object
-        of the correct type. The caller must stop before it writes the physical
-        address.
-    """
-    current_type = None if current_object is None else current_object.object_type
-    new_type = wanted_object_type(trouve)
-    if current_type is None or current_type == new_type:
-        return None
-
-    old_type_name = current_type.value.upper()
-    new_type_name = new_type.value.upper()
-    return (
-        f"{physical_address} holds the type {old_type_name}, and the Trouve now "
-        f"makes the type {new_type_name}. Snowflake cannot replace one type with the other. "
-        f"Clair does not drop the {old_type_name}, because a drop removes each "
-        f"grant on it. Run DROP {old_type_name} {physical_address}, then run "
-        f"clair again"
-    )
-
-
-def _promote_or_keep(
-    trouve: SqlTrouve | DataframeTrouve,
-    adapter: WarehouseAdapter,
-    addresses: NodeAddresses,
-    tests_passed: bool,
-    current_object: WarehouseObject | None,
-    current_comments: WarehouseComments | None = None,
-) -> tuple[list[Statement], str]:
-    """Complete a node: promote the staging object, or keep it for an examination.
-
-    Args:
-        trouve: The Trouve that clair materialized at the staging address.
-        adapter: A warehouse adapter with an open connection.
-        addresses: The addresses of the node. The staging address holds the
-            candidate data, and the physical address must receive it.
-        tests_passed: The result of the data quality tests on the staging object.
-        current_object: The object at the physical address at the start of the
-            node, or None. The promotion stops if its type differs.
-        current_comments: The comments of the physical table before the run.
-            None means a new object. The promotion of an incremental table
-            clones a clone of the physical table, thus it keeps them.
-
-    Returns:
-        The statements that clair executed, and an error message. The error
-        message is empty when the physical address holds the tested data.
-    """
-    staging_address = addresses.staging
-    assert staging_address is not None
-    physical_address = addresses.physical
-    statements: list[Statement] = []
-
-    if not tests_passed:
-        return statements, (
-            f"the tests failed. {physical_address} keeps its data. "
-            f"The rejected candidate stays at {staging_address}"
-        )
-
-    assert trouve.compiled is not None
-
-    # The tests passed, so the candidate must reach the physical address. A
-    # Trouve that changed its type finds an object of the old type there. Clair
-    # stops, and keeps the tested candidate for the person who fixes the address.
-    type_error = type_change_error(trouve, current_object, physical_address)
-    if type_error is not None:
-        return statements, (
-            f"the tests passed, but clair does not promote: {type_error}. "
-            f"The tested candidate stays at {staging_address}"
-        )
-
-    # The comments go on after the promotion: a promotion of a view removes each
-    # comment that the staging view had.
-    promotion_statements = [
-        *build_promote_statements(
-            trouve.type,
-            staging_address=staging_address,
-            physical_address=physical_address,
-            resolved_sql=trouve.full_refresh_sql() if isinstance(trouve, View) else "",
-            table_options=table_options_of(trouve),
-        ),
-        *build_comment_statements(physical_address, trouve, current_comments),
-    ]
-    for statement_index, sql in enumerate(promotion_statements):
-        statements.append(adapter.execute(sql))
-        if statements[-1].success:
-            continue
-        error = statements[-1].error or "unknown error"
-        if statement_index == 0:
-            return statements, (
-                f"the tests passed, but the promotion failed: {error}. "
-                f"The candidate stays at {staging_address}"
-            )
-        # The clone succeeded, thus the physical address holds the tested data.
-        # The table is not yet in the state that the Trouve declares.
-        return statements, (
-            f"{physical_address} holds the tested data, but a statement after "
-            f"the promotion failed: {error}. Run it again: {sql.splitlines()[-1]}"
-        )
-
-    # The physical address now holds the tested data, so the staging copy has no
-    # more use. A fault here makes clutter, not a wrong table, thus the node
-    # keeps the SUCCESS status.
-    drop = adapter.execute(build_drop_staging_statement(trouve.type, staging_address))
-    statements.append(drop)
-    if not drop.success:
-        logger.warning(
-            "run.node.staging_drop_failed",
-            trouve=str(physical_address),
-            staging=str(staging_address),
-            error=drop.error,
-        )
-
-    return statements, ""
+        return None, statement.error or f"Clair cannot write the DataFrame to {address}"
+    return statement, ""
 
 
 def _cancelled_before_promotion(addresses: NodeAddresses) -> str:
@@ -618,6 +400,30 @@ def _cancelled_before_promotion(addresses: NodeAddresses) -> str:
     return (
         f"the run was cancelled before the promotion. {addresses.physical} keeps its "
         f"data. The candidate stays at {addresses.staging}"
+    )
+
+
+def _rejection_error(
+    trouve: MaterializedTrouve,
+    context: PlanContext,
+    test_results: list[TestResult],
+) -> str:
+    """Give the error of a node whose should_promote() gave False."""
+    staging_address = context.staging_address
+    if any(test_result.is_blocking for test_result in test_results):
+        return (
+            f"the tests failed. {context.physical_address} keeps its data. "
+            f"The rejected candidate stays at {staging_address}"
+        )
+    type_error = trouve.type_change_error(context)
+    if type_error is not None:
+        return (
+            f"the tests passed, but clair does not promote: {type_error}. "
+            f"The tested candidate stays at {staging_address}"
+        )
+    return (
+        f"should_promote() gave False. {context.physical_address} keeps its data. "
+        f"The candidate stays at {staging_address}"
     )
 
 
@@ -666,21 +472,29 @@ def _make_databases_and_schemas(
         )
 
 
+# The callback that executes the test queries of one node, on the connection of
+# the thread, and gives the results.
+TestNode = Callable[[str, list[TestQuery], WarehouseAdapter], list[TestResult]]
+
+
 def _run_node(
     name: str,
     dag: ClairDag,
     adapter: WarehouseAdapter,
     run_mode: RunMode,
     run_id: str,
-    after_node_success: Callable[[str, str, WarehouseAdapter], bool] | None,
+    test_node: TestNode | None,
     use_staging: bool,
     environment_name: str,
     cancellation: RunCancellation | None = None,
 ) -> _NodeOutcome:
-    """Materialize one Trouve in the warehouse.
+    """Materialize one Trouve in the warehouse: read, plan, then execute each phase.
 
     A thread of the run calls this function. *adapter* is the private connection
-    of that thread, and the function gives the same adapter to each callback.
+    of that thread, and the function gives the same adapter to *test_node*.
+
+    The function reads the warehouse, gives what it read to ``trouve.plan()``,
+    and executes the phases of the plan in order. See ``clair.trouves.plan``.
 
     Args:
         name: The physical address of the node, which is the key in the DAG.
@@ -688,11 +502,11 @@ def _run_node(
         adapter: The warehouse adapter of the thread that calls this function.
         run_mode: The run mode that the command line gives.
         run_id: The identifier of the run. A staging address holds it.
-        after_node_success: The callback that runs the data quality tests.
+        test_node: The callback that executes the test queries.
         use_staging: True if clair writes to a staging address first.
         environment_name: The environment of the run. The query tag holds it.
         cancellation: The request to stop the run. After it, the node sends no
-            new statement and promotes nothing.
+            new statement and promotes nothing. The cleanup still runs.
 
     Returns:
         A _NodeOutcome. It holds the result, and it tells you if clair can
@@ -705,9 +519,16 @@ def _run_node(
     logical_address = str(addresses.logical)
     trouve = dag.get_trouve(name)
     assert trouve.compiled is not None
+    assert isinstance(trouve, MaterializedTrouve), "clair never materializes a Source"
 
     def is_cancelled() -> bool:
         return cancellation is not None and cancellation.is_cancelled
+
+    def failure(error: str, **result_fields: Any) -> _NodeOutcome:
+        logger.warning("run.node.failure", logical=logical_address, physical=name, error=error)
+        return _NodeOutcome(
+            RunFailure(addresses=addresses, error=error, **result_fields), downstream_ok=False
+        )
 
     if is_cancelled():
         return _NodeOutcome(RunCancel(addresses=addresses), downstream_ok=False)
@@ -722,10 +543,7 @@ def _run_node(
     except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
         logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=config.warehouse, role=config.role, error=str(e))
         return _NodeOutcome(
-            RunFailure(
-                addresses=addresses,
-                error=f"Clair cannot set the session context: {e}",
-            ),
+            RunFailure(addresses=addresses, error=f"Clair cannot set the session context: {e}"),
             downstream_ok=False,
         )
 
@@ -734,267 +552,228 @@ def _run_node(
     # that object pass.
     if use_staging:
         try:
-            addresses = addresses_of(
-                dag, name, make_staging_address(addresses.physical, run_id)
-            )
+            addresses = addresses_of(dag, name, make_staging_address(addresses.physical, run_id))
         except ClairError as naming_error:
-            logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(naming_error))
-            return _NodeOutcome(
-                RunFailure(addresses=addresses, error=str(naming_error)),
-                downstream_ok=False,
-            )
-
+            return failure(str(naming_error))
     staging_address = addresses.staging
 
+    # ── read: what the plan needs to know ─────────────────────────────────
     # One read of the physical object for each node. It gives the type for the
-    # type test and for the incremental mode, and the comment of the object.
+    # type test and for the run mode, and the comment of the object.
     try:
-        current_object = (
-            None if trouve.type == TrouveType.SOURCE else adapter.describe_object(addresses.physical)
-        )
+        current_object = adapter.describe_object(addresses.physical)
     except ClairError as describe_error:
-        logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(describe_error))
-        return _NodeOutcome(
-            RunFailure(addresses=addresses, error=str(describe_error)),
-            downstream_ok=False,
-        )
+        return failure(str(describe_error))
 
     # A run with no staging writes the physical address directly, thus it has no
     # candidate to keep. A Trouve that changed its type stops before any write.
-    # A staged run builds and tests first, and stops in _promote_or_keep.
-    if staging_address is None and trouve.type != TrouveType.SOURCE:
-        type_error = type_change_error(trouve, current_object, addresses.physical)
+    # A staged run builds and tests first, and should_promote() stops it.
+    if staging_address is None:
+        type_error = type_change_error(
+            current_object, trouve.warehouse_object_type, addresses.physical
+        )
         if type_error is not None:
-            logger.warning("run.node.failure", logical=logical_address, physical=name, error=type_error)
-            return _NodeOutcome(
-                RunFailure(addresses=addresses, error=type_error),
-                downstream_ok=False,
-            )
+            return failure(type_error)
 
-    # A DataframeTrouve is different. Clair reads the data, builds a DataFrame
-    # and writes it. Clair does not execute SQL.
-    if trouve.execution_type == ExecutionType.PANDAS:
-        assert isinstance(trouve, DataframeTrouve)
-        logger.info("run.node.start", logical=logical_address, physical=name, effective_mode="full_refresh")
-        result = _run_dataframe_trouve(trouve, adapter, addresses, RunMode.FULL_REFRESH)
-
-        downstream_ok = True
-
-        if isinstance(result, RunSuccess) and staging_address is not None:
-            assert after_node_success is not None
-            # A cancel can arrive while the tests run, thus clair asks again
-            # after them, just before the promotion.
-            tests_passed = not is_cancelled() and after_node_success(name, str(staging_address), adapter)
-            if is_cancelled():
-                promote_statements, staging_error = [], _cancelled_before_promotion(addresses)
-            else:
-                promote_statements, staging_error = _promote_or_keep(
-                    trouve, adapter, addresses, tests_passed, current_object
-                )
-            statements = result.statements + promote_statements
-            if staging_error:
-                result = RunFailure(
-                    addresses=result.addresses,
-                    error=staging_error,
-                    statements=statements,
-                    effective_run_mode=result.effective_run_mode,
-                    duration_seconds=result.duration_seconds,
-                )
-            else:
-                result = result.model_copy(update={"statements": statements})
-        elif isinstance(result, RunFailure) and staging_address is not None:
-            result = result.model_copy(
-                update={
-                    "error": (
-                        f"{result.error}. Clair keeps the staging object at "
-                        f"{staging_address}, if the write made one"
-                    )
-                }
-            )
-
-        if isinstance(result, RunSuccess):
-            logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3))
-            # Without staging the tests run after clair wrote the physical object.
-            if staging_address is None and after_node_success is not None:
-                downstream_ok = after_node_success(name, str(addresses.physical), adapter)
+    effective_mode = trouve.effective_mode(run_mode, current_object)
+    if run_mode == RunMode.INCREMENTAL and effective_mode == RunMode.FULL_REFRESH and isinstance(trouve, Table) and isinstance(trouve.run_config, Incremental):
+        if current_object is None:
+            reason = "object_not_found"
+        elif current_object.object_type != trouve.warehouse_object_type:
+            reason = "object_type_changed"
         else:
-            logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(result.duration_seconds, 3), error=result.error)
-            downstream_ok = False
-
-        return _NodeOutcome(result, downstream_ok)
-
-    assert isinstance(trouve, SqlTrouve)
-    effective_mode = resolve_effective_mode(trouve, run_mode)
-    # An incremental run adds to the rows that the target table holds, thus it
-    # needs a target table. Two conditions give it none: the address holds
-    # nothing, and the address holds a view because the Trouve was a VIEW
-    # before. Both change the run to the full refresh mode. For the view, the
-    # full refresh builds and tests a candidate, and the promotion then stops,
-    # because the address holds an object of the old type.
-    if effective_mode == RunMode.INCREMENTAL:
-        current_type = None if current_object is None else current_object.object_type
-        if current_type is None:
-            logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_not_found")
-            effective_mode = RunMode.FULL_REFRESH
-        elif current_type != wanted_object_type(trouve):
-            logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason="object_type_changed")
-            effective_mode = RunMode.FULL_REFRESH
+            reason = "effective_mode"
+        logger.info("run.node.incremental_fallback", logical=logical_address, physical=name, reason=reason)
 
     # The INSERT names each column of the target, and the SQL must give the
     # same columns. read_incremental_columns() compares the two lists.
-    incremental_columns = None
-    if effective_mode == RunMode.INCREMENTAL:
-        assert isinstance(trouve, Table)
+    target_columns = None
+    added_columns: list[WarehouseColumn] = []
+    if effective_mode == RunMode.INCREMENTAL and isinstance(trouve, Table):
         try:
-            incremental_columns = read_incremental_columns(
-                trouve, adapter, addresses.physical, addresses.target
-            )
+            incremental_columns = read_incremental_columns(trouve, adapter, addresses.physical)
         except ClairError as column_error:
-            logger.warning("run.node.failure", logical=logical_address, physical=name, error=str(column_error))
-            return _NodeOutcome(
-                RunFailure(addresses=addresses, error=str(column_error)),
-                downstream_ok=False,
-            )
-        if not incremental_columns.change.is_empty:
-            added_names = [column.name for column in incremental_columns.change.added_columns]
-            logger.info("run.node.schema_change", logical=logical_address, physical=name, added_columns=added_names)
+            return failure(str(column_error))
+        target_columns = incremental_columns.target_columns
+        added_columns = incremental_columns.change.added_columns
+        if added_columns:
+            logger.info("run.node.schema_change", logical=logical_address, physical=name, added_columns=[column.name for column in added_columns])
 
-    logger.info("run.node.start", logical=logical_address, physical=name, effective_mode=effective_mode.value)
-    plan = trouve.build_sql(
-        effective_mode,
-        run_id,
-        target_address=addresses.target,
-        target_column_names=incremental_columns.target_column_names if incremental_columns else None,
-    )
-
-    # An incremental run changes data that already exists, so the staging
-    # table needs that data first. A zero-copy clone gives it in constant time.
-    # Each new column goes onto the clone, thus a test that fails leaves the
-    # physical table as it was.
-    prefix_statements: list[str] = []
-    if staging_address is not None and effective_mode == RunMode.INCREMENTAL:
-        assert isinstance(trouve, Table)
-        prefix_statements.append(
-            build_clone_statement(addresses.physical, staging_address, table_options=trouve)
-        )
-    if incremental_columns is not None:
-        prefix_statements.extend(incremental_columns.alter_statements)
-    # A build_sql() that gives no statement makes no table, thus no key.
-    cluster_by_statements: list[str] = []
-    if plan.statements:
-        cluster_by_statements = build_cluster_by_statements(
-            addresses.target,
-            table_options_of(trouve),
-            incremental=effective_mode == RunMode.INCREMENTAL,
-        )
     # An incremental table keeps its comments, and the two reads above hold
-    # them. Clair writes only a comment that differs from the docs.
+    # them. The default document() writes only a comment that differs.
     current_comments = None
-    if incremental_columns is not None and current_object is not None:
-        current_comments = WarehouseComments.of(current_object, incremental_columns.target_columns)
-    # A staged run writes the comments after the promotion, in _promote_or_keep.
-    after_build_statements = cluster_by_statements
-    if plan.statements and staging_address is None:
-        after_build_statements = [
-            *cluster_by_statements,
-            *build_comment_statements(addresses.physical, trouve, current_comments),
-        ]
-    plan = plan.model_copy(
-        update={"statements": [*prefix_statements, *plan.statements, *after_build_statements]}
+    if target_columns is not None and current_object is not None:
+        current_comments = WarehouseComments.of(current_object, target_columns)
+
+    context = PlanContext(
+        run_id=run_id,
+        effective_mode=effective_mode,
+        staged=staging_address is not None,
+        physical_address=addresses.physical,
+        staging_address=staging_address,
+        current_object=current_object,
+        target_columns=target_columns,
+        added_columns=added_columns,
+        current_comments=current_comments,
     )
 
-    if not plan.statements:
+    # ── plan ──────────────────────────────────────────────────────────────
+    try:
+        plan = trouve.plan(context)
+    except Exception as plan_error:  # noqa: BLE001 — plan() can be user code, and it can raise anything
+        return failure(f"{type(trouve).__name__}.plan() raised {type(plan_error).__name__}: {plan_error}")
+
+    is_dataframe = isinstance(trouve, DataframeTrouve)
+    # A SQL Trouve with no build statement makes no object, thus clair has
+    # nothing to execute and nothing to tell.
+    if not is_dataframe and not plan.build:
         return _NodeOutcome(None, downstream_ok=True)
 
+    # ── execute ───────────────────────────────────────────────────────────
+    logger.info("run.node.start", logical=logical_address, physical=name, effective_mode=effective_mode.value)
     start = time.monotonic()
     statements: list[Statement] = []
-    failed_at = None
 
-    for statement_index, sql in enumerate(plan.statements):
+    def execute(sql: str) -> Statement:
+        """Send one statement, or record it as cancelled after a cancel."""
         if is_cancelled():
-            statements.append(
-                Statement(sql=sql, status=StatementStatus.FAILURE, error=RUN_CANCELLED_ERROR)
-            )
+            statement = Statement(sql=sql, status=StatementStatus.FAILURE, error=RUN_CANCELLED_ERROR)
         else:
-            statements.append(adapter.execute(sql))
-        if not statements[-1].success:
-            failed_at = statement_index
-            break
+            statement = adapter.execute(sql)
+        statements.append(statement)
+        return statement
 
-    # The last statement that writes rows gives the count. The ALTER of the
-    # clustering key and the comments come after it.
-    last_write_index = len(plan.statements) - len(after_build_statements) - 1
-    row_count = statements[min(len(statements) - 1, last_write_index)].row_count
+    def execute_phase(phase_statements: list[str]) -> Statement | None:
+        """Execute each statement of one phase. Give the statement that failed, or None."""
+        for sql in phase_statements:
+            statement = execute(sql)
+            if not statement.success:
+                return statement
+        return None
 
-    # The result holds each statement of the plan, thus the reader sees the
-    # complete plan and the point where clair stopped.
-    statements.extend(Statement(sql=sql) for sql in plan.statements[len(statements):])
+    def run_cleanup() -> None:
+        """Execute the cleanup phase. It runs last, after a failure and after a cancel too."""
+        for sql in plan.cleanup:
+            cleanup_statement = adapter.execute(sql)
+            statements.append(cleanup_statement)
+            if not cleanup_statement.success:
+                logger.warning("run.node.cleanup_failure", logical=logical_address, physical=name, error=cleanup_statement.error)
 
-    # A failed cleanup leaves an object that the run made for itself, and the
-    # data of the Trouve stays correct. Thus it does not fail the node.
-    for sql in plan.cleanup_statements:
-        cleanup_statement = adapter.execute(sql)
-        statements.append(cleanup_statement)
-        if not cleanup_statement.success:
-            logger.warning("run.node.cleanup_failure", logical=logical_address, physical=name, error=cleanup_statement.error)
-
-    duration = time.monotonic() - start
-
-    # A staged run tests the staging object, then promotes it or keeps it.
-    staging_error = ""
-    if failed_at is None and staging_address is not None:
-        assert after_node_success is not None
-        # A cancel can arrive while the tests run, thus clair asks again after
-        # them, just before the promotion.
-        tests_passed = not is_cancelled() and after_node_success(name, str(staging_address), adapter)
-        if is_cancelled():
-            staging_error = _cancelled_before_promotion(addresses)
-        else:
-            promote_statements, staging_error = _promote_or_keep(
-                trouve, adapter, addresses, tests_passed, current_object, current_comments
+    def finish(error: str, downstream_ok: bool, row_count: int = 0) -> _NodeOutcome:
+        """Run the cleanup, and give the result of the node."""
+        run_cleanup()
+        duration = time.monotonic() - start
+        query_ids = [statement.query_id for statement in statements if statement.query_id]
+        if error:
+            logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(duration, 3), error=error, query_ids=query_ids)
+            return _NodeOutcome(
+                RunFailure(addresses=addresses, statements=statements, effective_run_mode=effective_mode, error=error, duration_seconds=duration),
+                downstream_ok=False,
             )
-            statements.extend(promote_statements)
-
-    query_ids = [statement.query_id for statement in statements if statement.query_id]
-
-    if failed_at is None and not staging_error:
         logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(duration, 3), query_ids=query_ids)
-        downstream_ok = True
-        # Without staging the tests run after clair wrote the physical object.
-        if staging_address is None and after_node_success is not None:
-            downstream_ok = after_node_success(name, str(addresses.physical), adapter)
         return _NodeOutcome(
-            RunSuccess(
-                addresses=addresses,
-                statements=statements,
-                effective_run_mode=effective_mode,
-                duration_seconds=duration,
-                row_count=row_count,
-            ),
-            downstream_ok,
+            RunSuccess(addresses=addresses, statements=statements, effective_run_mode=effective_mode, duration_seconds=duration, row_count=row_count),
+            downstream_ok=downstream_ok,
         )
 
-    if staging_error:
-        error_message = staging_error
-    else:
-        assert failed_at is not None
-        error_message = statements[failed_at].error or "unknown error"
-        if staging_address is not None:
-            error_message = (
-                f"{error_message}. Clair keeps the staging object at "
-                f"{staging_address}, if the build made one"
-            )
-    logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(duration, 3), error=error_message, query_ids=query_ids)
-    return _NodeOutcome(
-        RunFailure(
-            addresses=addresses,
-            statements=statements,
-            effective_run_mode=effective_mode,
-            error=error_message,
-            duration_seconds=duration,
-        ),
-        downstream_ok=False,
+    # prepare, build and configure write the target. clair stops at the first
+    # statement that fails, and records each statement after it as not run,
+    # thus the reader sees the complete plan and the point where clair stopped.
+    staging_note = (
+        "" if staging_address is None
+        else f". Clair keeps the staging object at {staging_address}, if the {'write' if is_dataframe else 'build'} made one"
     )
+    sent_write_count = 0
+    row_count = 0
+
+    def stop_writes(error: str) -> _NodeOutcome:
+        """Record each write statement that clair did not send, and give the failure."""
+        statements.extend(Statement(sql=sql) for sql in plan.write_statements[sent_write_count:])
+        return finish(f"{error}{staging_note}", downstream_ok=False)
+
+    failed_statement = execute_phase(plan.prepare)
+    sent_write_count = len(statements)
+    if failed_statement is not None:
+        return stop_writes(failed_statement.error or "unknown error")
+
+    if isinstance(trouve, DataframeTrouve):
+        write_statement, write_error = (
+            (None, RUN_CANCELLED_ERROR) if is_cancelled()
+            else _write_dataframe(trouve, adapter, context.target_address)
+        )
+        if write_statement is None:
+            return stop_writes(write_error)
+        statements.append(write_statement)
+        row_count = write_statement.row_count
+
+    build_start = len(statements)
+    failed_statement = execute_phase(plan.build)
+    sent_write_count += len(statements) - build_start
+    if failed_statement is not None:
+        return stop_writes(failed_statement.error or "unknown error")
+    if plan.build:
+        # The last statement that writes rows gives the count.
+        row_count = statements[-1].row_count
+
+    configure_start = len(statements)
+    failed_statement = execute_phase(plan.configure)
+    sent_write_count += len(statements) - configure_start
+    if failed_statement is not None:
+        return stop_writes(failed_statement.error or "unknown error")
+
+    # A run with no staging wrote production. The comments follow the build,
+    # and the tests report on the written object. Nothing waits on them.
+    if staging_address is None:
+        failed_statement = execute_phase(plan.document)
+        if failed_statement is not None:
+            return finish(failed_statement.error or "unknown error", downstream_ok=False)
+        downstream_ok = True
+        if test_node is not None:
+            test_results = test_node(name, plan.test, adapter)
+            downstream_ok = not any(test_result.is_blocking for test_result in test_results)
+        return finish("", downstream_ok=downstream_ok, row_count=row_count)
+
+    # A staged run tests the candidate, then promotes it or keeps it. A cancel
+    # can arrive while the tests run, thus clair asks again after them, just
+    # before the promotion.
+    assert test_node is not None
+    test_results = [] if is_cancelled() else test_node(name, plan.test, adapter)
+    if is_cancelled():
+        return finish(_cancelled_before_promotion(addresses), downstream_ok=False)
+    if not trouve.should_promote(context, test_results):
+        return finish(_rejection_error(trouve, context, test_results), downstream_ok=False)
+
+    for statement_index, sql in enumerate([*plan.promote, *plan.document]):
+        statement = execute(sql)
+        if statement.success:
+            continue
+        error = statement.error or "unknown error"
+        if statement_index == 0:
+            return finish(
+                f"the tests passed, but the promotion failed: {error}. "
+                f"The candidate stays at {staging_address}",
+                downstream_ok=False,
+            )
+        # The first statement of the promotion succeeded, thus the physical
+        # address holds the tested data. The object is not yet in the state that
+        # the Trouve declares.
+        return finish(
+            f"{addresses.physical} holds the tested data, but a statement after "
+            f"the promotion failed: {error}. Run it again: {sql.splitlines()[-1]}",
+            downstream_ok=False,
+        )
+
+    # The physical address now holds the tested data. A fault in the retire
+    # phase makes clutter, not a wrong table, thus the node keeps the SUCCESS
+    # status.
+    for sql in plan.retire:
+        retire_statement = adapter.execute(sql)
+        statements.append(retire_statement)
+        if not retire_statement.success:
+            logger.warning("run.node.staging_drop_failed", trouve=str(addresses.physical), staging=str(staging_address), error=retire_statement.error)
+
+    return finish("", downstream_ok=True, row_count=row_count)
+
 
 def run_project(
     dag: ClairDag,
@@ -1002,7 +781,7 @@ def run_project(
     adapter: WarehouseAdapter,
     run_mode: RunMode = RunMode.FULL_REFRESH,
     run_id: str = "",
-    after_node_success: Callable[[str, str, WarehouseAdapter], bool] | None = None,
+    test_node: TestNode | None = None,
     use_staging: bool = False,
     threads: int = 1,
     environment_name: str = "",
@@ -1028,16 +807,15 @@ def run_project(
             the first connection of the pool, and opens `threads - 1` more.
         run_mode: The run mode that the command line gives.
         run_id: The identifier of the run. A staging address holds it.
-        after_node_success: an optional callback. Clair calls it after each node
-            that succeeds, before the promotion. The three arguments are the
-            node name, the address that holds the new data, and the connection
-            of the thread. Give False to make clair treat the node as a failure
-            and skip each node downstream of it. This stops the run early when
-            a test fails.
+        test_node: The callback that executes the test queries of one node, and
+            gives the results. The three arguments are the node name, the
+            queries of the test phase of the plan, and the connection of the
+            thread. In a staged run, the results go to should_promote(). A
+            blocking result skips each node downstream.
         use_staging: if True, clair writes each node to a run-scoped staging
             address, runs the tests there, and promotes the object only after
             the tests pass. The tests decide the promotion, so this needs
-            after_node_success.
+            test_node.
         threads: The number of Trouves that clair runs at one time, and thus the
             number of warehouse connections.
         cancellation: The request to stop the run. After it, clair starts no
@@ -1045,12 +823,12 @@ def run_project(
             runs stops before its next statement and before its promotion.
 
     Raises:
-        RunError: If *use_staging* is True and *after_node_success* is None.
+        RunError: If *use_staging* is True and *test_node* is None.
         ValueError: If *threads* is less than 1.
     """
-    if use_staging and after_node_success is None:
+    if use_staging and test_node is None:
         raise RunError(
-            "A staged run needs the tests. Give after_node_success, because the "
+            "A staged run needs the tests. Give test_node, because the "
             "tests decide if clair promotes a Trouve."
         )
     if threads < 1:
@@ -1102,7 +880,7 @@ def run_project(
             pool.acquire(),
             run_mode,
             run_id,
-            after_node_success,
+            test_node,
             use_staging,
             environment_name,
             cancellation,

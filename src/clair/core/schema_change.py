@@ -23,7 +23,7 @@ from clair.adapters.objects import WarehouseColumn
 from clair.exceptions import RunError
 from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import Incremental, OnSchemaChange
-from clair.trouves.trouve import Table, quote_column_name
+from clair.trouves.trouve import Table
 
 
 class SchemaChange(BaseModel):
@@ -48,16 +48,12 @@ class IncrementalColumns(BaseModel):
     """What an incremental build needs to know about its columns.
 
     Attributes:
-        target_column_names: The columns that the INSERT names: each column of
-            the table, then each column that clair adds.
-        alter_statements: The statements that add each new column, before the build.
-        change: The difference that clair found.
+        change: The difference that clair found. ``Table.prepare()`` adds each
+            column of ``change.added_columns`` before the build.
         target_columns: The columns of the table before the build, as the
             warehouse describes them. They hold the comment of each column.
     """
 
-    target_column_names: list[str]
-    alter_statements: list[str]
     change: SchemaChange
     target_columns: list[WarehouseColumn]
 
@@ -108,26 +104,10 @@ def schema_change_error(
     return "\n".join(lines)
 
 
-def add_column_statements(
-    change: SchemaChange, address: TrouveAddress, object_keyword: str
-) -> list[str]:
-    """Give one ALTER for each column that the SQL adds.
-
-    *object_keyword* is ``TABLE`` or ``ICEBERG TABLE``.
-    """
-    return [
-        f"-- add the new column {column.name}\n"
-        f"ALTER {object_keyword} {address} "
-        f"ADD COLUMN {quote_column_name(column.name)} {column.data_type}"
-        for column in change.added_columns
-    ]
-
-
 def read_incremental_columns(
     trouve: Table,
     adapter: WarehouseAdapter,
     physical_address: TrouveAddress,
-    write_address: TrouveAddress,
 ) -> IncrementalColumns:
     """Read the columns of the table and of the SQL, and apply the policy of the Trouve.
 
@@ -135,8 +115,6 @@ def read_incremental_columns(
         trouve: An incremental Table.
         adapter: The connection that reads the two lists of columns.
         physical_address: The table that holds the rows of the earlier runs.
-        write_address: The table that the build writes to: the staging clone,
-            or the physical table in a run with no staging.
 
     Raises:
         RunError: If clair cannot read a list of columns, or the policy stops
@@ -156,11 +134,6 @@ def read_incremental_columns(
         raise RunError(error)
 
     return IncrementalColumns(
-        target_column_names=[
-            *(column.name for column in target_columns),
-            *(column.name for column in change.added_columns),
-        ],
-        alter_statements=add_column_statements(change, write_address, trouve.object_keyword),
         change=change,
         target_columns=target_columns,
     )

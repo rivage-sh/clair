@@ -36,6 +36,7 @@ import pytest
 import clair
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.environments.environments import Environment
+from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
 from tests.helpers import success_of
 from tests.integration.config import IntegrationConfig
@@ -46,7 +47,7 @@ from tests.integration.projects import (
     physical_address,
     trouves_of,
 )
-from tests.integration.warehouse import row_count, table_exists
+from tests.integration.warehouse import execute, query_rows, row_count, table_exists
 
 pytestmark = pytest.mark.integration
 
@@ -212,6 +213,57 @@ class TestExample3(ExampleProjectTests):
         # exist yet.
         result = success_of(summary, "example_3_database.derived.recent_orders")
         assert result.effective_run_mode == RunMode.INCREMENTAL
+
+
+    def test_a_mirrored_upsert_keeps_the_table_object_and_its_stream(
+        self,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """MirroredUpsert merges into production, and the clone promotion replaces it.
+
+        A stream attaches to the object, and not to the name. Thus the stream on
+        the mirrored table must read the merged rows after an incremental run,
+        and the CREATED time of that table must not change. The table of a
+        default Upsert gets a new object, thus a new CREATED time.
+        """
+        schema_name = clair_environment.schema_name
+        mirrored = physical_address("example_3_database.derived.customer_order_totals", schema_name)
+        replaced = physical_address("example_3_database.derived.customer_order_summary", schema_name)
+        source_orders = physical_address("example_3_database.source.orders", schema_name)
+        stream = f"{mirrored}__stream"
+
+        def created_time(address: TrouveAddress) -> object:
+            ((created,),) = query_rows(adapter, f"""
+                select created from {address.database_name}.information_schema.tables
+                where table_schema = '{address.schema_name.upper()}'
+                and table_name = '{address.table_name.upper()}'
+            """)
+            return created
+
+        clair.run(project_copy, env=environment, run_mode=RunMode.FULL_REFRESH)
+        execute(adapter, f"create or replace stream {stream} on table {mirrored}")
+        mirrored_created, replaced_created = created_time(mirrored), created_time(replaced)
+
+        execute(adapter, f"""
+            insert into {source_orders}
+            select column1, column2, column3, column4, column5, column6
+            from values ('ord_009', 'cust_e', 'placed', 12.00, current_timestamp(), current_timestamp())
+        """)
+        summary = clair.run(project_copy, env=environment, run_mode=RunMode.INCREMENTAL)
+
+        assert summary.failed == []
+        assert created_time(mirrored) == mirrored_created
+        assert created_time(replaced) != replaced_created
+        # The stream holds the change of the merge: cust_e is a new customer.
+        ((changed_rows,),) = query_rows(adapter, f"select count(*) from {stream} where customer_id = 'cust_e'")
+        assert changed_rows == 1
+        # The plan merged into production, and did not clone it into position.
+        result = success_of(summary, "example_3_database.derived.customer_order_totals")
+        assert any(f"MERGE INTO {mirrored} AS target" in statement.sql for statement in result.statements)
+        assert not any(f"CREATE OR REPLACE TABLE {mirrored} CLONE" in statement.sql for statement in result.statements)
 
 
 class TestExample4(ExampleProjectTests):

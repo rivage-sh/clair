@@ -300,24 +300,24 @@ class TestTextReferences:
 
 
 _OVERRIDE_MODULE = '''\
-from clair import BuildPlan, RunMode, Table, TrouveAddress
+from clair import RunMode, Table
 
 
 class PhysicalOnlyTrouve(Table):
     """An override that writes to the physical address, also in a staged run."""
 
-    def build_sql(self, effective_mode, run_id, target_address, target_column_names=None):
-        if effective_mode == RunMode.FULL_REFRESH:
-            return super().build_sql(effective_mode, run_id, target_address)
-        return BuildPlan(statements=[f"DELETE FROM {self.require_compiled().physical_address}"])
+    def build(self, context):
+        if context.effective_mode == RunMode.FULL_REFRESH:
+            return super().build(context)
+        return [f"DELETE FROM {context.physical_address}"]
 
 
 class RaisingTrouve(Table):
     """An override with a bug in its incremental branch."""
 
-    def build_sql(self, effective_mode, run_id, target_address, target_column_names=None):
-        if effective_mode == RunMode.FULL_REFRESH:
-            return super().build_sql(effective_mode, run_id, target_address)
+    def build(self, context):
+        if context.effective_mode == RunMode.FULL_REFRESH:
+            return super().build(context)
         raise KeyError("window_column")
 '''
 
@@ -385,14 +385,14 @@ class TestBuildPlans:
         assert build_plan_faults(report) == [("analytics.finance.revenue", "incremental", True)]
 
     def test_a_full_refresh_trouve_makes_no_incremental_plan(self, project_with_trouves: Path):
-        """A Trouve gets only the modes that resolve_effective_mode() can give it."""
+        """A Trouve gets only the modes that its effective_mode() can give."""
         write_revenue(project_with_trouves, 'RaisingTrouve(sql="SELECT 1 AS x")')
         assert clair.validate(project_with_trouves, env="dev").build_plan_problems == []
 
     def test_the_example_override_is_correct(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """examples/projects/example_3 holds the override of the build_sql() guide."""
+        """examples/projects/example_3 holds the overrides of the lifecycle guide."""
         monkeypatch.setenv("CLAIR_USER", "tester")
         example_3 = Path(__file__).parents[2] / "examples" / "projects" / "example_3"
         project_root = tmp_path / "example_3"
