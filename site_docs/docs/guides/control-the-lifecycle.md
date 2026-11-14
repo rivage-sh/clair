@@ -9,7 +9,7 @@ You can change each statement. Override one phase method to change one step. Ove
 `plan()` to change many steps together. Override a policy method to change a decision.
 clair keeps the order of the phases, and it executes each phase at the correct time.
 
-This guide gives the lifecycle, the facts that a phase reads, and four overrides. The
+This guide gives the lifecycle, the facts that a phase reads, and three overrides. The
 code of the first two is in `examples/projects/example_3`.
 
 ## The lifecycle
@@ -194,116 +194,13 @@ The cleanup runs after the promotion, thus the new rows table still exists when 
 still replaces the table. An integration test of clair puts a stream on this table, and
 reads it after an incremental run.
 
-## 2. Replace a window of days
+## 2. Keep each candidate as a snapshot
 
-`ReplaceWindowTrouve` is an incremental table that replaces each row of a recent window.
-It overrides the build of the incremental mode, and the cleanup of its own window table.
-
-```python
-# _replace_window_trouve.py
-from clair import PlanContext, RunMode, Table
-
-
-class ReplaceWindowTrouve(Table):
-    """An incremental TABLE that replaces each row of a recent window.
-
-    A full refresh builds the table in the same way as a Trouve. An incremental
-    run deletes each row of the window from the target, and inserts the rows of
-    the window again. Thus a late row lands, and a changed row replaces its old
-    version.
-    """
-
-    window_column: str
-
-    def window_rows_address(self, run_id: str) -> str:
-        return f"{self.require_compiled().physical_address}__window_{run_id}"
-
-    def build(self, context: PlanContext) -> list[str]:
-        if context.effective_mode == RunMode.FULL_REFRESH:
-            return super().build(context)
-
-        window_rows = self.window_rows_address(context.run_id)
-        create_window_rows = f"CREATE OR REPLACE TABLE {window_rows} AS (\n{self.resolved_sql()}\n)"
-        delete_window = (
-            f"DELETE FROM {context.target_address}\n"
-            f"WHERE {self.window_column} >= (SELECT MIN({self.window_column}) FROM {window_rows})"
-        )
-        insert_window = self.insert_statement(
-            str(context.target_address), window_rows, context.target_column_names
-        )
-        return [create_window_rows, delete_window, insert_window]
-
-    def cleanup(self, context: PlanContext) -> list[str]:
-        if context.effective_mode == RunMode.FULL_REFRESH:
-            return []
-        return [f"DROP TABLE IF EXISTS {self.window_rows_address(context.run_id)}"]
-```
+The default `retire` drops the staging object after the promotion. `AuditedTable` keeps
+the candidate of each run as a snapshot in its place:
 
 ```python
-# example_3_database/derived/daily_revenue.py
-from _replace_window_trouve import ReplaceWindowTrouve
-from example_3_database.refined.orders import trouve as refined_orders
-
-import clair
-from clair import (
-    THIS,
-    Column,
-    ColumnType,
-    Incremental,
-    RunMode,
-    TestUnique,
-)
-
-sql = f"""
-    select
-        created_date,
-        count(*)    as order_count,
-        sum(amount) as revenue
-    from {refined_orders}
-"""
-if clair.run_mode == RunMode.INCREMENTAL:
-    sql += f"""
-        where created_date >= dateadd('day', -3, (select max(created_date) from {THIS}))
-    """
-sql += """
-    group by created_date
-"""
-
-trouve = ReplaceWindowTrouve(
-    docs="""
-        The revenue of each day. In each incremental run, clair replaces the last 3 days,
-        thus a late order changes the total of its day. ReplaceWindowTrouve overrides
-        build() and cleanup(), and its plan writes the incremental SQL.
-    """,
-    sql=sql,
-    window_column="created_date",
-    run_config=Incremental(),
-    columns=[
-        Column(name="created_date", type=ColumnType.DATE),
-        Column(name="order_count", type=ColumnType.INTEGER),
-        Column(name="revenue", type=ColumnType.FLOAT),
-    ],
-    tests=[TestUnique(column="created_date")],
-)
-```
-
-`Incremental()` names no strategy, because the override writes the incremental SQL. A
-`Table` with no override and no strategy raises a `CompileError` on an incremental run.
-
-`insert_statement()` names each column of the target. Do not write `INSERT INTO target
-SELECT * FROM ...`. That statement matches the columns by position, thus two columns that
-change places in the SQL swap their values, and Snowflake gives no error.
-
-The built-in `DeleteInsert(range_column=...)` deletes each row between the minimum and the
-maximum of the new rows. This subclass deletes each row from the minimum on, thus it also
-removes each row after the last new row.
-
-## 3. Keep each candidate as a snapshot
-
-The default `retire` drops the staging object after the promotion. Override it to keep
-the candidate of each run as a snapshot:
-
-```python
+# _audited_table.py
 from clair import PlanContext, Table
 
 
@@ -315,10 +212,41 @@ class AuditedTable(Table):
         return [f"ALTER TABLE {context.staging_address} RENAME TO {snapshot}"]
 ```
 
-`retire()` runs only after a promotion, thus each snapshot holds data that passed its
-tests. clair does not drop the snapshots. Drop the old ones on a schedule.
+```python
+# example_3_database/derived/order_status_counts.py
+from _audited_table import AuditedTable
+from example_3_database.refined.orders import trouve as refined_orders
 
-## 4. Never rebuild a table by accident
+from clair import Column, ColumnType, TestNotNull, TestUnique
+
+trouve = AuditedTable(
+    docs="""
+        The number of orders in each status. Each run keeps its tested candidate as a snapshot.
+
+        AuditedTable renames the promoted staging table to order_status_counts__audit_<run_id>,
+        and does not drop it. Thus each run leaves a copy of the data that passed its tests.
+    """,
+    sql=f"""
+        select
+            order_status,
+            count(*) as order_count
+        from {refined_orders}
+        group by order_status
+    """,
+    columns=[
+        Column(name="order_status", type=ColumnType.STRING),
+        Column(name="order_count", type=ColumnType.NUMBER),
+    ],
+    tests=[TestUnique(column="order_status"), TestNotNull(column="order_status")],
+)
+```
+
+`retire()` runs only after a promotion, thus each snapshot holds data that passed its
+tests. The rename costs nothing: the candidate already exists, and clair renames it in the
+metadata. clair does not drop the snapshots. Drop the old ones on a schedule. An
+integration test of clair runs this Trouve, and reads the snapshot.
+
+## 3. Never rebuild a table by accident
 
 An incremental run changes to a full refresh when production holds no table. For a large
 table, a full refresh can cost more than a failure. Override the policy:

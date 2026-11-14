@@ -266,6 +266,27 @@ class TestExample3(ExampleProjectTests):
         assert not any(f"CREATE OR REPLACE TABLE {mirrored} CLONE" in statement.sql for statement in result.statements)
 
 
+    def test_an_audited_table_keeps_the_candidate_of_each_run_as_a_snapshot(
+        self,
+        project_copy: Path,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        """AuditedTable renames the promoted candidate, and does not drop it."""
+        schema_name = clair_environment.schema_name
+        audited = physical_address("example_3_database.derived.order_status_counts", schema_name)
+
+        summary = clair.run(project_copy, env=environment)
+
+        snapshot = TrouveAddress.parse(f"{audited}__audit_{summary.run_id}")
+        assert table_exists(adapter, snapshot)
+        assert row_count(adapter, snapshot) == row_count(adapter, audited) > 0
+        result = success_of(summary, "example_3_database.derived.order_status_counts")
+        assert result.addresses.staging is not None
+        assert not table_exists(adapter, result.addresses.staging)
+
+
 class TestExample4(ExampleProjectTests):
     project_name = "example_4"
 

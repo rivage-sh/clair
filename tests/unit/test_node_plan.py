@@ -363,10 +363,10 @@ def test_a_promote_override_merges_into_production_and_does_not_replace_it() -> 
 EXAMPLE_3 = Path(__file__).parents[2] / "examples" / "projects" / "example_3"
 
 
-def test_the_example_override_compiles_its_window_plan(
+def test_the_example_overrides_compile_their_plans(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """examples/projects/example_3 holds the subclass that the lifecycle guide shows."""
+    """examples/projects/example_3 holds the two subclasses that the lifecycle guide shows."""
     # The dev routing of the example reads the name of the developer.
     monkeypatch.setenv("CLAIR_USER", "tester")
     project_root = tmp_path / "example_3"
@@ -374,17 +374,16 @@ def test_the_example_override_compiles_its_window_plan(
 
     output = clair.compile(project_root, run_mode=RunMode.INCREMENTAL, env="dev")
 
-    node = output.node("example_3_database.derived.daily_revenue")
-    assert node is not None
-    window_rows = f"{node.addresses.physical}__window_{output.run_id}"
-    # A statement can start with comment lines: the header of its phase.
-    plan_statements = [
-        "\n".join(line for line in sql.splitlines() if not line.startswith("--"))
-        for sql in node.sql
-    ]
-    assert plan_statements[0].startswith(f"CREATE OR REPLACE TABLE {node.addresses.staging} CLONE")
-    assert plan_statements[1].startswith(f"CREATE OR REPLACE TABLE {window_rows} AS")
-    assert plan_statements[2].startswith(f"DELETE FROM {node.addresses.staging}")
-    assert plan_statements[3].startswith(f"INSERT INTO {node.addresses.staging}")
-    assert plan_statements[4] == f"ALTER TABLE {node.addresses.staging} DROP CLUSTERING KEY"
-    assert plan_statements[-1] == f"DROP TABLE IF EXISTS {window_rows}"
+    mirrored = output.node("example_3_database.derived.customer_order_totals")
+    assert mirrored is not None
+    (promote,) = [sql for sql in mirrored.sql if sql.startswith(Phase.PROMOTE.header)]
+    assert f"MERGE INTO {mirrored.addresses.physical} AS target" in promote
+    assert "CLONE" not in promote
+
+    audited = output.node("example_3_database.derived.order_status_counts")
+    assert audited is not None
+    (retire,) = [sql for sql in audited.sql if sql.startswith(Phase.RETIRE.header)]
+    assert retire.endswith(
+        f"ALTER TABLE {audited.addresses.staging} RENAME TO "
+        f"{audited.addresses.physical}__audit_{output.run_id}"
+    )
