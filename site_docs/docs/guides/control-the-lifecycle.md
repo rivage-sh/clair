@@ -246,32 +246,40 @@ tests. The rename costs nothing: the candidate already exists, and clair renames
 metadata. clair does not drop the snapshots. Drop the old ones on a schedule. An
 integration test of clair runs this Trouve, and reads the snapshot.
 
-## 3. Never rebuild a table by accident
+## 3. Make a table one time, then never again
 
-An incremental run changes to a full refresh when production holds no table. For a large
-table, a full refresh can cost more than a failure. Override the policy:
+Some tables must never be made again after their first run: a full refresh costs too
+much, or the source no longer holds the old rows. `NeverRebuild` makes the table on the
+first run, and gives each later run the incremental mode, also under
+`--run-mode full_refresh`:
 
 ```python
 from clair import RunMode, Table, WarehouseObject
-from clair.exceptions import RunError
 
 
 class NeverRebuild(Table):
-    """Fail the node, and do not change to a full refresh, when the table is missing."""
+    """Make the table one time, then run each later run in the incremental mode."""
 
     def effective_mode(
         self, requested_mode: RunMode, current_object: WarehouseObject | None
     ) -> RunMode:
-        if requested_mode == RunMode.INCREMENTAL and current_object is None:
-            raise RunError(
-                f"{self.logical_address} has no table. Run --run-mode full_refresh on purpose."
-            )
-        return super().effective_mode(requested_mode, current_object)
+        # The first run has no table to add to, thus it makes the table.
+        if current_object is None:
+            return RunMode.FULL_REFRESH
+        return super().effective_mode(RunMode.INCREMENTAL, current_object)
 ```
 
-The error fails this node only, and clair skips each Trouve downstream of it. `clair
-compile` gives `effective_mode()` an object of the type of the Trouve, thus the compile
-does not raise.
+The policy cannot give `INCREMENTAL` when production holds no table: the clone and the
+`MERGE` need a table. `super()` keeps the other guards of `Table`: a Trouve with no
+`Incremental` run_config, or an address that holds a view, still gets a full refresh.
+
+Give `NeverRebuild` an `Upsert` or a `DeleteInsert` strategy. A Trouve file reads
+`clair.run_mode` at import time, thus under `--run-mode full_refresh` its SQL holds no
+incremental filter, and the build gets each row. A `MERGE` or a `DELETE` and `INSERT` of
+each row gives the same table, and only reads more data. An `Append` adds each row again.
+
+`clair compile` gives `effective_mode()` an object of the type of the Trouve, thus the
+compiled plan shows the incremental plan in each mode, as the run does.
 
 ## Read the plan
 

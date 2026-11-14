@@ -17,7 +17,7 @@ import pytest
 from structlog.testing import capture_logs
 
 import clair
-from clair.adapters.objects import StatementStatus
+from clair.adapters.objects import StatementStatus, WarehouseObject
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.runner import RunCancellation, RunFailure, RunResult, RunSuccess, RunSummary, run_project
 from clair.phase import Phase
@@ -387,3 +387,38 @@ def test_the_example_overrides_compile_their_plans(
         f"ALTER TABLE {audited.addresses.staging} RENAME TO "
         f"{audited.addresses.physical}__audit_{output.run_id}"
     )
+
+
+class NeverRebuild(Table):
+    """The policy of the lifecycle guide: make the table one time, then always run incrementally."""
+
+    def effective_mode(self, requested_mode: RunMode, current_object: WarehouseObject | None) -> RunMode:
+        if current_object is None:
+            return RunMode.FULL_REFRESH
+        return super().effective_mode(RunMode.INCREMENTAL, current_object)
+
+
+@pytest.mark.parametrize(
+    ("existing_tables", "expected_mode"),
+    [([PHYSICAL_ADDRESS], RunMode.INCREMENTAL), ([], RunMode.FULL_REFRESH)],
+)
+def test_an_effective_mode_override_decides_the_mode_of_a_full_refresh_run(
+    existing_tables: list[str], expected_mode: RunMode
+) -> None:
+    trouve = incremental_table(Upsert(primary_key_columns=["id"]), NeverRebuild)
+    dag = build_dag([trouve])
+
+    (result,) = run_project(
+        dag,
+        get_executable_nodes(dag),
+        RecordingAdapter(existing_tables=existing_tables),
+        run_mode=RunMode.FULL_REFRESH,
+        run_id=TEST_RUN_ID,
+        test_node=lambda name, queries, adapter: [],
+        use_staging=True,
+    )
+
+    assert isinstance(result, RunSuccess)
+    assert result.effective_run_mode == expected_mode
+    merged = any("MERGE INTO" in statement.sql for statement in result.statements)
+    assert merged == (expected_mode == RunMode.INCREMENTAL)
