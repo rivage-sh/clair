@@ -258,6 +258,7 @@ def _compile_trouve(
     module_name: str,
     project_root: Path,
     logical_addresses: dict[int, TrouveAddress],
+    address_of_logical: dict[TrouveAddress, TrouveAddress],
     physical_addresses: dict[int, TrouveAddress],
     profile_defaults: dict[str, str | None] | None,
     run_mode: RunMode | None,
@@ -307,11 +308,7 @@ def _compile_trouve(
         # of the file, and render the SQL of the other mode on demand: a node
         # whose effective mode differs from the mode of the import asks for it.
         tokens_in_mode = _tokens_in_mode_of(file_path.read_text(), file_path, module_name)
-        render_in_mode = mode_renderer(
-            tokens_in_mode,
-            {address: address for address in logical_addresses.values()},
-            logical,
-        )
+        render_in_mode = mode_renderer(tokens_in_mode, address_of_logical, logical)
         trouve_obj.compiled = CompiledSql(
             rendered_mode=run_mode or RunMode.FULL_REFRESH,
             tokens_in_mode=tokens_in_mode,
@@ -495,6 +492,10 @@ def discover_project(
     # reads the production upstream tables. After the selection, call
     # recompile_for_selection() to change each selected upstream address to its
     # physical address.
+    # Discovery renders the SQL of another run mode with the logical addresses
+    # too. Each Trouve shares one map, thus discovery stays linear in the
+    # number of Trouves.
+    address_of_logical = {address: address for address in logical_addresses.values()}
     for trouve_obj, _, file_path, module_name in collected:
         _compile_trouve(
             trouve_obj,
@@ -502,6 +503,7 @@ def discover_project(
             module_name=module_name,
             project_root=project_root,
             logical_addresses=logical_addresses,
+            address_of_logical=address_of_logical,
             physical_addresses=physical_addresses,
             profile_defaults=profile_defaults,
             run_mode=run_mode,
