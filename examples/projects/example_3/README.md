@@ -1,9 +1,11 @@
 # Example 3 — Incremental Materializations
 
 Integration test project for `run_mode` functionality. Demonstrates the three incremental
-strategies, `APPEND`, `UPSERT` and `DELETE_INSERT`, and a Trouve subclass that overrides
-`build_sql()` to replace a window of days. See the
-[`build_sql()` guide](../../../site_docs/docs/guides/custom-build-sql.md).
+strategies, `APPEND`, `UPSERT` and `DELETE_INSERT`, and two Trouve subclasses that change
+a phase of the lifecycle. `ReplaceWindowTrouve` overrides the build to replace a window of
+days. `MirroredUpsert` overrides the promotion to merge into production, and keeps the
+table object. See the
+[lifecycle guide](../../../site_docs/docs/guides/control-the-lifecycle.md).
 
 ## Pipeline
 
@@ -12,8 +14,9 @@ source.orders  (SOURCE)
     └── refined.orders             (TABLE, full refresh)
             ├── derived.recent_orders          (TABLE, INCREMENTAL APPEND)
             ├── derived.customer_order_summary (TABLE, INCREMENTAL UPSERT)
+            ├── derived.customer_order_totals  (TABLE, INCREMENTAL UPSERT, MirroredUpsert merges in place)
             ├── derived.daily_orders           (TABLE, INCREMENTAL DELETE_INSERT)
-            └── derived.daily_revenue          (TABLE, INCREMENTAL, build_sql() replaces a window)
+            └── derived.daily_revenue          (TABLE, INCREMENTAL, build() replaces a window)
 ```
 
 | Trouve | Strategy | Description |
@@ -21,12 +24,14 @@ source.orders  (SOURCE)
 | `source.orders` | SOURCE | Raw orders table |
 | `refined.orders` | Full refresh | Typed + date columns added |
 | `derived.recent_orders` | Incremental APPEND | Appends orders created in last 3 days |
-| `derived.customer_order_summary` | Incremental UPSERT on `customer_id` | Per-customer stats, merged in-place |
+| `derived.customer_order_summary` | Incremental UPSERT on `customer_id` | Per-customer stats. The promotion replaces the table with a clone |
+| `derived.customer_order_totals` | Incremental UPSERT on `customer_id`, `MirroredUpsert` | Per-customer totals. The promotion merges into the table, thus a stream on it keeps reading |
 | `derived.daily_orders` | Incremental DELETE_INSERT on `created_date` | Orders and revenue of each day; replaces the last 3 days |
 | `derived.daily_revenue` | Incremental, `ReplaceWindowTrouve` | Revenue of each day. Replaces the last 3 days |
 
-`_replace_window_trouve.py` holds `ReplaceWindowTrouve`. Discovery skips a file that starts
-with `_`, thus the file holds Python that a Trouve file imports, and no Trouve.
+`_replace_window_trouve.py` holds `ReplaceWindowTrouve`, and `_mirrored_upsert.py` holds
+`MirroredUpsert`. Discovery skips a file that starts with `_`, thus each file holds Python
+that a Trouve file imports, and no Trouve.
 
 ## Prerequisites
 
@@ -135,6 +140,7 @@ Expected behaviour:
 - `refined.orders` — full refresh (no `run_config` set), rebuilds from source
 - `derived.recent_orders` — **APPEND**: the two new orders are inserted alongside existing rows
 - `derived.customer_order_summary` — **UPSERT**: `cust_c` stats are updated; `cust_d` is inserted as a new row
+- `derived.customer_order_totals` — **UPSERT, merged in place**: the same change. clair runs the `MERGE` on the staging clone, tests it, and then runs the same `MERGE` into the table
 - `derived.daily_orders` — **DELETE_INSERT**: clair deletes the rows of the last 3 days and inserts them again; today now counts ord_007 and ord_008
 - `derived.daily_revenue` — **window replace**: clair deletes the rows of the last 3 days, and inserts them again with the two new orders
 

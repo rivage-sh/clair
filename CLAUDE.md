@@ -42,9 +42,9 @@ Packages inside `src/clair/`:
 | Package | Holds |
 |---------|-------|
 | `cli/` | `main.py` — the click entrypoint. Read first for any CLI change. |
-| `trouves/` | The domain models: `trouve.py`, `trouve_type.py`, `column.py`, `test.py`, `config.py`, `run_config.py`, `_refs.py`. |
+| `trouves/` | The domain models: `trouve.py`, `trouve_type.py`, `column.py`, `test.py`, `config.py`, `run_config.py`, `_refs.py`. `plan.py` holds the phases of the lifecycle of a Trouve, and `statements.py` the SQL text of each step. |
 | `core/` | The pipeline: `discovery.py`, `project_imports.py`, `references.py`, `dag.py`, `compiler.py`, `runner.py`, `test_runner.py`, `dag_render.py`, `selector.py`, `scaffold.py`. |
-| `adapters/` | `base.py` holds the `WarehouseAdapter` ABC. `snowflake.py` is the only implementation. |
+| `adapters/` | `base.py` holds the `WarehouseAdapter` ABC. `objects.py` holds the data that an adapter gives. `snowflake.py` is the only implementation. |
 | `environments/` | `environments.py` reads `~/.clair/environments.yml`. `routing.py` remaps targets. |
 | `web_ui/` | `clair docs` server: `catalog.py`, `columns.py`, `server.py`, bundled SPA in `static/`. |
 | (top level) | `api.py` holds the operations: `run`, `compile`, `test`, `docs`, `catalog`. The CLI calls them. `__init__.py` is the public API surface. Also `lineage.py`, `exceptions.py`, `_logging.py`. |

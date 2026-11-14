@@ -58,18 +58,23 @@ argument for them. A user who reads that page wants to know where the file goes.
 
 ---
 
-### `build_sql()` takes no connection, and a runtime fact arrives as data
+### `plan()` takes no connection, and a runtime fact arrives as data
 
-`Trouve.build_sql()` is the extension point for each build that clair does not model, and
-it takes no warehouse connection. That is invariant 4 at the level of one method:
+`Trouve.plan()` gives each statement that clair sends to materialize a Trouve, by phase:
+prepare, build, configure, test, promote, document, retire, cleanup. Each phase is a
+method with a default, and a user can override each one. The user controls every
+statement of the lifecycle: a new step of a node goes into a phase or a policy method
+(`effective_mode()`, `should_promote()`), never into the runner as fixed SQL.
+
+`plan()` takes no warehouse connection. That is invariant 4 at the level of one method:
 `clair compile` calls it offline, thus a pull request shows the complete plan. A method
 that queries the warehouse — a dbt introspective macro — makes the plan depend on the
 state of the warehouse at run time, and no reviewer can read it.
 
 Some builds need a fact of the warehouse: the type of the object at the address, or its
 columns. The runner asks for that fact with a named probe on the `WarehouseAdapter` ABC,
-in the same way as `object_type()`. If a plan needs the answer, the runner gives it to
-`build_sql()` as data. Never give `build_sql()` the adapter.
+in the same way as `describe_object()`. If a plan needs the answer, the runner gives it
+to `plan()` in the `PlanContext`. Never give `plan()` the adapter.
 
 ## The documentation gives orientation. The code gives the truth.
 

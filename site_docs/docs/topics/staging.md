@@ -42,17 +42,27 @@ The promotion uses `COPY GRANTS`, and this is necessary. Snowflake attaches a pr
 An incremental Trouve changes data that already exists, so the staging object needs that data before the `INSERT` or the `MERGE` runs. Clair puts it there with a zero-copy clone:
 
 ```sql
--- staging: clone the target, so the incremental statements have a base
+-- ── prepare
 CREATE OR REPLACE TABLE db.schema.orders__clair_<run_id> CLONE db.schema.orders
 
+-- ── build
 INSERT INTO db.schema.orders__clair_<run_id>
 SELECT * FROM ( ... )
 
--- staging: the data quality tests run here
+-- ── test · a blocking test that fails stops the promotion
+SELECT ... FROM db.schema.orders__clair_<run_id> ...
 
+-- ── promote · when should_promote() gives True
 CREATE OR REPLACE TABLE db.schema.orders CLONE db.schema.orders__clair_<run_id> COPY GRANTS
+
+-- ── retire · after the promotion
 DROP TABLE IF EXISTS db.schema.orders__clair_<run_id>
 ```
+
+Each step is a phase of `Trouve.plan()`, and a subclass can change it. The promotion
+replaces the production table with a new object, thus Time Travel and a stream start
+again at each run. To keep the object, see
+[Keep the production table object](../guides/control-the-lifecycle.md#1-keep-the-production-table-object).
 
 Snowflake makes a clone in the metadata, so this step takes constant time for a table of any size. Two conditions give the clone no base: the physical address holds nothing, and the physical address holds a view because the Trouve was a `VIEW` before. In each condition clair changes that Trouve to the full refresh mode and makes no clone. The promotion does not change.
 

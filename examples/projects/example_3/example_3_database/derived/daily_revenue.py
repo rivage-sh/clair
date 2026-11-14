@@ -30,7 +30,7 @@ trouve = ReplaceWindowTrouve(
     docs="""
         The revenue of each day. In each incremental run, clair replaces the last 3 days,
         thus a late order changes the total of its day. ReplaceWindowTrouve overrides
-        build_sql(), and its plan writes the incremental SQL.
+        build() and cleanup(), and its plan writes the incremental SQL.
     """,
     sql=sql,
     window_column="created_date",
