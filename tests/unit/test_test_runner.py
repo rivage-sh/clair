@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from clair.adapters.base import StatementStatus
+from clair.adapters.objects import StatementStatus
 from clair.core.dag import build_dag
 from clair.core.test_runner import (
     SampleScope,

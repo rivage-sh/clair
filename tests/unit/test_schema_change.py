@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from clair.adapters.base import WarehouseColumn
+from clair.adapters.objects import WarehouseColumn
 from clair.core.runner import RunFailure, RunSuccess
 from clair.core.schema_change import SchemaChange, compare_columns, schema_change_error
 from clair.exceptions import RunError

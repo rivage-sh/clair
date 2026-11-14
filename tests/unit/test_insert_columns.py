@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from clair.adapters.base import WarehouseColumn
+from clair.adapters.objects import WarehouseColumn
 from clair.core.runner import RunFailure, RunSuccess
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType

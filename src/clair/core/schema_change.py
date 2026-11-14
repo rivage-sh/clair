@@ -18,7 +18,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from clair.adapters.base import WarehouseAdapter, WarehouseColumn
+from clair.adapters.base import WarehouseAdapter
+from clair.adapters.objects import WarehouseColumn
 from clair.exceptions import RunError
 from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import Incremental, OnSchemaChange

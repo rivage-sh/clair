@@ -16,13 +16,8 @@ import pandas as pd
 import structlog
 from pydantic import BaseModel, Field
 
-from clair.adapters.base import (
-    Statement,
-    StatementStatus,
-    WarehouseAdapter,
-    WarehouseObject,
-    WarehouseObjectType,
-)
+from clair.adapters.base import WarehouseAdapter
+from clair.adapters.objects import Statement, StatementStatus, WarehouseObject, WarehouseObjectType
 from clair.adapters.pool import AdapterPool
 from clair.core.comments import WarehouseComments, build_comment_statements
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes

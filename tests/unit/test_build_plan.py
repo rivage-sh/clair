@@ -15,7 +15,7 @@ import pytest
 from structlog.testing import capture_logs
 
 import clair
-from clair.adapters.base import StatementStatus
+from clair.adapters.objects import StatementStatus
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.runner import RunFailure, RunResult, RunSuccess, run_project
 from clair.environments.routing import TrouveAddress

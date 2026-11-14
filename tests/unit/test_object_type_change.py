@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 from structlog.testing import capture_logs
 
-from clair.adapters.base import WarehouseObject, WarehouseObjectType
+from clair.adapters.objects import WarehouseObject, WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunFailure, RunSuccess, wanted_object_type
 from clair.core.staging import make_staging_address

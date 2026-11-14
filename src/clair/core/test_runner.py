@@ -9,7 +9,8 @@ from enum import StrEnum
 import structlog
 from pydantic import BaseModel, computed_field
 
-from clair.adapters.base import Statement, StatementStatus, WarehouseAdapter
+from clair.adapters.base import WarehouseAdapter
+from clair.adapters.objects import Statement, StatementStatus
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag
 from clair.core.references import render_sample

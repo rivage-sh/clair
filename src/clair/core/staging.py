@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
-from clair.adapters.base import WarehouseObjectType
+from clair.adapters.objects import WarehouseObjectType
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import ClairError
 from clair.trouves.trouve import TableOptions

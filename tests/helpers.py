@@ -17,14 +17,8 @@ from typing import Any, TypeVar, cast
 
 import pandas as pd
 
-from clair.adapters.base import (
-    Statement,
-    StatementStatus,
-    WarehouseAdapter,
-    WarehouseColumn,
-    WarehouseObject,
-    WarehouseObjectType,
-)
+from clair.adapters.base import WarehouseAdapter
+from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, WarehouseObject, WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.dag import ClairDag, build_dag, get_executable_nodes
 from clair.core.runner import RunFailure, RunSkip, RunSuccess, RunSummary, run_project

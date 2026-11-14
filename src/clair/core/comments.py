@@ -27,7 +27,7 @@ import inspect
 
 from pydantic import BaseModel
 
-from clair.adapters.base import WarehouseColumn, WarehouseObject
+from clair.adapters.objects import WarehouseColumn, WarehouseObject
 from clair.environments.routing import TrouveAddress
 from clair.trouves.trouve import TrouveAbc, table_options_of
 from clair.trouves.trouve_type import TrouveType

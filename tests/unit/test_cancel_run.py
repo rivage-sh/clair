@@ -19,7 +19,7 @@ import pytest
 from click.testing import CliRunner
 
 import clair
-from clair.adapters.base import Statement, StatementStatus
+from clair.adapters.objects import Statement, StatementStatus
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.cli.main import cli
 from clair.core.artifacts import write_run_result

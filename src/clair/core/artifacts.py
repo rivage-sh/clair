@@ -22,7 +22,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, computed_field
 
-from clair.adapters.base import Statement
+from clair.adapters.objects import Statement
 from clair.core.compiler import CompiledNodeInfo, CompileOutput
 from clair.core.runner import RunCancel, RunFailure, RunResult, RunSkip, RunSummary
 from clair.exceptions import ClairError

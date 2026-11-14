@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from clair.adapters.base import StatementStatus
+from clair.adapters.objects import StatementStatus
 from clair.core.artifacts import (
     RUN_SUMMARY_FILE_NAME,
     write_compile_output,

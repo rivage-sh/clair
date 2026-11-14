@@ -11,14 +11,8 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from clair.adapters.base import (
-    Statement,
-    StatementStatus,
-    WarehouseAdapter,
-    WarehouseColumn,
-    WarehouseObject,
-    WarehouseObjectType,
-)
+from clair.adapters.base import WarehouseAdapter
+from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, WarehouseObject, WarehouseObjectType
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project

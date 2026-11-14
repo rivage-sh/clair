@@ -11,7 +11,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from clair.adapters.base import WarehouseColumn
+from clair.adapters.objects import WarehouseColumn
 from clair.core.comments import WarehouseComments, build_comment_statements, quote_comment
 from clair.core.compiler import build_statements
 from clair.core.runner import RunFailure, RunSuccess

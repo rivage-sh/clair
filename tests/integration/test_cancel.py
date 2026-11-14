@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from clair.adapters.base import Statement
+from clair.adapters.objects import Statement
 from clair.adapters.snowflake import SnowflakeAdapter
 
 pytestmark = pytest.mark.integration

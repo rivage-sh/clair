@@ -12,7 +12,7 @@ import pytest
 
 import clair
 from clair import TestSeverity, TestUnique
-from clair.adapters.base import StatementStatus
+from clair.adapters.objects import StatementStatus
 from clair.core.runner import RunFailure, RunSkip, RunSuccess
 from clair.core.test_runner import TestResult, TestSummary
 from clair.trouves.address import TrouveAddress
