@@ -11,8 +11,8 @@ The command finds four faults:
 - Two Trouves that go to one physical address.
 - An address that an author writes as text, which makes no DAG edge.
 - A build plan that clair cannot make, or that ignores the staging address.
-  ``build_sql()`` needs no connection, thus the command calls it for each run
-  mode that a Trouve can reach. A ``build_sql()`` override gets the same test.
+  ``Trouve.plan()`` needs no connection, thus the command calls it for each run
+  mode that a Trouve can reach. An override of a phase gets the same test.
 """
 
 from __future__ import annotations
