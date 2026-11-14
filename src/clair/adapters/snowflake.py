@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -35,9 +34,9 @@ class SnowflakeAdapter(WarehouseAdapter):
         # USE statement. set_context() reads them one time.
         self._opening_context: tuple[str | None, str | None] | None = None
 
-        # The text and the request id of the statement that runs now. cancel()
-        # reads them from another thread.
-        self._running_statement: tuple[str, uuid.UUID] | None = None
+        # True while execute() waits for a statement. cancel() reads it from
+        # another thread.
+        self._statement_running = False
         self._running_lock = threading.Lock()
 
     @classmethod
@@ -99,13 +98,10 @@ class SnowflakeAdapter(WarehouseAdapter):
             raise RuntimeError("Not connected. Call connect() first.")
 
         cursor = self._conn.cursor()
-        # clair gives the request id, thus cancel() can name this statement
-        # while execute() waits for it.
-        request_id = uuid.uuid4()
         with self._running_lock:
-            self._running_statement = (sql.strip(" \t\n\r"), request_id)
+            self._statement_running = True
         try:
-            cursor.execute(sql, _statement_params={"requestId": str(request_id)})
+            cursor.execute(sql)
             query_id = cursor.sfqid or "unknown"
             return Statement(
                 sql=sql,
@@ -125,22 +121,32 @@ class SnowflakeAdapter(WarehouseAdapter):
             )
         finally:
             with self._running_lock:
-                self._running_statement = None
+                self._statement_running = False
             cursor.close()
 
     def cancel(self) -> None:
         """Cancel the statement that execute() waits for now. Another thread calls it.
 
-        The connector cancels a statement by its text and its request id, in
-        the same way as for its own timeout. execute() then gives a Statement
-        that failed. With no statement, the method does nothing.
+        A second cursor on the same connection sends
+        ``SYSTEM$CANCEL_ALL_QUERIES`` for the session. Each thread of a run
+        has its own adapter, thus the session runs only the statement of
+        execute(). Snowflake does not cancel the statement that sends the
+        cancel. execute() then gives a Statement that failed. With no
+        statement, the method does nothing.
+
+        clair uses only the public interface of the connector and a SQL
+        function that Snowflake documents. The private cancel of the
+        connector can change in each release.
         """
         with self._running_lock:
-            running_statement = self._running_statement
-        if running_statement is None or self._conn is None:
+            statement_running = self._statement_running
+        if not statement_running or self._conn is None:
             return
-        sql, request_id = running_statement
-        self._conn._cancel_query(sql, request_id)
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute("SELECT SYSTEM$CANCEL_ALL_QUERIES(%s)", (self._conn.session_id,))
+        finally:
+            cursor.close()
 
     def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
         """Give the type and the comment of the object at the address. Reads INFORMATION_SCHEMA.
