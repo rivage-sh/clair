@@ -246,19 +246,19 @@ tests. The rename costs nothing: the candidate already exists, and clair renames
 metadata. clair does not drop the snapshots. Drop the old ones on a schedule. An
 integration test of clair runs this Trouve, and reads the snapshot.
 
-## 3. Make a table one time, then never again
+## 3. Always run a table incrementally
 
-Some tables must never be made again after their first run: a full refresh costs too
-much, or the source no longer holds the old rows. `NeverRebuild` makes the table on the
-first run, and gives each later run the incremental mode, also under
-`--run-mode full_refresh`:
+Some tables must always run in the incremental mode: a full refresh costs too much, or
+the source no longer holds the old rows. `AlwaysIncremental` gives each run the
+incremental mode, also under `--run-mode full_refresh`. The one exception is the first
+run, which makes the table:
 
 ```python
 from clair import RunMode, Table, WarehouseObject
 
 
-class NeverRebuild(Table):
-    """Make the table one time, then run each later run in the incremental mode."""
+class AlwaysIncremental(Table):
+    """Run each run in the incremental mode. Only the first run makes the table."""
 
     def effective_mode(
         self, requested_mode: RunMode, current_object: WarehouseObject | None

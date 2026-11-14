@@ -389,8 +389,8 @@ def test_the_example_overrides_compile_their_plans(
     )
 
 
-class NeverRebuild(Table):
-    """The policy of the lifecycle guide: make the table one time, then always run incrementally."""
+class AlwaysIncremental(Table):
+    """The policy of the lifecycle guide: each run is incremental, except the first run."""
 
     def effective_mode(self, requested_mode: RunMode, current_object: WarehouseObject | None) -> RunMode:
         if current_object is None:
@@ -405,7 +405,7 @@ class NeverRebuild(Table):
 def test_an_effective_mode_override_decides_the_mode_of_a_full_refresh_run(
     existing_tables: list[str], expected_mode: RunMode
 ) -> None:
-    trouve = incremental_table(Upsert(primary_key_columns=["id"]), NeverRebuild)
+    trouve = incremental_table(Upsert(primary_key_columns=["id"]), AlwaysIncremental)
     dag = build_dag([trouve])
 
     (result,) = run_project(

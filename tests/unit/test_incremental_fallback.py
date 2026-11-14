@@ -296,11 +296,11 @@ def test_a_later_discovery_in_the_process_does_not_change_the_addresses(tmp_path
     assert INCREMENTAL_FILTER not in build_sql
 
 
-_NEVER_REBUILD_MODULE = """
+_ALWAYS_INCREMENTAL_MODULE = """
 from clair import RunMode, Table
 
 
-class NeverRebuild(Table):
+class AlwaysIncremental(Table):
     def effective_mode(self, requested_mode, current_object):
         if current_object is None:
             return RunMode.FULL_REFRESH
@@ -317,11 +317,11 @@ def test_a_node_that_a_policy_makes_incremental_keeps_the_filter_in_a_full_refre
     """
     project_root = _write_project(
         tmp_path / "project",
-        f"NeverRebuild(sql=sql, run_config=Incremental(strategy={strategy}), columns=[Column(name='id', type='NUMBER')])",
+        f"AlwaysIncremental(sql=sql, run_config=Incremental(strategy={strategy}), columns=[Column(name='id', type='NUMBER')])",
     )
-    (project_root / "_never_rebuild.py").write_text(_NEVER_REBUILD_MODULE)
+    (project_root / "_always_incremental.py").write_text(_ALWAYS_INCREMENTAL_MODULE)
     trouve_file = project_root / "db" / "derived" / "recent_orders.py"
-    trouve_file.write_text("from _never_rebuild import NeverRebuild\n" + trouve_file.read_text())
+    trouve_file.write_text("from _always_incremental import AlwaysIncremental\n" + trouve_file.read_text())
 
     summary = _run(project_root, RecordingAdapter(), RunMode.FULL_REFRESH)
 
