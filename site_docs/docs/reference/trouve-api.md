@@ -138,7 +138,8 @@ class SqlTrouve(MaterializedTrouve, ABC):
 |--------|---------|-------------|
 | `create_statement(address)` | `str` | The `CREATE OR REPLACE` of a full refresh. |
 | `resolved_sql()` | `str` | The SQL with each reference resolved. Raises `TrouveNotCompiledError` if not compiled. |
-| `full_refresh_sql()` | `str` | The SQL of the full refresh mode, without an incremental filter. |
+| `sql_for(run_mode)` | `str` | The SQL as the module writes it when `clair.run_mode` is `run_mode`. clair runs the file again if the mode differs from the mode of the command line. A build gives `sql_for(context.effective_mode)`. |
+| `full_refresh_sql()` | `str` | `sql_for(RunMode.FULL_REFRESH)`: the SQL without an incremental filter. |
 
 Write `isinstance(obj, SqlTrouve)` to accept a `Table` or a `View`.
 

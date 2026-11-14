@@ -297,21 +297,24 @@ class CompiledSql(CompiledAttributes):
 
     Attributes:
         resolved_sql: The SQL of the author, with an address in place of each
-            reference token.
-        full_refresh_tokens: Gives the SQL of the author, with its tokens, as
-            the module writes it when ``clair.run_mode`` is ``FULL_REFRESH``.
-            Discovery sets it when the module saw ``INCREMENTAL``. The call
-            runs the file one more time, thus clair calls it only for a node
-            that makes its object again.
-        full_refresh_render: Gives that SQL with an address in place of each
-            token. Discovery sets it with the logical addresses, and
+            reference token, as the module wrote it in ``rendered_mode``.
+        rendered_mode: The value of ``clair.run_mode`` when discovery imported
+            the module. A module can read it, for example to add an
+            incremental filter.
+        tokens_in_mode: Gives the SQL of the author, with its tokens, as the
+            module writes it in another run mode. The call runs the file one
+            more time, thus clair calls it only for a node whose effective
+            mode differs from ``rendered_mode``.
+        render_in_mode: Gives that SQL with an address in place of each token.
+            Discovery sets it with the logical addresses, and
             ``recompile_for_selection()`` sets it again for the selection.
-            None means that ``resolved_sql`` is the SQL of a full refresh.
+            None means that ``resolved_sql`` is the SQL of each mode.
     """
 
     resolved_sql: str
-    full_refresh_tokens: Callable[[], str] | None = Field(default=None, exclude=True, repr=False)
-    full_refresh_render: Callable[[], str] | None = Field(default=None, exclude=True, repr=False)
+    rendered_mode: RunMode = RunMode.FULL_REFRESH
+    tokens_in_mode: Callable[[RunMode], str] | None = Field(default=None, exclude=True, repr=False)
+    render_in_mode: Callable[[RunMode], str] | None = Field(default=None, exclude=True, repr=False)
 
 
 class CompiledDataframe(CompiledAttributes):
@@ -685,29 +688,42 @@ class SqlTrouve(MaterializedTrouve[CompiledSql], ABC):
         """Give the statement that makes the object at *address* again from the SQL."""
 
     def resolved_sql(self) -> str:
-        """Give the SQL with each reference resolved.
+        """Give the SQL with each reference resolved, in the run mode of the command line.
+
+        A build gives ``sql_for(context.effective_mode)`` in place of this, because
+        the effective mode of a node can differ from the mode of the command line.
 
         Raises:
             TrouveNotCompiledError: If discovery did not load this Trouve.
         """
         return self.require_compiled().resolved_sql.strip()
 
-    def full_refresh_sql(self) -> str:
-        """Give the resolved SQL that makes the object again from nothing.
+    def sql_for(self, run_mode: RunMode) -> str:
+        """Give the resolved SQL as the module writes it when ``clair.run_mode`` is *run_mode*.
 
-        A module can read ``clair.run_mode`` and add an incremental filter. A
-        node whose effective mode is ``FULL_REFRESH`` must not keep that
-        filter, because its object then holds the filtered rows only. In an
-        incremental run, clair thus renders the SQL of this one module in the
-        full refresh mode, at the first call.
+        A module can read ``clair.run_mode`` and add an incremental filter that
+        reads ``{THIS}``. The SQL of a node must match its effective mode, and
+        not the mode of the command line. A full refresh must not keep the
+        filter, because its object then holds the filtered rows only. An
+        incremental node must keep it, because it then adds each row again.
+        When the two modes differ, clair runs this one module again in
+        *run_mode*, at the first call.
 
         Raises:
             TrouveNotCompiledError: If discovery did not load this Trouve.
         """
         compiled = self.require_compiled()
-        if compiled.full_refresh_render is not None:
-            return compiled.full_refresh_render().strip()
-        return compiled.resolved_sql.strip()
+        if run_mode == compiled.rendered_mode or compiled.render_in_mode is None:
+            return compiled.resolved_sql.strip()
+        return compiled.render_in_mode(run_mode).strip()
+
+    def full_refresh_sql(self) -> str:
+        """Give the resolved SQL that makes the object again from nothing: ``sql_for(FULL_REFRESH)``.
+
+        Raises:
+            TrouveNotCompiledError: If discovery did not load this Trouve.
+        """
+        return self.sql_for(RunMode.FULL_REFRESH)
 
 
 class View(SqlTrouve):
@@ -815,7 +831,9 @@ class Table(SqlTrouve, TableOptions):
         if isinstance(strategy, Append):
             return [
                 self.insert_statement(
-                    str(target_address), f"(\n{self.resolved_sql()}\n)", context.target_column_names
+                    str(target_address),
+                    f"(\n{self.sql_for(context.effective_mode)}\n)",
+                    context.target_column_names,
                 )
             ]
         new_rows_address = self.new_rows_address(context.run_id)
@@ -858,7 +876,8 @@ class Table(SqlTrouve, TableOptions):
         """Give the statement that writes the rows of this run to the new rows table."""
         return (
             f"-- create the new rows table\n"
-            f"CREATE OR REPLACE TABLE {self.new_rows_address(run_id)} AS (\n{self.resolved_sql()}\n)"
+            f"CREATE OR REPLACE TABLE {self.new_rows_address(run_id)} AS (\n"
+            f"{self.sql_for(RunMode.INCREMENTAL)}\n)"
         )
 
     def merge_statement(self, target_address: TrouveAddress | str, source_address: TrouveAddress | str) -> str:

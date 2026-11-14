@@ -22,7 +22,7 @@ from clair.adapters.base import WarehouseAdapter
 from clair.adapters.objects import WarehouseColumn
 from clair.exceptions import RunError
 from clair.trouves.address import TrouveAddress
-from clair.trouves.run_config import Incremental, OnSchemaChange
+from clair.trouves.run_config import Incremental, OnSchemaChange, RunMode
 from clair.trouves.trouve import Table
 
 
@@ -127,7 +127,7 @@ def read_incremental_columns(
     if target_columns is None:
         raise RunError(f"Clair cannot read the columns of {physical_address}.")
 
-    new_row_columns = adapter.describe_query(trouve.resolved_sql())
+    new_row_columns = adapter.describe_query(trouve.sql_for(RunMode.INCREMENTAL))
     change = compare_columns(target_columns, new_row_columns)
     error = schema_change_error(change, trouve.run_config.on_schema_change, physical_address)
     if error is not None:

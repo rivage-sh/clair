@@ -108,7 +108,7 @@ copy SQL from the source of clair.
 | `clone_promote_statements(staging_address, physical_address)` | The default promotion. |
 | `comment_statements(address, current_comments)` | The comments of the Trouve and its columns. |
 | `drop_statement(address)` | A `DROP TABLE IF EXISTS` or a `DROP VIEW IF EXISTS`. |
-| `resolved_sql()`, `full_refresh_sql()` | The SQL of the Trouve, with each reference resolved. |
+| `sql_for(run_mode)` | The SQL of the Trouve in one run mode, with each reference resolved. Give it `context.effective_mode`: the mode of a node can differ from the mode of the command line. |
 
 `super()` gives the default of each phase. An override often keeps the default for one
 mode, and changes the other.
@@ -273,10 +273,11 @@ The policy cannot give `INCREMENTAL` when production holds no table: the clone a
 `MERGE` need a table. `super()` keeps the other guards of `Table`: a Trouve with no
 `Incremental` run_config, or an address that holds a view, still gets a full refresh.
 
-Give `NeverRebuild` an `Upsert` or a `DeleteInsert` strategy. A Trouve file reads
-`clair.run_mode` at import time, thus under `--run-mode full_refresh` its SQL holds no
-incremental filter, and the build gets each row. A `MERGE` or a `DELETE` and `INSERT` of
-each row gives the same table, and only reads more data. An `Append` adds each row again.
+Each strategy works, also `Append`. A Trouve file reads `clair.run_mode` at import time,
+thus under `--run-mode full_refresh` its SQL holds no incremental filter. The build of an
+incremental node gives `sql_for(context.effective_mode)`, and clair runs the file again in
+the incremental mode. The node thus gets its filter, in the same way as a node that falls
+back to a full refresh loses it.
 
 `clair compile` gives `effective_mode()` an object of the type of the Trouve, thus the
 compiled plan shows the incremental plan in each mode, as the run does.

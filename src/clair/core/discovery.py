@@ -33,7 +33,7 @@ from clair.core import project_imports
 from clair.core.references import (
     describe_unresolved_tokens,
     detect_imports,
-    full_refresh_renderer,
+    mode_renderer,
     resolve_sql,
 )
 from clair.environments.project_routing import ROUTING_FILE_NAME
@@ -221,20 +221,22 @@ def _merge_imports(imports: list[str], sample_imports: list[str]) -> list[str]:
 _RUN_MODE_LOCK = threading.Lock()
 
 
-def _full_refresh_tokens_of(source: str, file_path: Path, module_name: str) -> Callable[[], str]:
-    """Give the function that runs one Trouve file again, with ``clair.run_mode`` as FULL_REFRESH.
+def _tokens_in_mode_of(source: str, file_path: Path, module_name: str) -> Callable[[RunMode], str]:
+    """Give the function that runs one Trouve file again, with ``clair.run_mode`` set to a mode.
 
     A module reads the run mode at import time, for example to add an
-    incremental filter. A node whose effective mode is a full refresh needs
-    the SQL without it. Only that file runs again, and only when a node asks:
-    each import of the file resolves to the module that discovery loaded.
+    incremental filter. A node whose effective mode differs from the mode of
+    the import needs the SQL of its own mode: a full refresh without the
+    filter, and an incremental run with it. Only that file runs again, and only
+    when a node asks: each import of the file resolves to the module that
+    discovery loaded.
     """
 
     @functools.cache
-    def full_refresh_tokens() -> str:
+    def tokens_in_mode(run_mode: RunMode) -> str:
         with _RUN_MODE_LOCK:
             run_mode_of_the_run = _clair_pkg.run_mode
-            _clair_pkg.run_mode = RunMode.FULL_REFRESH
+            _clair_pkg.run_mode = run_mode
             try:
                 names = project_imports.run_source_again(source, file_path, module_name)
             finally:
@@ -242,11 +244,11 @@ def _full_refresh_tokens_of(source: str, file_path: Path, module_name: str) -> C
         rendered = names.get("trouve")
         if not isinstance(rendered, SqlTrouve):
             raise DiscoveryError(
-                str(file_path), "the file gives no SQL Trouve when clair.run_mode is FULL_REFRESH."
+                str(file_path), f"the file gives no SQL Trouve when clair.run_mode is {run_mode.name}."
             )
         return rendered.sql
 
-    return full_refresh_tokens
+    return tokens_in_mode
 
 
 def _compile_trouve(
@@ -301,20 +303,19 @@ def _compile_trouve(
             config=config,
         )
     elif isinstance(trouve_obj, SqlTrouve):
-        # The module saw INCREMENTAL, thus its SQL can hold an incremental
-        # filter. Keep its text, and render the full refresh SQL on demand.
-        full_refresh_tokens = None
-        full_refresh_render = None
-        if run_mode == RunMode.INCREMENTAL:
-            full_refresh_tokens = _full_refresh_tokens_of(file_path.read_text(), file_path, module_name)
-            full_refresh_render = full_refresh_renderer(
-                full_refresh_tokens,
-                {address: address for address in logical_addresses.values()},
-                logical,
-            )
+        # The SQL can depend on the run mode that the module saw. Keep the text
+        # of the file, and render the SQL of the other mode on demand: a node
+        # whose effective mode differs from the mode of the import asks for it.
+        tokens_in_mode = _tokens_in_mode_of(file_path.read_text(), file_path, module_name)
+        render_in_mode = mode_renderer(
+            tokens_in_mode,
+            {address: address for address in logical_addresses.values()},
+            logical,
+        )
         trouve_obj.compiled = CompiledSql(
-            full_refresh_tokens=full_refresh_tokens,
-            full_refresh_render=full_refresh_render,
+            rendered_mode=run_mode or RunMode.FULL_REFRESH,
+            tokens_in_mode=tokens_in_mode,
+            render_in_mode=render_in_mode,
             physical_address=physical,
             resolved_sql=resolve_sql(trouve_obj.sql, logical_addresses, this_address=logical),
             file_path=relative_file_path,

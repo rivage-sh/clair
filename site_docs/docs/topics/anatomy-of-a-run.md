@@ -290,10 +290,12 @@ A subclass can override this policy. The first run of a new incremental Trouve n
 no flag from you.
 
 That node builds from the SQL of its effective mode. A module reads `clair.run_mode` at
-import time, thus discovery keeps the text of each Trouve file of an incremental run. At
-the first call of `SqlTrouve.full_refresh_sql()`, clair runs that one file again with
-`FULL_REFRESH`: each import of the file resolves to the module that discovery loaded, and
-no other file runs. The logical address joins the Trouves of that SQL to the addresses of
+import time, thus discovery keeps the text of each Trouve file. When the effective mode of
+a node differs from the mode of the command line, the build calls
+`SqlTrouve.sql_for(effective_mode)`, and clair runs that one file again in that mode: each
+import of the file resolves to the module that discovery loaded, and no other file runs.
+The two directions are the same: a fallback to a full refresh drops the incremental
+filter, and a policy that makes a full refresh run incremental keeps it. The logical address joins the Trouves of that SQL to the addresses of
 the run. A query that cannot tell if the table exists fails the node: a fallback on a table
 that exists replaces its history with the incremental rows.
 
