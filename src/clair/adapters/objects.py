@@ -10,6 +10,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
+from clair.phase import Phase
+
 
 class StatementStatus(StrEnum):
     """What happened to one SQL statement."""
@@ -76,6 +78,9 @@ class Statement(BaseModel):
         query_url: The URL of the query detail page in the warehouse console.
         error: The error message of a statement that failed.
         row_count: The number of rows that the statement returned or changed.
+        phase: The phase of the lifecycle that sent the statement. The runner
+            sets it on each statement of a run result. None for a statement
+            outside the lifecycle of a Trouve.
     """
 
     sql: str = ""
@@ -84,6 +89,7 @@ class Statement(BaseModel):
     query_url: str | None = None
     error: str = ""
     row_count: int = 0
+    phase: Phase | None = None
 
     @property
     def success(self) -> bool:

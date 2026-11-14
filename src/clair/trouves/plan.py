@@ -1,7 +1,7 @@
 """The plan of one node: each statement that clair sends to materialize a Trouve.
 
-``Trouve.plan()`` gives a ``NodePlan``. The plan holds eight phases, and the
-runner executes them in this order:
+``Trouve.plan()`` gives a ``NodePlan``. The plan holds one field for each
+``clair.phase.Phase``, and the runner executes the phases in this order:
 
 1. ``prepare``: make the target ready. An incremental run clones production to
    the staging address, and adds each new column.
@@ -30,6 +30,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, computed_field
 
 from clair.adapters.objects import Statement, WarehouseColumn, WarehouseObject
+from clair.phase import Phase
 from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
 from clair.trouves.statements import WarehouseComments
@@ -212,6 +213,12 @@ class NodePlan(BaseModel):
     document: list[str] = []
     retire: list[str] = []
     cleanup: list[str] = []
+
+    def statements_of(self, phase: Phase) -> list[str]:
+        """Give the SQL of one phase. For ``Phase.TEST``, give the SQL of each test query."""
+        if phase == Phase.TEST:
+            return [query.sql for query in self.test]
+        return list(getattr(self, phase.value))
 
     @property
     def write_statements(self) -> list[str]:

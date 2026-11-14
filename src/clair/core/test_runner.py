@@ -14,6 +14,7 @@ from clair.adapters.objects import Statement, StatementStatus
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag
 from clair.core.references import render_sample
+from clair.phase import Phase
 from clair.trouves.address import TrouveAddress
 from clair.trouves.plan import PlanContext, TestQuery, TestResult
 from clair.trouves.run_config import RunMode
@@ -189,7 +190,7 @@ def run_test_queries(
                 test_index=query.test_index,
                 test_type=query.label,
                 column_name=query.column_name,
-                statement=statement,
+                statement=statement.model_copy(update={"phase": Phase.TEST}),
                 severity=query.severity,
             )
         )

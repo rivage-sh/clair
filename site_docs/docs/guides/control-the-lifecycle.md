@@ -364,6 +364,25 @@ ON target.customer_id = source.customer_id
 ...
 ```
 
+## Read the record of a run
+
+Each statement of a run result names its `Phase`, thus the record of a run has the same
+shape as the plan. The artifact file of each Trouve in `.clair/artifacts/<run_id>/` gives
+each phase a section with the header of `clair compile`. The `test` section holds each
+test query and its outcome:
+
+```sql
+-- ── test · a blocking test that fails stops the promotion ────
+-- statement 4/7: success, query ID 01b2...
+-- unique (customer_id), ERROR: passed
+SELECT customer_id, COUNT(*) FROM <staging> GROUP BY customer_id HAVING COUNT(*) > 1
+```
+
+A failure names its phase. The summary of `clair run` says `FAILED in promote`, and
+`RunFailure.failed_phase` gives the same answer to a caller of `clair.run()`. A statement
+that clair did not send keeps its phase, with the status `not_run`. See
+[`Phase`](../reference/python-api.md#phase).
+
 ## Validate the plan
 
 ```bash

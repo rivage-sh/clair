@@ -91,6 +91,7 @@ from clair.environments.environments import (
     load_environment,
 )
 from clair.environments.routing import RoutingEntry, RoutingTable
+from clair.phase import Phase
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
@@ -155,6 +156,7 @@ __all__ = [
     "OnSchemaChange",
     "PandasTable",
     "Password",
+    "Phase",
     "PlanContext",
     "PrivateKey",
     "RoutingEntry",

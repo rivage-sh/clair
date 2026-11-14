@@ -23,6 +23,7 @@ from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.schema_change import read_incremental_columns
 from clair.core.staging import make_staging_address
 from clair.exceptions import ClairError, ResultNotFoundError, RunError
+from clair.phase import Phase
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.plan import PlanContext, TestQuery, TestResult
@@ -104,6 +105,21 @@ class RunFailure(_RunResultBase):
         for statement in self.statements:
             if statement.status == StatementStatus.FAILURE:
                 return statement
+        return None
+
+    @property
+    def failed_phase(self) -> Phase | None:
+        """Give the phase that failed, or None for a failure outside the phases.
+
+        A failed statement gives its phase. A blocking test result gives
+        ``Phase.TEST``. A failure before the plan, for example a session context
+        that clair cannot set, gives None.
+        """
+        failed_statement = self.failed_statement
+        if failed_statement is not None and failed_statement.phase is not None:
+            return failed_statement.phase
+        if any(test_result.is_blocking for test_result in self.test_results):
+            return Phase.TEST
         return None
 
 
@@ -300,8 +316,10 @@ class RunSummary(BaseModel):
             )
             lines.extend(_render_statements(result.statements))
         else:
+            failed_phase = result.failed_phase
+            phase_text = "" if failed_phase is None else f" in {failed_phase.value}"
             lines.append(
-                f"[{index}/{total}] {name} ... FAILED ({result.duration_seconds:.1f}s)"
+                f"[{index}/{total}] {name} ... FAILED{phase_text} ({result.duration_seconds:.1f}s)"
             )
             lines.extend(_render_statements(result.statements))
             lines.append(f"      Error: {result.error}")
@@ -634,19 +652,22 @@ def _run_node(
     start = time.monotonic()
     statements: list[Statement] = []
 
-    def execute(sql: str) -> Statement:
-        """Send one statement, or record it as cancelled after a cancel."""
-        if is_cancelled():
-            statement = Statement(sql=sql, status=StatementStatus.FAILURE, error=RUN_CANCELLED_ERROR)
-        else:
-            statement = adapter.execute(sql)
+    def record(statement: Statement, phase: Phase) -> Statement:
+        """Keep one statement of the result, with the phase that sent it."""
+        statement = statement.model_copy(update={"phase": phase})
         statements.append(statement)
         return statement
 
-    def execute_phase(phase_statements: list[str]) -> Statement | None:
+    def execute(sql: str, phase: Phase) -> Statement:
+        """Send one statement, or record it as cancelled after a cancel."""
+        if is_cancelled():
+            return record(Statement(sql=sql, status=StatementStatus.FAILURE, error=RUN_CANCELLED_ERROR), phase)
+        return record(adapter.execute(sql), phase)
+
+    def execute_phase(phase: Phase) -> Statement | None:
         """Execute each statement of one phase. Give the statement that failed, or None."""
-        for sql in phase_statements:
-            statement = execute(sql)
+        for sql in plan.statements_of(phase):
+            statement = execute(sql, phase)
             if not statement.success:
                 return statement
         return None
@@ -654,8 +675,7 @@ def _run_node(
     def run_cleanup() -> None:
         """Execute the cleanup phase. It runs last, after a failure and after a cancel too."""
         for sql in plan.cleanup:
-            cleanup_statement = adapter.execute(sql)
-            statements.append(cleanup_statement)
+            cleanup_statement = record(adapter.execute(sql), Phase.CLEANUP)
             if not cleanup_statement.success:
                 logger.warning("run.node.cleanup_failure", logical=logical_address, physical=name, error=cleanup_statement.error)
 
@@ -683,15 +703,19 @@ def _run_node(
         "" if staging_address is None
         else f". Clair keeps the staging object at {staging_address}, if the {'write' if is_dataframe else 'build'} made one"
     )
+    write_phases = (Phase.PREPARE, Phase.BUILD, Phase.CONFIGURE)
+    write_statements = [(phase, sql) for phase in write_phases for sql in plan.statements_of(phase)]
     sent_write_count = 0
     row_count = 0
 
     def stop_writes(error: str) -> _NodeOutcome:
         """Record each write statement that clair did not send, and give the failure."""
-        statements.extend(Statement(sql=sql) for sql in plan.write_statements[sent_write_count:])
+        statements.extend(
+            Statement(sql=sql, phase=phase) for phase, sql in write_statements[sent_write_count:]
+        )
         return finish(f"{error}{staging_note}", downstream_ok=False)
 
-    failed_statement = execute_phase(plan.prepare)
+    failed_statement = execute_phase(Phase.PREPARE)
     sent_write_count = len(statements)
     if failed_statement is not None:
         return stop_writes(failed_statement.error or "unknown error")
@@ -703,11 +727,11 @@ def _run_node(
         )
         if write_statement is None:
             return stop_writes(write_error)
-        statements.append(write_statement)
+        record(write_statement, Phase.BUILD)
         row_count = write_statement.row_count
 
     build_start = len(statements)
-    failed_statement = execute_phase(plan.build)
+    failed_statement = execute_phase(Phase.BUILD)
     sent_write_count += len(statements) - build_start
     if failed_statement is not None:
         return stop_writes(failed_statement.error or "unknown error")
@@ -716,7 +740,7 @@ def _run_node(
         row_count = statements[-1].row_count
 
     configure_start = len(statements)
-    failed_statement = execute_phase(plan.configure)
+    failed_statement = execute_phase(Phase.CONFIGURE)
     sent_write_count += len(statements) - configure_start
     if failed_statement is not None:
         return stop_writes(failed_statement.error or "unknown error")
@@ -724,7 +748,7 @@ def _run_node(
     # A run with no staging wrote production. The comments follow the build,
     # and the tests report on the written object. Nothing waits on them.
     if staging_address is None:
-        failed_statement = execute_phase(plan.document)
+        failed_statement = execute_phase(Phase.DOCUMENT)
         if failed_statement is not None:
             return finish(failed_statement.error or "unknown error", downstream_ok=False)
         downstream_ok = True
@@ -743,8 +767,12 @@ def _run_node(
     if not trouve.should_promote(context, test_results):
         return finish(_rejection_error(trouve, context, test_results), downstream_ok=False)
 
-    for statement_index, sql in enumerate([*plan.promote, *plan.document]):
-        statement = execute(sql)
+    promotion_statements = [
+        *((Phase.PROMOTE, sql) for sql in plan.promote),
+        *((Phase.DOCUMENT, sql) for sql in plan.document),
+    ]
+    for statement_index, (phase, sql) in enumerate(promotion_statements):
+        statement = execute(sql, phase)
         if statement.success:
             continue
         error = statement.error or "unknown error"
@@ -767,8 +795,7 @@ def _run_node(
     # phase makes clutter, not a wrong table, thus the node keeps the SUCCESS
     # status.
     for sql in plan.retire:
-        retire_statement = adapter.execute(sql)
-        statements.append(retire_statement)
+        retire_statement = record(adapter.execute(sql), Phase.RETIRE)
         if not retire_statement.success:
             logger.warning("run.node.staging_drop_failed", trouve=str(addresses.physical), staging=str(staging_address), error=retire_statement.error)
 

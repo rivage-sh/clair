@@ -26,7 +26,9 @@ from clair.adapters.objects import Statement
 from clair.core.compiler import CompiledNodeInfo, CompileOutput
 from clair.core.runner import RunCancel, RunFailure, RunResult, RunSkip, RunSummary
 from clair.exceptions import ClairError
+from clair.phase import Phase
 from clair.trouves.address import NodeAddresses
+from clair.trouves.plan import TestResult
 
 # The number of hex characters of a UUIDv7 that hold the milliseconds.
 _RUN_ID_TIME_LENGTH = 12
@@ -255,12 +257,14 @@ def _comment_lines(label: str, text: str) -> list[str]:
     return [f"-- {label}: {lines[0]}", *(f"--   {line}" for line in lines[1:])]
 
 
-def _render_statement(statement: Statement, index: int, total: int) -> str:
+def _render_statement(statement: Statement, index: int, total: int, label: str = "") -> str:
     """Give one executed statement, with a comment that holds the answer of the warehouse."""
     header = f"-- statement {index}/{total}: {statement.status.value}"
     if statement.query_id:
         header += f", query ID {statement.query_id}"
     lines = [header]
+    if label:
+        lines.append(f"-- {label}")
     if statement.query_url:
         lines.append(f"-- URL: {statement.query_url}")
     if statement.error:
@@ -269,21 +273,61 @@ def _render_statement(statement: Statement, index: int, total: int) -> str:
     return "\n".join(lines)
 
 
+def _test_label(test_result: TestResult) -> str:
+    """Give the comment that names one test and its outcome."""
+    column = f" ({test_result.column_name})" if test_result.column_name else ""
+    if test_result.passed:
+        outcome = "passed"
+    elif test_result.error:
+        outcome = "the query failed"
+    else:
+        row_word = "row" if test_result.failing_row_count == 1 else "rows"
+        outcome = f"{test_result.failing_row_count} failing {row_word}"
+    return f"{test_result.test_type}{column}, {test_result.severity.value.upper()}: {outcome}"
+
+
 def _render_run_result(result: RunResult) -> str:
-    """Give the text of the artifact file of one Trouve that clair ran."""
+    """Give the text of the artifact file of one Trouve that clair ran.
+
+    The statements come in sections, one for each phase, in the order of
+    ``Phase``, with the headers of ``clair compile``. Thus the record of the
+    run reads the same way as the plan. The ``test`` section holds each test
+    query, and its outcome.
+    """
     assert not isinstance(result, RunSkip | RunCancel)
     lines = [
         f"-- clair run: {result.addresses.physical}",
         f"-- status: {result.status.value}",
     ]
     if isinstance(result, RunFailure):
+        if result.failed_phase is not None:
+            lines.append(f"-- failed phase: {result.failed_phase.value}")
         lines.extend(_comment_lines("error", result.error))
-    total = len(result.statements)
+
+    # Each statement with its phase and its label, in the order of the file.
+    entries: list[tuple[Phase | None, Statement, str]] = [
+        (None, statement, "") for statement in result.statements if statement.phase is None
+    ]
+    for phase in Phase:
+        if phase == Phase.TEST:
+            entries.extend(
+                (phase, test_result.statement, _test_label(test_result))
+                for test_result in result.test_results
+            )
+            continue
+        entries.extend(
+            (phase, statement, "") for statement in result.statements if statement.phase == phase
+        )
+
+    total = len(entries)
     parts = ["\n".join(lines)]
-    parts.extend(
-        _render_statement(statement, index, total)
-        for index, statement in enumerate(result.statements, 1)
-    )
+    previous_phase: Phase | None = None
+    for index, (phase, statement, label) in enumerate(entries, 1):
+        text = _render_statement(statement, index, total, label)
+        if phase is not None and phase != previous_phase:
+            text = f"{phase.header}\n{text}"
+        previous_phase = phase
+        parts.append(text)
     return _STATEMENT_SEPARATOR.join(parts) + "\n"
 
 

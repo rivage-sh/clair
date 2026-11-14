@@ -19,7 +19,8 @@ from structlog.testing import capture_logs
 import clair
 from clair.adapters.objects import StatementStatus
 from clair.core.dag import build_dag, get_executable_nodes
-from clair.core.runner import RunCancellation, RunFailure, RunResult, RunSuccess, run_project
+from clair.core.runner import RunCancellation, RunFailure, RunResult, RunSuccess, RunSummary, run_project
+from clair.phase import Phase
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.plan import NodePlan, PlanContext, TestQuery, TestResult
 from clair.trouves.run_config import DeleteInsert, Incremental, RunMode, Upsert
@@ -114,6 +115,41 @@ def test_a_staged_run_executes_each_phase_in_order() -> None:
 
     assert isinstance(result, RunSuccess)
     assert executed_plan_statements(adapter) == PLAN_STATEMENTS
+
+
+def test_each_statement_of_the_result_names_its_phase() -> None:
+    result = run_plan(RecordingAdapter())
+
+    assert isinstance(result, RunSuccess)
+    plan_statements = [statement for statement in result.statements if statement.sql in PLAN_STATEMENTS]
+    assert [statement.phase for statement in plan_statements] == [
+        Phase.PREPARE,
+        Phase.BUILD,
+        Phase.BUILD,
+        Phase.CONFIGURE,
+        Phase.PROMOTE,
+        Phase.DOCUMENT,
+        Phase.RETIRE,
+        Phase.CLEANUP,
+        Phase.CLEANUP,
+    ]
+
+
+def test_a_statement_that_did_not_run_keeps_its_phase() -> None:
+    result = run_plan(RecordingAdapter(fail_on=[PLAN.build[0]]))
+
+    assert isinstance(result, RunFailure)
+    assert result.failed_phase == Phase.BUILD
+    not_run = [statement for statement in result.statements if statement.status == StatementStatus.NOT_RUN]
+    assert [statement.phase for statement in not_run] == [Phase.BUILD, Phase.CONFIGURE]
+
+
+def test_the_summary_names_the_phase_that_failed() -> None:
+    result = run_plan(RecordingAdapter(fail_on=PLAN.promote))
+
+    assert isinstance(result, RunFailure)
+    assert result.failed_phase == Phase.PROMOTE
+    assert f"{PHYSICAL_ADDRESS} ... FAILED in promote (" in RunSummary.render_node(result, 1, 1)
 
 
 def test_a_run_without_staging_executes_no_promote_and_no_retire() -> None:

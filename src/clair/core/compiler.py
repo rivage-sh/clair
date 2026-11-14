@@ -11,6 +11,7 @@ from clair.adapters.objects import WarehouseObject
 from clair.core.dag import ClairDag, addresses_of
 from clair.core.staging import make_staging_address
 from clair.exceptions import CompileError
+from clair.phase import Phase
 from clair.trouves.address import NodeAddresses
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.plan import NodePlan, PlanContext
@@ -146,22 +147,6 @@ def offline_plan_context(
     )
 
 
-# The text after the name of a phase in its header, when the condition is not "always".
-_PHASE_CONDITIONS = {
-    "test": "a blocking test that fails stops the promotion",
-    "promote": "when should_promote() gives True",
-    "retire": "after the promotion",
-    "cleanup": "always, also after a failure",
-}
-
-
-def _phase_header(phase_name: str) -> str:
-    """Give the comment line that names one phase in the compiled SQL."""
-    condition = _PHASE_CONDITIONS.get(phase_name)
-    label = phase_name if condition is None else f"{phase_name} · {condition}"
-    return f"-- ── {label} " + "─" * max(4, 56 - len(label))
-
-
 def render_plan(trouve: MaterializedTrouve, context: PlanContext, plan: NodePlan) -> list[str]:
     """Give the statements of a plan in the order that clair executes them, with a header for each phase.
 
@@ -175,26 +160,25 @@ def render_plan(trouve: MaterializedTrouve, context: PlanContext, plan: NodePlan
         + f", {query.severity.value.upper()}\n{query.sql}"
         for query in plan.test
     ]
-    phases: list[tuple[str, list[str]]] = [
-        ("prepare", plan.prepare),
-        ("build", plan.build),
-        ("configure", plan.configure),
+    # A run without staging runs no test, and has no promotion.
+    phases = [
+        phase
+        for phase in Phase
+        if context.staged or phase not in (Phase.TEST, Phase.PROMOTE)
     ]
-    if context.staged:
-        phases += [("test", test_statements), ("promote", plan.promote)]
-    phases += [("document", plan.document), ("retire", plan.retire), ("cleanup", plan.cleanup)]
-
-    statements: list[str] = []
     # The type test comes before the first statement that writes production:
     # the promotion of a staged run, and the first statement of a run without one.
-    type_comment_phase = "promote" if context.staged else next(
-        (phase_name for phase_name, phase_statements in phases if phase_statements), ""
+    type_comment_phase = Phase.PROMOTE if context.staged else next(
+        (phase for phase in phases if plan.statements_of(phase)), None
     )
-    for phase_name, phase_statements in phases:
+
+    statements: list[str] = []
+    for phase in phases:
+        phase_statements = test_statements if phase == Phase.TEST else plan.statements_of(phase)
         for statement_index, sql in enumerate(phase_statements):
             if statement_index == 0:
-                header = _phase_header(phase_name)
-                if phase_name == type_comment_phase:
+                header = phase.header
+                if phase == type_comment_phase:
                     header = f"{header}\n{type_comment}"
                 sql = f"{header}\n{sql}"
             statements.append(sql)
