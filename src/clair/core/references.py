@@ -38,6 +38,7 @@ from clair.environments.routing import TrouveAddress
 from clair.exceptions import CompileError
 from clair.trouves._refs import THIS_PLACEHOLDER, TROUVE_PLACEHOLDER_PREFIX, registered
 from clair.trouves.dataframe_trouve import DataframeTrouve
+from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSql
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, DataframeInput, SqlTrouve, TrouveAbc
 from clair.trouves.trouve_type import TrouveType
@@ -247,18 +248,18 @@ def resolve_sql_by_logical_address(
     return resolve_sql(sql, id_to_address, this_address, id_to_sampled_reference)
 
 
-def full_refresh_renderer(
-    full_refresh_tokens: Callable[[], str],
+def mode_renderer(
+    tokens_in_mode: Callable[[RunMode], str],
     address_of_logical: dict[TrouveAddress, TrouveAddress],
     this_address: TrouveAddress,
     sampled_reference_of_logical: dict[TrouveAddress, str] | None = None,
-) -> Callable[[], str]:
-    """Give the function that renders the full refresh SQL of one Trouve, one time at most."""
+) -> Callable[[RunMode], str]:
+    """Give the function that renders the SQL of one Trouve in a run mode, one time at most for each mode."""
 
     @functools.cache
-    def render() -> str:
+    def render(run_mode: RunMode) -> str:
         return resolve_sql_by_logical_address(
-            full_refresh_tokens(), address_of_logical, this_address, sampled_reference_of_logical
+            tokens_in_mode(run_mode), address_of_logical, this_address, sampled_reference_of_logical
         )
 
     return render
@@ -375,7 +376,7 @@ def recompile_for_selection(
         this_address = trouve.compiled.physical_address
 
         if isinstance(trouve, SqlTrouve):
-            full_refresh_tokens = trouve.compiled.full_refresh_tokens
+            tokens_in_mode = trouve.compiled.tokens_in_mode
             trouve.compiled = trouve.compiled.model_copy(
                 update={
                     "resolved_sql": resolve_sql(
@@ -384,10 +385,10 @@ def recompile_for_selection(
                         this_address=this_address,
                         id_to_sampled_reference=sampled_references,
                     ),
-                    "full_refresh_render": None
-                    if full_refresh_tokens is None
-                    else full_refresh_renderer(
-                        full_refresh_tokens,
+                    "render_in_mode": None
+                    if tokens_in_mode is None
+                    else mode_renderer(
+                        tokens_in_mode,
                         address_of_logical,
                         this_address,
                         sampled_reference_of_logical,

@@ -294,3 +294,42 @@ def test_a_later_discovery_in_the_process_does_not_change_the_addresses(tmp_path
     build_sql = _build_sql_of(target)
     assert "from db.raw.orders" in build_sql
     assert INCREMENTAL_FILTER not in build_sql
+
+
+_ALWAYS_INCREMENTAL_MODULE = """
+from clair import RunMode, Table
+
+
+class AlwaysIncrementalTable(Table):
+    def effective_mode(self, requested_mode, current_object):
+        if current_object is None:
+            return RunMode.FULL_REFRESH
+        return super().effective_mode(RunMode.INCREMENTAL, current_object)
+"""
+
+
+@pytest.mark.parametrize("strategy", ["Append()", "Upsert(primary_key_columns=['id'])", "DeleteInsert(range_column='created_at')"])
+def test_a_node_that_a_policy_makes_incremental_keeps_the_filter_in_a_full_refresh_run(tmp_path, strategy):
+    """The reverse of a fallback: the command line asks FULL_REFRESH, and the node runs INCREMENTAL.
+
+    The module saw FULL_REFRESH, thus its SQL has no filter. The node needs the
+    SQL of its own mode, else an Append adds each row again.
+    """
+    project_root = _write_project(
+        tmp_path / "project",
+        f"AlwaysIncrementalTable(sql=sql, run_config=Incremental(strategy={strategy}), columns=[Column(name='id', type='NUMBER')])",
+    )
+    (project_root / "_always_incremental_table.py").write_text(_ALWAYS_INCREMENTAL_MODULE)
+    trouve_file = project_root / "db" / "derived" / "recent_orders.py"
+    trouve_file.write_text("from _always_incremental_table import AlwaysIncrementalTable\n" + trouve_file.read_text())
+
+    summary = _run(project_root, RecordingAdapter(), RunMode.FULL_REFRESH)
+
+    result = summary.result(TARGET)
+    assert isinstance(result, RunSuccess)
+    assert result.effective_run_mode == RunMode.INCREMENTAL
+    assert INCREMENTAL_FILTER in _build_sql_of(result)
+    # The Trouve downstream runs in the mode of the command line, without the filter.
+    downstream = summary.result(DOWNSTREAM)
+    assert isinstance(downstream, RunSuccess)
+    assert downstream.effective_run_mode == RunMode.FULL_REFRESH

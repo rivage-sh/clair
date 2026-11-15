@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from clair.adapters.base import WarehouseColumn
+from clair.adapters.objects import WarehouseColumn
 from clair.core.compiler import build_statements
 from clair.core.discovery import discover_project
 from clair.core.runner import RunSuccess

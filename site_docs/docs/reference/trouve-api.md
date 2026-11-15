@@ -1,7 +1,7 @@
 # Trouve API
 
 ```python
-from clair import BuildPlan, PandasTable, SeedTable, Source, SqlTrouve, Table, TrouveAbc, TrouveType, View
+from clair import MaterializedTrouve, NodePlan, PandasTable, PlanContext, SeedTable, Source, SqlTrouve, Table, TestQuery, TrouveAbc, TrouveType, View
 ```
 
 Clair has one class for each kind of object. The class gives the type, thus no
@@ -103,15 +103,31 @@ from clair import Source
 trouve = Source(docs="The raw orders. The ingestion job loads them.")
 ```
 
+## `MaterializedTrouve`
+
+The abstract base of each Trouve that clair writes: `Table`, `View`, `PandasTable` and
+`SeedTable`. It gives the lifecycle of the Trouve: `plan()` and one method for each phase.
+[Control the lifecycle of a Trouve](../guides/control-the-lifecycle.md) tells you what
+each phase does, when clair executes it, and how to override it.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `effective_mode(requested_mode, current_object)` | `RunMode` | The policy that gives the mode of one node. The default gives `FULL_REFRESH`. A `Table` can give `INCREMENTAL`. |
+| `should_promote(context, test_results)` | `bool` | The policy that decides the promotion of a staged run. |
+| `plan(context)` | `NodePlan` | Each statement of the node, by phase. |
+| `prepare(context)`, `build(context)`, `configure(context)`, `test(context)`, `promote(context)`, `document(context)`, `retire(context)`, `cleanup(context)` | `list[str]`, or `list[TestQuery]` for `test` | The statements of one phase. |
+| `comment_statements(address, current_comments)`, `drop_statement(address)` | `list[str]`, `str` | Building blocks for an override. |
+| `warehouse_object_type` | `WarehouseObjectType` | Property. `TABLE`, `ICEBERG_TABLE` or `VIEW`. |
+
 ## `SqlTrouve`
 
 The abstract base of `Table` and `View`. Snowflake materializes each one from SQL.
 
 ```python
-class SqlTrouve(TrouveAbc, ABC):
+class SqlTrouve(MaterializedTrouve, ABC):
     sql: str
 
-    def build_sql(self, effective_mode, run_id, target_address, target_column_names=None) -> BuildPlan: ...
+    def build(self, context: PlanContext) -> list[str]: ...
 ```
 
 | Field | Type | Default | Description |
@@ -120,7 +136,10 @@ class SqlTrouve(TrouveAbc, ABC):
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `build_sql(effective_mode, run_id, target_address, target_column_names=None)` | `BuildPlan` | The statements that write the object to `target_address`. Raises `TrouveNotCompiledError` if not compiled. A subclass can override it. See [Write your own build](../guides/custom-build-sql.md). |
+| `create_statement(address)` | `str` | The `CREATE OR REPLACE` of a full refresh. |
+| `resolved_sql()` | `str` | The SQL with each reference resolved. Raises `TrouveNotCompiledError` if not compiled. |
+| `sql_for(run_mode)` | `str` | The SQL as the module writes it when `clair.run_mode` is `run_mode`. clair runs the file again if the mode differs from the mode of the command line. A build gives `sql_for(context.effective_mode)`. |
+| `full_refresh_sql()` | `str` | `sql_for(RunMode.FULL_REFRESH)`: the SQL without an incremental filter. |
 
 Write `isinstance(obj, SqlTrouve)` to accept a `Table` or a `View`.
 
@@ -147,7 +166,18 @@ class Table(SqlTrouve):
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `insert_statement(address, new_rows, target_column_names)` | `str` | An `INSERT` that names each column of the target. `new_rows` is a table name, or a subquery in parentheses. With no `target_column_names`, it names the declared `columns`. Use it in a `build_sql()` override. |
+| `insert_statement(address, new_rows, target_column_names)` | `str` | An `INSERT` that names each column of the target. `new_rows` is a table name, or a subquery in parentheses. With no `target_column_names`, it names the declared `columns`. |
+| `merge_statement(target_address, source_address)` | `str` | The `MERGE` of the `Upsert` strategy. |
+| `delete_replaced_rows_statement(target_address, source_address)` | `str` | The `DELETE` of the `DeleteInsert` strategy. |
+| `create_new_rows_statement(run_id)` | `str` | The table of the new rows of this run, at `new_rows_address(run_id)`. |
+| `new_rows_address(run_id)` | `str` | The address of the new rows table of an `Upsert` or a `DeleteInsert`. |
+| `clone_statement(source_address, clone_address)` | `str` | A zero-copy clone. |
+| `add_column_statements(address, added_columns)` | `list[str]` | One `ALTER TABLE ... ADD COLUMN` for each column. |
+| `cluster_by_statements(address, incremental=...)` | `list[str]` | The `ALTER` that sets or drops the clustering key. |
+| `clone_promote_statements(staging_address, physical_address)` | `list[str]` | The default promotion: a clone with `COPY GRANTS`. |
+
+Each method gives SQL text, and sends nothing. Use them in an override of a phase. See
+[The building blocks](../guides/control-the-lifecycle.md#the-building-blocks).
 
 ## `Iceberg`
 
@@ -169,26 +199,45 @@ class Iceberg(BaseModel):
 A view that Snowflake makes from the SQL. Each run makes it again. A `View` has
 no `run_config`, because a view has no incremental mode.
 
-## `BuildPlan`
+## `NodePlan`
 
-The statements that `SqlTrouve.build_sql()` gives for one Trouve.
+The statements that `plan()` gives for one node, by phase. The runner executes the phases
+in the order of the fields.
 
 ```python
-class BuildPlan(BaseModel):
-    statements:         list[str] = []
-    cleanup_statements: list[str] = []
-
-    @property
-    def all_statements(self) -> list[str]: ...  # statements, then cleanup_statements
+class NodePlan(BaseModel):
+    prepare:   list[str] = []
+    build:     list[str] = []
+    configure: list[str] = []
+    test:      list[TestQuery] = []
+    promote:   list[str] = []
+    document:  list[str] = []
+    retire:    list[str] = []
+    cleanup:   list[str] = []
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `statements` | `list[str]` | The statements that write the object, in order. clair stops at the first one that fails. |
-| `cleanup_statements` | `list[str]` | The statements that remove each object that the plan makes for one run. clair executes them after `statements`, when they pass and when one of them fails. A failed cleanup statement does not fail the Trouve. |
-| `all_statements` | `list[str]` | Property. Each statement in the order of a run that passes. |
+## `PlanContext`
 
-UPSERT puts the drop of its merge source in `cleanup_statements`.
+The facts of one node that `plan()` reads. The runner reads them from the warehouse before
+it calls `plan()`. `clair compile` and `clair validate` give an offline context. See
+[What a phase reads](../guides/control-the-lifecycle.md#what-a-phase-reads-plancontext).
+
+## `TestQuery`
+
+One data quality test as SQL. Each row of the result is a failure.
+
+```python
+class TestQuery(BaseModel):
+    test_index: int
+    label: str
+    column_name: str | None = None
+    severity: TestSeverity = TestSeverity.ERROR
+    run_with_sample: bool = True
+    sql: str
+```
+
+`TestQuery.of(test, test_index, address)` gives the query of one `Test` against an address.
+The default `test()` phase gives one for each test of the Trouve.
 
 ## `CompiledAttributes`
 

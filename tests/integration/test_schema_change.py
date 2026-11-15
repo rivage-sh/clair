@@ -15,7 +15,7 @@ from typing import NamedTuple
 import pytest
 
 import clair
-from clair.adapters.base import WarehouseColumn
+from clair.adapters.objects import WarehouseColumn
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunFailure, RunStatus, RunSuccess, RunSummary
 from clair.environments.environments import Environment

@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 # typing.TypeVar takes a default from Python 3.13 only.
 from typing_extensions import TypeVar
 
+from clair.adapters.objects import WarehouseColumn, WarehouseObject, WarehouseObjectType
 from clair.core import project_imports
 from clair.environments.project_routing import find_project_root, routing_entry_of
 from clair.environments.routing import route
@@ -36,6 +37,7 @@ from clair.trouves._refs import THIS_PLACEHOLDER, register
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column
 from clair.trouves.config import ResolvedConfig, SessionConfig, TableDefaults
+from clair.trouves.plan import NodePlan, PlanContext, TestQuery, TestResult
 from clair.trouves.run_config import (
     SOURCE,
     TARGET,
@@ -47,30 +49,20 @@ from clair.trouves.run_config import (
     RunMode,
     Upsert,
 )
+from clair.trouves.statements import (
+    WarehouseComments,
+    add_column_statements,
+    clone_promote_statements,
+    clone_statement,
+    cluster_by_statements,
+    comment_statements,
+    drop_statement,
+    quote_column_name,
+    type_change_error,
+    view_promote_statement,
+)
 from clair.trouves.test import AnyTest
 from clair.trouves.trouve_type import TrouveType
-
-
-class BuildPlan(BaseModel):
-    """The SQL statements that materialize one Trouve.
-
-    Attributes:
-        statements: The statements that write the object, in order. The runner
-            stops at the first statement that fails.
-        cleanup_statements: The statements that remove each object that the
-            statements make for one run only, for example a temporary table.
-            The runner executes them after the statements, when the statements
-            pass and when one of them fails. Thus a cleanup statement must be
-            correct after any statement, for example ``DROP TABLE IF EXISTS``.
-    """
-
-    statements: list[str] = []
-    cleanup_statements: list[str] = []
-
-    @property
-    def all_statements(self) -> list[str]:
-        """Give each statement in the order of a run that passes."""
-        return [*self.statements, *self.cleanup_statements]
 
 
 class UpsertPlan(BaseModel):
@@ -80,13 +72,11 @@ class UpsertPlan(BaseModel):
     make the clauses, thus the semantics and the format stay apart.
 
     Attributes:
-        merge_source_address: The table that holds the new rows of this run.
         join_condition: The ON condition of the MERGE.
         update_column_names: The columns that a row that matches receives.
         insert_column_names: The columns that a row that does not match gets.
     """
 
-    merge_source_address: str
     join_condition: str
     update_column_names: list[str]
     insert_column_names: list[str]
@@ -122,17 +112,6 @@ class ExecutionType(StrEnum):
 # table. It is not the staging suffix of clair.core.staging: the two objects
 # hold different data, and an incremental run makes both.
 NEW_ROWS_SUFFIX = "__clair_new_rows_"
-
-
-def quote_column_name(column_name: str) -> str:
-    """Give the column name as a quoted identifier.
-
-    The warehouse gives each name as it stores it, for example ``ORDER_DATE``.
-    A quoted identifier matches that name exactly, also when the name is a
-    reserved word or holds lower case letters.
-    """
-    escaped_name = column_name.replace('"', '""')
-    return f'"{escaped_name}"'
 
 
 class Iceberg(BaseModel):
@@ -241,6 +220,35 @@ class TableOptions(TableDefaults):
             parameters += f"\nEXTERNAL_VOLUME = '{escaped_volume}'"
         return parameters + "\nCATALOG = 'SNOWFLAKE'"
 
+    # ── building blocks ───────────────────────────────────────────────────
+    def clone_statement(self, source_address: TrouveAddress, clone_address: TrouveAddress) -> str:
+        """Give the zero-copy clone of the table at *source_address* to *clone_address*."""
+        return clone_statement(source_address, clone_address, table_keyword=self.table_keyword)
+
+    def add_column_statements(
+        self, address: TrouveAddress, added_columns: list[WarehouseColumn]
+    ) -> list[str]:
+        """Give one ALTER TABLE ... ADD COLUMN for each column in *added_columns*."""
+        return add_column_statements(address, added_columns, object_keyword=self.object_keyword)
+
+    def cluster_by_statements(self, address: TrouveAddress, *, incremental: bool) -> list[str]:
+        """Give the ALTER that sets the clustering key, or drops a key that the Trouve removed."""
+        return cluster_by_statements(
+            address, self.cluster_by, object_keyword=self.object_keyword, incremental=incremental
+        )
+
+    def clone_promote_statements(
+        self, staging_address: TrouveAddress, physical_address: TrouveAddress
+    ) -> list[str]:
+        """Give the CREATE OR REPLACE ... CLONE ... COPY GRANTS that replaces production."""
+        return clone_promote_statements(
+            staging_address,
+            physical_address,
+            table_keyword=self.table_keyword,
+            object_keyword=self.object_keyword,
+            clustered=bool(self.cluster_by),
+        )
+
 
 def table_options_of(trouve: TrouveAbc) -> TableOptions | None:
     """Give the table options of the Trouve. A View and a Source have none."""
@@ -289,21 +297,24 @@ class CompiledSql(CompiledAttributes):
 
     Attributes:
         resolved_sql: The SQL of the author, with an address in place of each
-            reference token.
-        full_refresh_tokens: Gives the SQL of the author, with its tokens, as
-            the module writes it when ``clair.run_mode`` is ``FULL_REFRESH``.
-            Discovery sets it when the module saw ``INCREMENTAL``. The call
-            runs the file one more time, thus clair calls it only for a node
-            that makes its object again.
-        full_refresh_render: Gives that SQL with an address in place of each
-            token. Discovery sets it with the logical addresses, and
+            reference token, as the module wrote it in ``rendered_mode``.
+        rendered_mode: The value of ``clair.run_mode`` when discovery imported
+            the module. A module can read it, for example to add an
+            incremental filter.
+        tokens_in_mode: Gives the SQL of the author, with its tokens, as the
+            module writes it in another run mode. The call runs the file one
+            more time, thus clair calls it only for a node whose effective
+            mode differs from ``rendered_mode``.
+        render_in_mode: Gives that SQL with an address in place of each token.
+            Discovery sets it with the logical addresses, and
             ``recompile_for_selection()`` sets it again for the selection.
-            None means that ``resolved_sql`` is the SQL of a full refresh.
+            None means that ``resolved_sql`` is the SQL of each mode.
     """
 
     resolved_sql: str
-    full_refresh_tokens: Callable[[], str] | None = Field(default=None, exclude=True, repr=False)
-    full_refresh_render: Callable[[], str] | None = Field(default=None, exclude=True, repr=False)
+    rendered_mode: RunMode = RunMode.FULL_REFRESH
+    tokens_in_mode: Callable[[RunMode], str] | None = Field(default=None, exclude=True, repr=False)
+    render_in_mode: Callable[[RunMode], str] | None = Field(default=None, exclude=True, repr=False)
 
 
 class CompiledDataframe(CompiledAttributes):
@@ -503,7 +514,151 @@ class Source(TrouveAbc):
         return []
 
 
-class SqlTrouve(TrouveAbc[CompiledSql], ABC):
+class MaterializedTrouve(TrouveAbc[CompiledT_co], ABC):
+    """The base of each Trouve that clair writes: a Table, a View, a PandasTable or a SeedTable.
+
+    ``plan()`` gives each statement that clair sends to materialize the Trouve.
+    It calls one method for each phase, in the order of ``NodePlan``. Override
+    one phase method to change one step, or override ``plan()`` to change many
+    together. ``effective_mode()`` and ``should_promote()`` are the two
+    decisions of the lifecycle, and an override can change them too.
+
+    See ``clair.trouves.plan`` for the phases.
+    """
+
+    # ── policies ──────────────────────────────────────────────────────────
+    def effective_mode(
+        self, requested_mode: RunMode, current_object: WarehouseObject | None
+    ) -> RunMode:
+        """Give the run mode of this node. The runner calls it before ``plan()``.
+
+        Args:
+            requested_mode: The run mode that the command line gives.
+            current_object: The object at the physical address. ``clair
+                compile`` has no connection, and gives an object of the type
+                of this Trouve.
+
+        Returns:
+            ``FULL_REFRESH``. A ``Table`` with an ``Incremental`` run_config
+            can give ``INCREMENTAL``.
+        """
+        return RunMode.FULL_REFRESH
+
+    def should_promote(self, context: PlanContext, test_results: list[TestResult]) -> bool:
+        """Tell the runner to promote the tested candidate. A staged run only.
+
+        The default promotes when no blocking test failed, and production holds
+        no object of a different type.
+        """
+        if any(test_result.is_blocking for test_result in test_results):
+            return False
+        return self.type_change_error(context) is None
+
+    # ── the plan ──────────────────────────────────────────────────────────
+    def plan(self, context: PlanContext) -> NodePlan:
+        """Give each statement of this node, by phase.
+
+        The runner executes the phases in the order of the fields of
+        ``NodePlan``. A run with ``--no-test`` gets no ``promote`` and no
+        ``retire``, because the build writes production directly.
+        """
+        return NodePlan(
+            prepare=self.prepare(context),
+            build=self.build(context),
+            configure=self.configure(context),
+            test=self.test(context),
+            promote=self.promote(context) if context.staged else [],
+            document=self.document(context),
+            retire=self.retire(context) if context.staged else [],
+            cleanup=self.cleanup(context),
+        )
+
+    # ── the phases ────────────────────────────────────────────────────────
+    def prepare(self, context: PlanContext) -> list[str]:
+        """Make the target ready for the build. The default sends nothing."""
+        return []
+
+    @abstractmethod
+    def build(self, context: PlanContext) -> list[str]:
+        """Give the statements that write the rows to ``context.target_address``."""
+
+    def configure(self, context: PlanContext) -> list[str]:
+        """Set the properties of the table after the write: the clustering key."""
+        table_options = table_options_of(self)
+        if table_options is None:
+            return []
+        return table_options.cluster_by_statements(
+            context.target_address, incremental=context.effective_mode == RunMode.INCREMENTAL
+        )
+
+    def test(self, context: PlanContext) -> list[TestQuery]:
+        """Give one query for each test of the Trouve, against ``context.target_address``."""
+        return [
+            TestQuery.of(test, test_index, context.target_address)
+            for test_index, test in enumerate(self.tests)
+        ]
+
+    def promote(self, context: PlanContext) -> list[str]:
+        """Make production hold the tested data. The default replaces production with a clone."""
+        table_options = table_options_of(self)
+        assert table_options is not None, "a View gives its own promote()"
+        return table_options.clone_promote_statements(context.target_address, context.physical_address)
+
+    def document(self, context: PlanContext) -> list[str]:
+        """Write the docs as comments on production. The default writes only a text that differs."""
+        return self.comment_statements(context.physical_address, context.current_comments)
+
+    def retire(self, context: PlanContext) -> list[str]:
+        """Deal with the promoted staging object. The default drops it."""
+        return [self.drop_statement(context.target_address)]
+
+    def cleanup(self, context: PlanContext) -> list[str]:
+        """Remove each object that this run made for itself. The default sends nothing.
+
+        Clair executes this phase last, also when a statement before it failed,
+        thus each statement must be correct when its object does not exist.
+        Write ``DROP TABLE IF EXISTS``.
+        """
+        return []
+
+    # ── building blocks ───────────────────────────────────────────────────
+    @property
+    def warehouse_object_type(self) -> WarehouseObjectType:
+        """Give the warehouse type that this Trouve makes: a TABLE, an ICEBERG TABLE or a VIEW."""
+        table_options = table_options_of(self)
+        if table_options is None:
+            return WarehouseObjectType.VIEW
+        if table_options.iceberg_settings() is not None:
+            return WarehouseObjectType.ICEBERG_TABLE
+        return WarehouseObjectType.TABLE
+
+    @property
+    def alter_keyword(self) -> str:
+        """Give the keyword of an ALTER or a DROP: ``TABLE``, ``ICEBERG TABLE`` or ``VIEW``."""
+        table_options = table_options_of(self)
+        return "VIEW" if table_options is None else table_options.object_keyword
+
+    def type_change_error(self, context: PlanContext) -> str | None:
+        """Give the error when production holds an object of a different type, or None."""
+        return type_change_error(
+            context.current_object, self.warehouse_object_type, context.physical_address
+        )
+
+    def comment_statements(
+        self, address: TrouveAddress, current_comments: WarehouseComments | None
+    ) -> list[str]:
+        """Give the statements that write the docs of the Trouve and its columns to *address*."""
+        return comment_statements(
+            address, self.docs, self.columns, current_comments, object_keyword=self.alter_keyword
+        )
+
+    def drop_statement(self, address: TrouveAddress) -> str:
+        """Give the DROP of the object at *address*."""
+        object_keyword = "VIEW" if self.warehouse_object_type == WarehouseObjectType.VIEW else "TABLE"
+        return drop_statement(address, object_keyword=object_keyword)
+
+
+class SqlTrouve(MaterializedTrouve[CompiledSql], ABC):
     """The base of each Trouve that Snowflake materializes from SQL: a Table or a View.
 
     Attributes:
@@ -529,68 +684,46 @@ class SqlTrouve(TrouveAbc[CompiledSql], ABC):
         return self
 
     @abstractmethod
-    def build_sql(
-        self,
-        effective_mode: RunMode,
-        run_id: str,
-        target_address: TrouveAddress,
-        target_column_names: list[str] | None = None,
-    ) -> BuildPlan:
-        """Make the SQL statements that materialize this Trouve.
-
-        Args:
-            effective_mode: The final run mode. The caller selects it.
-            run_id: The unique identifier of this clair run.
-            target_address: The address that the statements write to. The
-                runner gives the staging address of a run with a staging step,
-                and the physical address of a run without one. A reference to
-                an upstream Trouve keeps its own address.
-            target_column_names: The columns of the table that an incremental
-                run writes to, in the order of the warehouse. The runner reads
-                them before it calls this method. It is None in a full refresh,
-                and in ``clair compile``, which has no connection.
-
-        Returns:
-            The statements to execute, and the statements that clean up after
-            them.
-        """
+    def create_statement(self, address: TrouveAddress) -> str:
+        """Give the statement that makes the object at *address* again from the SQL."""
 
     def resolved_sql(self) -> str:
-        """Give the SQL with each reference resolved.
+        """Give the SQL with each reference resolved, in the run mode of the command line.
+
+        A build gives ``sql_for(context.effective_mode)`` in place of this, because
+        the effective mode of a node can differ from the mode of the command line.
 
         Raises:
             TrouveNotCompiledError: If discovery did not load this Trouve.
         """
         return self.require_compiled().resolved_sql.strip()
 
-    def full_refresh_sql(self) -> str:
-        """Give the resolved SQL that makes the object again from nothing.
+    def sql_for(self, run_mode: RunMode) -> str:
+        """Give the resolved SQL as the module writes it when ``clair.run_mode`` is *run_mode*.
 
-        A module can read ``clair.run_mode`` and add an incremental filter. A
-        node whose effective mode is ``FULL_REFRESH`` must not keep that
-        filter, because its object then holds the filtered rows only. In an
-        incremental run, clair thus renders the SQL of this one module in the
-        full refresh mode, at the first call.
+        A module can read ``clair.run_mode`` and add an incremental filter that
+        reads ``{THIS}``. The SQL of a node must match its effective mode, and
+        not the mode of the command line. A full refresh must not keep the
+        filter, because its object then holds the filtered rows only. An
+        incremental node must keep it, because it then adds each row again.
+        When the two modes differ, clair runs this one module again in
+        *run_mode*, at the first call.
 
         Raises:
             TrouveNotCompiledError: If discovery did not load this Trouve.
         """
         compiled = self.require_compiled()
-        if compiled.full_refresh_render is not None:
-            return compiled.full_refresh_render().strip()
-        return compiled.resolved_sql.strip()
+        if run_mode == compiled.rendered_mode or compiled.render_in_mode is None:
+            return compiled.resolved_sql.strip()
+        return compiled.render_in_mode(run_mode).strip()
 
-    def _full_refresh_plan(
-        self,
-        object_keyword: str,
-        target_address: TrouveAddress,
-        create_parameters: str = "",
-    ) -> BuildPlan:
-        """Give the plan that makes the object again from the SQL."""
-        resolved_sql = self.full_refresh_sql()
-        return BuildPlan(statements=[
-            f"CREATE OR REPLACE {object_keyword} {target_address}{create_parameters} AS (\n{resolved_sql}\n)"
-        ])
+    def full_refresh_sql(self) -> str:
+        """Give the resolved SQL that makes the object again from nothing: ``sql_for(FULL_REFRESH)``.
+
+        Raises:
+            TrouveNotCompiledError: If discovery did not load this Trouve.
+        """
+        return self.sql_for(RunMode.FULL_REFRESH)
 
 
 class View(SqlTrouve):
@@ -598,15 +731,17 @@ class View(SqlTrouve):
 
     trouve_type: ClassVar[TrouveType] = TrouveType.VIEW
 
-    def build_sql(
-        self,
-        effective_mode: RunMode,
-        run_id: str,
-        target_address: TrouveAddress,
-        target_column_names: list[str] | None = None,
-    ) -> BuildPlan:
+    def create_statement(self, address: TrouveAddress) -> str:
+        """Give CREATE OR REPLACE VIEW."""
+        return f"CREATE OR REPLACE VIEW {address} AS (\n{self.full_refresh_sql()}\n)"
+
+    def build(self, context: PlanContext) -> list[str]:
         """Give CREATE OR REPLACE VIEW. A view has no incremental mode."""
-        return self._full_refresh_plan("VIEW", target_address)
+        return [self.create_statement(context.target_address)]
+
+    def promote(self, context: PlanContext) -> list[str]:
+        """Make the view again at the production address, with the grants of the old view."""
+        return [view_promote_statement(context.physical_address, self.full_refresh_sql())]
 
 
 class Table(SqlTrouve, TableOptions):
@@ -641,48 +776,165 @@ class Table(SqlTrouve, TableOptions):
         """Give the Iceberg settings of this Table, or None for a standard table."""
         return self.iceberg
 
-    def build_sql(
-        self,
-        effective_mode: RunMode,
-        run_id: str,
-        target_address: TrouveAddress,
-        target_column_names: list[str] | None = None,
-    ) -> BuildPlan:
-        """Make the SQL statements that materialize this Table.
+    # ── policies ──────────────────────────────────────────────────────────
+    def effective_mode(
+        self, requested_mode: RunMode, current_object: WarehouseObject | None
+    ) -> RunMode:
+        """Give ``INCREMENTAL`` when the command line asks for it, and production holds a table.
 
-        See ``SqlTrouve.build_sql`` for the arguments.
+        An incremental run adds to the rows of a table. Two conditions give it
+        none: the address holds nothing, and the address holds a view because
+        the Trouve was a View before. Both give ``FULL_REFRESH``. For the view,
+        the full refresh builds and tests a candidate, and the promotion then
+        stops, because the address holds an object of the old type.
+        """
+        if requested_mode != RunMode.INCREMENTAL or not isinstance(self.run_config, Incremental):
+            return RunMode.FULL_REFRESH
+        if current_object is None or current_object.object_type != self.warehouse_object_type:
+            return RunMode.FULL_REFRESH
+        return RunMode.INCREMENTAL
+
+    # ── the phases ────────────────────────────────────────────────────────
+    def prepare(self, context: PlanContext) -> list[str]:
+        """Give the candidate the rows of production, and each new column.
+
+        An incremental run changes data that already exists, so the staging
+        table needs that data first. A zero-copy clone gives it in constant
+        time. Each new column goes onto the target, thus a test that fails
+        leaves the physical table as it was.
+        """
+        statements: list[str] = []
+        if context.staged and context.effective_mode == RunMode.INCREMENTAL:
+            statements.append(self.clone_statement(context.physical_address, context.target_address))
+        statements.extend(self.add_column_statements(context.target_address, context.added_columns))
+        return statements
+
+    def build(self, context: PlanContext) -> list[str]:
+        """Write the rows: CREATE TABLE AS SELECT, or the statements of the incremental strategy.
 
         Raises:
             TrouveNotCompiledError: If discovery did not load this Trouve.
             CompileError: If an incremental run has no built-in strategy.
             ValueError: If the config asks for UPSERT but has no columns.
         """
-        if effective_mode == RunMode.FULL_REFRESH:
-            return self._full_refresh_plan(
-                self.table_keyword, target_address, self.create_parameters
-            )
-
-        resolved_sql = self.resolved_sql()
-        address = str(target_address)
+        target_address = context.target_address
+        if context.effective_mode == RunMode.FULL_REFRESH:
+            return [self.create_statement(target_address)]
 
         strategy = self.incremental_strategy()
         if strategy is None:
             raise CompileError(
                 f"{self.logical_address} runs in the incremental mode, but its "
                 "run_config names no strategy. Give Incremental(strategy=...), or "
-                "override build_sql() to write the incremental SQL."
+                "override build() to write the incremental SQL."
             )
         if isinstance(strategy, Append):
-            return BuildPlan(statements=[
-                self.insert_statement(address, f"(\n{resolved_sql}\n)", target_column_names)
-            ])
+            return [
+                self.insert_statement(
+                    str(target_address),
+                    f"(\n{self.sql_for(context.effective_mode)}\n)",
+                    context.target_column_names,
+                )
+            ]
+        new_rows_address = self.new_rows_address(context.run_id)
         if isinstance(strategy, Upsert):
-            return self._upsert_build_plan(address, resolved_sql, run_id)
+            return [
+                self.create_new_rows_statement(context.run_id),
+                self.merge_statement(target_address, new_rows_address),
+            ]
         if isinstance(strategy, DeleteInsert):
-            return self._delete_insert_build_plan(
-                strategy, address, resolved_sql, run_id, target_column_names
-            )
+            return [
+                self.create_new_rows_statement(context.run_id),
+                self.delete_replaced_rows_statement(target_address, new_rows_address),
+                "-- insert the new rows\n"
+                + self.insert_statement(
+                    str(target_address), new_rows_address, context.target_column_names
+                ),
+            ]
         raise CompileError(f"No incremental plan for the strategy {strategy}.")
+
+    def cleanup(self, context: PlanContext) -> list[str]:
+        """Drop the new rows table of an Upsert or a DeleteInsert."""
+        strategy = self.incremental_strategy()
+        if context.effective_mode != RunMode.INCREMENTAL or not isinstance(
+            strategy, Upsert | DeleteInsert
+        ):
+            return []
+        return [
+            f"-- drop the new rows table\nDROP TABLE IF EXISTS {self.new_rows_address(context.run_id)}"
+        ]
+
+    # ── building blocks ───────────────────────────────────────────────────
+    def create_statement(self, address: TrouveAddress) -> str:
+        """Give the CREATE OR REPLACE TABLE AS SELECT of a full refresh."""
+        return (
+            f"CREATE OR REPLACE {self.table_keyword} {address}{self.create_parameters} AS (\n"
+            f"{self.full_refresh_sql()}\n)"
+        )
+
+    def create_new_rows_statement(self, run_id: str) -> str:
+        """Give the statement that writes the rows of this run to the new rows table."""
+        return (
+            f"-- create the new rows table\n"
+            f"CREATE OR REPLACE TABLE {self.new_rows_address(run_id)} AS (\n"
+            f"{self.sql_for(RunMode.INCREMENTAL)}\n)"
+        )
+
+    def merge_statement(self, target_address: TrouveAddress | str, source_address: TrouveAddress | str) -> str:
+        """Give the MERGE of the Upsert strategy: update each row that matches, insert each other row.
+
+        Args:
+            target_address: The table that receives the rows.
+            source_address: The table that holds the new rows, for example
+                ``new_rows_address(run_id)``.
+
+        Raises:
+            TypeError: If the strategy is not Upsert.
+            ValueError: If the Trouve has no column.
+        """
+        plan = self.upsert_plan()
+        return (
+            f"-- merge the new rows into the target table\n"
+            f"MERGE INTO {target_address} AS {TARGET}\n"
+            f"USING {source_address} AS {SOURCE}\n"
+            f"ON {plan.join_condition}\n"
+            f"WHEN MATCHED THEN UPDATE SET {plan.update_clause}\n"
+            f"WHEN NOT MATCHED THEN INSERT ({plan.insert_clause}) "
+            f"VALUES ({plan.insert_values_clause})"
+        )
+
+    def delete_replaced_rows_statement(
+        self, target_address: TrouveAddress | str, source_address: TrouveAddress | str
+    ) -> str:
+        """Give the DELETE of the DeleteInsert strategy: remove each target row that a new row replaces.
+
+        A DELETE_INSERT keeps a duplicate key in the new rows, where a MERGE
+        fails. A key on a date column replaces each day that the new rows hold.
+        A range column replaces each day from the first to the last day of the
+        new rows. Its bounds are scalar subqueries, and Snowflake prunes the
+        micro-partitions of the target on them when it compiles the DELETE.
+
+        Raises:
+            TypeError: If the strategy is not DeleteInsert.
+        """
+        strategy = self.incremental_strategy()
+        if not isinstance(strategy, DeleteInsert):
+            raise TypeError("delete_replaced_rows_statement() needs Incremental(strategy=DeleteInsert(...))")
+        if strategy.range_column is not None:
+            range_column = strategy.range_column
+            return (
+                f"-- delete each target row in the range of the new rows\n"
+                f"DELETE FROM {target_address} AS {TARGET}\n"
+                f"WHERE {TARGET}.{range_column} BETWEEN "
+                f"(SELECT MIN({range_column}) FROM {source_address}) "
+                f"AND (SELECT MAX({range_column}) FROM {source_address})"
+            )
+        return (
+            f"-- delete each target row that a new row matches\n"
+            f"DELETE FROM {target_address} AS {TARGET}\n"
+            f"USING {source_address} AS {SOURCE}\n"
+            f"WHERE {strategy.match_condition}"
+        )
 
     def insert_statement(
         self, address: str, new_rows: str, target_column_names: list[str] | None
@@ -698,9 +950,9 @@ class Table(SqlTrouve, TableOptions):
             new_rows: The relation that holds the new rows: a table name, or a
                 subquery in parentheses.
             target_column_names: The columns of the target, from the warehouse.
-                None uses the declared columns. With none of the two, the
-                statement matches by position, and a comment says that the run
-                names the columns.
+                ``PlanContext.target_column_names`` gives them. None uses the
+                declared columns. With none of the two, the statement matches
+                by position, and a comment says that the run names the columns.
         """
         if target_column_names is not None:
             column_list = ", ".join(
@@ -721,82 +973,6 @@ class Table(SqlTrouve, TableOptions):
             return self.run_config.strategy
         return None
 
-    def _upsert_build_plan(self, address: str, resolved_sql: str, run_id: str) -> BuildPlan:
-        """Make the plan that merges the new rows into the target table."""
-        plan = self.upsert_plan(run_id)
-        create_merge_source = (
-            f"-- [1/3] create the merge source table\n"
-            f"CREATE OR REPLACE TABLE {plan.merge_source_address} AS "
-            f"(\n{resolved_sql}\n)"
-        )
-        merge = (
-            f"-- [2/3] merge the source table into the target table\n"
-            f"MERGE INTO {address} AS {TARGET}\n"
-            f"USING {plan.merge_source_address} AS {SOURCE}\n"
-            f"ON {plan.join_condition}\n"
-            f"WHEN MATCHED THEN UPDATE SET {plan.update_clause}\n"
-            f"WHEN NOT MATCHED THEN INSERT ({plan.insert_clause}) "
-            f"VALUES ({plan.insert_values_clause})"
-        )
-        drop_merge_source = (
-            f"-- [3/3] drop the merge source table\n"
-            f"DROP TABLE IF EXISTS {plan.merge_source_address}"
-        )
-        return BuildPlan(
-            statements=[create_merge_source, merge],
-            cleanup_statements=[drop_merge_source],
-        )
-
-    def _delete_insert_build_plan(
-        self,
-        strategy: DeleteInsert,
-        address: str,
-        resolved_sql: str,
-        run_id: str,
-        target_column_names: list[str] | None,
-    ) -> BuildPlan:
-        """Make the plan that deletes the target rows of the new rows, then inserts the new rows.
-
-        A DELETE_INSERT keeps a duplicate key in the new rows, where a MERGE
-        fails. A key on a date column replaces each day that the new rows hold.
-        A range column replaces each day from the first to the last day of the
-        new rows. Its bounds are scalar subqueries, and Snowflake prunes the
-        micro-partitions of the target on them when it compiles the DELETE.
-        """
-        new_rows_address = self.new_rows_address(run_id)
-        create_new_rows = (
-            f"-- [1/4] create the new rows table\n"
-            f"CREATE OR REPLACE TABLE {new_rows_address} AS (\n{resolved_sql}\n)"
-        )
-        if strategy.range_column is not None:
-            range_column = strategy.range_column
-            delete_replaced_rows = (
-                f"-- [2/4] delete each target row in the range of the new rows\n"
-                f"DELETE FROM {address} AS {TARGET}\n"
-                f"WHERE {TARGET}.{range_column} BETWEEN "
-                f"(SELECT MIN({range_column}) FROM {new_rows_address}) "
-                f"AND (SELECT MAX({range_column}) FROM {new_rows_address})"
-            )
-        else:
-            delete_replaced_rows = (
-                f"-- [2/4] delete each target row that a new row matches\n"
-                f"DELETE FROM {address} AS {TARGET}\n"
-                f"USING {new_rows_address} AS {SOURCE}\n"
-                f"WHERE {strategy.match_condition}"
-            )
-        insert_new_rows = (
-            f"-- [3/4] insert the new rows\n"
-            f"{self.insert_statement(address, new_rows_address, target_column_names)}"
-        )
-        drop_new_rows = (
-            f"-- [4/4] drop the new rows table\n"
-            f"DROP TABLE IF EXISTS {new_rows_address}"
-        )
-        return BuildPlan(
-            statements=[create_new_rows, delete_replaced_rows, insert_new_rows],
-            cleanup_statements=[drop_new_rows],
-        )
-
     def new_rows_address(self, run_id: str) -> str:
         """Give the table that holds the new rows of an UPSERT or a DELETE_INSERT.
 
@@ -809,15 +985,11 @@ class Table(SqlTrouve, TableOptions):
         """
         return f"{self.require_compiled().physical_address}{NEW_ROWS_SUFFIX}{run_id}"
 
-    def upsert_plan(self, run_id: str) -> UpsertPlan:
+    def upsert_plan(self) -> UpsertPlan:
         """Give the decisions that the MERGE of an UPSERT run needs.
 
         The plan holds the columns and the join, and it holds no SQL text. Thus
         a caller reads which column clair updates, and it parses no statement.
-
-        Args:
-            run_id: The unique identifier of this clair run. It makes the name
-                of the merge source table.
 
         Returns:
             The plan of the MERGE.
@@ -854,7 +1026,6 @@ class Table(SqlTrouve, TableOptions):
             insert_column_names = all_column_names
 
         return UpsertPlan(
-            merge_source_address=self.new_rows_address(run_id),
             join_condition=strategy.match_condition,
             update_column_names=update_column_names,
             insert_column_names=insert_column_names,

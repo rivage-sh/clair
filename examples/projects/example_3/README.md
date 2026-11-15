@@ -1,9 +1,11 @@
 # Example 3 — Incremental Materializations
 
 Integration test project for `run_mode` functionality. Demonstrates the three incremental
-strategies, `APPEND`, `UPSERT` and `DELETE_INSERT`, and a Trouve subclass that overrides
-`build_sql()` to replace a window of days. See the
-[`build_sql()` guide](../../../site_docs/docs/guides/custom-build-sql.md).
+strategies, `APPEND`, `UPSERT` and `DELETE_INSERT`, and two Trouve subclasses that change
+a phase of the lifecycle. `MirroredUpsertTable` overrides the promotion to merge into
+production, and keeps the table object. `AuditedTable` overrides the retire phase to keep
+each tested candidate as a snapshot. See the
+[lifecycle guide](../../../site_docs/docs/guides/control-the-lifecycle.md).
 
 ## Pipeline
 
@@ -12,8 +14,9 @@ source.orders  (SOURCE)
     └── refined.orders             (TABLE, full refresh)
             ├── derived.recent_orders          (TABLE, INCREMENTAL APPEND)
             ├── derived.customer_order_summary (TABLE, INCREMENTAL UPSERT)
+            ├── derived.customer_order_totals  (TABLE, INCREMENTAL UPSERT, MirroredUpsertTable merges in place)
             ├── derived.daily_orders           (TABLE, INCREMENTAL DELETE_INSERT)
-            └── derived.daily_revenue          (TABLE, INCREMENTAL, build_sql() replaces a window)
+            └── derived.order_status_counts    (TABLE, full refresh, AuditedTable keeps a snapshot)
 ```
 
 | Trouve | Strategy | Description |
@@ -21,12 +24,14 @@ source.orders  (SOURCE)
 | `source.orders` | SOURCE | Raw orders table |
 | `refined.orders` | Full refresh | Typed + date columns added |
 | `derived.recent_orders` | Incremental APPEND | Appends orders created in last 3 days |
-| `derived.customer_order_summary` | Incremental UPSERT on `customer_id` | Per-customer stats, merged in-place |
+| `derived.customer_order_summary` | Incremental UPSERT on `customer_id` | Per-customer stats. The promotion replaces the table with a clone |
+| `derived.customer_order_totals` | Incremental UPSERT on `customer_id`, `MirroredUpsertTable` | Per-customer totals. The promotion merges into the table, thus a stream on it keeps reading |
 | `derived.daily_orders` | Incremental DELETE_INSERT on `created_date` | Orders and revenue of each day; replaces the last 3 days |
-| `derived.daily_revenue` | Incremental, `ReplaceWindowTrouve` | Revenue of each day. Replaces the last 3 days |
+| `derived.order_status_counts` | Full refresh, `AuditedTable` | Orders in each status. Each run keeps its candidate as `order_status_counts__audit_<run_id>` |
 
-`_replace_window_trouve.py` holds `ReplaceWindowTrouve`. Discovery skips a file that starts
-with `_`, thus the file holds Python that a Trouve file imports, and no Trouve.
+`_mirrored_upsert_table.py` holds `MirroredUpsertTable`, and `_audited_table.py` holds
+`AuditedTable`. Discovery skips a file that starts with `_`, thus each file holds Python
+that a Trouve file imports, and no Trouve.
 
 ## Prerequisites
 
@@ -135,8 +140,9 @@ Expected behaviour:
 - `refined.orders` — full refresh (no `run_config` set), rebuilds from source
 - `derived.recent_orders` — **APPEND**: the two new orders are inserted alongside existing rows
 - `derived.customer_order_summary` — **UPSERT**: `cust_c` stats are updated; `cust_d` is inserted as a new row
+- `derived.customer_order_totals` — **UPSERT, merged in place**: the same change. clair runs the `MERGE` on the staging clone, tests it, and then runs the same `MERGE` into the table
 - `derived.daily_orders` — **DELETE_INSERT**: clair deletes the rows of the last 3 days and inserts them again; today now counts ord_007 and ord_008
-- `derived.daily_revenue` — **window replace**: clair deletes the rows of the last 3 days, and inserts them again with the two new orders
+- `derived.order_status_counts` — **full refresh, audited**: clair makes the table again, and keeps the candidate of this run as a second snapshot
 
 Verify:
 
@@ -147,8 +153,10 @@ select * from example_3_database.derived.recent_orders order by created_at desc;
 -- cust_c total_orders should be 2; cust_d should appear for the first time
 select * from example_3_database.derived.customer_order_summary order by customer_id;
 
--- today holds ord_007 and ord_008; each day appears one time only
-select * from example_3_database.derived.daily_revenue order by created_date;
+-- one snapshot for each run: two tables
+select table_name
+from example_3_database.information_schema.tables
+where table_name ilike 'ORDER_STATUS_COUNTS__AUDIT_%';
 ```
 
 ### 5. Verify UPSERT staging table cleanup
@@ -162,10 +170,6 @@ select table_name
 from example_3_database.information_schema.tables
 where table_name ilike '%clair_staging%';
 
--- the cleanup statement of daily_revenue drops its window table: should return no rows
-select table_name
-from example_3_database.information_schema.tables
-where table_name ilike '%__window_%';
 ```
 
 ## Teardown

@@ -27,7 +27,7 @@ from clair.trouves.test import (
 )
 from clair.trouves.trouve import CompiledSql, ExecutionType, Source, Table, TrouveAbc, View
 from clair.trouves.trouve_type import TrouveType
-from tests.helpers import compile_trouve, unstaged_plan
+from tests.helpers import build_and_cleanup, compile_trouve, unstaged_plan
 
 # ---------------------------------------------------------------------------
 # The helper functions.
@@ -269,7 +269,7 @@ class TestBuildSqlFullRefresh:
             physical_address="prod.analytics.orders",
             resolved_sql="SELECT * FROM raw.orders",
         )
-        statements = unstaged_plan(trouve, RunMode.FULL_REFRESH, "run_001").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.FULL_REFRESH, "run_001"))
 
         assert len(statements) == 1
         assert statements[0] == (
@@ -283,7 +283,7 @@ class TestBuildSqlFullRefresh:
             physical_address="prod.analytics.orders_view",
             resolved_sql="SELECT * FROM raw.orders",
         )
-        statements = unstaged_plan(trouve, RunMode.FULL_REFRESH, "run_001").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.FULL_REFRESH, "run_001"))
 
         assert len(statements) == 1
         assert statements[0] == (
@@ -294,7 +294,7 @@ class TestBuildSqlFullRefresh:
     def test_resolved_sql_is_stripped(self):
         """The code removes each space at the start and at the end of resolved_sql."""
         trouve = _compiled_trouve(resolved_sql="  \n  SELECT 1  \n  ")
-        statements = unstaged_plan(trouve, RunMode.FULL_REFRESH, "run_001").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.FULL_REFRESH, "run_001"))
         assert "SELECT 1" in statements[0]
         assert "  \n  SELECT 1" not in statements[0]
 
@@ -306,7 +306,7 @@ class TestBuildSqlAppend:
             resolved_sql="SELECT * FROM staging.events WHERE ts > '2024-01-01'",
             run_config=Incremental(strategy=Append()),
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_002").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "run_002"))
 
         assert len(statements) == 1
         assert statements[0].startswith("INSERT INTO prod.analytics.events")
@@ -330,7 +330,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
             columns=self.columns,
             run_config=self.run_config,
         )
-        self.statements = unstaged_plan(self.trouve, RunMode.INCREMENTAL, "abc123").all_statements
+        self.statements = build_and_cleanup(unstaged_plan(self.trouve, RunMode.INCREMENTAL, "abc123"))
 
     def test_produces_three_statements(self):
         assert len(self.statements) == 3
@@ -339,7 +339,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
         staging_stmt = self.statements[0]
         assert "CREATE OR REPLACE TABLE db.schema.orders__clair_new_rows_abc123" in staging_stmt
         assert "SELECT id, name, amount FROM staging.orders" in staging_stmt
-        assert "-- [1/3]" in staging_stmt
+        assert staging_stmt.startswith("-- create the new rows table")
 
     def test_stmt2_merge_uses_primary_key_in_on_clause(self):
         merge_stmt = self.statements[1]
@@ -361,7 +361,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
     def test_stmt3_drops_staging_table(self):
         drop_stmt = self.statements[2]
         assert "DROP TABLE IF EXISTS db.schema.orders__clair_new_rows_abc123" in drop_stmt
-        assert "-- [3/3]" in drop_stmt
+        assert drop_stmt.startswith("-- drop the new rows table")
 
 
 class TestBuildSqlUpsertWithCompositePrimaryKey:
@@ -380,7 +380,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             columns=columns,
             run_config=run_config,
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_99").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "run_99"))
         merge_stmt = statements[1]
 
         assert "ON target.region = source.region AND target.product_id = source.product_id" in merge_stmt
@@ -398,7 +398,7 @@ class TestBuildSqlUpsertWithCompositePrimaryKey:
             columns=columns,
             run_config=run_config,
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_99").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "run_99"))
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -424,7 +424,7 @@ class TestBuildSqlUpsertWithJoinSql:
             columns=columns,
             run_config=run_config,
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_j1").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "run_j1"))
         merge_stmt = statements[1]
 
         assert "ON target.id = source.id AND target.name IS NOT NULL" in merge_stmt
@@ -443,7 +443,7 @@ class TestBuildSqlUpsertWithJoinSql:
             columns=columns,
             run_config=run_config,
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_j2").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "run_j2"))
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -468,7 +468,7 @@ class TestBuildSqlUpsertColumnOverrides:
             columns=columns,
             run_config=run_config,
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_uc1").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "run_uc1"))
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -489,7 +489,7 @@ class TestBuildSqlUpsertColumnOverrides:
             columns=columns,
             run_config=run_config,
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_uc2").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "run_uc2"))
         merge_stmt = statements[1]
 
         assert "INSERT (id, name)" in merge_stmt
@@ -511,7 +511,7 @@ class TestBuildSqlUpsertColumnOverrides:
             columns=columns,
             run_config=run_config,
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "run_uc3").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "run_uc3"))
         merge_stmt = statements[1]
 
         update_part = merge_stmt.split("UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
@@ -541,7 +541,7 @@ class TestBuildSqlStagingTableName:
             columns=columns,
             run_config=run_config,
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "unique_run_42").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "unique_run_42"))
 
         staging_name = "db.schema.target_table__clair_new_rows_unique_run_42"
         assert staging_name in statements[0]

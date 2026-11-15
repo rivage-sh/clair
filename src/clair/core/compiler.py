@@ -7,22 +7,17 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from clair.core.comments import build_comment_statements
+from clair.adapters.objects import WarehouseObject
 from clair.core.dag import ClairDag, addresses_of
-from clair.core.runner import resolve_effective_mode, wanted_object_type
-from clair.core.staging import (
-    build_clone_statement,
-    build_cluster_by_statements,
-    build_drop_staging_statement,
-    build_promote_statements,
-    build_type_change_comment,
-    make_staging_address,
-)
+from clair.core.staging import make_staging_address
 from clair.exceptions import CompileError
+from clair.phase import Phase
 from clair.trouves.address import NodeAddresses
 from clair.trouves.dataframe_trouve import DataframeTrouve
+from clair.trouves.plan import NodePlan, PlanContext
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import ExecutionType, SqlTrouve, View, table_options_of
+from clair.trouves.statements import type_change_comment
+from clair.trouves.trouve import ExecutionType, MaterializedTrouve, SqlTrouve
 from clair.trouves.trouve_type import TrouveType
 
 
@@ -131,6 +126,65 @@ class CompileOutput(BaseModel):
         return "\n".join(parts)
 
 
+def offline_plan_context(
+    trouve: MaterializedTrouve, run_mode: RunMode, run_id: str, use_staging: bool = True
+) -> PlanContext:
+    """Give the context of a plan that clair makes with no connection.
+
+    ``clair compile`` and ``clair validate`` read nothing from the warehouse.
+    They plan the run of a project whose objects exist with the type of each
+    Trouve, thus an incremental Trouve shows its incremental plan.
+    """
+    physical_address = trouve.require_compiled().physical_address
+    assumed_object = WarehouseObject(object_type=trouve.warehouse_object_type)
+    return PlanContext(
+        run_id=run_id,
+        effective_mode=trouve.effective_mode(run_mode, assumed_object),
+        staged=use_staging,
+        offline=True,
+        physical_address=physical_address,
+        staging_address=make_staging_address(physical_address, run_id) if use_staging else None,
+    )
+
+
+def render_plan(trouve: MaterializedTrouve, context: PlanContext, plan: NodePlan) -> list[str]:
+    """Give the statements of a plan in the order that clair executes them, with a header for each phase.
+
+    The header goes on the first statement of its phase, thus each item stays
+    one statement. A phase with no statement gets no header.
+    """
+    type_comment = type_change_comment(trouve.warehouse_object_type, context.physical_address)
+    test_statements = [
+        f"-- {query.label}"
+        + (f" ({query.column_name})" if query.column_name else "")
+        + f", {query.severity.value.upper()}\n{query.sql}"
+        for query in plan.test
+    ]
+    # A run without staging runs no test, and has no promotion.
+    phases = [
+        phase
+        for phase in Phase
+        if context.staged or phase not in (Phase.TEST, Phase.PROMOTE)
+    ]
+    # The type test comes before the first statement that writes production:
+    # the promotion of a staged run, and the first statement of a run without one.
+    type_comment_phase = Phase.PROMOTE if context.staged else next(
+        (phase for phase in phases if plan.statements_of(phase)), None
+    )
+
+    statements: list[str] = []
+    for phase in phases:
+        phase_statements = test_statements if phase == Phase.TEST else plan.statements_of(phase)
+        for statement_index, sql in enumerate(phase_statements):
+            if statement_index == 0:
+                header = phase.header
+                if phase == type_comment_phase:
+                    header = f"{header}\n{type_comment}"
+                sql = f"{header}\n{sql}"
+            statements.append(sql)
+    return statements
+
+
 def build_statements(
     trouve: SqlTrouve,
     run_mode: RunMode,
@@ -139,64 +193,11 @@ def build_statements(
 ) -> list[str]:
     """Make the SQL statements of one Trouve, in the order that clair executes them.
 
-    A staged plan shows each step: the clone for an incremental Trouve, the build
-    at the staging address, and the promotion after the tests pass. The plan shows
-    the path of a run that passes. A run that fails a test stops after the build,
-    and the staging object stays.
+    The plan shows the path of a run that passes. A run that fails a test stops
+    after the tests, and the staging object stays.
     """
-    effective_mode = resolve_effective_mode(trouve, run_mode)
-    table_options = table_options_of(trouve)
-
-    assert trouve.compiled is not None
-    physical_address = trouve.compiled.physical_address
-
-    if not use_staging:
-        plan = trouve.build_sql(effective_mode, run_id=run_id, target_address=physical_address)
-        return [
-            build_type_change_comment(wanted_object_type(trouve), physical_address),
-            *plan.statements,
-            *build_cluster_by_statements(
-                physical_address,
-                table_options,
-                incremental=effective_mode == RunMode.INCREMENTAL,
-            ),
-            *build_comment_statements(physical_address, trouve),
-            *plan.cleanup_statements,
-        ]
-
-    staging_address = make_staging_address(physical_address, run_id)
-
-    statements: list[str] = []
-    if effective_mode == RunMode.INCREMENTAL:
-        assert table_options is not None, "an incremental Trouve is a Table"
-        statements.append(
-            build_clone_statement(physical_address, staging_address, table_options=table_options)
-        )
-    plan = trouve.build_sql(effective_mode, run_id=run_id, target_address=staging_address)
-    statements.extend(plan.statements)
-    statements.extend(
-        build_cluster_by_statements(
-            staging_address,
-            table_options,
-            incremental=effective_mode == RunMode.INCREMENTAL,
-        )
-    )
-    statements.extend(plan.cleanup_statements)
-
-    statements.append("-- staging: the data quality tests run here")
-    statements.append(build_type_change_comment(wanted_object_type(trouve), physical_address))
-    statements.extend(
-        build_promote_statements(
-            trouve.type,
-            staging_address=staging_address,
-            physical_address=physical_address,
-            resolved_sql=trouve.full_refresh_sql() if isinstance(trouve, View) else "",
-            table_options=table_options,
-        )
-    )
-    statements.extend(build_comment_statements(physical_address, trouve))
-    statements.append(build_drop_staging_statement(trouve.type, staging_address))
-    return statements
+    context = offline_plan_context(trouve, run_mode, run_id, use_staging)
+    return render_plan(trouve, context, trouve.plan(context))
 
 
 def build_compile_output(
@@ -292,7 +293,7 @@ def build_compile_output(
                 addresses=addresses,
                 type=trouve.type,
                 execution_type=ExecutionType.SNOWFLAKE,
-                effective_run_mode=resolve_effective_mode(trouve, run_mode),
+                effective_run_mode=offline_plan_context(trouve, run_mode, run_id, use_staging).effective_mode,
                 dependencies=deps,
                 sql=statements,
             ))

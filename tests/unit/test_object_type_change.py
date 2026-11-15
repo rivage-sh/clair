@@ -13,15 +13,17 @@ import pandas as pd
 import pytest
 from structlog.testing import capture_logs
 
-from clair.adapters.base import WarehouseObject, WarehouseObjectType
+from clair.adapters.objects import WarehouseObject, WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunFailure, RunSuccess, wanted_object_type
+from clair.core.runner import RunFailure, RunSuccess
 from clair.core.staging import make_staging_address
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import RunError
 from clair.trouves.pandas_table import PandasTable
+from clair.trouves.plan import TestQuery
 from clair.trouves.run_config import Append, Incremental, RunMode
 from clair.trouves.seed_table import SeedTable
+from clair.trouves.test import TestNotNull
 from clair.trouves.trouve import (
     Table,
     View,
@@ -59,10 +61,10 @@ def _drops_of_the_physical_object(result: RunSuccess | RunFailure) -> list[str]:
 
 class TestWantedObjectType:
     def test_a_table_trouve_wants_a_table(self):
-        assert wanted_object_type(Table(sql="SELECT 1 AS id")) == WarehouseObjectType.TABLE
+        assert Table(sql="SELECT 1 AS id").warehouse_object_type == WarehouseObjectType.TABLE
 
     def test_a_view_trouve_wants_a_view(self):
-        assert wanted_object_type(View(sql="SELECT 1 AS id")) == WarehouseObjectType.VIEW
+        assert View(sql="SELECT 1 AS id").warehouse_object_type == WarehouseObjectType.VIEW
 
 
 class TestStagedRun:
@@ -92,16 +94,17 @@ class TestStagedRun:
         # A person who reads the error can query a tested candidate, so the
         # stop comes after the build and after the tests.
         adapter = RecordingAdapter(existing_views=[ADDRESS])
-        tested_addresses: list[str] = []
+        tested_queries: list[TestQuery] = []
         result = run_one_trouve(
-            Table(sql="SELECT 1 AS id"),
+            Table(sql="SELECT 1 AS id", tests=[TestNotNull(column="id")]),
             adapter,
-            tested_addresses=tested_addresses,
+            tested_queries=tested_queries,
         )
 
         assert isinstance(result, RunFailure)
         assert f"CREATE OR REPLACE TABLE {_staging_address()}" in executed_sql(result)[0]
-        assert tested_addresses == [_staging_address()]
+        (tested_query,) = tested_queries
+        assert f"FROM {_staging_address()}" in tested_query.sql
         assert f"The tested candidate stays at {_staging_address()}" in result.error
         # Clair drops the staging object only after a promotion.
         assert not [sql for sql in executed_sql(result) if "DROP" in sql]

@@ -23,7 +23,7 @@ from typing import NamedTuple
 import pytest
 
 import clair
-from clair.adapters.base import WarehouseObjectType
+from clair.adapters.objects import WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.core.runner import RunFailure, RunSuccess, RunSummary
 from clair.core.staging import make_staging_address

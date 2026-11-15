@@ -34,7 +34,7 @@ class Incremental(BaseModel):
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `strategy` | `None` | The built-in method that writes the new data. `None` tells clair that a [`build_sql()` override](../guides/custom-build-sql.md) writes the incremental SQL. A `Table` with no override and no strategy raises a `CompileError` on an incremental run. |
+| `strategy` | `None` | The built-in method that writes the new data. `None` tells clair that a [`build()` override](../guides/control-the-lifecycle.md) writes the incremental SQL. A `Table` with no override and no strategy raises a `CompileError` on an incremental run. |
 | `on_schema_change` | `FAIL` | What the run does when the SQL gives a column that the table does not hold. See [`OnSchemaChange`](#onschemachange). |
 
 ## `OnSchemaChange`
@@ -106,7 +106,7 @@ Give one of the three fields only.
 
 ## `RunMode`
 
-The mode of one run. `--run-mode` on the CLI, `clair.run_mode` in a Trouve file, and the `effective_mode` argument of `build_sql()` hold a `RunMode`.
+The mode of one run. `--run-mode` on the CLI, `clair.run_mode` in a Trouve file, and `PlanContext.effective_mode` hold a `RunMode`. `Table.effective_mode()` gives the mode of one node.
 
 ```python
 class RunMode(StrEnum):
@@ -140,11 +140,11 @@ Incremental(strategy=DeleteInsert(primary_key_columns=["created_date"]))
 # Replace each day from the first to the last day of the new rows
 Incremental(strategy=DeleteInsert(range_column="created_date"))
 
-# A build_sql() override writes the incremental SQL
+# A build() override writes the incremental SQL
 Incremental()
 ```
 
 ## See also
 
 - [Incrementality](../topics/incrementality.md)
-- [Write your own build with `build_sql()`](../guides/custom-build-sql.md)
+- [Control the lifecycle of a Trouve](../guides/control-the-lifecycle.md)

@@ -164,17 +164,17 @@ trouve = Table(
 !!! note
     `Upsert` needs `columns`. clair uses the column list to build the MERGE statement.
 
-Generated SQL on an incremental run — 3 statements:
+Generated SQL on an incremental run: two statements in the build phase, and one in the cleanup phase. A staged run sends them against the staging clone; this example shows a run with `--no-test`, which writes production directly.
 
 ```sql
--- [1/3] make the merge source table
+-- create the new rows table
 CREATE OR REPLACE TABLE example_3_database.derived.customer_order_summary__clair_new_rows_<run_id> AS (
     select customer_id, count(*) as total_orders, ...
     from example_3_database.refined.orders
     group by customer_id
 )
 
--- [2/3] merge into the target
+-- merge the new rows into the target table
 MERGE INTO example_3_database.derived.customer_order_summary AS target
 USING example_3_database.derived.customer_order_summary__clair_new_rows_<run_id> AS source
 ON target.customer_id = source.customer_id
@@ -187,7 +187,7 @@ WHEN MATCHED THEN UPDATE SET
 WHEN NOT MATCHED THEN INSERT (customer_id, total_orders, total_amount, first_order_at, last_order_at, last_updated_at)
     VALUES (source.customer_id, source.total_orders, source.total_amount, source.first_order_at, source.last_order_at, source.last_updated_at)
 
--- [3/3] drop the merge source table
+-- drop the new rows table
 DROP TABLE IF EXISTS example_3_database.derived.customer_order_summary__clair_new_rows_<run_id>
 ```
 
@@ -280,7 +280,7 @@ The key is `created_date`, thus each incremental run replaces each day of the la
 Generated SQL on an incremental run — 3 statements and 1 cleanup:
 
 ```sql
--- [1/4] create the new rows table
+-- create the new rows table
 CREATE OR REPLACE TABLE example_3_database.derived.daily_orders__clair_new_rows_<run_id> AS (
     select created_date, count(*) as order_count, sum(amount) as revenue
     from example_3_database.refined.orders
@@ -288,16 +288,16 @@ CREATE OR REPLACE TABLE example_3_database.derived.daily_orders__clair_new_rows_
     group by created_date
 )
 
--- [2/4] delete each target row that a new row matches
+-- delete each target row that a new row matches
 DELETE FROM example_3_database.derived.daily_orders AS target
 USING example_3_database.derived.daily_orders__clair_new_rows_<run_id> AS source
 WHERE target.created_date = source.created_date
 
--- [3/4] insert the new rows
+-- insert the new rows
 INSERT INTO example_3_database.derived.daily_orders
 SELECT * FROM example_3_database.derived.daily_orders__clair_new_rows_<run_id>
 
--- [4/4] drop the new rows table
+-- drop the new rows table
 DROP TABLE IF EXISTS example_3_database.derived.daily_orders__clair_new_rows_<run_id>
 ```
 
@@ -319,7 +319,7 @@ run_config=Incremental(strategy=DeleteInsert(range_column="created_date"))
 The DELETE of an incremental run:
 
 ```sql
--- [2/4] delete each target row in the range of the new rows
+-- delete each target row in the range of the new rows
 DELETE FROM example_3_database.derived.daily_orders AS target
 WHERE target.created_date BETWEEN
     (SELECT MIN(created_date) FROM example_3_database.derived.daily_orders__clair_new_rows_<run_id>)

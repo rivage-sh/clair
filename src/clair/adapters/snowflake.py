@@ -11,14 +11,8 @@ import snowflake.connector
 from cryptography.hazmat.primitives import serialization
 from snowflake.connector.pandas_tools import write_pandas
 
-from clair.adapters.base import (
-    Statement,
-    StatementStatus,
-    WarehouseAdapter,
-    WarehouseColumn,
-    WarehouseObject,
-    WarehouseObjectType,
-)
+from clair.adapters.base import WarehouseAdapter
+from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, WarehouseObject, WarehouseObjectType
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey
 from clair.exceptions import RunError
 from clair.trouves.address import TrouveAddress

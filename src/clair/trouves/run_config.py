@@ -5,7 +5,7 @@ parameter. An incremental run takes a strategy, and each strategy holds only the
 parameters that it reads. Thus an illegal combination, for example a key column
 on an APPEND, has no way to exist.
 
-A subclass of ``Table`` that overrides ``build_sql()`` writes its own
+A subclass of ``Table`` that overrides ``build()`` writes its own
 incremental SQL. It gives ``Incremental()`` with no strategy.
 """
 
@@ -163,7 +163,7 @@ class Incremental(_ConfigModel):
 
     Attributes:
         strategy: The built-in method that writes the new data. None tells
-            clair that a ``build_sql()`` override writes the SQL.
+            clair that a ``build()`` override writes the SQL.
         on_schema_change: What the run does when the SQL gives a column that
             the table does not hold, or no longer gives a column that it holds.
     """

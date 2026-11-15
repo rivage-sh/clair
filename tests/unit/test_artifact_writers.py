@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from clair.adapters.base import StatementStatus
+from clair.adapters.objects import StatementStatus
 from clair.core.artifacts import (
     RUN_SUMMARY_FILE_NAME,
     write_compile_output,
@@ -13,6 +13,7 @@ from clair.core.artifacts import (
 )
 from clair.core.compiler import CompiledNodeInfo, CompileOutput
 from clair.core.runner import RunSummary
+from clair.phase import Phase
 from clair.trouves.trouve import ExecutionType
 from clair.trouves.trouve_type import TrouveType
 from tests.helpers import (
@@ -75,6 +76,36 @@ class TestWriteRunResult:
         for message_line in ("line two", "at position 7"):
             line = next(line for line in text.splitlines() if message_line in line)
             assert line.startswith("--")
+
+    def test_the_file_gives_each_phase_a_section_and_holds_the_tests(self, tmp_path: Path):
+        """The record of the run reads as clair compile: a header for each phase, in order."""
+        result = make_run_failure(
+            ORDERS,
+            error="the tests failed",
+            statements=[
+                make_statement("create table staging as select 1", phase=Phase.BUILD),
+                make_statement("drop table new_rows", phase=Phase.CLEANUP),
+            ],
+            test_results=[
+                make_test_result(ORDERS, column_name="id", sql="select id from staging", row_count=3)
+            ],
+        )
+
+        path = write_run_result(tmp_path, RUN_ID, result)
+
+        assert path is not None
+        text = path.read_text()
+        assert "-- failed phase: test" in text
+        assert (
+            text.index(Phase.BUILD.header)
+            < text.index("create table staging")
+            < text.index(Phase.TEST.header)
+            < text.index("-- unique (id), ERROR: 3 failing rows")
+            < text.index("select id from staging")
+            < text.index(Phase.CLEANUP.header)
+            < text.index("drop table new_rows")
+        )
+        assert "-- statement 3/3" in text
 
     def test_a_skipped_trouve_writes_no_file(self, tmp_path: Path):
         result = make_run_skip(ORDERS, skipped_by="mydb.analytics.upstream")

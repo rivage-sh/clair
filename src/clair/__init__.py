@@ -69,6 +69,7 @@ from __future__ import annotations
 
 from clair._version import __version__
 from clair.adapters.base import WarehouseAdapter
+from clair.adapters.objects import WarehouseColumn, WarehouseObject, WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.api import (
     RunHandle,
@@ -90,11 +91,13 @@ from clair.environments.environments import (
     load_environment,
 )
 from clair.environments.routing import RoutingEntry, RoutingTable
+from clair.phase import Phase
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.config import DatabaseDefaults, SchemaDefaults
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.pandas_table import PandasTable
+from clair.trouves.plan import NodePlan, PlanContext, TestQuery, TestResult
 from clair.trouves.run_config import (
     SOURCE,
     TARGET,
@@ -119,7 +122,7 @@ from clair.trouves.test import (
     TestUnique,
     TestUniqueColumns,
 )
-from clair.trouves.trouve import BuildPlan, Iceberg, Source, SqlTrouve, Table, TrouveAbc, View
+from clair.trouves.trouve import Iceberg, MaterializedTrouve, Source, SqlTrouve, Table, TrouveAbc, View
 from clair.trouves.trouve_type import TrouveType
 
 # discover_project() sets this before it loads the Trouve modules.
@@ -137,7 +140,6 @@ __all__ = [
     "AnyTest",
     "Append",
     "Authenticator",
-    "BuildPlan",
     "Column",
     "ColumnType",
     "Connection",
@@ -148,10 +150,14 @@ __all__ = [
     "FullRefresh",
     "Iceberg",
     "Incremental",
+    "MaterializedTrouve",
     "NodeAddresses",
+    "NodePlan",
     "OnSchemaChange",
     "PandasTable",
     "Password",
+    "Phase",
+    "PlanContext",
     "PrivateKey",
     "RoutingEntry",
     "RoutingTable",
@@ -166,6 +172,8 @@ __all__ = [
     "Table",
     "Test",
     "TestNotNull",
+    "TestQuery",
+    "TestResult",
     "TestRowCount",
     "TestSeverity",
     "TestSql",
@@ -177,6 +185,9 @@ __all__ = [
     "Upsert",
     "View",
     "WarehouseAdapter",
+    "WarehouseColumn",
+    "WarehouseObject",
+    "WarehouseObjectType",
     "__version__",
     "catalog",
     "clean",

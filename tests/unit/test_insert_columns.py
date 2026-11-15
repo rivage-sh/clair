@@ -10,18 +10,20 @@ from __future__ import annotations
 
 import pytest
 
-from clair.adapters.base import WarehouseColumn
+from clair.adapters.objects import WarehouseColumn
 from clair.core.runner import RunFailure, RunSuccess
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
 from clair.trouves.run_config import Append, DeleteInsert, Incremental, RunMode
-from clair.trouves.trouve import Table, quote_column_name
+from clair.trouves.statements import quote_column_name
+from clair.trouves.trouve import Table
 from tests.helpers import (
     RecordingAdapter,
     compile_trouve,
     executed_sql,
     run_one_trouve,
     snowflake_adapter_that_answers,
+    staged_plan,
     unstaged_plan,
 )
 
@@ -52,7 +54,7 @@ class TestThePlan:
     @pytest.mark.parametrize("strategy", STRATEGIES)
     def test_the_insert_names_the_columns_of_the_target_in_their_order(self, strategy):
         plan = unstaged_plan(incremental_table(strategy), RunMode.INCREMENTAL, "abc", target_column_names=["LABEL", "ID"])
-        insert = insert_of(plan.statements)
+        insert = insert_of(plan.build)
         assert 'analytics.revenue.orders ("LABEL", "ID")\nSELECT "LABEL", "ID" FROM' in insert
 
     @pytest.mark.parametrize("strategy", STRATEGIES)
@@ -60,19 +62,17 @@ class TestThePlan:
         """clair compile has no connection, thus the declared columns are the best answer."""
         declared = [Column(name="id", type=ColumnType.NUMBER), Column(name="label", type=ColumnType.STRING)]
         plan = unstaged_plan(incremental_table(strategy, declared), RunMode.INCREMENTAL, "abc")
-        assert "analytics.revenue.orders (id, label)\nSELECT id, label FROM" in insert_of(plan.statements)
+        assert "analytics.revenue.orders (id, label)\nSELECT id, label FROM" in insert_of(plan.build)
 
     @pytest.mark.parametrize("strategy", STRATEGIES)
     def test_compile_with_no_declared_column_says_that_the_run_names_them(self, strategy):
         plan = unstaged_plan(incremental_table(strategy), RunMode.INCREMENTAL, "abc")
-        assert insert_of(plan.statements).endswith("-- clair run names each column of the target table")
+        assert insert_of(plan.build).endswith("-- clair run names each column of the target table")
 
     def test_the_insert_writes_to_the_staging_address(self):
         staging_address = TrouveAddress.parse("analytics.revenue.orders__clair_stg")
-        plan = incremental_table(Append()).build_sql(
-            RunMode.INCREMENTAL, run_id="abc", target_address=staging_address, target_column_names=["ID"]
-        )
-        assert insert_of(plan.statements).startswith(f'INSERT INTO {staging_address} ("ID")')
+        plan = staged_plan(incremental_table(Append()), RunMode.INCREMENTAL, "abc", staging_address, ["ID"])
+        assert insert_of(plan.build).startswith(f'INSERT INTO {staging_address} ("ID")')
 
     @pytest.mark.parametrize(
         ("column_name", "expected_identifier"),

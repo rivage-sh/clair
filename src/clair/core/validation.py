@@ -11,8 +11,8 @@ The command finds four faults:
 - Two Trouves that go to one physical address.
 - An address that an author writes as text, which makes no DAG edge.
 - A build plan that clair cannot make, or that ignores the staging address.
-  ``build_sql()`` needs no connection, thus the command calls it for each run
-  mode that a Trouve can reach. A ``build_sql()`` override gets the same test.
+  ``Trouve.plan()`` needs no connection, thus the command calls it for each run
+  mode that a Trouve can reach. An override of a phase gets the same test.
 """
 
 from __future__ import annotations
@@ -21,9 +21,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from clair.core.compiler import offline_plan_context
 from clair.core.discovery import discover_project
-from clair.core.runner import resolve_effective_mode
-from clair.core.staging import make_staging_address
 from clair.core.text_references import TextReference, find_text_references
 from clair.environments.project_routing import (
     describe_unnamed_environment,
@@ -35,7 +34,7 @@ from clair.environments.routing import (
     detect_routing_collisions,
     route,
 )
-from clair.trouves.address import TrouveAddress
+from clair.trouves.plan import PlanContext
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import SqlTrouve, TrouveAbc
 
@@ -89,52 +88,59 @@ def collect_build_plan_problems(trouves: list[TrouveAbc]) -> list[BuildPlanProbl
 
     A run with tests writes to the staging address, and a run without tests
     writes to the physical address. Thus clair makes each plan with each target
-    address, and the plan must name the address that it got. A staged plan that
-    does not writes to the physical object, before the tests and without the
-    promotion.
+    address, and the build phase must name the address that it got. A staged
+    build that does not writes to the physical object, before the tests and
+    without the promotion.
     """
     problems: list[BuildPlanProblem] = []
     for trouve in trouves:
         if not isinstance(trouve, SqlTrouve) or trouve.compiled is None:
             continue
         logical_address = str(trouve.logical_address)
-        effective_modes = sorted(
-            {resolve_effective_mode(trouve, run_mode) for run_mode in RunMode}
-        )
-        physical_address = trouve.compiled.physical_address
-        staging_address = make_staging_address(physical_address, VALIDATION_RUN_ID)
-        for effective_mode in effective_modes:
-            for target_address in (staging_address, physical_address):
-                detail = _build_plan_fault(trouve, effective_mode, target_address)
+        seen: set[tuple[RunMode, bool]] = set()
+        for run_mode in RunMode:
+            for staged in (True, False):
+                try:
+                    context = offline_plan_context(trouve, run_mode, VALIDATION_RUN_ID, staged)
+                except Exception as error:  # noqa: BLE001 — effective_mode() is user code, and it can raise anything
+                    problems.append(BuildPlanProblem(
+                        logical_address=logical_address,
+                        run_mode=run_mode,
+                        staged=staged,
+                        detail=f"effective_mode() raised {type(error).__name__}: {error}",
+                    ))
+                    continue
+                if (context.effective_mode, staged) in seen:
+                    continue
+                seen.add((context.effective_mode, staged))
+                detail = _build_plan_fault(trouve, context)
                 if detail is not None:
                     problems.append(
                         BuildPlanProblem(
                             logical_address=logical_address,
-                            run_mode=effective_mode,
-                            staged=target_address == staging_address,
+                            run_mode=context.effective_mode,
+                            staged=staged,
                             detail=detail,
                         )
                     )
     return problems
 
 
-def _build_plan_fault(
-    trouve: SqlTrouve, effective_mode: RunMode, target_address: TrouveAddress
-) -> str | None:
+def _build_plan_fault(trouve: SqlTrouve, context: PlanContext) -> str | None:
     """Give the fault of one plan, or None if the plan is correct."""
     try:
-        plan = trouve.build_sql(
-            effective_mode, run_id=VALIDATION_RUN_ID, target_address=target_address
-        )
+        plan = trouve.plan(context)
     except Exception as error:  # noqa: BLE001 — an override is user code, and it can raise anything
-        return f"build_sql() raised {type(error).__name__}: {error}"
-    if not plan.statements:
+        return f"plan() raised {type(error).__name__}: {error}"
+    if not plan.build:
         return None
-    if not any(str(target_address) in statement for statement in plan.statements):
+    target_address = context.target_address
+    if not any(str(target_address) in statement for statement in plan.build):
         return (
-            f"build_sql() got the target address {target_address}, and no statement "
+            f"the build phase got the target address {target_address}, and no statement "
             "names it. The plan then writes to a different object, and a staged run "
-            "writes to the physical object before the tests run. Write to `target_address`."
+            "writes to the physical object before the tests run. Write to "
+            "`context.target_address`."
         )
     return None
 

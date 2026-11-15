@@ -11,8 +11,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from clair.adapters.base import WarehouseColumn
-from clair.core.comments import WarehouseComments, build_comment_statements, quote_comment
+from clair.adapters.objects import WarehouseColumn
 from clair.core.compiler import build_statements
 from clair.core.runner import RunFailure, RunSuccess
 from clair.core.staging import make_staging_address
@@ -20,6 +19,7 @@ from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column
 from clair.trouves.pandas_table import PandasTable
 from clair.trouves.run_config import Append, Incremental, RunMode
+from clair.trouves.statements import WarehouseComments, quote_comment
 from clair.trouves.trouve import Iceberg, Table, View
 from tests.helpers import (
     TEST_ADDRESS,
@@ -87,14 +87,14 @@ class TestTheText:
     def test_a_triple_quoted_text_loses_its_indent(self):
         trouve = Table(sql="SELECT 1 AS id", docs="\n    The orders.\n    One row each.\n    ")
 
-        (statement,) = build_comment_statements(PHYSICAL_ADDRESS, trouve)
+        (statement,) = trouve.comment_statements(PHYSICAL_ADDRESS, None)
 
         assert statement.endswith("SET COMMENT = 'The orders.\\nOne row each.'")
 
     def test_each_statement_is_one_line_after_its_header(self):
         trouve = Table(sql="SELECT 1 AS id", docs="a\nb", columns=documented_columns())
 
-        for statement in build_comment_statements(PHYSICAL_ADDRESS, trouve):
+        for statement in trouve.comment_statements(PHYSICAL_ADDRESS, None):
             assert len(statement.splitlines()) == 2
 
 
@@ -102,12 +102,12 @@ class TestTheStatements:
     def test_a_trouve_with_no_docs_gets_no_statement(self):
         trouve = Table(sql="SELECT 1 AS id", columns=[Column(name="id", type="NUMBER")])
 
-        assert build_comment_statements(PHYSICAL_ADDRESS, trouve) == []
+        assert trouve.comment_statements(PHYSICAL_ADDRESS, None) == []
 
     def test_only_a_column_with_docs_gets_a_comment(self):
         trouve = Table(sql="SELECT 1 AS id", docs="The orders.", columns=documented_columns())
 
-        statements = build_comment_statements(PHYSICAL_ADDRESS, trouve)
+        statements = trouve.comment_statements(PHYSICAL_ADDRESS, None)
 
         assert last_lines(statements) == [TABLE_COMMENT, TABLE_COLUMN_COMMENT]
 
@@ -120,7 +120,7 @@ class TestTheStatements:
             ],
         )
 
-        (statement,) = build_comment_statements(PHYSICAL_ADDRESS, trouve)
+        (statement,) = trouve.comment_statements(PHYSICAL_ADDRESS, None)
 
         assert statement.endswith(
             f"ALTER TABLE {PHYSICAL_ADDRESS} ALTER COLUMN id COMMENT 'The order ID.', "
@@ -137,7 +137,7 @@ class TestTheStatements:
             ],
         )
 
-        statements = build_comment_statements(PHYSICAL_ADDRESS, trouve)
+        statements = trouve.comment_statements(PHYSICAL_ADDRESS, None)
 
         assert last_lines(statements) == [
             VIEW_COMMENT,
@@ -153,7 +153,7 @@ class TestTheStatements:
             iceberg=Iceberg(),
         )
 
-        statements = build_comment_statements(PHYSICAL_ADDRESS, trouve)
+        statements = trouve.comment_statements(PHYSICAL_ADDRESS, None)
 
         assert all(f"ALTER ICEBERG TABLE {PHYSICAL_ADDRESS}" in statement for statement in statements)
 
@@ -164,8 +164,8 @@ class TestTheDifference:
     def test_comments_that_match_the_docs_get_no_statement(self):
         trouve = incremental_table("The orders.", documented_columns())
 
-        statements = build_comment_statements(
-            PHYSICAL_ADDRESS, trouve, current_comments("The orders.", id="The order ID.")
+        statements = trouve.comment_statements(
+            PHYSICAL_ADDRESS, current_comments("The orders.", id="The order ID.")
         )
 
         assert statements == []
@@ -179,9 +179,8 @@ class TestTheDifference:
             ],
         )
 
-        statements = build_comment_statements(
+        statements = trouve.comment_statements(
             PHYSICAL_ADDRESS,
-            trouve,
             current_comments("The orders.", id="The order ID.", amount="An old text."),
         )
 
@@ -192,8 +191,8 @@ class TestTheDifference:
     def test_a_removed_docs_text_clears_its_comment(self):
         trouve = incremental_table(columns=[Column(name="id", type="NUMBER")])
 
-        statements = build_comment_statements(
-            PHYSICAL_ADDRESS, trouve, current_comments("The orders.", id="The order ID.")
+        statements = trouve.comment_statements(
+            PHYSICAL_ADDRESS, current_comments("The orders.", id="The order ID.")
         )
 
         assert last_lines(statements) == [
@@ -204,7 +203,7 @@ class TestTheDifference:
     def test_a_new_column_has_no_comment_in_the_warehouse(self):
         trouve = incremental_table(columns=[Column(name="discount", type="NUMBER", docs="Off.")])
 
-        statements = build_comment_statements(PHYSICAL_ADDRESS, trouve, current_comments())
+        statements = trouve.comment_statements(PHYSICAL_ADDRESS, current_comments())
 
         assert last_lines(statements) == [
             f"ALTER TABLE {PHYSICAL_ADDRESS} ALTER COLUMN discount COMMENT 'Off.'"
@@ -213,8 +212,8 @@ class TestTheDifference:
     def test_the_column_name_matches_in_each_case(self):
         trouve = incremental_table(columns=[Column(name="Order_Id", type="NUMBER", docs="The ID.")])
 
-        statements = build_comment_statements(
-            PHYSICAL_ADDRESS, trouve, current_comments(order_id="The ID.")
+        statements = trouve.comment_statements(
+            PHYSICAL_ADDRESS, current_comments(order_id="The ID.")
         )
 
         assert statements == []

@@ -249,13 +249,14 @@ class RunSkip(BaseModel):
 |--------|----|-------|
 | `addresses` | each | The `NodeAddresses` of the node: `logical`, `physical` and `staging`. |
 | `status` | each | `RunStatus.SUCCESS`, `RunStatus.FAILURE` or `RunStatus.SKIPPED`. The class gives it, thus you set it never. It also tells the classes apart in JSON: `RunSummary.model_validate_json()` gives each result its class. |
-| `statements` | success, failure | One `Statement` for each statement of the node, in the order that clair made them. A failure before the first statement holds none. |
+| `statements` | success, failure | One `Statement` for each statement of the node, in the order that clair made them. Each one names its `phase`. The test queries are in `test_results`. A failure before the first statement holds none. |
 | `effective_run_mode` | success, failure | The mode that clair used, after the `RunConfig` of the Trouve and the fallback to a full refresh. It is `None` for a failure before clair selected it. See [Incrementality](../topics/incrementality.md). |
 | `duration_seconds` | success, failure | The clock time of the statements. |
 | `test_results` | success, failure | The data quality test results of this Trouve. A test that fails on a staged run causes the failure. |
 | `row_count` | success | The rows that the last build statement changed. |
 | `error` | failure | The cause of the failure. It is never empty. |
 | `failed_statement` | failure | The `Statement` that failed, or `None`. |
+| `failed_phase` | failure | The `Phase` that failed: the phase of the failed statement, or `Phase.TEST` for a blocking test. `None` for a failure before the plan, such as a session context that clair cannot set. |
 | `skipped_by` | skip | The physical address of the upstream Trouve that failed. |
 
 ## `NodeAddresses`
@@ -290,6 +291,7 @@ class Statement(BaseModel):
     query_url: str | None
     error: str
     row_count: int
+    phase: Phase | None
 ```
 
 | Member | Gives |
@@ -299,7 +301,32 @@ class Statement(BaseModel):
 | `query_id`, `query_url` | The warehouse query ID and the console URL. |
 | `error` | The error message of a statement that failed. |
 | `row_count` | The rows that the statement returned or changed. |
+| `phase` | The `Phase` of the lifecycle that sent the statement. `None` for a statement outside the lifecycle of a Trouve. |
 | `success` | True if the status is `SUCCESS`. |
+
+## `Phase`
+
+One step of the lifecycle of a Trouve. The order of the members is the order of a run.
+
+```python
+class Phase(StrEnum):
+    PREPARE = "prepare"
+    BUILD = "build"
+    CONFIGURE = "configure"
+    TEST = "test"
+    PROMOTE = "promote"
+    DOCUMENT = "document"
+    RETIRE = "retire"
+    CLEANUP = "cleanup"
+```
+
+| Member | Gives |
+|--------|-------|
+| `condition` | When the runner executes the phase, or an empty text for each run. |
+| `header` | The SQL comment line that names the phase in `clair compile` and in the artifact of `clair run`. |
+
+`Trouve.plan()` gives the statements of each phase. See
+[Control the lifecycle of a Trouve](../guides/control-the-lifecycle.md).
 
 ## `clair.compile()`
 

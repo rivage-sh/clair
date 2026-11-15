@@ -64,7 +64,7 @@ from clair.core.runner import (
     run_project,
 )
 from clair.core.selector import expand_selectors
-from clair.core.test_runner import SampleScope, TestResult, TestSummary, run_tests
+from clair.core.test_runner import SampleScope, TestSummary, run_test_queries, run_tests
 from clair.core.validation import ValidationReport, validate_project
 from clair.environments.environments import Environment
 from clair.environments.project_routing import find_project_root, routing_entry_of
@@ -72,6 +72,7 @@ from clair.environments.routing import (
     detect_routing_collisions_of_trouves,
 )
 from clair.exceptions import RunError, SampleTargetsProductionError
+from clair.trouves.plan import TestQuery, TestResult
 from clair.trouves.run_config import RunMode
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, TrouveAbc
 from clair.trouves.trouve_type import TrouveType
@@ -447,23 +448,19 @@ class RunHandle:
         test_results_of_node: dict[str, list[TestResult]] = defaultdict(list)
         sample_scope = SampleScope.RUN_INPUTS if self._sample else SampleScope.NONE
 
-        def on_node_success(
-            node_name: str, query_address: str, node_adapter: WarehouseAdapter
-        ) -> bool:
+        def test_node(
+            node_name: str, queries: list[TestQuery], node_adapter: WarehouseAdapter
+        ) -> list[TestResult]:
             # node_adapter is the connection of the thread that ran the node. A
             # parallel run must not send these test queries on a different
             # connection, because that connection holds a different context.
-            node_test_results = run_tests(
-                dag,
-                [node_name],
-                node_adapter,
-                sample_scope=sample_scope,
-                query_addresses={node_name: query_address},
+            node_test_results = run_test_queries(
+                dag.get_trouve(node_name), queries, node_adapter, sample_scope=sample_scope
             )
             # list.extend is atomic, thus the threads need no lock here. Each
             # thread writes to the entry of its own node.
             test_results_of_node[node_name].extend(node_test_results)
-            return not any(test_result.is_blocking for test_result in node_test_results)
+            return node_test_results
 
         # A connection that no Trouve uses gives nothing. A connection costs one
         # login, not credits: Snowflake bills the warehouse per second while it
@@ -488,7 +485,7 @@ class RunHandle:
                 warehouse_adapter,
                 run_mode=self._run_mode,
                 run_id=self.run_id,
-                after_node_success=on_node_success if self._test else None,
+                test_node=test_node if self._test else None,
                 use_staging=self._test,
                 threads=thread_count,
                 environment_name=env_name,

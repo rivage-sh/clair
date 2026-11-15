@@ -1,4 +1,4 @@
-"""The tests of Trouve.build_sql() and Trouve.upsert_plan().
+"""The tests of the build phase of a Trouve, and of Trouve.upsert_plan().
 
 ``upsert_plan`` holds the decisions of a MERGE as columns, thus a test names the
 column that clair updates and it splits no statement. The classes at the end
@@ -14,9 +14,10 @@ import pytest
 from clair.exceptions import CompileError, TrouveNotCompiledError
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
+from clair.trouves.plan import NodePlan
 from clair.trouves.run_config import Append, DeleteInsert, Incremental, RunConfig, RunMode, Upsert
-from clair.trouves.trouve import BuildPlan, Table, View
-from tests.helpers import compile_trouve, unstaged_plan
+from clair.trouves.trouve import Table, View
+from tests.helpers import build_and_cleanup, compile_trouve, staged_plan, unstaged_plan
 
 # The three columns that the upsert tests share.
 UPSERT_SQL = "SELECT 1 AS id, 2 AS name, 3 AS value"
@@ -64,20 +65,20 @@ class TestFullRefresh:
     )
     def test_each_class_replaces_its_object(self, trouve_class, expected_object_type):
         trouve = make_compiled_trouve(trouve_class=trouve_class)
-        statements = unstaged_plan(trouve, RunMode.FULL_REFRESH, "abc").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.FULL_REFRESH, "abc"))
         assert len(statements) == 1
         assert statements[0].startswith(
             f"CREATE OR REPLACE {expected_object_type} db.schema.my_table AS ("
         )
 
     def test_the_statement_holds_the_sql_of_the_trouve(self):
-        statements = unstaged_plan(make_compiled_trouve(), RunMode.FULL_REFRESH, "abc").all_statements
+        statements = build_and_cleanup(unstaged_plan(make_compiled_trouve(), RunMode.FULL_REFRESH, "abc"))
         assert "SELECT 1 AS id" in statements[0]
 
     def test_a_view_has_no_incremental_plan(self):
         """A View holds no run_config, thus each mode gives CREATE OR REPLACE VIEW."""
         trouve = make_compiled_trouve(trouve_class=View)
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "abc"))
         assert statements[0].startswith("CREATE OR REPLACE VIEW db.schema.my_table AS (")
 
     @pytest.mark.parametrize("trouve_class", [Table, View])
@@ -85,7 +86,7 @@ class TestFullRefresh:
     def test_a_trouve_that_clair_did_not_compile_raises(self, trouve_class, run_mode):
         trouve = trouve_class(sql="SELECT 1 AS id")
         with pytest.raises(TrouveNotCompiledError):
-            trouve.build_sql(run_mode, "abc", target_address=TrouveAddress.parse("db.s.t"))
+            staged_plan(trouve, run_mode, "abc", TrouveAddress.parse("db.s.t"))
 
 
 class TestAppend:
@@ -95,15 +96,15 @@ class TestAppend:
         trouve = make_compiled_trouve(
             run_config=Incremental(strategy=Append()),
         )
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.INCREMENTAL, "abc"))
         assert len(statements) == 1
         assert statements[0].startswith("INSERT INTO db.schema.my_table")
 
 
 class TestIncrementalWithoutAStrategy:
-    """Incremental() with no strategy is for a build_sql() override, which writes its own SQL."""
+    """Incremental() with no strategy is for a build() override, which writes its own SQL."""
 
-    def test_the_built_in_build_sql_raises_and_names_the_trouve(self):
+    def test_the_built_in_build_raises_and_names_the_trouve(self):
         trouve = make_compiled_trouve(run_config=Incremental())
         with pytest.raises(CompileError, match="db.schema.my_table .* names no strategy"):
             unstaged_plan(trouve, RunMode.INCREMENTAL, "abc")
@@ -111,7 +112,7 @@ class TestIncrementalWithoutAStrategy:
     def test_a_full_refresh_needs_no_strategy(self):
         """The first run of an incremental Trouve is a full refresh, and it reads no strategy."""
         trouve = make_compiled_trouve(run_config=Incremental())
-        statements = unstaged_plan(trouve, RunMode.FULL_REFRESH, "abc").all_statements
+        statements = build_and_cleanup(unstaged_plan(trouve, RunMode.FULL_REFRESH, "abc"))
         assert statements[0].startswith("CREATE OR REPLACE TABLE db.schema.my_table")
 
 
@@ -120,24 +121,24 @@ class TestUpsertPlanColumns:
 
     def test_the_update_leaves_out_each_key_column(self):
         """A key column makes the join, thus the UPDATE must not write to it."""
-        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan("abc")
+        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan()
         assert plan.update_column_names == ["name", "value"]
 
     def test_the_update_leaves_out_each_of_two_key_columns(self):
         plan = make_upsert_trouve(
             primary_key_columns=["id", "name"]
-        ).upsert_plan("abc")
+        ).upsert_plan()
         assert plan.update_column_names == ["value"]
 
     def test_the_insert_holds_each_column(self):
-        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan("abc")
+        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan()
         assert plan.insert_column_names == ["id", "name", "value"]
 
     def test_a_join_of_the_author_updates_each_column(self):
         """The join names no key column, thus clair removes none."""
         plan = make_upsert_trouve(
             join_sql="target.id = source.id"
-        ).upsert_plan("abc")
+        ).upsert_plan()
         assert plan.update_column_names == ["id", "name", "value"]
 
     @pytest.mark.parametrize(
@@ -153,21 +154,21 @@ class TestUpsertPlanColumns:
         plan = make_upsert_trouve(
             **match_arguments,
             update_columns=["name"],
-        ).upsert_plan("abc")
+        ).upsert_plan()
         assert plan.update_column_names == ["name"]
 
     def test_insert_columns_limits_the_insert(self):
         plan = make_upsert_trouve(
             primary_key_columns=["id"],
             insert_columns=["id", "name"],
-        ).upsert_plan("abc")
+        ).upsert_plan()
         assert plan.insert_column_names == ["id", "name"]
 
     def test_the_two_settings_work_together(self):
         plan = make_upsert_trouve(
             join_sql="target.id = source.id",
             update_columns=["name"], insert_columns=["id", "name"],
-        ).upsert_plan("abc")
+        ).upsert_plan()
         assert plan.update_column_names == ["name"]
         assert plan.insert_column_names == ["id", "name"]
 
@@ -175,7 +176,7 @@ class TestUpsertPlanColumns:
         plan = make_upsert_trouve(
             primary_key_columns=["id"],
             update_columns=[],
-        ).upsert_plan("abc")
+        ).upsert_plan()
         assert plan.update_column_names == []
 
     def test_a_trouve_with_no_column_raises(self):
@@ -185,7 +186,7 @@ class TestUpsertPlanColumns:
         )
         assert isinstance(trouve, Table)
         with pytest.raises(ValueError, match="the upsert strategy needs columns"):
-            trouve.upsert_plan("abc")
+            trouve.upsert_plan()
 
 
 class TestUpsertPlanJoin:
@@ -198,7 +199,7 @@ class TestUpsertPlanJoin:
     def test_the_plan_holds_the_condition_of_the_strategy(self, match_arguments):
         """test_run_config.py covers each form of the condition."""
         trouve = make_upsert_trouve(**match_arguments)
-        assert trouve.upsert_plan("abc").join_condition == Upsert(**match_arguments).match_condition
+        assert trouve.upsert_plan().join_condition == Upsert(**match_arguments).match_condition
 
     def test_a_key_column_and_a_join_together_raise(self):
         """Upsert makes the illegal state impossible, thus the plan never sees it."""
@@ -209,25 +210,23 @@ class TestUpsertPlanJoin:
 
     def test_the_merge_source_holds_the_run_id(self):
         """Two runs at one time must not share the merge source table."""
-        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan("abc123")
-        assert plan.merge_source_address == (
-            "db.schema.my_table__clair_new_rows_abc123"
-        )
+        trouve = make_upsert_trouve(primary_key_columns=["id"])
+        assert trouve.new_rows_address("abc123") == "db.schema.my_table__clair_new_rows_abc123"
 
 
 class TestUpsertClauses:
     """The plan makes the clauses of the MERGE."""
 
     def test_the_update_clause_names_the_source_column(self):
-        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan("abc")
+        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan()
         assert plan.update_clause == "name = source.name, value = source.value"
 
     def test_the_insert_clause_names_each_column(self):
-        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan("abc")
+        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan()
         assert plan.insert_clause == "id, name, value"
 
     def test_the_values_clause_reads_the_source(self):
-        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan("abc")
+        plan = make_upsert_trouve(primary_key_columns=["id"]).upsert_plan()
         assert plan.insert_values_clause == "source.id, source.name, source.value"
 
 
@@ -237,19 +236,18 @@ class TestUpsertStatements:
     def test_an_upsert_makes_two_statements_and_one_cleanup(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
         build_plan = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc")
-        assert len(build_plan.statements) == 2
-        assert len(build_plan.cleanup_statements) == 1
+        assert len(build_plan.build) == 2
+        assert len(build_plan.cleanup) == 1
 
     def test_the_first_statement_makes_the_merge_source(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
-        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc123").statements
-        plan = trouve.upsert_plan("abc123")
-        assert f"CREATE OR REPLACE TABLE {plan.merge_source_address}" in statements[0]
+        statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc123").build
+        assert f"CREATE OR REPLACE TABLE {trouve.new_rows_address('abc123')}" in statements[0]
 
     def test_the_second_statement_holds_each_clause_of_the_plan(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
-        merge = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc123").statements[1]
-        plan = trouve.upsert_plan("abc123")
+        merge = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc123").build[1]
+        plan = trouve.upsert_plan()
         assert f"ON {plan.join_condition}" in merge
         assert f"WHEN MATCHED THEN UPDATE SET {plan.update_clause}" in merge
         assert (
@@ -259,19 +257,16 @@ class TestUpsertStatements:
 
     def test_the_cleanup_drops_the_merge_source(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
-        cleanup_statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc123").cleanup_statements
-        plan = trouve.upsert_plan("abc123")
+        cleanup_statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc123").cleanup
         assert cleanup_statements[0].endswith(
-            f"DROP TABLE IF EXISTS {plan.merge_source_address}"
+            f"DROP TABLE IF EXISTS {trouve.new_rows_address('abc123')}"
         )
 
     def test_the_merge_writes_to_the_staging_address(self):
         """A staging run merges into the candidate, and not into the table."""
         trouve = make_upsert_trouve(primary_key_columns=["id"])
         staging_address = TrouveAddress.parse("db.schema.my_table__clair_stg")
-        merge = trouve.build_sql(
-            RunMode.INCREMENTAL, run_id="abc", target_address=staging_address
-        ).statements[1]
+        merge = staged_plan(trouve, RunMode.INCREMENTAL, "abc", staging_address).build[1]
         assert "MERGE INTO db.schema.my_table__clair_stg AS target" in merge
 
 
@@ -291,20 +286,18 @@ class TestDeleteInsertStatements:
     NEW_ROWS_ADDRESS = "db.schema.my_table__clair_new_rows_abc"
     STAGING_ADDRESS = TrouveAddress.parse("db.schema.my_table__clair_stg")
 
-    def build_plan(self, **match_arguments) -> BuildPlan:
+    def build_plan(self, **match_arguments) -> NodePlan:
         """Give the plan of a staging run. The INSERT copies each column, thus no column is necessary."""
         trouve = make_delete_insert_trouve(**match_arguments)
-        return trouve.build_sql(
-            RunMode.INCREMENTAL, run_id="abc", target_address=self.STAGING_ADDRESS
-        )
+        return staged_plan(trouve, RunMode.INCREMENTAL, "abc", self.STAGING_ADDRESS)
 
     def test_a_delete_insert_makes_three_statements_and_one_cleanup(self):
         build_plan = self.build_plan(primary_key_columns=["id"])
-        assert len(build_plan.statements) == 3
-        assert len(build_plan.cleanup_statements) == 1
+        assert len(build_plan.build) == 3
+        assert len(build_plan.cleanup) == 1
 
     def test_the_new_rows_table_holds_the_sql_of_the_trouve(self):
-        create_new_rows = self.build_plan(primary_key_columns=["id"]).statements[0]
+        create_new_rows = self.build_plan(primary_key_columns=["id"]).build[0]
         assert create_new_rows.endswith(
             f"CREATE OR REPLACE TABLE {self.NEW_ROWS_ADDRESS} AS (\n{UPSERT_SQL}\n)"
         )
@@ -321,7 +314,7 @@ class TestDeleteInsertStatements:
         ],
     )
     def test_the_delete_matches_on_the_key_or_the_join(self, match_arguments, expected_condition):
-        delete_matched_rows = self.build_plan(**match_arguments).statements[1]
+        delete_matched_rows = self.build_plan(**match_arguments).build[1]
         assert delete_matched_rows.endswith(
             "DELETE FROM db.schema.my_table__clair_stg AS target\n"
             f"USING {self.NEW_ROWS_ADDRESS} AS source\n"
@@ -330,7 +323,7 @@ class TestDeleteInsertStatements:
 
     def test_a_range_column_deletes_each_target_row_between_the_bounds_of_the_new_rows(self):
         """The bounds are scalar subqueries, thus the DELETE joins no table, and Snowflake prunes on them."""
-        delete_replaced_rows = self.build_plan(range_column="day").statements[1]
+        delete_replaced_rows = self.build_plan(range_column="day").build[1]
         assert delete_replaced_rows.endswith(
             "DELETE FROM db.schema.my_table__clair_stg AS target\n"
             "WHERE target.day BETWEEN "
@@ -345,18 +338,18 @@ class TestDeleteInsertStatements:
         """A range column changes the DELETE, and keeps the new rows table, the INSERT and the cleanup."""
         build_plan = self.build_plan(**match_arguments)
         key_plan = self.build_plan(primary_key_columns=["id"])
-        assert build_plan.statements[0] == key_plan.statements[0]
-        assert build_plan.statements[2:] == key_plan.statements[2:]
-        assert build_plan.cleanup_statements == key_plan.cleanup_statements
+        assert build_plan.build[0] == key_plan.build[0]
+        assert build_plan.build[2:] == key_plan.build[2:]
+        assert build_plan.cleanup == key_plan.cleanup
 
     def test_the_insert_writes_the_new_rows_to_the_staging_address(self):
         """A staging run changes the candidate, thus production never shows the gap."""
-        insert_new_rows = self.build_plan(primary_key_columns=["id"]).statements[2]
+        insert_new_rows = self.build_plan(primary_key_columns=["id"]).build[2]
         assert (
             f"INSERT INTO db.schema.my_table__clair_stg\nSELECT * FROM {self.NEW_ROWS_ADDRESS}"
             in insert_new_rows
         )
 
     def test_the_cleanup_drops_the_new_rows_table(self):
-        cleanup_statements = self.build_plan(primary_key_columns=["id"]).cleanup_statements
+        cleanup_statements = self.build_plan(primary_key_columns=["id"]).cleanup
         assert cleanup_statements[0].endswith(f"DROP TABLE IF EXISTS {self.NEW_ROWS_ADDRESS}")

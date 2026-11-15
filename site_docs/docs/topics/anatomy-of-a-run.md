@@ -240,23 +240,26 @@ Two consequences for the reader of the output:
 
 ### The steps for one node
 
-Each node does the same steps. The run mode decides only if the clone is necessary.
+Each node reads the warehouse, asks the Trouve for its plan, and executes the plan. The plan
+holds eight phases, and the runner executes them in this order. The table gives the
+default statements of a `Table`.
 
-| # | The step | Full refresh | Incremental |
+| # | The phase | Full refresh | Incremental |
 |---|---|---|---|
-| 1 | Clone the physical table to the staging address | No. The build makes the object. | Yes. `CREATE OR REPLACE TABLE <staging> CLONE <physical>` |
-| 2 | Build at the staging address | `CREATE OR REPLACE TABLE <staging> AS (...)`, or the same statement for a VIEW | `INSERT INTO <staging>`, or the three statements of the `MERGE` |
-| 3 | Test the staging object | Yes | Yes |
-| 4 | Promote after each test passes | `CREATE OR REPLACE TABLE <physical> CLONE <staging> COPY GRANTS` | The same statement |
-| 5 | Drop the staging object | Yes, after the promotion only | Yes, after the promotion only |
+| 1 | `prepare` | Nothing. The build makes the object. | `CREATE OR REPLACE TABLE <staging> CLONE <physical>`, then an `ALTER TABLE ... ADD COLUMN` for each new column |
+| 2 | `build` | `CREATE OR REPLACE TABLE <staging> AS (...)`, or the same statement for a VIEW | `INSERT INTO <staging>`, or the statements of the `MERGE` or the `DELETE` |
+| 3 | `configure` | The clustering key | The clustering key |
+| 4 | `test` | The tests of the Trouve, against the staging object | The same |
+| 5 | `promote`, after each blocking test passes | `CREATE OR REPLACE TABLE <physical> CLONE <staging> COPY GRANTS` | The same statement |
+| 6 | `document` | The `docs` as comments on the physical object | Each comment that differs |
+| 7 | `retire`, after the promotion | `DROP TABLE IF EXISTS <staging>` | The same |
+| 8 | `cleanup`, always | Nothing | `DROP TABLE IF EXISTS` the new rows table |
 
-*Source: [`core/staging.py`][staging-py], and [`trouves/trouve.py`][trouve-py] — `build_sql()`*
+*Source: [`core/runner.py`][runner-py] — `_run_node()`, and [`trouves/trouve.py`][trouve-py] — `MaterializedTrouve.plan()`*
 
-Between step 4 and step 5, clair writes the `docs` of the Trouve and of its columns as
-comments on the physical object. See [Comments in Snowflake](staging.md#comments-in-snowflake).
-
-Step 2 comes from `SqlTrouve.build_sql()`. A subclass can override it and give its own
-statements, and clair keeps each other step. See [Write your own build](../guides/custom-build-sql.md).
+A subclass can override each phase, or `plan()` itself, and clair keeps the order of the
+phases. See [Control the lifecycle of a Trouve](../guides/control-the-lifecycle.md). The
+comments go on in step 6. See [Comments in Snowflake](staging.md#comments-in-snowflake).
 
 clair promotes a node before it releases the Trouves downstream of it. A dependent thus
 starts only after its upstream reaches its physical address, and it reads the address that
@@ -273,37 +276,40 @@ object and not to the name, thus a `SWAP` moves the production grants to the sta
 
 ### The mode of each node
 
-`resolve_effective_mode()` decides the mode of one Trouve. It gives `full_refresh` unless
-each of three conditions is true: the Trouve is a TABLE, its `run_config` is
-`Incremental`, and the command line asks for the incremental mode.
+`Trouve.effective_mode()` decides the mode of one Trouve. The runner gives it the mode of
+the command line, and the object that Snowflake holds at the physical address. For a
+`Table`, it gives `incremental` when each of three conditions is true: the command line
+asks for the incremental mode, the `run_config` is `Incremental`, and the physical address
+holds a table. Else it gives `full_refresh`.
 
-*Source: [`core/runner.py`][runner-py] — `resolve_effective_mode()`*
+*Source: [`trouves/trouve.py`][trouve-py] — `Table.effective_mode()`*
 
-The runner adds a fourth condition, because it has a connection: it asks Snowflake if the
-physical table exists. A table that does not exist yet cannot get an `INSERT` or a `MERGE`,
-thus clair changes that node to the full refresh mode and writes
-`run.node.incremental_fallback` to the log. The first run of a new incremental Trouve needs
+A table that does not exist yet cannot get an `INSERT` or a `MERGE`, thus clair changes
+that node to the full refresh mode and writes `run.node.incremental_fallback` to the log.
+A subclass can override this policy. The first run of a new incremental Trouve needs
 no flag from you.
 
 That node builds from the SQL of its effective mode. A module reads `clair.run_mode` at
-import time, thus discovery keeps the text of each Trouve file of an incremental run. At
-the first call of `SqlTrouve.full_refresh_sql()`, clair runs that one file again with
-`FULL_REFRESH`: each import of the file resolves to the module that discovery loaded, and
-no other file runs. The logical address joins the Trouves of that SQL to the addresses of
+import time, thus discovery keeps the text of each Trouve file. When the effective mode of
+a node differs from the mode of the command line, the build calls
+`SqlTrouve.sql_for(effective_mode)`, and clair runs that one file again in that mode: each
+import of the file resolves to the module that discovery loaded, and no other file runs.
+The two directions are the same: a fallback to a full refresh drops the incremental
+filter, and a policy that makes a full refresh run incremental keeps it. The logical address joins the Trouves of that SQL to the addresses of
 the run. A query that cannot tell if the table exists fails the node: a fallback on a table
 that exists replaces its history with the incremental rows.
 
 For a table that exists, the runner then reads its columns with
-`WarehouseAdapter.describe_columns()`, and gives their names to `build_sql()` as data. The
+`WarehouseAdapter.describe_columns()`, and gives them to `plan()` in the `PlanContext`. The
 `INSERT` names each column, thus a new column order in the SQL cannot move a value into
-the wrong column. `build_sql()` itself takes no connection.
+the wrong column. `plan()` itself takes no connection.
 
 An `upsert` node makes three statements: it builds a new rows table, it merges that
 table into the staging table, and it drops the new rows table. A `delete_insert` node
 builds the same table, deletes each staging row that the new rows replace, inserts the new
-rows, and drops the table. The drop is a cleanup statement. clair runs it after the other statements, when they pass and when one of them
-fails. A failure leaves you the staging candidate to examine, and no clutter that you did
-not ask for. See [Incrementality](incrementality.md).
+rows, and drops the table. The drop is in the cleanup phase. clair runs it last, after the
+promotion, when the statements pass and when one of them fails. A failure leaves you the
+staging candidate to examine, and no clutter that you did not ask for. See [Incrementality](incrementality.md).
 
 A failed cleanup statement does not fail the node, because the data of the Trouve stays
 correct. clair writes `run.node.cleanup_failure` to the log, and the result of the node

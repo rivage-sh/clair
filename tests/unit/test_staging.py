@@ -7,19 +7,12 @@ from typing import TypeVar
 import pytest
 
 from clair.core.compiler import build_statements
-from clair.core.staging import (
-    STAGING_SUFFIX,
-    StagingAddressError,
-    build_clone_statement,
-    build_drop_staging_statement,
-    build_promote_statements,
-    make_staging_address,
-)
+from clair.core.staging import STAGING_SUFFIX, StagingAddressError, make_staging_address
 from clair.environments.routing import TrouveAddress
 from clair.trouves.run_config import Append, Incremental, RunMode, Upsert
-from clair.trouves.trouve import Table, TrouveAbc
-from clair.trouves.trouve_type import TrouveType
-from tests.helpers import compile_trouve, unstaged_plan
+from clair.trouves.statements import view_promote_statement
+from clair.trouves.trouve import Table, TrouveAbc, View
+from tests.helpers import build_and_cleanup, compile_trouve, staged_plan, unstaged_plan
 
 RUN_ID = "0195aabbccddeeff0011223344556677"
 
@@ -71,56 +64,46 @@ class TestStagingAddress:
 
 class TestPromoteStatements:
     def test_table_is_cloned_into_place_carrying_grants(self):
-        statement = "\n".join(build_promote_statements(
-            TrouveType.TABLE,
-            staging_address=_address("db.s.t__staging"),
-            physical_address=_address("db.s.t"),
-            table_options=_compile(Table(sql="SELECT 1 AS id"), "db.s.t"),
-        ))
+        statement = "\n".join(
+            _compile(Table(sql="SELECT 1 AS id"), "db.s.t").clone_promote_statements(
+                _address("db.s.t__staging"), _address("db.s.t")
+            )
+        )
         assert "CREATE OR REPLACE TABLE db.s.t CLONE db.s.t__staging COPY GRANTS" in statement
 
     def test_table_promotion_does_not_depend_on_the_target_existing(self):
         """COPY GRANTS copies from the replaced table, or the clone source if there is none."""
-        statement = "\n".join(build_promote_statements(
-            TrouveType.TABLE,
-            staging_address=_address("db.s.t__staging"),
-            physical_address=_address("db.s.t"),
-            table_options=_compile(Table(sql="SELECT 1 AS id"), "db.s.t"),
-        ))
+        statement = "\n".join(
+            _compile(Table(sql="SELECT 1 AS id"), "db.s.t").clone_promote_statements(
+                _address("db.s.t__staging"), _address("db.s.t")
+            )
+        )
         assert "IF NOT EXISTS" not in statement
         assert "SWAP WITH" not in statement
         assert "RENAME TO" not in statement
 
     def test_view_is_recreated_carrying_grants(self):
-        statement = "\n".join(build_promote_statements(
-            TrouveType.VIEW,
-            staging_address=_address("db.s.v__staging"),
-            physical_address=_address("db.s.v"),
-            resolved_sql="SELECT 1 AS id",
-            table_options=None,
-        ))
+        statement = view_promote_statement(_address("db.s.v"), "SELECT 1 AS id")
         assert "CREATE OR REPLACE VIEW db.s.v COPY GRANTS AS" in statement
         assert "SELECT 1 AS id" in statement
 
     def test_drop_staging_uses_matching_object_type(self):
-        assert "DROP TABLE IF EXISTS db.s.t" in build_drop_staging_statement(
-            TrouveType.TABLE, _address("db.s.t")
-        )
-        assert "DROP VIEW IF EXISTS db.s.v" in build_drop_staging_statement(
-            TrouveType.VIEW, _address("db.s.v")
-        )
+        table = _compile(Table(sql="SELECT 1 AS id"), "db.s.t")
+        view = _compile(View(sql="SELECT 1 AS id"), "db.s.v")
+        assert "DROP TABLE IF EXISTS db.s.t" in table.drop_statement(_address("db.s.t"))
+        assert "DROP VIEW IF EXISTS db.s.v" in view.drop_statement(_address("db.s.v"))
 
     def test_clone_is_zero_copy(self):
-        statement = build_clone_statement(
-            _address("db.s.t"), _address("db.s.t__staging"), table_options=_compile(Table(sql="SELECT 1 AS id"), "db.s.t")
+        statement = _compile(Table(sql="SELECT 1 AS id"), "db.s.t").clone_statement(
+            _address("db.s.t"), _address("db.s.t__staging")
         )
         assert "CREATE OR REPLACE TABLE db.s.t__staging CLONE db.s.t" in statement
 
 
-class TestBuildSqlStagingAddress:
+class TestTheBuildWritesTheTargetAddress:
     def test_full_refresh_writes_into_override(self):
         trouve = _compile(Table(sql="SELECT 1 AS id"), "db.s.orders")
-        statements = trouve.build_sql(RunMode.FULL_REFRESH, RUN_ID, target_address=_address("db.s.staging")).all_statements
+        statements = build_and_cleanup(staged_plan(trouve, RunMode.FULL_REFRESH, RUN_ID, _address("db.s.staging")))
         assert "CREATE OR REPLACE TABLE db.s.staging" in statements[0]
         assert "db.s.orders" not in statements[0]
 
@@ -132,7 +115,7 @@ class TestBuildSqlStagingAddress:
             ),
             "db.s.orders",
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, target_address=_address("db.s.staging")).all_statements
+        statements = build_and_cleanup(staged_plan(trouve, RunMode.INCREMENTAL, RUN_ID, _address("db.s.staging")))
         assert statements[0].startswith("INSERT INTO db.s.staging")
 
     def test_upsert_merges_into_override_without_stacking_staging_suffixes(self):
@@ -149,7 +132,7 @@ class TestBuildSqlStagingAddress:
             ),
             "db.s.orders",
         )
-        statements = trouve.build_sql(RunMode.INCREMENTAL, RUN_ID, target_address=_address("db.s.candidate")).all_statements
+        statements = build_and_cleanup(staged_plan(trouve, RunMode.INCREMENTAL, RUN_ID, _address("db.s.candidate")))
         assert "MERGE INTO db.s.candidate" in statements[1]
         # The merge source table derives from the real name, not the override,
         # so the two suffixes never stack.
@@ -182,11 +165,14 @@ class TestStagingCompilePlan:
         statements = build_statements(trouve, RunMode.FULL_REFRESH, RUN_ID, use_staging=True)
 
         staging = _staging_name("db.s.orders", RUN_ID)
+        assert statements[0].startswith("-- ── build")
         assert f"CREATE OR REPLACE TABLE {staging}" in statements[0]
-        assert "the data quality tests run here" in statements[1]
-        assert "of a type other than TABLE, clair stops here" in statements[2]
-        assert f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging} COPY GRANTS" in statements[3]
-        assert f"DROP TABLE IF EXISTS {staging}" in statements[4]
+        # The promotion names the type test, then clones the tested table into position.
+        assert statements[1].startswith("-- ── promote · when should_promote() gives True")
+        assert "of a type other than TABLE, clair stops here" in statements[1]
+        assert f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging} COPY GRANTS" in statements[1]
+        assert statements[2].startswith("-- ── retire · after the promotion")
+        assert f"DROP TABLE IF EXISTS {staging}" in statements[2]
 
     def test_incremental_plan_starts_with_a_clone(self):
         trouve = _compile(
@@ -207,5 +193,7 @@ class TestStagingCompilePlan:
         statements = build_statements(
             trouve, RunMode.FULL_REFRESH, RUN_ID, use_staging=False
         )
+        (build,) = build_and_cleanup(unstaged_plan(trouve, RunMode.FULL_REFRESH, RUN_ID))
+        assert len(statements) == 1
         assert "of a type other than TABLE, clair stops here" in statements[0]
-        assert statements[1:] == unstaged_plan(trouve, RunMode.FULL_REFRESH, RUN_ID).all_statements
+        assert statements[0].endswith(build)
