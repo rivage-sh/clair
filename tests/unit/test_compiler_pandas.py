@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import ast
 import textwrap
 from pathlib import Path
 
 import pytest
 
+import clair
 from clair.core.artifacts import write_compile_output
 from clair.core.compiler import build_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
@@ -114,14 +116,14 @@ class TestPandasTableArtifactFile:
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         assert py_file.exists()
 
-    def test_the_sql_file_holds_the_statements_after_the_write(self, tmp_path: Path):
+    def test_one_trouve_gives_one_file(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
         write_compile_output(tmp_path / "_clairtifacts", build_compile_output(dag, selected, run_id=FAKE_RUN_ID))
 
         sql_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.sql"
-        assert "CLONE mydb.derived.summary__clair_" in sql_file.read_text()
+        assert not sql_file.exists()
 
     def test_no_json_file_for_pandas_table(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
@@ -143,18 +145,15 @@ class TestPandasTableArtifactContent:
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         return py_file.read_text()
 
-    def test_header_contains_address(self, tmp_path: Path):
+    def test_the_build_comment_names_each_input(self, tmp_path: Path):
         content = self._get_artifact_content(tmp_path)
-        assert "# clair compiled: mydb.derived.summary" in content
+        assert "#   events  <-  mydb.source.events" in content
 
-    def test_header_contains_type_pandas(self, tmp_path: Path):
+    def test_the_function_runs_before_the_promotion(self, tmp_path: Path):
         content = self._get_artifact_content(tmp_path)
-        assert "# execution_type: pandas" in content
-
-    def test_header_contains_inputs(self, tmp_path: Path):
-        content = self._get_artifact_content(tmp_path)
-        assert "# inputs:" in content
-        assert "events  ->  mydb.source.events" in content
+        function_line = content.index("def summarize")
+        promotion_line = content.index("# CREATE OR REPLACE TABLE mydb.derived.summary CLONE")
+        assert content.index("# ── build") < function_line < promotion_line
 
     def test_contains_function_source(self, tmp_path: Path):
         content = self._get_artifact_content(tmp_path)
@@ -229,3 +228,19 @@ class TestSqlTrouveRegression:
         node_names = {str(n.addresses.physical) for n in output.compiled_nodes}
         assert "mydb.refined.events" in node_names
         assert "mydb.derived.summary" in node_names
+
+
+EXAMPLE_4 = Path(__file__).parents[2] / "examples" / "projects" / "example_4"
+
+
+def test_each_python_artifact_of_a_compile_is_valid_python(tmp_path: Path, monkeypatch):
+    # example_4 holds a PandasTable and a SeedTable. The artifact of each one
+    # holds its code and its plan as comments, and Python must read the file.
+    monkeypatch.setenv("CLAIR_USER", "tester")
+    output = clair.compile(EXAMPLE_4, env="dev")
+    run_dir = write_compile_output(tmp_path, output)
+
+    python_files = sorted(run_dir.rglob("*.py"))
+    assert len(python_files) == 2
+    for python_file in python_files:
+        ast.parse(python_file.read_text(), filename=str(python_file))

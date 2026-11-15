@@ -138,19 +138,27 @@ clair run --env=dev --select='derived.products.top_rated'
 
 ## Compile output
 
-`clair compile` writes a `.py` artifact for a `PandasTable`, in place of the `.sql` file it writes for a SQL Trouve. The artifact holds a header, the imports of the source module, and the source of your function. The header shows which upstream Trouve clair binds to each parameter:
+`clair compile` writes one `.py` artifact for a `PandasTable`, in place of the `.sql`
+file of a SQL Trouve. The file holds the complete plan in the order of the run. Your
+function sits at the build phase, where clair calls it, and each SQL statement is a
+comment. The build comment names the upstream Trouve that clair binds to each parameter:
 
 ```python
-# clair compiled: derived.products.top_rated
-# execution_type: pandas
-# inputs:
-#   catalog  ->  refined.products.catalog
-#   reviews  ->  refined.products.reviews
+# ── build ───────────────────────────────────────────────────
+# clair reads each input, calls the Python code below, and writes the DataFrame to derived.products.top_rated__clair_<run_id>
+#   catalog  <-  refined.products.catalog
+#   reviews  <-  refined.products.reviews
 
 import pandas as pd
 
 def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
     ...
+
+# ── promote · when should_promote() gives True ──────────────
+# CREATE OR REPLACE TABLE derived.products.top_rated CLONE derived.products.top_rated__clair_<run_id> COPY GRANTS
+
+# ── retire · after the promotion ────────────────────────────
+# DROP TABLE IF EXISTS derived.products.top_rated__clair_<run_id>
 ```
 
 ## Limitations

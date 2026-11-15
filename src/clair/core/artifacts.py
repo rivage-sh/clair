@@ -235,18 +235,45 @@ def _render_statements_file(node: CompiledNodeInfo) -> str:
     return _STATEMENT_SEPARATOR.join(statement.strip() for statement in node.sql) + "\n"
 
 
-def write_compile_output(artifacts_dir: Path, output: CompileOutput) -> Path:
-    """Write the files of each compiled Trouve, and give the run directory.
+def _python_comment(statement: str) -> str:
+    """Give the statement as Python comment lines. A SQL comment line becomes a plain Python comment."""
+    return "\n".join(
+        f"# {line.removeprefix('-- ')}".rstrip() for line in statement.splitlines()
+    )
 
-    Each Trouve gives a ``.sql`` file that holds its statements. A pandas
-    Trouve also gives a ``.py`` file that holds its Python text.
+
+def _render_python_file(node: CompiledNodeInfo, python_source: str) -> str:
+    """Give the text of the ``.py`` artifact file of one compiled pandas Trouve.
+
+    The file holds the complete plan in the order of the run. The Python text
+    sits in the build phase, where the runner calls it, and each SQL statement
+    is a comment. Thus one Trouve gives one file, as in the project.
+    """
+    parts: list[str] = []
+    for statement in node.sql:
+        parts.append(_python_comment(statement.strip()))
+        if statement.startswith(Phase.BUILD.header):
+            parts.append(python_source.strip())
+    return "\n\n".join(parts) + "\n"
+
+
+def write_compile_output(artifacts_dir: Path, output: CompileOutput) -> Path:
+    """Write one file for each compiled Trouve, and give the run directory.
+
+    A SQL Trouve gives a ``.sql`` file that holds its statements. A pandas
+    Trouve gives a ``.py`` file that holds its Python text at the build phase,
+    with each statement of its plan as a comment.
     """
     run_dir = run_directory(artifacts_dir, output.run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
     for node in output.compiled_nodes:
-        _write_text(_node_file(run_dir, node.addresses, ".sql"), _render_statements_file(node))
-        if node.python_source is not None:
-            _write_text(_node_file(run_dir, node.addresses, ".py"), node.python_source)
+        if node.python_source is None:
+            _write_text(_node_file(run_dir, node.addresses, ".sql"), _render_statements_file(node))
+        else:
+            _write_text(
+                _node_file(run_dir, node.addresses, ".py"),
+                _render_python_file(node, node.python_source),
+            )
     return run_dir
 
 

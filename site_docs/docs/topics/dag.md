@@ -86,8 +86,9 @@ _clairtifacts/
     └── run_summary.json                ← clair run only
 ```
 
-- `clair compile` writes the plan of each Trouve: a `.sql` file with its statements, and
-  for a pandas Trouve also a `.py` file with its Python text.
+- `clair compile` writes the plan of each Trouve, one file for each Trouve. A SQL Trouve
+  gets a `.sql` file. A pandas Trouve gets a `.py` file: its Python code sits at the build
+  phase, and each SQL statement of the plan is a comment, in the order of the run.
 - `clair run` writes the `.sql` file of a Trouve when the Trouve completes. The file holds
   each statement, with its status, its query ID and its error. A skipped Trouve gets no
   file. At the end, `clair run` writes `run_summary.json`, the complete `RunSummary`.

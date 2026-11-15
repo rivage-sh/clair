@@ -163,12 +163,21 @@ class TestWriteCompileOutput:
         text = _orders_file(tmp_path).read_text()
         assert text.index("create table a") < text.index("drop table b")
 
-    def test_a_pandas_trouve_gives_its_source_and_its_statements(self, tmp_path: Path):
+    def test_a_pandas_trouve_gives_one_python_file_in_the_order_of_the_run(self, tmp_path: Path):
         node = _compiled_node(
-            ExecutionType.PANDAS, sql=["select 'promote'"], python_source="def build():\n    pass\n"
+            ExecutionType.PANDAS,
+            sql=[
+                f"{Phase.BUILD.header}\n-- the write",
+                f"{Phase.PROMOTE.header}\nselect 'promote'",
+            ],
+            python_source="def build():\n    pass\n",
         )
 
         write_compile_output(tmp_path, self._output(node))
 
-        assert _orders_file(tmp_path, ".py").read_text() == "def build():\n    pass\n"
-        assert _orders_file(tmp_path).read_text() == "select 'promote'\n"
+        assert not _orders_file(tmp_path).exists()
+        assert _orders_file(tmp_path, ".py").read_text() == (
+            f"# {Phase.BUILD.header.removeprefix('-- ')}\n# the write\n\n"
+            "def build():\n    pass\n\n"
+            f"# {Phase.PROMOTE.header.removeprefix('-- ')}\n# select 'promote'\n"
+        )
