@@ -553,11 +553,7 @@ def _run_node(
 
     config = trouve.compiled.config
     try:
-        adapter.set_session_parameters(
-            query_tag=config.query_tag(run_id, environment_name, logical_address),
-            statement_timeout_seconds=config.statement_timeout_seconds,
-        )
-        adapter.set_context(warehouse=config.warehouse, role=config.role)
+        adapter.use_session_of(config, config.query_tag(run_id, environment_name, logical_address))
     except Exception as e:  # noqa: BLE001 — each adapter fault becomes a RunResult with the FAILURE status
         logger.warning("run.node.context_error", logical=logical_address, physical=name, warehouse=config.warehouse, role=config.role, error=str(e))
         return _NodeOutcome(
@@ -679,6 +675,8 @@ def _run_node(
             if not cleanup_statement.success:
                 logger.warning("run.node.cleanup_failure", logical=logical_address, physical=name, error=cleanup_statement.error)
 
+    test_results: list[TestResult] = []
+
     def finish(error: str, downstream_ok: bool, row_count: int = 0) -> _NodeOutcome:
         """Run the cleanup, and give the result of the node."""
         run_cleanup()
@@ -687,12 +685,12 @@ def _run_node(
         if error:
             logger.warning("run.node.failure", logical=logical_address, physical=name, duration_seconds=round(duration, 3), error=error, query_ids=query_ids)
             return _NodeOutcome(
-                RunFailure(addresses=addresses, statements=statements, effective_run_mode=effective_mode, error=error, duration_seconds=duration),
+                RunFailure(addresses=addresses, statements=statements, effective_run_mode=effective_mode, error=error, duration_seconds=duration, test_results=test_results),
                 downstream_ok=False,
             )
         logger.info("run.node.success", logical=logical_address, physical=name, duration_seconds=round(duration, 3), query_ids=query_ids)
         return _NodeOutcome(
-            RunSuccess(addresses=addresses, statements=statements, effective_run_mode=effective_mode, duration_seconds=duration, row_count=row_count),
+            RunSuccess(addresses=addresses, statements=statements, effective_run_mode=effective_mode, duration_seconds=duration, row_count=row_count, test_results=test_results),
             downstream_ok=downstream_ok,
         )
 
@@ -753,7 +751,7 @@ def _run_node(
             return finish(failed_statement.error or "unknown error", downstream_ok=False)
         downstream_ok = True
         if test_node is not None:
-            test_results = test_node(name, plan.test, adapter)
+            test_results.extend(test_node(name, plan.test, adapter))
             downstream_ok = not any(test_result.is_blocking for test_result in test_results)
         return finish("", downstream_ok=downstream_ok, row_count=row_count)
 
@@ -761,7 +759,8 @@ def _run_node(
     # can arrive while the tests run, thus clair asks again after them, just
     # before the promotion.
     assert test_node is not None
-    test_results = [] if is_cancelled() else test_node(name, plan.test, adapter)
+    if not is_cancelled():
+        test_results.extend(test_node(name, plan.test, adapter))
     if is_cancelled():
         return finish(_cancelled_before_promotion(addresses), downstream_ok=False)
     if not trouve.should_promote(context, test_results):

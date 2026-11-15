@@ -5,10 +5,13 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from clair.core.artifacts import write_compile_output
 from clair.core.compiler import build_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
+from clair.phase import Phase
 from clair.trouves.trouve import ExecutionType
 from clair.trouves.trouve_type import TrouveType
 
@@ -111,14 +114,14 @@ class TestPandasTableArtifactFile:
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         assert py_file.exists()
 
-    def test_no_sql_file_for_pandas_table(self, tmp_path: Path):
+    def test_the_sql_file_holds_the_statements_after_the_write(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
         write_compile_output(tmp_path / "_clairtifacts", build_compile_output(dag, selected, run_id=FAKE_RUN_ID))
 
         sql_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.sql"
-        assert not sql_file.exists()
+        assert "CLONE mydb.derived.summary__clair_" in sql_file.read_text()
 
     def test_no_json_file_for_pandas_table(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
@@ -168,14 +171,24 @@ class TestPandasTableCompiledNodeInfo:
         pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
         assert pandas_node.execution_type == ExecutionType.PANDAS
 
-    def test_compiled_node_has_empty_sql(self, tmp_path: Path):
+    @pytest.mark.parametrize(
+        ("use_staging", "expected_phases"),
+        [
+            (True, [Phase.BUILD, Phase.PROMOTE, Phase.RETIRE]),
+            (False, [Phase.BUILD]),
+        ],
+    )
+    def test_compiled_node_shows_each_phase_of_the_plan(
+        self, tmp_path: Path, use_staging: bool, expected_phases: list[Phase]
+    ):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID)
+        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID, use_staging=use_staging)
 
         pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
-        assert pandas_node.sql == []
+        phase_headers = [phase for phase in Phase for sql in pandas_node.sql if sql.startswith(phase.header)]
+        assert phase_headers == expected_phases
 
     def test_compiled_node_has_dependencies(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)

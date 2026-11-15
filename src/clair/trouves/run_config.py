@@ -97,6 +97,10 @@ class _MatchingStrategy(_ConfigModel):
                 f"{strategy_name} takes only one of {_or_list(self.match_field_names)}, "
                 f"but it got {' and '.join(given_names)}"
             )
+        (given_name,) = given_names
+        given_value = getattr(self, given_name)
+        if not given_value or (isinstance(given_value, str) and not given_value.strip()):
+            raise ValueError(f"{strategy_name} got an empty {given_name}. Give a value.")
         return self
 
     @property

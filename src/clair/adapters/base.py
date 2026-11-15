@@ -13,6 +13,7 @@ import pandas as pd
 from clair.adapters.objects import Statement, WarehouseColumn, WarehouseObject, WarehouseObjectType
 from clair.environments.environments import Environment
 from clair.trouves.address import TrouveAddress
+from clair.trouves.config import ResolvedConfig
 from clair.trouves.trouve import TrouveAbc
 
 
@@ -67,6 +68,18 @@ class WarehouseAdapter(ABC):
         values. A timeout of None removes the timeout of the Trouve before it.
         """
         ...
+
+    def use_session_of(self, config: ResolvedConfig, query_tag: str) -> None:
+        """Give the session the settings of one Trouve, before its first statement.
+
+        ``clair run`` and ``clair test`` call this method for each Trouve. Thus
+        each statement of a Trouve runs with its role, its warehouse, its query
+        tag and its timeout, and no value of the Trouve before it stays.
+        """
+        self.set_session_parameters(
+            query_tag=query_tag, statement_timeout_seconds=config.statement_timeout_seconds
+        )
+        self.set_context(warehouse=config.warehouse, role=config.role)
 
     @abstractmethod
     def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:

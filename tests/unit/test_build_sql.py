@@ -242,7 +242,7 @@ class TestUpsertStatements:
     def test_the_first_statement_makes_the_merge_source(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
         statements = unstaged_plan(trouve, RunMode.INCREMENTAL, "abc123").build
-        assert f"CREATE OR REPLACE TABLE {trouve.new_rows_address('abc123')}" in statements[0]
+        assert f"CREATE OR REPLACE TRANSIENT TABLE {trouve.new_rows_address('abc123')}" in statements[0]
 
     def test_the_second_statement_holds_each_clause_of_the_plan(self):
         trouve = make_upsert_trouve(primary_key_columns=["id"])
@@ -299,7 +299,7 @@ class TestDeleteInsertStatements:
     def test_the_new_rows_table_holds_the_sql_of_the_trouve(self):
         create_new_rows = self.build_plan(primary_key_columns=["id"]).build[0]
         assert create_new_rows.endswith(
-            f"CREATE OR REPLACE TABLE {self.NEW_ROWS_ADDRESS} AS (\n{UPSERT_SQL}\n)"
+            f"CREATE OR REPLACE TRANSIENT TABLE {self.NEW_ROWS_ADDRESS} AS (\n{UPSERT_SQL}\n)"
         )
 
     @pytest.mark.parametrize(

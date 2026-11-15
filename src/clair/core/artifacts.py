@@ -230,24 +230,23 @@ def _write_text(path: Path, text: str) -> Path:
     return path
 
 
-def _render_compiled_node(node: CompiledNodeInfo) -> str:
-    """Give the text of the artifact file of one compiled Trouve."""
-    if node.python_source is not None:
-        return node.python_source
+def _render_statements_file(node: CompiledNodeInfo) -> str:
+    """Give the text of the ``.sql`` artifact file of one compiled Trouve."""
     return _STATEMENT_SEPARATOR.join(statement.strip() for statement in node.sql) + "\n"
 
 
 def write_compile_output(artifacts_dir: Path, output: CompileOutput) -> Path:
-    """Write one file for each compiled Trouve, and give the run directory.
+    """Write the files of each compiled Trouve, and give the run directory.
 
-    A SQL Trouve gives a ``.sql`` file that holds its statements. A pandas
-    Trouve gives a ``.py`` file that holds its Python text.
+    Each Trouve gives a ``.sql`` file that holds its statements. A pandas
+    Trouve also gives a ``.py`` file that holds its Python text.
     """
     run_dir = run_directory(artifacts_dir, output.run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
     for node in output.compiled_nodes:
-        suffix = ".py" if node.python_source is not None else ".sql"
-        _write_text(_node_file(run_dir, node.addresses, suffix), _render_compiled_node(node))
+        _write_text(_node_file(run_dir, node.addresses, ".sql"), _render_statements_file(node))
+        if node.python_source is not None:
+            _write_text(_node_file(run_dir, node.addresses, ".py"), node.python_source)
     return run_dir
 
 

@@ -34,7 +34,6 @@ gets each result of a run while the run continues.
 from __future__ import annotations
 
 import shutil
-from collections import defaultdict
 from collections.abc import Generator, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -55,14 +54,7 @@ from clair.core.compiler import CompileOutput, build_compile_output
 from clair.core.dag import ClairDag, build_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.references import recompile_for_selection
-from clair.core.runner import (
-    RunCancel,
-    RunCancellation,
-    RunResult,
-    RunSkip,
-    RunSummary,
-    run_project,
-)
+from clair.core.runner import RunCancellation, RunResult, RunSummary, run_project
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import SampleScope, TestSummary, run_test_queries, run_tests
 from clair.core.validation import ValidationReport, validate_project
@@ -445,7 +437,6 @@ class RunHandle:
                 "run.no_account_locator", env=env_name, detail="Clair cannot show the query URLs."
             )
 
-        test_results_of_node: dict[str, list[TestResult]] = defaultdict(list)
         sample_scope = SampleScope.RUN_INPUTS if self._sample else SampleScope.NONE
 
         def test_node(
@@ -454,13 +445,9 @@ class RunHandle:
             # node_adapter is the connection of the thread that ran the node. A
             # parallel run must not send these test queries on a different
             # connection, because that connection holds a different context.
-            node_test_results = run_test_queries(
+            return run_test_queries(
                 dag.get_trouve(node_name), queries, node_adapter, sample_scope=sample_scope
             )
-            # list.extend is atomic, thus the threads need no lock here. Each
-            # thread writes to the entry of its own node.
-            test_results_of_node[node_name].extend(node_test_results)
-            return node_test_results
 
         # A connection that no Trouve uses gives nothing. A connection costs one
         # login, not credits: Snowflake bills the warehouse per second while it
@@ -491,11 +478,6 @@ class RunHandle:
                 environment_name=env_name,
                 cancellation=self._cancellation,
             ):
-                # A Trouve that did not start ran no test, thus its result has no test results.
-                if not isinstance(result, RunSkip | RunCancel):
-                    result = result.model_copy(
-                        update={"test_results": test_results_of_node[str(result.addresses.physical)]}
-                    )
                 self._results.append(result)
                 yield result
             self._complete = True
@@ -511,6 +493,7 @@ class RunHandle:
             succeeded=summary.succeeded_count,
             failed=summary.failed_count,
             skipped=summary.skipped_count,
+            cancelled=summary.cancelled_count,
         )
 
 
@@ -760,6 +743,8 @@ def test(
                 sample_scope=SampleScope.TEST_QUERIES if sample else SampleScope.NONE,
                 sample_rows=sample_rows,
                 threads=thread_count,
+                run_id=uuid6.uuid7().hex,
+                environment_name=env_name,
             )
         )
     finally:

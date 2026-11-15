@@ -163,10 +163,12 @@ class TestWriteCompileOutput:
         text = _orders_file(tmp_path).read_text()
         assert text.index("create table a") < text.index("drop table b")
 
-    def test_a_pandas_trouve_gives_a_python_file_with_its_source(self, tmp_path: Path):
-        node = _compiled_node(ExecutionType.PANDAS, sql=[], python_source="def build():\n    pass\n")
+    def test_a_pandas_trouve_gives_its_source_and_its_statements(self, tmp_path: Path):
+        node = _compiled_node(
+            ExecutionType.PANDAS, sql=["select 'promote'"], python_source="def build():\n    pass\n"
+        )
 
         write_compile_output(tmp_path, self._output(node))
 
         assert _orders_file(tmp_path, ".py").read_text() == "def build():\n    pass\n"
-        assert not _orders_file(tmp_path).exists()
+        assert _orders_file(tmp_path).read_text() == "select 'promote'\n"

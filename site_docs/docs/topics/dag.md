@@ -59,7 +59,7 @@ _clairtifacts/
             └── daily.sql
 ```
 
-- `clair compile` writes the plan of each Trouve: a `.sql` file for a SQL Trouve, and a `.py` file for a pandas Trouve.
+- `clair compile` writes the plan of each Trouve: a `.sql` file with the statements of each Trouve, and also a `.py` file with the Python text of a pandas Trouve.
 - `clair run` writes the file of a Trouve when the Trouve completes, thus the directory fills while the run continues. The `.sql` file holds each statement that the run made, with its status, its query ID and its error. A skipped Trouve gives no file. At the end, `clair run` writes `run_summary.json`, the complete `RunSummary`.
 - The Python API writes no file. See [Artifacts](../reference/python-api.md#artifacts) to write them from a notebook.
 

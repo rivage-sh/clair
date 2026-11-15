@@ -25,7 +25,7 @@ from clair.trouves.column import Column, ColumnType
 from clair.trouves.plan import NodePlan, PlanContext, TestQuery, TestResult
 from clair.trouves.run_config import DeleteInsert, Incremental, RunMode, Upsert
 from clair.trouves.trouve import Table
-from tests.helpers import TEST_RUN_ID, RecordingAdapter, compile_trouve
+from tests.helpers import TEST_RUN_ID, RecordingAdapter, compile_trouve, run_one_trouve
 
 PHYSICAL_ADDRESS = "db.s.planned"
 STAGING_ADDRESS = f"{PHYSICAL_ADDRESS}__clair_{TEST_RUN_ID}"
@@ -150,6 +150,14 @@ def test_the_summary_names_the_phase_that_failed() -> None:
     assert isinstance(result, RunFailure)
     assert result.failed_phase == Phase.PROMOTE
     assert f"{PHYSICAL_ADDRESS} ... FAILED in promote (" in RunSummary.render_node(result, 1, 1)
+
+
+def test_the_runner_gives_the_test_results_in_the_result_of_the_node() -> None:
+    result = run_one_trouve(Table(sql="select 1 as id"), RecordingAdapter(), tests_passed=False)
+
+    assert isinstance(result, RunFailure)
+    assert [test_result.test_type for test_result in result.test_results] == ["unique"]
+    assert result.failed_phase == Phase.TEST
 
 
 def test_a_run_without_staging_executes_no_promote_and_no_retire() -> None:
@@ -313,9 +321,9 @@ def run_incremental(trouve: Table, adapter: RecordingAdapter) -> RunResult:
     [
         # The clone statement also holds CREATE OR REPLACE TABLE, thus the
         # failure text names the new rows table for that case.
-        (Upsert(primary_key_columns=["id"]), f"CREATE OR REPLACE TABLE {NEW_ROWS_TABLE}"),
+        (Upsert(primary_key_columns=["id"]), f"CREATE OR REPLACE TRANSIENT TABLE {NEW_ROWS_TABLE}"),
         (Upsert(primary_key_columns=["id"]), "MERGE INTO"),
-        (DeleteInsert(primary_key_columns=["id"]), f"CREATE OR REPLACE TABLE {NEW_ROWS_TABLE}"),
+        (DeleteInsert(primary_key_columns=["id"]), f"CREATE OR REPLACE TRANSIENT TABLE {NEW_ROWS_TABLE}"),
         (DeleteInsert(primary_key_columns=["id"]), "DELETE FROM"),
         (DeleteInsert(primary_key_columns=["id"]), "INSERT INTO"),
     ],

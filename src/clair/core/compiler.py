@@ -33,8 +33,9 @@ class CompiledNodeInfo(BaseModel):
         effective_run_mode: The run mode after clair applied the RunConfig of
             the Trouve to the run mode of the caller.
         dependencies: The physical address of each upstream Trouve.
-        sql: The statements, in the order that clair executes them. A pandas
-            Trouve has no statements.
+        sql: The statements, in the order that clair executes them. The build
+            of a pandas Trouve is a ``write_pandas`` call and not SQL, thus a
+            comment marks its place.
         python_source: The Python text of a pandas Trouve: a header that names
             each input, the imports of its module, and its function. None for
             a SQL Trouve.
@@ -186,7 +187,7 @@ def render_plan(trouve: MaterializedTrouve, context: PlanContext, plan: NodePlan
 
 
 def build_statements(
-    trouve: SqlTrouve,
+    trouve: MaterializedTrouve,
     run_mode: RunMode,
     run_id: str,
     use_staging: bool = True,
@@ -197,7 +198,14 @@ def build_statements(
     after the tests, and the staging object stays.
     """
     context = offline_plan_context(trouve, run_mode, run_id, use_staging)
-    return render_plan(trouve, context, trouve.plan(context))
+    plan = trouve.plan(context)
+    if isinstance(trouve, DataframeTrouve):
+        # The runner writes the DataFrame before the build statements of the plan.
+        dataframe_write = (
+            f"-- clair writes the DataFrame of the Python file to {context.target_address}"
+        )
+        plan = plan.model_copy(update={"build": [dataframe_write, *plan.build]})
+    return render_plan(trouve, context, plan)
 
 
 def build_compile_output(
@@ -282,7 +290,7 @@ def build_compile_output(
                 execution_type=ExecutionType.PANDAS,
                 effective_run_mode=RunMode.FULL_REFRESH,
                 dependencies=deps,
-                sql=[],
+                sql=build_statements(trouve, run_mode, run_id, use_staging=use_staging),
                 python_source=header + imports_section + body_source,
             ))
         elif isinstance(trouve, SqlTrouve):
