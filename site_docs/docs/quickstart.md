@@ -189,7 +189,7 @@ database or schema, change the `route` method. See [Routing](topics/routing.md).
 ## Next steps
 
 - [Pandas-native transformations](topics/pandas-native.md) — write pipeline steps as Python functions
-- [Incrementality](topics/incrementality.md) — APPEND and UPSERT strategies for large tables
-- [Data quality tests](topics/data-quality-tests.md) — all four test types
+- [Incrementality](topics/incrementality.md) — APPEND, UPSERT and DELETE_INSERT strategies for large tables
+- [Data quality tests](topics/data-quality-tests.md) — each test type
 - [Selectors](topics/selectors.md) — run only a subset of Trouves
 - [CLI reference](cli/overview.md) — all commands and flags

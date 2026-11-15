@@ -3,7 +3,7 @@
 Run Trouves against Snowflake in dependency order, then run the data quality tests.
 
 ```bash
-clair run --env NAME [--select PATTERN]... [--run-mode MODE] [--no-test] [--sample [--sample-rows N]] [--threads N]
+clair run --env NAME [--select PATTERN]... [--exclude PATTERN]... [--run-mode MODE] [--no-test] [--sample [--sample-rows N]] [--threads N]
 ```
 
 ## Example
@@ -68,7 +68,7 @@ Three limits to know:
 
 ## Tests
 
-clair runs the attached tests after each successful TABLE or VIEW. If a test fails, the run stops with a non-zero status code. Use `--no-test` to skip the tests.
+clair runs the tests of each Trouve after its build. An `ERROR` test that fails stops the promotion of that Trouve, and clair skips each Trouve downstream of it. The other branches of the DAG continue. A `WARN` test that fails promotes the data, and logs a warning. Use `--no-test` to skip the tests.
 
 The tests decide the publication. They do not report a fault after it reaches production: clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes. See [Staging](../topics/staging.md).
 
@@ -103,7 +103,8 @@ Trouves that did not succeed: see [Retry the failed Trouves](../guides/retry-the
 |------|---------|-------------|
 | `--env` | required | The environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py`. `CLAIR_ENV` gives it when you omit the flag. |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
-| `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Overrides the `run_config` of each Trouve. |
+| `--exclude` | none | Pattern that removes Trouves after the selection. The syntax is the same as `--select`. |
+| `--run-mode` | `full_refresh` | `full_refresh` makes each Trouve again. `incremental` applies the `Incremental` run_config of each Trouve that has one, and makes each other Trouve again. |
 | `--no-test` | `false` | Skip the data quality tests |
 | `--sample` | `false` | Read a sample of each Trouve that the run does not build. See [Sampled run](#sampled-run). |
 | `--sample-rows` | `1000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |
@@ -118,8 +119,8 @@ stops the process at once. See
 
 ## Exit codes
 
-- `0` — all the Trouves ran, and all the tests passed
-- `1` — one or more Trouves failed, or one or more tests failed. A Trouve whose
+- `0` — all the Trouves ran, and no `ERROR` test failed
+- `1` — one or more Trouves failed, or one or more `ERROR` tests failed. A Trouve whose
   tests failed counts as a failure. Its physical object keeps the data that it
   had, and the rejected candidate stays for you to query.
 - `130` or `143` — a `SIGINT` or a `SIGTERM` stopped the run. See [Stop a run](#stop-a-run).

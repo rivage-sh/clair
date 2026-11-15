@@ -70,7 +70,7 @@ trouve = Table(
 no other Trouve, thus it is always a root:
 
 ```
-=== Clair DAG: 4 models, 1 source ===
+=== Clair DAG: 4 Trouves, 1 source ===
 
 example_4_database.reference.event_type_labels  [SEED]
 └── example_4_database.derived.top_event_types  [TABLE]

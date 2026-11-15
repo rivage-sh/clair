@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from enum import StrEnum
-from fnmatch import fnmatch
 
 import networkx as nx
 from pydantic import BaseModel, computed_field
 
 from clair.core.dag import ClairDag
+from clair.core.selector import expand_selectors
 from clair.exceptions import ClairError
 from clair.trouves.seed_table import SeedTable
 from clair.trouves.trouve import ExecutionType
@@ -102,7 +102,7 @@ class DagTreeNode(BaseModel):
 class DagRenderOutput(BaseModel):
     """The result after clair draws a DAG."""
 
-    model_count: int
+    trouve_count: int
     source_count: int
     visible_nodes: list[str]
     matched_nodes: list[str]
@@ -150,9 +150,10 @@ def render_dag(dag: ClairDag, selected: list[str] | None = None) -> DagRenderOut
 
     Args:
         dag: The dependency graph to draw.
-        selected: Optional glob patterns that limit the visible nodes. With
-            these patterns, the tree shows only the nodes that agree with a
-            pattern, and their parents at each level above.
+        selected: Optional selector patterns that limit the visible nodes,
+            with the syntax of ``clair run --select``. With these patterns, the
+            tree shows only the nodes that a pattern selects, and their parents
+            at each level above.
 
     Returns:
         A DagRenderOutput that holds the counts, the tree, and a .render()
@@ -160,11 +161,11 @@ def render_dag(dag: ClairDag, selected: list[str] | None = None) -> DagRenderOut
     """
     selected = selected or []
     visible, matched = _compute_visible_nodes(dag, selected)
-    pattern = selected[0] if selected else None
+    pattern = ", ".join(selected) if selected else None
 
     if selected and not visible:
         return DagRenderOutput(
-            model_count=0,
+            trouve_count=0,
             source_count=0,
             visible_nodes=[],
             matched_nodes=[],
@@ -188,7 +189,7 @@ def render_dag(dag: ClairDag, selected: list[str] | None = None) -> DagRenderOut
     ]
 
     return DagRenderOutput(
-        model_count=len(visible) - source_count,
+        trouve_count=len(visible) - source_count,
         source_count=source_count,
         visible_nodes=sorted(visible),
         matched_nodes=sorted(matched),
@@ -236,7 +237,7 @@ def format_dag_tree(output: DagRenderOutput) -> str:
         return f"Clair found no Trouves for the selector '{output.selector}'."
 
     lines = [
-        format_header(output.model_count, output.source_count, output.selector),
+        format_header(output.trouve_count, output.source_count, output.selector),
         "",
     ]
     for index, root in enumerate(output.roots):
@@ -294,13 +295,7 @@ def _compute_visible_nodes(
     if not selected:
         return set(dag.nodes), set()
 
-    matched: set[str] = set()
-    for node in dag.nodes:
-        for pattern in selected:
-            if fnmatch(node, pattern):
-                matched.add(node)
-                break
-
+    matched = set(expand_selectors(dag, selected))
     visible = set(matched)
     for node in matched:
         visible |= nx.ancestors(dag, node)
@@ -308,14 +303,14 @@ def _compute_visible_nodes(
     return visible, matched
 
 
-def format_header(model_count: int, source_count: int, pattern: str | None) -> str:
+def format_header(trouve_count: int, source_count: int, pattern: str | None) -> str:
     """Give the === header line ===."""
-    model_word = "model" if model_count == 1 else "models"
+    trouve_word = "Trouve" if trouve_count == 1 else "Trouves"
     source_word = "source" if source_count == 1 else "sources"
 
     if pattern is not None:
         return (
             f"=== Clair DAG (filtered: {pattern}): "
-            f"{model_count} {model_word}, {source_count} {source_word} ==="
+            f"{trouve_count} {trouve_word}, {source_count} {source_word} ==="
         )
-    return f"=== Clair DAG: {model_count} {model_word}, {source_count} {source_word} ==="
+    return f"=== Clair DAG: {trouve_count} {trouve_word}, {source_count} {source_word} ==="

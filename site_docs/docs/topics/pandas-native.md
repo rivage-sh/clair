@@ -112,7 +112,7 @@ Clair examines the `transform` signature when Python loads your file. Thus a mis
 Dependencies come from `inputs`. No extra configuration is necessary. `clair dag` marks these nodes with a `[PANDAS]` tag, in place of the `[TABLE]` or `[VIEW]` tag:
 
 ```
-=== Clair DAG: 4 models, 1 source ===
+=== Clair DAG: 4 Trouves, 1 source ===
 
 example_4_database.reference.event_type_labels  [SEED]
 └── example_4_database.derived.top_event_types  [TABLE]
