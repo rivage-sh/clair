@@ -6,477 +6,88 @@
 
 Python-native data transformations for Snowflake.
 
-Define your pipelines as Python files. Clair compiles them to SQL, builds a DAG, and runs them against Snowflake in dependency order — with data quality tests, incremental strategies, and structured logging out of the box.
-
----
-
-## Why clair?
-
-SQL-only tools make it hard to express dependencies clearly. With clair, each table or view is a Python file that references its upstreams by import. And if SQL isn't the right tool — write pandas instead:
+Each table or view is one Python file, a **Trouve**. The path of the file gives the
+Snowflake name, and the SQL is a plain f-string. A Trouve reads another Trouve through a
+normal Python import:
 
 ```python
-from clair import Table
+# derived/products/top_reviewed.py  →  derived.products.top_reviewed
+from clair import Table, TestNotNull
 from refined.products.catalog import trouve as catalog
 from refined.products.reviews import trouve as reviews
 
 trouve = Table(
     sql=f"""
-        SELECT
-            c.product_id,
-            c.name,
-            avg(r.rating)  AS avg_rating,
-            count(*)       AS review_count
+        SELECT c.product_id, c.name, avg(r.rating) AS avg_rating
         FROM {catalog} c
         JOIN {reviews} r ON c.product_id = r.product_id
         GROUP BY 1, 2
     """,
+    tests=[TestNotNull(column="product_id")],
 )
 ```
 
-Import the upstream, use it in the f-string — clair figures out the rest.
+clair finds each Trouve, builds the DAG from the references, and runs it in order. It
+writes each Trouve to a staging table first, runs the tests there, and replaces
+production only when the tests pass.
 
-Or skip SQL entirely and write pandas:
+- **No Jinja, no YAML.** The SQL is Python, thus your editor completes it and finds each
+  reference.
+- **Compile with no connection.** `clair compile` writes each statement that a run sends,
+  so a pull request shows the complete plan.
+- **Incremental tables.** `Append`, `Upsert` and `DeleteInsert`, with a check of the
+  columns before each write.
+- **pandas when SQL is not enough.** A `PandasTable` runs a Python function on DataFrames,
+  and a `SeedTable` holds its rows in the file.
+- **A Python library first.** `clair.run()`, `clair.compile()` and `clair.test()` give
+  data objects. The CLI is a thin caller of them.
 
-```python
-import pandas as pd
-from refined.products.catalog import trouve as catalog_trouve
-from refined.products.reviews import trouve as reviews_trouve
+## Install
 
-from clair import PandasTable
-
-
-def summarize(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
-    merged = catalog.merge(reviews, on="product_id")
-    return merged.groupby("name", as_index=False).agg(rating=("rating", "mean"))
-
-
-trouve = PandasTable(transform=summarize, inputs=[catalog_trouve, reviews_trouve])
+```bash
+uv tool install rivage-clair   # the clair command
+uv add rivage-clair            # in your project, for the editor and the type checker
 ```
 
-clair fetches the upstream tables from Snowflake, runs your function locally, then writes the result back. The DAG, lineage, `--select` filters, and data quality tests all work unchanged.
+## First run
 
----
-
-## Concepts
-
-### Trouve
-
-A **Trouve** is a single Python file representing one queryable Snowflake object. Its position in the directory tree determines its fully-qualified name:
-
-```
-my_project/
-└── source/
-    └── products/
-        └── reviews.py   →   source.products.reviews
+```bash
+clair init                     # writes ~/.clair/environments.yml and __routing__.py
+clair compile --env dev        # shows the SQL, needs no Snowflake connection
+clair run --env dev            # builds, tests and promotes each Trouve
 ```
 
-Clair has one Trouve class for each kind of object. Each one derives from `TrouveAbc`:
-
-| Class | What it is |
-|-------|-----------|
-| `Source` | A Snowflake table that external tools load. Clair reads it, and never writes it. |
-| `Table` | A Snowflake table that clair makes from `sql`. Runs inside Snowflake. |
-| `View` | A Snowflake view that clair makes from `sql`. |
-| `PandasTable` | A table that a Python function makes on the clair machine. Clair writes the result to Snowflake. |
-
-### DAG
-
-Clair discovers all Trouves in your project, resolves the Python import references into a dependency graph, and executes nodes in topological order. If a node fails, all its downstream dependents are skipped automatically.
-
-### Project layout
-
-Each directory level maps to one part of the Snowflake name: `database_name / schema_name / table_name`.
-
-```
-my_project/
-├── source/
-│   └── products/
-│       ├── catalog.py             # source.products.catalog
-│       └── reviews.py             # source.products.reviews
-├── refined/
-│   └── products/
-│       ├── catalog.py             # refined.products.catalog
-│       └── reviews.py             # refined.products.reviews
-├── derived/
-│   └── products/
-│       └── top_reviewed.py        # derived.products.top_reviewed
-└── _clairtifacts/                 # compiled SQL artifacts — add to .gitignore
-```
-
-Files beginning with `_` are ignored during discovery.
-
----
+The [Quickstart](https://rivage-sh.github.io/clair/quickstart/) takes you from an empty
+directory to a first run.
 
 ## Documentation
 
-Full documentation — guides, CLI reference, and API reference — is at **[rivage-sh.github.io/clair](https://rivage-sh.github.io/clair)**.
-
-## Installation
-
-Install the CLI globally using [uv](https://github.com/astral-sh/uv):
-
-```bash
-uv tool install rivage-clair
-```
-
-Then add clair as a project dependency so your Trouve files get IDE autocompletion and type checking:
-
-```bash
-uv add rivage-clair
-```
-
----
-
-## Getting started
-
-### 1. Set up an environment
-
-Run `clair init`. It asks for your Snowflake connection details and writes two files:
-
-- `~/.clair/environments.yml` — your connection settings. Do not commit this file.
-- `<project>/__routing__.py` — the [routing](https://clair.rivage.sh/topics/routing/) entry of each environment. Commit this file.
-
-### 2. Create a project
-
-```
-my_project/
-├── source/
-│   └── products/
-│       ├── catalog.py
-│       └── reviews.py
-├── refined/
-│   └── products/
-│       ├── catalog.py
-│       └── reviews.py
-└── derived/
-    └── products/
-        └── top_reviewed.py
-```
-
-**`source/products/catalog.py`** — declares a pre-existing Snowflake table
-```python
-from clair import Column, ColumnType, Source
-
-trouve = Source(
-    columns=[
-        Column(name="product_id",   type=ColumnType.STRING),
-        Column(name="name",         type=ColumnType.STRING),
-        Column(name="category",     type=ColumnType.STRING),
-        Column(name="price",        type=ColumnType.FLOAT),
-    ],
-)
-```
-
-**`refined/products/catalog.py`** — cleans and standardises the source
-```python
-from clair import Table
-from source.products.catalog import trouve as source_catalog
-
-trouve = Table(
-    sql=f"""
-        SELECT
-            product_id,
-            initcap(name)     AS name,
-            lower(category)   AS category,
-            price
-        FROM {source_catalog}
-        WHERE product_id IS NOT NULL
-    """,
-)
-```
-
-**`refined/products/reviews.py`** — cleans the reviews source
-```python
-from clair import Table
-from source.products.reviews import trouve as source_reviews
-
-trouve = Table(
-    sql=f"""
-        SELECT
-            review_id,
-            product_id,
-            rating,
-            review_date
-        FROM {source_reviews}
-        WHERE rating BETWEEN 1 AND 5
-    """,
-)
-```
-
-**`derived/products/top_reviewed.py`** — joins and aggregates the refined layer
-```python
-from clair import Table
-from refined.products.catalog import trouve as catalog
-from refined.products.reviews import trouve as reviews
-
-trouve = Table(
-    sql=f"""
-        SELECT
-            c.product_id,
-            c.name,
-            c.category,
-            avg(r.rating)  AS avg_rating,
-            count(*)       AS review_count
-        FROM {catalog} c
-        JOIN {reviews} r ON c.product_id = r.product_id
-        GROUP BY 1, 2, 3
-        HAVING avg_rating >= 4
-    """,
-)
-```
-
-### 3. Compile and run
-
-```bash
-cd my_project
-
-# Inspect the generated SQL without touching Snowflake
-clair compile --env dev
-
-# Execute against Snowflake
-clair run --env=dev
-```
-
----
-
-## CLI reference
-
-Each command finds the project root: it walks up from the working directory to
-the first `__routing__.py`, in the same way that git finds `.git`. Thus you run
-a command from any directory of the project.
-
-```bash
-clair --help   # list all commands
-```
-
-### `clair init`
-Scaffold a new project and write a profile interactively.
-```bash
-clair init --project=./my_project
-```
-
-### `clair compile`
-Resolve the DAG and write SQL to `_clairtifacts/`. No Snowflake connection needed.
-```bash
-clair compile --env dev [--select='db.schema.*'] [--run-mode=incremental]
-```
-
-### `clair run`
-Execute Trouves against Snowflake in topological order.
-```bash
-clair run --env=dev [--select='db.schema.*'] [--run-mode=incremental]
-```
-
-### `clair test`
-Run data quality tests against Snowflake.
-```bash
-clair test --env=dev [--select='db.schema.*']
-```
-
-### `clair dag`
-Print the dependency graph as an indented tree.
-```bash
-clair dag [--select='db.schema.*']
-```
-
-### `clair docs`
-Start a local web UI showing the project DAG and per-Trouve documentation. No Snowflake connection needed.
-```bash
-clair docs [--port=8741] [--host=127.0.0.1] [--no-browser]
-```
-
-### `clair clean`
-Remove compiled artifacts from `_clairtifacts/`.
-```bash
-clair clean --before=7d          # older than 7 days
-clair clean --before=2026-03-01  # before a date
-clair clean --dry-run            # preview only
-```
-
----
-
-## Data quality tests
-
-Attach tests to any TABLE or VIEW Trouve. They run against the live table in Snowflake.
-
-```python
-from clair import Table, TestNotNull, TestRowCount, TestUnique
-
-trouve = Table(
-    sql=f"SELECT event_id, user_id, event_type FROM {source_events}",
-    tests=[
-        TestUnique(column="event_id"),
-        TestNotNull(column="user_id"),
-        TestRowCount(min_rows=1),
-    ],
-)
-```
-
-| Test | Checks |
-|------|--------|
-| `TestUnique(column)` | No duplicate values in the column |
-| `TestNotNull(column)` | No NULL values in the column |
-| `TestRowCount(min_rows, max_rows)` | Row count is within the specified bounds |
-| `TestUniqueColumns(columns)` | No duplicate combinations across multiple columns |
-| `TestSql(sql)` | Arbitrary SQL — zero returned rows means pass |
-
-`TestSql` lets you write any SQL assertion. Use `THIS` as a placeholder for the owning Trouve's table name, and reference other Trouves via import exactly as you would in `Trouve.sql`:
-
-```python
-from clair import THIS, Table, TestSql
-from source.payments.transactions import trouve as transactions
-
-trouve = Table(
-    sql=f"SELECT * FROM {transactions}",
-    tests=[
-        TestSql(sql=f"SELECT * FROM {THIS} WHERE amount < 0"),
-        TestSql(sql=f"SELECT * FROM {THIS} t LEFT JOIN {transactions} tx ON t.id = tx.id WHERE tx.id IS NULL"),
-    ],
-)
-```
-
-`TestSql` is skipped during `--sample` runs.
-
-```bash
-clair test --env=dev
-```
-
----
-
-## Incrementality
-
-By default, every run does a full refresh. To process only new data, give a Trouve `run_config=Incremental(strategy=...)`:
-
-**Append** — inserts new rows, never updates existing ones:
-```python
-from clair import Append, Incremental, Table
-
-trouve = Table(
-    sql=f"""
-        SELECT * FROM {source_events}
-        WHERE occurred_at > dateadd('day', -3, current_timestamp())
-    """,
-    run_config=Incremental(strategy=Append()),
-)
-```
-
-**Upsert** — merges on primary key columns, updating existing rows and inserting new ones:
-```python
-run_config=Incremental(strategy=Upsert(primary_key_columns=["user_id"]))
-```
-
-**DeleteInsert** — deletes each row that a new row matches, or each row in the range of the new rows, then inserts the new rows:
-```python
-run_config=Incremental(strategy=DeleteInsert(primary_key_columns=["event_date"]))
-run_config=Incremental(strategy=DeleteInsert(range_column="event_date"))
-```
-
-If the target table doesn't exist yet, clair runs a full refresh automatically regardless of the configured strategy.
-
-Pass `--run-mode full_refresh` on the CLI to force a full rebuild of everything in a single run.
-
----
-
-## Pandas-native transformations
-
-When SQL isn't the right tool — complex reshaping, ML feature engineering, multi-step aggregations — use a `PandasTable` in place of a `Trouve`. Your function receives upstream tables as DataFrames, runs locally on the machine executing clair, and clair writes the result back to Snowflake.
-
-```python
-import pandas as pd
-from refined.products.catalog import trouve as catalog_trouve
-from refined.products.reviews import trouve as reviews_trouve
-
-from clair import Column, ColumnType, PandasTable, TestNotNull
-
-
-def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
-    merged = catalog.merge(reviews, on="product_id")
-    return (
-        merged.groupby(["product_id", "name"], as_index=False)
-        .agg(avg_rating=("rating", "mean"))
-        .query("avg_rating >= 4")
-    )
-
-
-trouve = PandasTable(
-    transform=top_rated,
-    inputs=[catalog_trouve, reviews_trouve],
-    columns=[
-        Column(name="product_id", type=ColumnType.STRING),
-        Column(name="name",       type=ColumnType.STRING),
-        Column(name="avg_rating", type=ColumnType.FLOAT),
-    ],
-    tests=[TestNotNull(column="product_id")],
-    docs="The products with the highest average review score. This Trouve uses pandas.",
-)
-```
-
-Clair binds `inputs` to the transform parameters by position. Because the transform takes plain DataFrames, you can call it directly in a unit test or in a notebook.
-
-> **Note:** pandas transformations run on the machine executing clair, not inside Snowflake. Keep this in mind for large tables.
-
-See [Pandas-Native Transformations](https://rivage-sh.github.io/clair/topics/pandas-native/) for the full field reference, DAG integration details, and limitations.
-
----
-
-## Selectors
-
-All commands accept `--select` for glob-style filtering on fully-qualified names. Repeat the flag to union multiple patterns:
-
-```bash
-# Run everything in one schema
-clair run --env=dev --select='source.products.*'
-
-# Run a specific table
-clair run --env=dev --select='derived.products.top_reviewed'
-
-# Compile only tables matching a name pattern across all schemas
-clair compile --env dev --select='*.*.top_*'
-
-# Union multiple patterns -- select from two schemas at once
-clair run --env=dev --select='source.products.*' --select='derived.products.*'
-```
-
----
-
-## Per-database and per-schema config
-
-Override the warehouse or role for a specific database or schema:
-
-**`my_db/__database_config__.py`**
-```python
-from clair import DatabaseDefaults
-
-defaults = DatabaseDefaults(warehouse="transform_wh", role="transformer")
-```
-
-**`my_db/derived/__schema_config__.py`**
-```python
-from clair import SchemaDefaults
-
-defaults = SchemaDefaults(warehouse="reporting_wh")
-```
-
-Resolution order (later wins): environment defaults → `__database_config__` → `__schema_config__`.
-
----
+**[rivage-sh.github.io/clair](https://rivage-sh.github.io/clair)** holds the topics, the
+guides, the CLI reference and the Python API reference.
 
 ## Example projects
 
-Example projects are included under `examples/projects/`:
+`examples/projects/` holds projects that you can run:
 
-| Project | What it demonstrates |
-|---------|---------------------|
-| `example_1` | A minimal 4-Trouve events pipeline with VARIANT flattening |
-| `example_2` | A 52-Trouve e-commerce warehouse across 5 layers (source → refined → derived → reports), with a seed in `reference` |
-| `example_3` | Incremental APPEND, UPSERT and DELETE_INSERT strategies |
-| `example_4` | A `PandasTable` that gives a DataFrame instead of SQL |
+| Project | What it shows |
+|---------|---------------|
+| `example_1` | A minimal pipeline of 4 Trouves, with VARIANT flattening |
+| `example_2` | A warehouse of 52 Trouves in 5 layers, with a seed in `reference` |
+| `example_3` | The incremental strategies APPEND, UPSERT and DELETE_INSERT |
+| `example_4` | A `PandasTable` that gives a DataFrame in place of SQL |
 | `example_from_init` | The files that `clair init` writes |
 
-Each numbered project holds a `__routing__.py` with a `dev` entry and a `prod` entry. The
-`dev` entry reads `CLAIR_USER`, thus each person writes to a separate database. Run
-`clair validate` in `examples/projects/example_1` to find a routing problem without a
-Snowflake connection.
+Each numbered project has a `dev` entry and a `prod` entry in `__routing__.py`. The `dev`
+entry reads `CLAIR_USER`, thus each person writes to a different database. The README of
+each project holds the SQL that makes the source tables.
 
-The README of each project holds the SQL that creates and seeds the source tables, and the SQL
-that inspects the results.
+`examples/notebooks/` shows the Python API. The notebooks need no Snowflake account.
+
+## Development
+
+```bash
+git clone https://github.com/rivage-sh/clair.git
+cd clair
+uv sync
+uv run pytest -m "not integration"
+```
