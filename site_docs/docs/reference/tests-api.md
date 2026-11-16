@@ -142,7 +142,8 @@ TestSql(
 ```
 
 clair resolves each reference in the same way as the SQL of a Trouve. A reference to
-another Trouve adds no edge to the DAG.
+another Trouve adds a test edge to the DAG: the Trouve waits for the other Trouve, and
+a failure of the other Trouve skips it. See [DAG](../topics/dag.md#where-an-edge-comes-from).
 
 Run with `--sample`: **No** — the query can group the rows or read other tables, thus a
 sample can make it fail when the complete data passes.

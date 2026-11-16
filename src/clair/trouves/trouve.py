@@ -288,8 +288,12 @@ class CompiledAttributes(BaseModel):
     physical_address: TrouveAddress
     file_path: Path
     module_name: str
+    # The logical address of each Trouve that the build reads.
     imports: list[str]
     config: ResolvedConfig
+    # The logical address of each Trouve that a TestSql of this Trouve reads.
+    # The tests run after the build, thus each one is an edge of the DAG too.
+    test_imports: list[str] = []
 
 
 class CompiledSql(CompiledAttributes):

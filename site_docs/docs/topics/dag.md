@@ -15,14 +15,15 @@ inputs.
 | `sample_sql=f"SELECT * FROM {THIS} WHERE id IN (SELECT id FROM {test_users})"` | Yes, to `test_users` |
 | `PandasTable(inputs=[orders])` | Yes |
 | `from db.schema.orders import trouve as orders`, with no reference | No |
-| `TestSql(sql=f"SELECT * FROM {THIS} JOIN {customers} ...")` | No |
+| `TestSql(sql=f"SELECT * FROM {THIS} JOIN {customers} ...")` | Yes, a test edge |
 
 An `import` alone adds no edge, because the import only gives you the object. The
 reference tells clair where the SQL reads.
 
-A `TestSql` reference adds no edge. Thus a test can read a Trouve that the run builds
-after the Trouve that holds the test. Select both Trouves, or keep the test on the
-Trouve downstream.
+A `TestSql` reference adds a test edge. The build of the Trouve does not read the other
+Trouve, but its test does, and the test runs before the promotion. Thus the run treats a
+test edge as any other edge: the Trouve waits for the Trouve that its test reads, and a
+failure of that Trouve skips it. A Source runs no test, thus its tests add no edge.
 
 ## How clair builds the DAG
 
@@ -42,14 +43,28 @@ them as configuration and not as Trouves. See
 
 ## Run order
 
-clair runs each Trouve after each Trouve that it reads. If a Trouve fails, clair skips
-each Trouve downstream of it, and continues with the other branches:
+clair runs each Trouve after each Trouve that it reads. A failure stops one branch, and
+not the run. If a Trouve fails, clair skips each Trouve downstream of it, and continues
+with each other branch. Here a test of `refined.orders` fails:
 
+```mermaid
+flowchart LR
+    src_orders[source.orders]:::source --> ref_orders["refined.orders<br/>FAILED in test"]:::failed
+    ref_orders --> der_summary["derived.orders_summary<br/>SKIPPED"]:::skipped
+    src_customers[source.customers]:::source --> ref_customers["refined.customers<br/>SUCCESS"]:::success
+    ref_customers --> der_ltv["derived.customer_ltv<br/>SUCCESS"]:::success
+
+    classDef source fill:#eceff3,stroke:#8a94a6,color:#1b2230
+    classDef success fill:#e3f3ea,stroke:#1f7a4d,color:#14532d
+    classDef failed fill:#f8e6e6,stroke:#b23a3a,color:#7f1d1d
+    classDef skipped fill:#fbf0d9,stroke:#9a6400,color:#5c3d00
 ```
-source.orders.raw                    SOURCE, clair does not run it
-└── refined.orders.daily             FAILED
-    └── derived.orders.summary       SKIPPED, because refined.orders.daily failed
-```
+
+- `refined.orders` keeps its production data. The rejected candidate stays at its staging
+  address, for you to query.
+- `derived.orders_summary` does not run, because its input did not change.
+- The customers branch runs to the end.
+- The run ends with `=== Done: 2 succeeded, 1 failed, 1 skipped ===`, and the status code 1.
 
 ## Read the DAG
 

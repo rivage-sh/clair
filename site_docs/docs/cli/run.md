@@ -68,7 +68,7 @@ Three limits to know:
 
 ## Tests
 
-clair runs the tests of each Trouve after its build. An `ERROR` test that fails stops the promotion of that Trouve, and clair skips each Trouve downstream of it. The other branches of the DAG continue. A `WARN` test that fails promotes the data, and logs a warning. Use `--no-test` to skip the tests.
+clair runs the tests of each Trouve after its build. An `ERROR` test that fails stops the promotion of that Trouve, and clair skips each Trouve downstream of it. The other branches of the DAG continue: see [Run order](../topics/dag.md#run-order). A `WARN` test that fails promotes the data, and logs a warning. Use `--no-test` to skip the tests.
 
 The tests decide the publication. They do not report a fault after it reaches production: clair writes each Trouve to a run-scoped staging address, runs the tests there, and gives the data its physical address only after each test passes. See [Staging](../topics/staging.md).
 

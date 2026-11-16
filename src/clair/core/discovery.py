@@ -57,6 +57,7 @@ from clair.trouves.trouve import (
     CompiledDataframe,
     CompiledSql,
     DataframeInput,
+    MaterializedTrouve,
     Source,
     SqlTrouve,
     TrouveAbc,
@@ -211,9 +212,9 @@ def _input_addresses_of(
     return input_addresses
 
 
-def _merge_imports(imports: list[str], sample_imports: list[str]) -> list[str]:
+def _merge_imports(*import_lists: list[str]) -> list[str]:
     """Give each import one time, in the order of the first occurrence."""
-    return list(dict.fromkeys([*imports, *sample_imports]))
+    return list(dict.fromkeys(address for imports in import_lists for address in imports))
 
 
 # A second run of a Trouve file sets clair.run_mode, which is global, and the
@@ -283,6 +284,20 @@ def _compile_trouve(
         else []
     )
 
+    # A Source runs no test, thus only a Trouve that clair builds gets the
+    # edges of its tests.
+    test_imports = (
+        _merge_imports(
+            *(
+                detect_imports(test.sql, logical_addresses, logical)
+                for test in trouve_obj.tests
+                if isinstance(test, TestSql)
+            )
+        )
+        if isinstance(trouve_obj, MaterializedTrouve)
+        else []
+    )
+
     if isinstance(trouve_obj, DataframeTrouve):
         input_addresses = _input_addresses_of(
             trouve_obj, logical_addresses, file_path, logical
@@ -300,6 +315,7 @@ def _compile_trouve(
             file_path=relative_file_path,
             module_name=module_name,
             imports=_merge_imports(transform_imports, sample_imports),
+            test_imports=test_imports,
             inputs=[DataframeInput(address=address) for address in input_addresses],
             config=config,
         )
@@ -320,6 +336,7 @@ def _compile_trouve(
             imports=_merge_imports(
                 detect_imports(trouve_obj.sql, logical_addresses, logical), sample_imports
             ),
+            test_imports=test_imports,
             config=config,
         )
     elif isinstance(trouve_obj, Source):
