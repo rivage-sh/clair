@@ -202,6 +202,32 @@ trouve = Table(
 '''
 
 
+def candidate_with_test_sql(database_name: str) -> str:
+    """Give a candidate whose TestSql refuses a negative amount, through {THIS}.
+
+    {THIS} must name the staging object in a staged run. If it named the
+    physical object, the test would read the data of the run before, pass, and
+    let the candidate with a negative amount into production.
+    """
+    return f'''\
+from {database_name}.source.rows import trouve as source_rows
+
+from clair import THIS, Column, ColumnType, Table, TestSql
+
+trouve = Table(
+    docs="The candidate. A TestSql on THIS refuses a negative amount.",
+    sql=f"""
+        select id, amount from {{source_rows}}
+    """,
+    columns=[
+        Column(name="id", type=ColumnType.STRING),
+        Column(name="amount", type=ColumnType.NUMBER),
+    ],
+    tests=[TestSql(sql=f"select * from {{THIS}} where amount < 0")],
+)
+'''
+
+
 def pandas_checked_file(database_name: str, minimum_rows: int) -> str:
     """Give the candidate Trouve that a transform function gives."""
     return f'''\
@@ -246,12 +272,29 @@ trouve = Table(
 '''
 
 
+def _checked_file_of(
+    database_name: str,
+    minimum_rows: int,
+    execution_type: ExecutionType,
+    strategy: str | None,
+) -> str:
+    """Give the candidate that the engine and the strategy choose."""
+    if strategy is not None:
+        return incremental_checked_file(database_name, minimum_rows, strategy)
+    if execution_type == ExecutionType.PANDAS:
+        return pandas_checked_file(database_name, minimum_rows)
+    if execution_type == ExecutionType.SNOWFLAKE:
+        return sql_checked_file(database_name, minimum_rows)
+    raise ValueError(f"The probe project has no Trouve for {execution_type}.")
+
+
 def write_probe_project(
     destination: Path,
     database_name: str,
     minimum_rows: int,
     execution_type: ExecutionType = ExecutionType.SNOWFLAKE,
     strategy: str | None = None,
+    checked_file: str | None = None,
 ) -> Path:
     """Write the project, and give the path of its root.
 
@@ -273,6 +316,8 @@ def write_probe_project(
     Raises:
         ValueError: If the execution type has no Trouve here, or if a pandas
             candidate asks for an incremental mode.
+        checked_file: The text of the candidate, in place of the file that the
+            other arguments choose. For example candidate_with_test_sql().
     """
     if strategy is not None and execution_type == ExecutionType.PANDAS:
         raise ValueError("A pandas candidate has no incremental mode.")
@@ -285,15 +330,8 @@ def write_probe_project(
     (project_path / "__routing__.py").write_text(CI_ROUTING_FILE)
     (database_path / "__database_config__.py").write_text(CI_DATABASE_CONFIG_FILE)
 
-    checked_file = None
-    if strategy is not None:
-        checked_file = incremental_checked_file(database_name, minimum_rows, strategy)
-    elif execution_type == ExecutionType.PANDAS:
-        checked_file = pandas_checked_file(database_name, minimum_rows)
-    elif execution_type == ExecutionType.SNOWFLAKE:
-        checked_file = sql_checked_file(database_name, minimum_rows)
-    else:
-        raise ValueError(f"The probe project has no Trouve for {execution_type}.")
+    if checked_file is None:
+        checked_file = _checked_file_of(database_name, minimum_rows, execution_type, strategy)
 
     (database_path / "source" / "rows.py").write_text(source_file())
     (database_path / "refined" / "checked.py").write_text(checked_file)

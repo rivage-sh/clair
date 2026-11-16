@@ -186,7 +186,8 @@ class TestTableIncremental:
 
     def test_table_with_incremental_upsert_valid(self):
         trouve = Table(
-            sql="SELECT 1",
+            sql="SELECT 1 AS id, 2 AS value",
+            columns=[Column(name="id", type="INTEGER"), Column(name="value", type="INTEGER")],
             run_config=Incremental(strategy=Upsert(primary_key_columns=["id"])),
         )
         assert isinstance(trouve.run_config, Incremental)
@@ -518,17 +519,6 @@ class TestBuildSqlUpsertColumnOverrides:
         assert "score = source.score" in update_part
         assert "name = source.name" not in update_part
         assert "id = source.id" not in update_part
-
-
-class TestBuildSqlUpsertErrors:
-    def test_upsert_without_columns_raises(self):
-        run_config = Incremental(strategy=Upsert(primary_key_columns=["id"]))
-        trouve = _compiled_trouve(
-            columns=[],
-            run_config=run_config,
-        )
-        with pytest.raises(ValueError, match="the upsert strategy needs columns on the Trouve"):
-            unstaged_plan(trouve, RunMode.INCREMENTAL, "run_err")
 
 
 class TestBuildSqlStagingTableName:

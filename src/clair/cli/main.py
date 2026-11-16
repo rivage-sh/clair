@@ -14,7 +14,7 @@ import click
 import structlog
 
 from clair import api as clair_api
-from clair._logging import configure_logging
+from clair._logging import configure_logging, logs_are_json
 from clair._version import __version__
 from clair.core.artifacts import (
     InvalidBeforeSpecError,
@@ -25,7 +25,7 @@ from clair.core.artifacts import (
 from clair.core.dag import build_dag
 from clair.core.dag_render import render_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
-from clair.core.scaffold import scaffold_project, write_environments_yml
+from clair.core.scaffold import add_artifacts_to_gitignore, scaffold_project, write_environments_yml
 from clair.environments.environments import (
     DEFAULT_THREADS,
     Authenticator,
@@ -108,6 +108,13 @@ class _StopOnSignal:
         self._run_handle.cancel()
 
 
+def _echo_summary(text: str) -> None:
+    """Write the summary of a command to stdout. JSON logs hold the same facts, and own stdout."""
+    if logs_are_json():
+        return
+    click.echo(text)
+
+
 def _sample_rows(sample: bool, sample_rows: int | None) -> int:
     """Give the row limit of the sample, and stop a --sample-rows without --sample."""
     if sample_rows is None:
@@ -135,10 +142,11 @@ def _load_environment(env_name: str) -> Environment:
 
 
 def _load_environment_or_name(env_name: str) -> Environment | str:
-    """Give the Environment, or the name only if environments.yml is absent.
+    """Give the Environment, or the name only if environments.yml does not hold it.
 
     `clair compile` and `clair validate` make no connection, thus they continue
-    without the file. The name still selects the routing entry.
+    without the file, and without the entry: a developer validates the `prod`
+    routing with no `prod` credentials. The name still selects the routing entry.
     """
     try:
         return _load_environment(env_name)
@@ -146,6 +154,13 @@ def _load_environment_or_name(env_name: str) -> Environment | str:
         logger.warning(
             "cli.no_environments_file",
             detail="Clair continues without an environment. Run `clair init` to make environments.yml.",
+        )
+        return env_name
+    except EnvironmentNotFoundError:
+        logger.warning(
+            "cli.no_environment_entry",
+            env=env_name,
+            detail="environments.yml does not name this environment. Clair continues with the routing entry only.",
         )
         return env_name
 
@@ -197,7 +212,6 @@ def init(project: str | None) -> None:
     # Step 3 -- The source table.
     source_full_table_name: str = click.prompt(
         "Give an example Snowflake table that contains source data (for example source.orders.raw)",
-        default="source",
         type=str,
     )
     source_full_table_name_split = source_full_table_name.split('.')
@@ -224,10 +238,10 @@ def init(project: str | None) -> None:
         click.echo(f"  {status}  {filepath}")
     click.echo("")
 
-    # Step 5 -- The .gitignore file.
-    gitignore_path = project_dir / ".gitignore"
-    gitignore_path.write_text(f"/{ARTIFACTS_DIR_NAME}\n")
-    click.echo(f"  created  {gitignore_path}")
+    # Step 5 -- The .gitignore file. The directory can hold a repository with
+    # its own .gitignore, thus clair adds one line and keeps each other line.
+    gitignore_status, gitignore_path = add_artifacts_to_gitignore(project_dir)
+    click.echo(f"  {gitignore_status}  {gitignore_path}")
     click.echo("")
 
     # Step 6 -- The next steps for the user.
@@ -398,6 +412,11 @@ def compile_cmd(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run
 
     run_dir = write_compile_output(_artifacts_dir_of(project_root), output)
     logger.info("compile.artifacts", artifacts_dir=str(run_dir))
+    # The artifact files hold each statement, thus stdout gives the order only.
+    _echo_summary(
+        output.render_header(output.trouve_count, output.source_count, output.compiled_nodes)
+        + f"SQL: {run_dir}\n"
+    )
 
 
 @cli.command()
@@ -549,6 +568,7 @@ def run(select: tuple[str, ...], exclude: tuple[str, ...], env: str, run_mode: s
 
     summary_file = write_run_summary(artifacts_dir, summary)
     logger.info("run.artifacts", artifacts_dir=str(summary_file.parent))
+    _echo_summary(summary.render())
 
     # The convention of a shell: a process that a signal stopped gives 128 plus its number.
     if stop.signal_number is not None:
@@ -607,6 +627,7 @@ def test(
         logger.error("test.error", error=str(e))
         sys.exit(1)
 
+    _echo_summary(summary.render())
     if summary.blocking_results:
         sys.exit(1)
 

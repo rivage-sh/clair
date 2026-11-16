@@ -239,9 +239,8 @@ Clair keeps each object. It drops a staging object only after a promotion.
 In each condition the Trouve gets the FAILED status, clair skips each dependent, and `clair run` stops with the status code 1. The error message names the staging object, thus you can query it:
 
 ```
-db.schema.orders ... FAILED in test (2.4s)
-      Error: the tests failed. db.schema.orders keeps its data.
-             The rejected candidate stays at db.schema.orders__clair_<run_id>
+[1/3] db.schema.orders ... FAILED in test (2.4s)
+      Error: the tests failed. db.schema.orders keeps its data. The rejected candidate stays at db.schema.orders__clair_<run_id>
 ```
 
 This is the fastest path to a diagnosis. The candidate holds the exact data that failed the test. To make it again, you must run each upstream Trouve again.

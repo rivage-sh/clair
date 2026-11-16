@@ -79,7 +79,7 @@ to `plan()` in the `PlanContext`. Never give `plan()` the adapter.
 ## The documentation gives orientation. The code gives the truth.
 
 `grep` `site_docs/docs/` to learn what a feature does — it is Markdown, and it is small
-(approximately 9000 words). Then confirm the exact API against `src/` or
+(approximately 35000 words). Then confirm the exact API against `src/` or
 `examples/projects/` before you depend on it. When the two disagree, the code wins and the
 page is a bug.
 

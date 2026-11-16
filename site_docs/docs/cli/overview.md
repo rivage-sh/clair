@@ -32,8 +32,8 @@ See [Project Layout](../topics/project-layout.md#the-project-root).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CLAIR_ENV` | — | The environment name, for each command that takes `--env`. `--env` wins if you set both. The Python API does not read it. |
-| `CLAIR_USER` | — | The `clair init` routing template reads this name. Give each variable that a routing entry reads the `CLAIR_` prefix. |
-| `CLAIR_LOG_FORMAT` | _(text)_ | Set to `json` to write structured JSON logs. Use this in CI/CD pipelines and in container environments that read JSON logs. |
+| `CLAIR_USER` | — | The `DeveloperRouting` entry of the example projects reads this name. clair itself does not read it. Give each variable that a routing entry reads the `CLAIR_` prefix. |
+| `CLAIR_LOG_FORMAT` | _(text)_ | Set to `json` to write structured JSON logs to stdout. Use this in CI/CD pipelines and in container environments that read JSON logs. The text logs go to stderr, and `clair run`, `clair test` and `clair compile` then write a summary to stdout. With `json`, stdout holds the JSON logs only. |
 
 ## Help
 

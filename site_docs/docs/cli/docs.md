@@ -1,6 +1,6 @@
 # clair docs
 
-Start a local web UI for the project DAG and the documentation of each Trouve. The command does not need a Snowflake connection.
+Start a local web UI for the project DAG and the documentation of each Trouve. The command does not need a Snowflake connection. The browser loads the graph libraries from `cdn.jsdelivr.net`, thus the DAG needs an internet connection.
 
 ```bash
 clair docs [--port PORT] [--host HOST] [--no-browser]

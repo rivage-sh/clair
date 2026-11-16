@@ -29,14 +29,17 @@ from clair.trouves.trouve import ExecutionType
 from tests.helpers import failure_of, success_of
 from tests.integration.config import IntegrationConfig
 from tests.integration.staging_project import (
+    candidate_with_test_sql,
     checked_address,
     downstream_address,
+    insert_source_row,
     make_source_rows,
     write_probe_project,
 )
 from tests.integration.warehouse import (
     execute,
     privileges_on,
+    query_rows,
     row_count,
     staging_objects,
     table_exists,
@@ -263,6 +266,59 @@ class TestAFailedDataQualityTest:
         assert failed_run.skipped[0].skipped_by == str(checked)
         # The first run built it, thus it exists. It holds the old data.
         assert row_count(adapter, downstream) == 3
+
+
+class TestATestSqlReadsTheCandidate:
+    """A TestSql on {THIS} examines the staging object, not production.
+
+    The first run promotes rows that pass. Then the source gets a negative
+    amount. If the test read production, it would read the clean rows of the
+    first run, pass, and promote the negative amount.
+    """
+
+    DATABASE_NAME = "staging_test_sql_database"
+
+    @pytest.fixture(scope="class")
+    def second_run(
+        self,
+        clair_environment: IntegrationConfig,
+        environment: Environment,
+        adapter: SnowflakeAdapter,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> RunSummary:
+        """Run once with clean rows, add a negative amount, and run again."""
+        schema_name = clair_environment.schema_name
+        make_source_rows(adapter, self.DATABASE_NAME, schema_name, {"id_001": 5, "id_002": 7})
+        project_path = write_probe_project(
+            tmp_path_factory.mktemp("staging_test_sql"),
+            self.DATABASE_NAME,
+            minimum_rows=PASSING_LIMIT,
+            checked_file=candidate_with_test_sql(self.DATABASE_NAME),
+        )
+        first_run = clair.run(project_path, env=environment)
+        success_of(first_run, f"{self.DATABASE_NAME}.refined.checked")
+
+        insert_source_row(adapter, self.DATABASE_NAME, schema_name, "id_003", -1)
+        return clair.run(project_path, env=environment)
+
+    def test_the_test_fails_on_the_candidate(self, second_run: RunSummary) -> None:
+        failure = failure_of(second_run, f"{self.DATABASE_NAME}.refined.checked")
+
+        (test_result,) = failure.test_results
+        assert test_result.failing_row_count == 1
+        assert failure.addresses.staging is not None
+        assert str(failure.addresses.staging) in test_result.statement.sql
+
+    def test_production_keeps_the_clean_rows(
+        self,
+        second_run: RunSummary,
+        clair_environment: IntegrationConfig,
+        adapter: SnowflakeAdapter,
+    ) -> None:
+        checked = checked_address(self.DATABASE_NAME, clair_environment.schema_name)
+
+        assert query_rows(adapter, f"select count(*) from {checked} where amount < 0") == [(0,)]
+        assert row_count(adapter, checked) == 2
 
 
 class TestAPandasTableThatPasses:

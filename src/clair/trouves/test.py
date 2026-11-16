@@ -199,9 +199,10 @@ class TestSql(Test):
         TestSql(sql=f"SELECT * FROM {THIS} t LEFT JOIN {customers} c ON t.cid = c.id WHERE c.id IS NULL")
 
     ``sql`` keeps the tokens that the f-string makes. Discovery writes the SQL
-    with the true addresses to ``resolved_sql``, and the test runner executes
-    that. The two fields are the counterpart of ``Trouve.sql`` and
-    ``CompiledAttributes.resolved_sql``.
+    with the address of each other Trouve to ``resolved_sql``, and keeps the
+    ``{THIS}`` marker. ``to_sql()`` puts in the object that the plan tests: the
+    staging object of a staged run, or the physical object. Thus the test reads
+    the candidate, and two Trouves can share one TestSql object.
     """
 
     type: Literal["sql"] = "sql"
@@ -214,7 +215,7 @@ class TestSql(Test):
     is_run_with_sample_by_default: ClassVar[bool] = False
 
     def to_sql(self, physical_address: str) -> str:
-        return self.resolved_sql
+        return self.resolved_sql.replace(THIS_PLACEHOLDER, physical_address)
 
 
 AnyTest = Annotated[

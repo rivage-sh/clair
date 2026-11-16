@@ -135,7 +135,7 @@ class TestRoutingFileValidation:
 
     def test_missing_routing_table_raises(self, routing_project: Path):
         _write_routing_file(routing_project, "# no routing table here\n")
-        with pytest.raises(InvalidRoutingFileError, match="must define a 'routing'"):
+        with pytest.raises(InvalidRoutingFileError, match="must define 'routing = RoutingTable"):
             load_project_routing(routing_project, "dev")
 
     def test_routing_that_is_not_a_table_raises(self, routing_project: Path):

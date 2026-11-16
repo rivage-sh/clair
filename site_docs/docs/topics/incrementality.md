@@ -2,6 +2,8 @@
 
 By default, clair makes every Trouve again on each run with `CREATE OR REPLACE TABLE`. For a large table, you can configure an incremental strategy. The strategy applies the new data only.
 
+Two settings decide the mode, and an incremental run needs both. The `run_config` of the Trouve gives the strategy. The command line asks for the mode: `clair run --run-mode incremental`. The default of `--run-mode` is `full_refresh`, thus a run with no flag makes each table again, also a Trouve with an `Incremental` run_config.
+
 ## Default: full refresh
 
 ```python
@@ -162,7 +164,7 @@ trouve = Table(
 ```
 
 !!! note
-    `Upsert` needs `columns`. clair uses the column list to build the MERGE statement.
+    `Upsert` needs `columns`. clair uses the column list to build the MERGE statement, thus a `Table` with an `Upsert` and no `columns` raises when Python makes it.
 
 Generated SQL on an incremental run: two statements in the build phase, and one in the cleanup phase. A staged run sends them against the staging clone; this example shows a run with `--no-test`, which writes production directly.
 
@@ -206,7 +208,9 @@ run_config=Incremental(
 
 ## Column overrides
 
-By default, MATCH updates all the columns that are not primary keys, and NO MATCH inserts all the columns. Give `update_columns` or `insert_columns` to `Upsert` to change this:
+By default, MATCH updates all the columns that are not primary keys, and NO MATCH inserts all the columns. Give `update_columns` or `insert_columns` to `Upsert` to change this.
+
+A clause with no column goes out of the MERGE. A table whose columns are all key columns, or `update_columns=[]`, gets no `WHEN MATCHED`: a row that exists stays as it is, and a new row goes in. `insert_columns=[]` removes `WHEN NOT MATCHED` in the same way. A `Table` with no column in the two lists raises, because its MERGE does nothing.
 
 ```python
 run_config=Incremental(
@@ -281,7 +285,7 @@ Generated SQL on an incremental run — 3 statements and 1 cleanup:
 
 ```sql
 -- create the new rows table
-CREATE OR REPLACE TABLE example_3_database.derived.daily_orders__clair_new_rows_<run_id> AS (
+CREATE OR REPLACE TRANSIENT TABLE example_3_database.derived.daily_orders__clair_new_rows_<run_id> AS (
     select created_date, count(*) as order_count, sum(amount) as revenue
     from example_3_database.refined.orders
     where created_date >= dateadd('day', -3, (select max(created_date) from example_3_database.derived.daily_orders))
@@ -294,8 +298,8 @@ USING example_3_database.derived.daily_orders__clair_new_rows_<run_id> AS source
 WHERE target.created_date = source.created_date
 
 -- insert the new rows
-INSERT INTO example_3_database.derived.daily_orders
-SELECT * FROM example_3_database.derived.daily_orders__clair_new_rows_<run_id>
+INSERT INTO example_3_database.derived.daily_orders ("CREATED_DATE", "ORDER_COUNT", "REVENUE")
+SELECT "CREATED_DATE", "ORDER_COUNT", "REVENUE" FROM example_3_database.derived.daily_orders__clair_new_rows_<run_id>
 
 -- drop the new rows table
 DROP TABLE IF EXISTS example_3_database.derived.daily_orders__clair_new_rows_<run_id>
@@ -363,7 +367,7 @@ column lists from Snowflake.
 
 ## Behavior of the first run
 
-On the first run, the target table does not exist. clair then does a full refresh, and it ignores your strategy. The runs after the first one use your incremental mode.
+On the first run, the target table does not exist. clair then does a full refresh, and it ignores your strategy. Each run after it with `--run-mode incremental` uses your strategy.
 
 The effective mode of that node is `FULL_REFRESH`, and its SQL obeys the effective mode: clair runs the file of that one Trouve again with `clair.run_mode` set to `FULL_REFRESH`, and builds from that SQL. Thus the first run of `clair run --run-mode incremental` holds each row, and not only the rows of the incremental filter. No other file runs again. The same rule builds each Trouve of the run whose effective mode is `FULL_REFRESH`: a `View`, and a `Table` with `FullRefresh()`.
 
@@ -371,13 +375,15 @@ If Snowflake cannot tell clair whether the table exists, the Trouve fails and cl
 
 A Trouve that changes from a `VIEW` to an incremental `TABLE` has no base table either, because the address holds a view. Clair builds and tests a full refresh candidate, then stops before the promotion, and tells you to drop the view — see [A Trouve that changes its type](staging.md#a-trouve-that-changes-its-type).
 
-## Change the mode at the command line
+## Choose the mode at the command line
 
-Force a full refresh for one run:
+Apply the strategy of each incremental Trouve:
 
 ```bash
-clair run --env=dev --run-mode=full_refresh
+clair run --env=dev --run-mode=incremental
 ```
+
+Omit the flag, or give `--run-mode=full_refresh`, to make each table again from its SQL.
 
 ## The `run_config` types
 

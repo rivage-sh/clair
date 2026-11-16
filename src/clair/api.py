@@ -61,9 +61,6 @@ from clair.core.test_runner import SampleScope, TestSummary, run_test_queries, r
 from clair.core.validation import ValidationReport, validate_project
 from clair.environments.environments import Environment
 from clair.environments.project_routing import find_project_root, routing_entry_of
-from clair.environments.routing import (
-    detect_routing_collisions_of_trouves,
-)
 from clair.exceptions import RunError, SampleTargetsProductionError
 from clair.trouves.plan import TestQuery, TestResult
 from clair.trouves.run_config import RunMode
@@ -99,24 +96,6 @@ def _env_name_of(env: EnvSpec) -> str:
     if isinstance(env, Environment):
         return env.name
     return env
-
-
-def _warn_about_routing_collisions(trouves: list[TrouveAbc], env_name: str) -> None:
-    """Show each routing collision, before the SQL starts."""
-    for physical_address, logical_sources in detect_routing_collisions_of_trouves(
-        trouves
-    ):
-        logger.warning(
-            "routing.collision",
-            env=env_name,
-            physical=physical_address,
-            logical_sources=logical_sources,
-            detail=(
-                "Two or more Trouves write to this one address. Give one Trouve a "
-                "different name, change the routing entry, or use select to remove "
-                "one Trouve from this run."
-            ),
-        )
 
 
 def _select_nodes(
@@ -202,7 +181,6 @@ def _discover(
         environment=environment,
         run_mode=run_mode,
     )
-    _warn_about_routing_collisions(trouves, env_name)
     return _DiscoveredProject(project_root, env_name, trouves, build_dag(trouves))
 
 
@@ -438,11 +416,16 @@ class RunHandle:
     def close(self) -> None:
         """Stop the run, and close each connection that the handle opened.
 
-        The close of the generator ends the ``with`` block of ``_execute``,
-        thus the thread pool and the connection close too.
+        A run that did not complete gets a cancel first, thus a Trouve that
+        runs now promotes nothing, and the close does not wait for the
+        complete branch. The close of the generator then ends the ``with``
+        block of ``_execute``, thus the thread pool and the connection close.
         """
-        if self._result_generator is not None:
-            self._result_generator.close()
+        if self._result_generator is None:
+            return
+        if not self._complete:
+            self._cancellation.cancel()
+        self._result_generator.close()
 
     def _execute(self) -> Generator[RunResult]:
         project_root, env_name, _, dag = self._plan.project

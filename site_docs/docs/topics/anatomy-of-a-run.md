@@ -163,6 +163,8 @@ production for everything else. You do not build 40 tables to test 10.
 This step is the same for both backends. A SQL Trouve holds its addresses in its SQL, and
 a pandas Trouve holds them in `inputs`. The rule above decides both. A `TestSql`
 gets its addresses from the same step, thus a test reads the tables that its Trouve reads.
+Its `{THIS}` stays a marker until the plan: a staged run tests the staging object, and
+`clair test` tests the physical object.
 
 A sampled run (`--sample`) adds one rule. A reference to a Trouve that the run does not
 build becomes the subquery of `Trouve.sample()`, and a pandas input reads the same
@@ -265,7 +267,7 @@ clair promotes a node before it releases the Trouves downstream of it. A depende
 starts only after its upstream reaches its physical address, and it reads the address that
 its own SQL names. You never write a staging name in a Trouve file.
 
-Step 1 and step 4 are zero-copy clones. Snowflake makes a clone in the metadata, thus the
+Step 1 and step 5 are zero-copy clones. Snowflake makes a clone in the metadata, thus the
 time is constant for a table of any size. An incremental Trouve therefore gets a full copy
 of its target to change, at no copy cost, and a rejected candidate costs you nothing but
 the divergence.

@@ -108,6 +108,23 @@ def test_a_cancel_before_the_first_trouve_cancels_each_trouve(project_root):
     assert not any(sql.startswith("CREATE OR REPLACE TABLE") for sql in adapter.record.statements)
 
 
+@pytest.mark.parametrize(
+    ("results_to_read", "expected_cancel"),
+    [pytest.param(1, True, id="a_loop_that_stops_early"), pytest.param(None, False, id="a_complete_loop")],
+)
+def test_the_close_of_a_handle_cancels_only_a_run_that_did_not_complete(
+    project_root, results_to_read, expected_cancel
+):
+    adapter = RecordingAdapter()
+
+    with clair.start_run(project_root, env=make_environment(), adapter=adapter, threads=1) as run_handle:
+        for result_count, _result in enumerate(run_handle, 1):
+            if result_count == results_to_read:
+                break
+
+    assert run_handle.is_cancelled is expected_cancel
+
+
 def test_a_cancel_during_a_build_stops_the_statement_and_promotes_nothing(project_root):
     adapter = _BlockingAdapter()
     run_handle = clair.start_run(project_root, env=make_environment(), adapter=adapter, threads=1)

@@ -483,11 +483,16 @@ def _make_databases_and_schemas(
             continue
         made.add(key)
 
-        adapter.execute(f"CREATE DATABASE IF NOT EXISTS {physical_address.database_name}")
-        adapter.execute(
-            f"CREATE SCHEMA IF NOT EXISTS "
-            f"{physical_address.database_name}.{physical_address.schema_name}"
-        )
+        # A role that cannot make a database can still write to one that
+        # exists, thus a failure here does not stop the run. The log tells the
+        # reader why each Trouve of a missing schema then fails.
+        for sql in (
+            f"CREATE DATABASE IF NOT EXISTS {physical_address.database_name}",
+            f"CREATE SCHEMA IF NOT EXISTS {physical_address.database_name}.{physical_address.schema_name}",
+        ):
+            statement = adapter.execute(sql)
+            if not statement.success:
+                logger.warning("run.container_failure", sql=sql, error=statement.error)
 
 
 # The callback that executes the test queries of one node, on the connection of

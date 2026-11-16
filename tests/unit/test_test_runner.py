@@ -9,9 +9,11 @@ from clair.core.dag import build_dag
 from clair.core.test_runner import (
     SampleScope,
     TestSummary,
+    run_test_queries,
     run_tests,
 )
 from clair.trouves._refs import THIS_PLACEHOLDER
+from clair.trouves.plan import TestQuery
 from clair.trouves.test import (
     THIS,
     TestNotNull,
@@ -482,6 +484,38 @@ class TestSampleScope:
         run_tests(dag, ["db.s.orders"], adapter, sample_scope=sample_scope, sample_rows=10)
 
         assert ("LIMIT 10" in adapter.record.statements[-1]) is reads_the_sample
+
+
+    @pytest.mark.parametrize(
+        ("query_sql", "expected_sql"),
+        [
+            pytest.param(
+                "select * from db.s.orders where id is null",
+                "select * FROM (SAMPLE) where id is null",
+                id="the_object",
+            ),
+            pytest.param(
+                "select * from db.s.orders_archive where id is null",
+                "select * from db.s.orders_archive where id is null",
+                id="a_longer_name",
+            ),
+        ],
+    )
+    def test_the_sample_replaces_the_object_only(self, query_sql: str, expected_sql: str):
+        trouve = _make_trouve_with_tests("db.s.orders", TrouveType.TABLE, [TestUnique(column="id")])
+        adapter = RecordingAdapter()
+        query = TestQuery(test_index=0, label="sql", sql=query_sql)
+
+        run_test_queries(
+            trouve,
+            [query],
+            adapter,
+            sample_scope=SampleScope.TEST_QUERIES,
+            sample_subquery="(SAMPLE)",
+            queried_address="db.s.orders",
+        )
+
+        assert adapter.record.statements == [expected_sql]
 
 
 class TestTestSql:
