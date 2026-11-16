@@ -291,6 +291,7 @@ class Statement(BaseModel):
     query_url: str | None
     error: str
     row_count: int
+    written_row_count: int
     phase: Phase | None
 ```
 
@@ -300,7 +301,8 @@ class Statement(BaseModel):
 | `status` | `StatementStatus.SUCCESS`, `FAILURE`, or `NOT_RUN`. A statement after the one that failed has `NOT_RUN`. |
 | `query_id`, `query_url` | The warehouse query ID and the console URL. `query_id` is `None` for a statement that did not get to the warehouse. `query_url` is `None` without a query ID, or when the environment has no `region` or no `account_locator`. |
 | `error` | The error message of a statement that failed. |
-| `row_count` | The rows that the statement wrote: inserted, updated and deleted. A query gives the rows that it returned. A DDL statement gives the status row of Snowflake. |
+| `row_count` | The rows of the result. A query gives the rows that it returned. A `CREATE` statement gives one status row. |
+| `written_row_count` | The rows that the statement wrote: inserted, updated and deleted. 0 for a statement that wrote no rows, such as a `CREATE VIEW`. |
 | `phase` | The `Phase` of the lifecycle that sent the statement. `None` for a statement outside the lifecycle of a Trouve. |
 | `success` | True if the status is `SUCCESS`. |
 

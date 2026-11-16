@@ -114,7 +114,8 @@ class SnowflakeAdapter(WarehouseAdapter):
                 status=StatementStatus.SUCCESS,
                 query_id=query_id,
                 query_url=self._build_query_url(query_id),
-                row_count=_row_count_of(cursor),
+                row_count=cursor.rowcount or 0,
+                written_row_count=_written_row_count_of(cursor),
             )
         except Exception as e:  # noqa: BLE001 — each driver error becomes a Statement that failed
             # A statement that never reached Snowflake, for example after a
@@ -358,6 +359,7 @@ class SnowflakeAdapter(WarehouseAdapter):
             status=StatementStatus.SUCCESS if success else StatementStatus.FAILURE,
             error="" if success else f"Clair cannot write the DataFrame to {address}",
             row_count=num_rows,
+            written_row_count=num_rows,
         )
 
     def close(self) -> None:
@@ -400,25 +402,20 @@ def _read_private_key(authentication: PrivateKey) -> bytes:
 _DESCRIBE_COMMENT_INDEX = 9
 
 
-def _row_count_of(cursor: SnowflakeCursor) -> int:
-    """Give the rows that a statement wrote, or the rows that a query returned.
+def _written_row_count_of(cursor: SnowflakeCursor) -> int:
+    """Give the rows that a statement wrote, from the DML statistics of Snowflake.
 
-    ``cursor.rowcount`` counts the rows of the result. A query returns its rows,
-    but a CREATE TABLE AS SELECT returns one status row. The DML statistics of
-    Snowflake hold the rows that a statement wrote. A statement that writes no
-    row, and each statement that does not write rows, gives no statistics.
+    ``cursor.rowcount`` cannot give it: a CREATE TABLE AS SELECT returns one
+    status row, whatever it wrote. Snowflake gives no statistics for a
+    statement that wrote no rows, and for each statement that does not write.
     """
     stats = cursor.stats
     if stats is None:
-        return cursor.rowcount or 0
-    written_counts = [
-        count
+        return 0
+    return sum(
+        count or 0
         for count in (stats.num_rows_inserted, stats.num_rows_updated, stats.num_rows_deleted)
-        if count is not None
-    ]
-    if written_counts:
-        return sum(written_counts)
-    return cursor.rowcount or 0
+    )
 
 
 def _columns_of(rows: list[tuple]) -> list[WarehouseColumn]:

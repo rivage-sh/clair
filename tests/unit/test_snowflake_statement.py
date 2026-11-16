@@ -1,9 +1,10 @@
-"""The Statement that SnowflakeAdapter.execute() gives: the row count, the query ID and the URL.
+"""The Statement that SnowflakeAdapter.execute() gives: the row counts, the query ID and the URL.
 
-A test in Snowflake showed the answers that the connector gives. A CREATE TABLE
-AS SELECT of 7 rows has ``rowcount`` 1, its status row, and DML statistics of 7
-inserted rows. An INSERT, a MERGE and a DELETE give statistics too. A query
-and a DDL statement give none.
+A probe in Snowflake showed the answers that the connector gives. A CREATE
+TABLE AS SELECT has ``rowcount`` 1, its status row, whatever it wrote. A
+statement that wrote rows gives DML statistics. A statement that wrote no rows,
+a query and a DDL statement give none. The rows of the cursor are the rows of
+the result, thus ``rowcount`` here is their number.
 """
 
 from __future__ import annotations
@@ -26,24 +27,39 @@ def _adapter(cursor: FakeCursor, **connection_fields: str) -> SnowflakeAdapter:
     return adapter
 
 
+STATUS_ROW = [("Table PROBE successfully created.",)]
+
+
 @pytest.mark.parametrize(
-    ("rows", "stats", "expected_row_count"),
+    ("rows", "stats", "expected_row_count", "expected_written_row_count"),
     [
-        pytest.param([("Table PROBE successfully created.",)], QueryResultStats(7, 0, 0, 0), 7, id="create_table_as_select"),
-        pytest.param([(3,)], QueryResultStats(3, 0, 0, 0), 3, id="insert"),
-        pytest.param([(1, 2)], QueryResultStats(1, 0, 2, 0), 3, id="merge"),
-        pytest.param([(2,)], QueryResultStats(0, 2, 0, 0), 2, id="delete"),
-        pytest.param([("View PROBE successfully created.",)], NO_STATS, 1, id="ddl_status_row"),
-        pytest.param([(1,), (2,), (3,)], NO_STATS, 3, id="query"),
-        pytest.param([], None, 0, id="query_with_no_row"),
+        pytest.param(STATUS_ROW, QueryResultStats(7, 0, 0, 0), 1, 7, id="create_table_as_select"),
+        # Found in CI: an empty table gives no statistics, and still one status row.
+        pytest.param(STATUS_ROW, NO_STATS, 1, 0, id="create_table_as_select_of_no_row"),
+        pytest.param([(3,)], QueryResultStats(3, 0, 0, 0), 1, 3, id="insert"),
+        pytest.param([(1, 2)], QueryResultStats(1, 0, 2, 0), 1, 3, id="merge"),
+        pytest.param([(2,)], QueryResultStats(0, 2, 0, 0), 1, 2, id="delete"),
+        pytest.param([("View PROBE successfully created.",)], NO_STATS, 1, 0, id="create_view"),
+        # A test query: each row is a failure, thus row_count must count the rows.
+        pytest.param([(1,), (2,), (3,)], NO_STATS, 3, 0, id="query"),
+        pytest.param([("x",)], NO_STATS, 1, 0, id="query_of_one_status_column"),
+        pytest.param([], None, 0, 0, id="query_with_no_row"),
     ],
 )
-def test_the_row_count_is_the_rows_that_the_statement_wrote_or_returned(
-    rows: list[tuple], stats: QueryResultStats | None, expected_row_count: int
+def test_the_statement_keeps_the_rows_of_the_result_and_the_rows_written_apart(
+    rows: list[tuple],
+    stats: QueryResultStats | None,
+    expected_row_count: int,
+    expected_written_row_count: int,
 ) -> None:
     adapter = _adapter(FakeCursor(rows, stats=stats))
 
-    assert adapter.execute("SELECT 1").row_count == expected_row_count
+    statement = adapter.execute("SELECT 1")
+
+    assert (statement.row_count, statement.written_row_count) == (
+        expected_row_count,
+        expected_written_row_count,
+    )
 
 
 @pytest.mark.parametrize(

@@ -17,7 +17,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from clair.adapters.base import WarehouseAdapter
-from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, WarehouseObjectType
+from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.schema_change import read_incremental_columns
@@ -732,17 +732,16 @@ def _run_node(
         if write_statement is None:
             return stop_writes(write_error)
         record(write_statement, Phase.BUILD)
-        row_count = write_statement.row_count
+        row_count = write_statement.written_row_count
 
     build_start = len(statements)
     failed_statement = execute_phase(Phase.BUILD)
     sent_write_count += len(statements) - build_start
     if failed_statement is not None:
         return stop_writes(failed_statement.error or "unknown error")
-    # The last statement of the build gives the count. A view holds no rows,
-    # and its CREATE VIEW gives one status row, thus a view writes 0.
-    if plan.build and trouve.warehouse_object_type != WarehouseObjectType.VIEW:
-        row_count = statements[-1].row_count
+    if plan.build:
+        # The last statement of the build gives the count.
+        row_count = statements[-1].written_row_count
 
     configure_start = len(statements)
     failed_statement = execute_phase(Phase.CONFIGURE)

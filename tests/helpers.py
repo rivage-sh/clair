@@ -500,12 +500,15 @@ class RecordingAdapter(WarehouseAdapter):
                 )
 
         is_select = sql.lstrip().upper().startswith("SELECT")
+        # Snowflake gives no DML statistics for a view: it holds no rows.
+        writes_rows = not is_select and " VIEW " not in f" {sql.upper()} "
         return Statement(
             sql=sql,
             status=StatementStatus.SUCCESS,
             query_id=query_id,
             query_url=query_url,
             row_count=self.select_row_count if is_select else self.write_row_count,
+            written_row_count=self.write_row_count if writes_rows else 0,
         )
 
     def execute(self, sql: str) -> Statement:

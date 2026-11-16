@@ -78,8 +78,10 @@ class Statement(BaseModel):
         query_url: The URL of the query detail page in the warehouse console.
             None when the adapter cannot make one.
         error: The error message of a statement that failed.
-        row_count: The rows that the statement wrote: inserted, updated and
-            deleted. A query gives the rows that it returned.
+        row_count: The rows of the result. A query gives the rows that it
+            returned. A CREATE statement gives one status row.
+        written_row_count: The rows that the statement wrote: inserted,
+            updated and deleted. 0 for a statement that wrote no rows.
         phase: The phase of the lifecycle that sent the statement. The runner
             sets it on each statement of a run result. None for a statement
             outside the lifecycle of a Trouve.
@@ -91,6 +93,7 @@ class Statement(BaseModel):
     query_url: str | None = None
     error: str = ""
     row_count: int = 0
+    written_row_count: int = 0
     phase: Phase | None = None
 
     @property
