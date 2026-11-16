@@ -73,6 +73,22 @@ class TestRunLogNames:
         assert results[0].addresses.logical == results[0].addresses.physical
 
 
+class TestTheContainersOfTheRun:
+    """A role that cannot make a database can still write to one that exists."""
+
+    @pytest.mark.parametrize("failed_statement", ["CREATE DATABASE", "CREATE SCHEMA"])
+    def test_a_failed_create_warns_and_the_run_continues(self, simple_project: Path, failed_statement: str):
+        dag = build_dag(discover_project(simple_project))
+        adapter = RecordingAdapter(fail_on=[failed_statement])
+
+        with capture_logs() as log_entries:
+            results = list(run_project(dag, get_executable_nodes(dag), adapter, run_id="test"))
+
+        warnings = [entry for entry in log_entries if entry["event"] == "run.container_failure"]
+        assert warnings and all(failed_statement in entry["sql"] for entry in warnings)
+        assert results and all(isinstance(result, RunSuccess) for result in results)
+
+
 class TestRunner:
     def test_run_simple_project(self, simple_project: Path):
         discovered = discover_project(simple_project)

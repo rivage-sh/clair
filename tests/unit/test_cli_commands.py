@@ -732,3 +732,22 @@ class TestInitNamesTheEnvironmentOfTheUser:
         assert "cannot find the environment 'dev'" in result.output
         assert "clair compile --env local" in result.output
         assert load_project_routing(project_dir, "local").entry is not None
+
+    def test_an_empty_source_table_asks_again(
+        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+    ):
+        # The prompt has no default: a default that is not database.schema.table
+        # would stop the command at the next line.
+        home_dir = tmp_path_factory.mktemp("home")
+        monkeypatch.setenv("HOME", str(home_dir))
+        monkeypatch.setattr("clair.cli.main.load_environment", load_environment)
+        write_environments_yml(make_environment(name="local"), home_dir=home_dir)
+        project_dir = tmp_path_factory.mktemp("init") / "proj"
+        answers = ["local", "", "source.orders.raw"]
+
+        result = CliRunner().invoke(
+            cli, ["init", "--project", str(project_dir)], input="\n".join(answers) + "\n"
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (project_dir / "source" / "orders" / "raw.py").is_file()
