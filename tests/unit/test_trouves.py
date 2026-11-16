@@ -337,7 +337,7 @@ class TestBuildSqlUpsertWithPrimaryKey:
 
     def test_stmt1_creates_staging_table_with_run_id(self):
         staging_stmt = self.statements[0]
-        assert "CREATE OR REPLACE TABLE db.schema.orders__clair_new_rows_abc123" in staging_stmt
+        assert "CREATE OR REPLACE TRANSIENT TABLE db.schema.orders__clair_new_rows_abc123" in staging_stmt
         assert "SELECT id, name, amount FROM staging.orders" in staging_stmt
         assert staging_stmt.startswith("-- create the new rows table")
 

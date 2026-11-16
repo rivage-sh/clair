@@ -177,10 +177,8 @@ class TestSeedTableCompiler:
             if node.addresses.physical.table_name.lower() == "tax_rates"
         )
         assert seed_node.execution_type == ExecutionType.PANDAS
-        assert seed_node.sql == []
         assert seed_node.python_source is not None
 
         artifact_text = seed_node.python_source
-        assert "execution_type: pandas" in artifact_text
         assert "country_code" in artifact_text
         assert "US" in artifact_text

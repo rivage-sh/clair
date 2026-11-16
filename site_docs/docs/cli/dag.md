@@ -15,18 +15,21 @@ cd examples/projects/example_1 && clair dag
 Output:
 
 ```
-example_1_database.source.events (SOURCE)
-└── example_1_database.refined.events (TABLE)
-    ├── example_1_database.derived.daily_event_counts (TABLE)
-    └── example_1_database.derived.top_event_types (TABLE)
+=== Clair DAG: 3 Trouves, 1 source ===
+
+example_1_database.source.events  [SOURCE]
+└── example_1_database.refined.events  [TABLE]
+    └── example_1_database.derived.daily_event_counts  [TABLE]
+        └── example_1_database.derived.top_event_types  [TABLE]
 ```
 
 ## Filter with `--select`
 
-Select specific Trouves to see a subgraph:
+The tree shows each Trouve that a pattern selects, and each Trouve above it:
 
 ```bash
-clair dag --select='refined.*.*'
+clair dag --select='*.refined.*'
+clair dag --select='example_1_database.refined.events+'
 ```
 
 ## Flags

@@ -213,43 +213,59 @@ def test_queries_of(trouve: MaterializedTrouve, address: TrouveAddress) -> list[
     return trouve.test(context)
 
 
+def _failed_results(trouve: MaterializedTrouve, error: str) -> list[TestResult]:
+    """Give one result with *error* for each test of a Trouve whose tests clair cannot send."""
+    logger.warning("test.exception", trouve=str(trouve.require_compiled().physical_address), error=error)
+    return [
+        TestResult(
+            address=trouve.require_compiled().physical_address,
+            test_index=test_index,
+            test_type=test.label,
+            column_name=getattr(test, "column", None),
+            statement=Statement(status=StatementStatus.FAILURE, error=error),
+            severity=test.severity,
+        )
+        for test_index, test in enumerate(trouve.tests)
+    ]
+
+
 def _run_trouve_tests(
     name: str,
     dag: ClairDag,
     adapter: WarehouseAdapter,
     sample_scope: SampleScope,
     sample_subquery: str | None,
-    query_addresses: dict[str, str],
+    run_id: str,
+    environment_name: str,
 ) -> list[TestResult]:
     """Execute each data quality test of one Trouve.
 
     A thread of the test run calls this function. *adapter* is the private
-    connection of that thread.
+    connection of that thread. The tests run with the session of the Trouve:
+    its role, its warehouse, its query tag and its timeout.
 
     Returns:
         A list of TestResult, one item for each test. The list is empty for a
         SOURCE Trouve, because clair makes no table for a SOURCE Trouve.
     """
     trouve = dag.get_trouve(name)
-    if not isinstance(trouve, MaterializedTrouve):
+    if not isinstance(trouve, MaterializedTrouve) or not trouve.tests:
         return []
-    queried_address = query_addresses.get(name, str(trouve.require_compiled().physical_address))
+    compiled = trouve.require_compiled()
+    queried_address = str(compiled.physical_address)
     try:
-        queries = test_queries_of(trouve, TrouveAddress.parse(queried_address))
+        queries = test_queries_of(trouve, compiled.physical_address)
     except Exception as plan_error:  # noqa: BLE001 — test() can be user code, and it can raise anything
-        error = f"{type(trouve).__name__}.test() raised {type(plan_error).__name__}: {plan_error}"
-        logger.warning("test.exception", trouve=name, error=error)
-        return [
-            TestResult(
-                address=trouve.require_compiled().physical_address,
-                test_index=test_index,
-                test_type=test.label,
-                column_name=getattr(test, "column", None),
-                statement=Statement(status=StatementStatus.FAILURE, error=error),
-                severity=test.severity,
-            )
-            for test_index, test in enumerate(trouve.tests)
-        ]
+        return _failed_results(
+            trouve, f"{type(trouve).__name__}.test() raised {type(plan_error).__name__}: {plan_error}"
+        )
+    try:
+        adapter.use_session_of(
+            compiled.config,
+            compiled.config.query_tag(run_id, environment_name, str(trouve.logical_address)),
+        )
+    except Exception as session_error:  # noqa: BLE001 — each adapter fault becomes a failed TestResult
+        return _failed_results(trouve, f"Clair cannot set the session context: {session_error}")
     return run_test_queries(
         trouve, queries, adapter, sample_scope, sample_subquery, queried_address
     )
@@ -258,7 +274,6 @@ def _run_trouve_tests(
 def _sample_subqueries(
     dag: ClairDag,
     selected: list[str],
-    query_addresses: dict[str, str],
     sample_rows: int,
 ) -> dict[str, str]:
     """Give the sample that the tests of each selected Trouve read, by node name.
@@ -276,9 +291,8 @@ def _sample_subqueries(
         trouve = dag.get_trouve(name)
         if trouve.compiled is None or trouve.type == TrouveType.SOURCE:
             continue
-        queried_address = query_addresses.get(name, str(trouve.compiled.physical_address))
         sample_subqueries[name] = render_sample(
-            trouve, physical_addresses, TrouveAddress.parse(queried_address), sample_rows
+            trouve, physical_addresses, trouve.compiled.physical_address, sample_rows
         )
     return sample_subqueries
 
@@ -289,8 +303,9 @@ def run_tests(
     adapter: WarehouseAdapter,
     sample_scope: SampleScope = SampleScope.NONE,
     sample_rows: int = DEFAULT_SAMPLE_ROWS,
-    query_addresses: dict[str, str] | None = None,
     threads: int = 1,
+    run_id: str = "",
+    environment_name: str = "",
 ) -> list[TestResult]:
     """Execute the data quality tests of the selected Trouves.
 
@@ -310,13 +325,11 @@ def run_tests(
             the complete data, such as ``TestRowCount``.
         sample_rows: The row limit of ``Trouve.sample()`` in the TEST_QUERIES
             scope, for each Trouve without a ``sample_sql``.
-        query_addresses: An optional map of node name to the address to query.
-            The runner gives the staging address here, so the tests examine the
-            candidate before clair promotes it. Each result still reports the
-            physical address, so the output does not change with the query address.
         threads: The number of Trouves that clair tests at one time, and thus
             the number of warehouse connections. The tests of one Trouve always
             run one after the other.
+        run_id: The identifier of this test run. The query tag holds it.
+        environment_name: The environment of the test run. The query tag holds it.
 
     Returns:
         A list of TestResult, one item for each test. The list keeps the order
@@ -328,29 +341,25 @@ def run_tests(
     if threads < 1:
         raise ValueError(f"The thread count must be 1 or more, but it is {threads}")
 
-    query_addresses = query_addresses or {}
     sample_subqueries = (
-        _sample_subqueries(dag, selected, query_addresses, sample_rows)
+        _sample_subqueries(dag, selected, sample_rows)
         if sample_scope == SampleScope.TEST_QUERIES
         else {}
     )
 
-    if threads == 1:
-        results: list[TestResult] = []
-        for name in selected:
-            results.extend(
-                _run_trouve_tests(
-                    name, dag, adapter, sample_scope, sample_subqueries.get(name), query_addresses
-                )
-            )
-        return results
-
+    # One thread gives a pool of one: the adapter of the caller, and no new connection.
     pool = AdapterPool(adapter, threads)
 
     def test_one(name: str) -> list[TestResult]:
         """Test one Trouve on the connection of this thread."""
         return _run_trouve_tests(
-            name, dag, pool.acquire(), sample_scope, sample_subqueries.get(name), query_addresses
+            name,
+            dag,
+            pool.acquire(),
+            sample_scope,
+            sample_subqueries.get(name),
+            run_id,
+            environment_name,
         )
 
     try:

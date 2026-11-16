@@ -288,8 +288,12 @@ class CompiledAttributes(BaseModel):
     physical_address: TrouveAddress
     file_path: Path
     module_name: str
+    # The logical address of each Trouve that the build reads.
     imports: list[str]
     config: ResolvedConfig
+    # The logical address of each Trouve that a TestSql of this Trouve reads.
+    # The tests run after the build, thus each one is an edge of the DAG too.
+    test_imports: list[str] = []
 
 
 class CompiledSql(CompiledAttributes):
@@ -873,10 +877,14 @@ class Table(SqlTrouve, TableOptions):
         )
 
     def create_new_rows_statement(self, run_id: str) -> str:
-        """Give the statement that writes the rows of this run to the new rows table."""
+        """Give the statement that writes the rows of this run to the new rows table.
+
+        The table lives for one run, thus it is TRANSIENT: Snowflake keeps no
+        Fail-safe copy of it for seven days after the cleanup drops it.
+        """
         return (
             f"-- create the new rows table\n"
-            f"CREATE OR REPLACE TABLE {self.new_rows_address(run_id)} AS (\n"
+            f"CREATE OR REPLACE TRANSIENT TABLE {self.new_rows_address(run_id)} AS (\n"
             f"{self.sql_for(RunMode.INCREMENTAL)}\n)"
         )
 

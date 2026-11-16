@@ -70,7 +70,7 @@ trouve = Table(
 no other Trouve, thus it is always a root:
 
 ```
-=== Clair DAG: 4 models, 1 source ===
+=== Clair DAG: 4 Trouves, 1 source ===
 
 example_4_database.reference.event_type_labels  [SEED]
 └── example_4_database.derived.top_event_types  [TABLE]
@@ -222,23 +222,26 @@ The DAG, the lineage, the selectors, the [staging](staging.md) step, the
 [data quality tests](data-quality-tests.md), [routing](routing.md), and `clair docs` all
 apply to a seed, the same as to a SQL Trouve.
 
-`clair compile` writes an artifact file for a seed. The file holds the dtypes and the rows,
-in place of the SQL:
+`clair compile` writes one `.py` artifact file for a seed. At the build phase it holds the
+dtypes and the rows, and each SQL statement of the plan is a comment:
 
-```
-# clair compiled: omer.reference.event_type_labels
-# execution_type: pandas
+```python
+# ── build ───────────────────────────────────────────────────
+# clair writes the DataFrame below to omer.reference.event_type_labels__clair_<run_id>
 
 # 3 row(s), 3 column(s)
 # dtypes:
 #   event_type: string
 #   label: string
 #   is_conversion: bool
+# rows:
+#       event_type        label  is_conversion
+#   0    page_view    Page view          False
+#   1  add_to_cart  Add to cart          False
+#   2     purchase     Purchase           True
 
-    event_type        label  is_conversion
-0    page_view    Page view          False
-1  add_to_cart  Add to cart          False
-2     purchase     Purchase           True
+# ── promote · when should_promote() gives True ──────────────
+# CREATE OR REPLACE TABLE omer.reference.event_type_labels CLONE omer.reference.event_type_labels__clair_<run_id> COPY GRANTS
 ```
 
 For the field tables, read the [Trouve API](../reference/trouve-api.md).

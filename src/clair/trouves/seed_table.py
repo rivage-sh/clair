@@ -51,16 +51,24 @@ class SeedTable(DataframeTrouve):
         return self.dataframe
 
     def source_text(self) -> str:
-        """Give the dtypes and the rows. This text is the source of a seed."""
+        """Give the dtypes and the rows as Python comments. This text is the source of a seed.
+
+        The compiled ``.py`` file holds this text, thus each line is a comment,
+        and the file stays valid Python.
+        """
         dtype_lines = "\n".join(
             f"#   {column_name}: {dtype}"
             for column_name, dtype in self.dataframe.dtypes.items()
         )
+        row_lines = "\n".join(
+            f"#   {line}".rstrip()
+            for line in self.dataframe.to_string(max_rows=_ARTIFACT_MAX_ROWS).splitlines()
+        )
         row_count = len(self.dataframe)
         return (
             f"# {row_count} row(s), {len(self.dataframe.columns)} column(s)\n"
-            f"# dtypes:\n{dtype_lines}\n\n"
-            f"{self.dataframe.to_string(max_rows=_ARTIFACT_MAX_ROWS)}\n"
+            f"# dtypes:\n{dtype_lines}\n"
+            f"# rows:\n{row_lines}\n"
         )
 
     @model_validator(mode="after")

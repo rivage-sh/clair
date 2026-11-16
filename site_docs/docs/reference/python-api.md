@@ -364,9 +364,10 @@ physical address.
 
 `CompiledNodeInfo` holds `addresses` (a `NodeAddresses`), `type`,
 `execution_type`, `effective_run_mode`, `dependencies`, `sql` and
-`python_source`. `python_source` is the Python text of a pandas Trouve: a header
-that names each input, the imports of its module, and its function. It is `None`
-for a SQL Trouve.
+`python_source`. `sql` holds each statement of the plan, by phase. The build of a
+pandas Trouve is a `write_pandas` call, not SQL, so a comment marks its place and
+names each input. `python_source` is the Python text of a pandas Trouve: the imports
+of its module, and its function. It is `None` for a SQL Trouve.
 
 ## Artifacts
 

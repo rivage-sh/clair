@@ -1,7 +1,7 @@
 # Tests API
 
 ```python
-from clair import TestUnique, TestNotNull, TestRowCount, TestUniqueColumns
+from clair import TestNotNull, TestRowCount, TestSql, TestUnique, TestUniqueColumns
 ```
 
 All the tests are Pydantic models. Zero rows from `to_sql()` = pass.
@@ -116,6 +116,38 @@ HAVING COUNT(*) > 1
 
 Run with `--sample`: **Yes**
 
+## `TestSql`
+
+Your own query. Each row that it gives is a failure. Write `{THIS}` for the address
+of the Trouve that holds the test, and an imported Trouve for any other address, as in
+`Trouve.sql`.
+
+```python
+class TestSql(Test):
+    sql: str
+```
+
+```python
+from clair import THIS, TestSql
+from mydb.myschema.customers import trouve as customers
+
+TestSql(
+    sql=f"""
+        SELECT o.order_id
+        FROM {THIS} o
+        LEFT JOIN {customers} c ON o.customer_id = c.customer_id
+        WHERE c.customer_id IS NULL
+    """,
+)
+```
+
+clair resolves each reference in the same way as the SQL of a Trouve. A reference to
+another Trouve adds a test edge to the DAG: the Trouve waits for the other Trouve, and
+a failure of the other Trouve skips it. See [DAG](../topics/dag.md#where-an-edge-comes-from).
+
+Run with `--sample`: **No** — the query can group the rows or read other tables, thus a
+sample can make it fail when the complete data passes.
+
 ## Summary
 
 | Class | Args | Run with `--sample` by default? |
@@ -124,16 +156,17 @@ Run with `--sample`: **Yes**
 | `TestNotNull` | `column: str` | Yes |
 | `TestRowCount` | `min_rows: int \| None`, `max_rows: int \| None` | **No** |
 | `TestUniqueColumns` | `columns: list[str]` (min 2) | Yes |
+| `TestSql` | `sql: str` | **No** |
 
 ## `AnyTest`
 
 clair uses this discriminated union internally to deserialize the tests:
 
 ```python
-AnyTest = TestUnique | TestNotNull | TestRowCount | TestUniqueColumns
+AnyTest = TestUnique | TestNotNull | TestRowCount | TestUniqueColumns | TestSql
 ```
 
-Each test class has a `type` literal field. clair uses it as the discriminator: `"unique"`, `"not_null"`, `"row_count"`, `"unique_columns"`.
+Each test class has a `type` literal field. clair uses it as the discriminator: `"unique"`, `"not_null"`, `"row_count"`, `"unique_columns"`, `"sql"`.
 
 ## See also
 

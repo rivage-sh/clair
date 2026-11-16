@@ -61,6 +61,15 @@ class TestEachStrategyThatMatchesRows:
         ):
             strategy_type(primary_key_columns=["id"], join_sql="target.id = source.id")
 
+    @pytest.mark.parametrize(
+        ("field_name", "empty_value"),
+        [("primary_key_columns", []), ("join_sql", ""), ("join_sql", "  ")],
+    )
+    def test_an_empty_match_raises(self, strategy_type, field_name, empty_value):
+        # An empty match makes a MERGE or a DELETE with no condition.
+        with pytest.raises(ValidationError, match=f"got an empty {field_name}"):
+            strategy_type(**{field_name: empty_value})
+
 
 class TestDeleteInsertByRange:
     """A range column is the third match of a DeleteInsert, and an Upsert has no such field."""

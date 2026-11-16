@@ -33,11 +33,11 @@ class CompiledNodeInfo(BaseModel):
         effective_run_mode: The run mode after clair applied the RunConfig of
             the Trouve to the run mode of the caller.
         dependencies: The physical address of each upstream Trouve.
-        sql: The statements, in the order that clair executes them. A pandas
-            Trouve has no statements.
-        python_source: The Python text of a pandas Trouve: a header that names
-            each input, the imports of its module, and its function. None for
-            a SQL Trouve.
+        sql: The statements, in the order that clair executes them. The build
+            of a pandas Trouve is a ``write_pandas`` call and not SQL, thus a
+            comment marks its place, and names each input and the target.
+        python_source: The Python text of a pandas Trouve: the imports of its
+            module, and its function. None for a SQL Trouve.
     """
 
     addresses: NodeAddresses
@@ -186,7 +186,7 @@ def render_plan(trouve: MaterializedTrouve, context: PlanContext, plan: NodePlan
 
 
 def build_statements(
-    trouve: SqlTrouve,
+    trouve: MaterializedTrouve,
     run_mode: RunMode,
     run_id: str,
     use_staging: bool = True,
@@ -197,7 +197,29 @@ def build_statements(
     after the tests, and the staging object stays.
     """
     context = offline_plan_context(trouve, run_mode, run_id, use_staging)
-    return render_plan(trouve, context, trouve.plan(context))
+    plan = trouve.plan(context)
+    if isinstance(trouve, DataframeTrouve):
+        # The runner writes the DataFrame before the build statements of the plan.
+        plan = plan.model_copy(
+            update={"build": [_dataframe_write_comment(trouve, context), *plan.build]}
+        )
+    return render_plan(trouve, context, plan)
+
+
+def _dataframe_write_comment(trouve: DataframeTrouve, context: PlanContext) -> str:
+    """Give the comment that stands for the DataFrame write: each input, and the target."""
+    dataframe_inputs = trouve.require_compiled().inputs
+    if not dataframe_inputs:
+        return f"-- clair writes the DataFrame below to {context.target_address}"
+    write_line = (
+        "-- clair reads each input, calls the Python code below, and writes the "
+        f"DataFrame to {context.target_address}"
+    )
+    lines = [write_line]
+    for parameter_name, dataframe_input in zip(trouve.parameter_names(), dataframe_inputs):
+        sample_note = "" if dataframe_input.sample_query is None else ", a sample"
+        lines.append(f"--   {parameter_name}  <-  {dataframe_input.address}{sample_note}")
+    return "\n".join(lines)
 
 
 def build_compile_output(
@@ -265,25 +287,14 @@ def build_compile_output(
                 except (OSError, SyntaxError):
                     pass
 
-            input_lines = [
-                f"#   {parameter_name}  ->  {upstream.require_compiled().physical_address}"
-                for parameter_name, upstream in zip(
-                    trouve.parameter_names(), trouve.upstream_trouves()
-                )
-            ]
-
-            header = f"# clair compiled: {trouve.require_compiled().physical_address}\n# execution_type: pandas\n"
-            if input_lines:
-                header += "# inputs:\n" + "\n".join(input_lines) + "\n"
-            header += "\n"
             compiled_nodes.append(CompiledNodeInfo(
                 addresses=addresses,
                 type=trouve.type,
                 execution_type=ExecutionType.PANDAS,
                 effective_run_mode=RunMode.FULL_REFRESH,
                 dependencies=deps,
-                sql=[],
-                python_source=header + imports_section + body_source,
+                sql=build_statements(trouve, run_mode, run_id, use_staging=use_staging),
+                python_source=imports_section + body_source,
             ))
         elif isinstance(trouve, SqlTrouve):
             statements = build_statements(

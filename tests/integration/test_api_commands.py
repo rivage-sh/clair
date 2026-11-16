@@ -99,11 +99,11 @@ class TestExclude:
         environment: Environment,
     ) -> None:
         excluded = LEAF_LOGICAL_NAME
-        model_count = len(model_logical_names(trouves_of(project_source_path)))
+        trouve_count = len(model_logical_names(trouves_of(project_source_path)))
 
         summary = clair.run(project_copy, env=environment, exclude=[excluded])
 
-        assert summary.succeeded_count == model_count - 1
+        assert summary.succeeded_count == trouve_count - 1
 
 
 class TestExcludeAMiddleTrouve:
@@ -152,12 +152,12 @@ class TestThreads:
         clair_environment: IntegrationConfig,
         environment: Environment,
     ) -> None:
-        model_count = len(model_logical_names(trouves_of(project_source_path)))
+        trouve_count = len(model_logical_names(trouves_of(project_source_path)))
 
         summary = clair.run(project_copy, env=environment, threads=4)
 
         assert summary.failed == []
-        assert summary.succeeded_count == model_count
+        assert summary.succeeded_count == trouve_count
 
     def test_a_parallel_run_builds_the_same_trouves_as_one_thread(
         self,
@@ -183,14 +183,14 @@ class TestCompile:
         clair_environment: IntegrationConfig,
         environment: Environment,
     ) -> None:
-        model_count = len(model_logical_names(trouves_of(project_source_path)))
+        trouve_count = len(model_logical_names(trouves_of(project_source_path)))
 
         output = clair.compile(project_copy, env=environment)
         run_dir = write_compile_output(project_copy / ARTIFACTS_DIR_NAME, output)
 
-        assert len(output.compiled_nodes) == model_count
+        assert len(output.compiled_nodes) == trouve_count
         artifact_files = [path for path in run_dir.rglob("*") if path.is_file()]
-        assert len(artifact_files) == model_count
+        assert len(artifact_files) == trouve_count
 
     def test_compile_routes_each_address_to_the_schema_of_the_run(
         self,

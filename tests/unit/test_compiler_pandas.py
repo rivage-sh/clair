@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import ast
 import textwrap
 from pathlib import Path
 
+import pytest
+
+import clair
 from clair.core.artifacts import write_compile_output
 from clair.core.compiler import build_compile_output
 from clair.core.dag import build_dag, get_executable_nodes
 from clair.core.discovery import discover_project
+from clair.phase import Phase
 from clair.trouves.trouve import ExecutionType
 from clair.trouves.trouve_type import TrouveType
 
@@ -111,7 +116,7 @@ class TestPandasTableArtifactFile:
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         assert py_file.exists()
 
-    def test_no_sql_file_for_pandas_table(self, tmp_path: Path):
+    def test_one_trouve_gives_one_file(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
@@ -140,18 +145,15 @@ class TestPandasTableArtifactContent:
         py_file = tmp_path / "_clairtifacts" / FAKE_RUN_ID / "mydb" / "derived" / "summary.py"
         return py_file.read_text()
 
-    def test_header_contains_address(self, tmp_path: Path):
+    def test_the_build_comment_names_each_input(self, tmp_path: Path):
         content = self._get_artifact_content(tmp_path)
-        assert "# clair compiled: mydb.derived.summary" in content
+        assert "#   events  <-  mydb.source.events" in content
 
-    def test_header_contains_type_pandas(self, tmp_path: Path):
+    def test_the_function_runs_before_the_promotion(self, tmp_path: Path):
         content = self._get_artifact_content(tmp_path)
-        assert "# execution_type: pandas" in content
-
-    def test_header_contains_inputs(self, tmp_path: Path):
-        content = self._get_artifact_content(tmp_path)
-        assert "# inputs:" in content
-        assert "events  ->  mydb.source.events" in content
+        function_line = content.index("def summarize")
+        promotion_line = content.index("# CREATE OR REPLACE TABLE mydb.derived.summary CLONE")
+        assert content.index("# ── build") < function_line < promotion_line
 
     def test_contains_function_source(self, tmp_path: Path):
         content = self._get_artifact_content(tmp_path)
@@ -168,14 +170,24 @@ class TestPandasTableCompiledNodeInfo:
         pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
         assert pandas_node.execution_type == ExecutionType.PANDAS
 
-    def test_compiled_node_has_empty_sql(self, tmp_path: Path):
+    @pytest.mark.parametrize(
+        ("use_staging", "expected_phases"),
+        [
+            (True, [Phase.BUILD, Phase.PROMOTE, Phase.RETIRE]),
+            (False, [Phase.BUILD]),
+        ],
+    )
+    def test_compiled_node_shows_each_phase_of_the_plan(
+        self, tmp_path: Path, use_staging: bool, expected_phases: list[Phase]
+    ):
         project = _make_pandas_project(tmp_path)
         dag = build_dag(discover_project(project))
         selected = get_executable_nodes(dag)
-        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID)
+        output = build_compile_output(dag, selected, run_id=FAKE_RUN_ID, use_staging=use_staging)
 
         pandas_node = next(n for n in output.compiled_nodes if n.addresses.matches("mydb.derived.summary"))
-        assert pandas_node.sql == []
+        phase_headers = [phase for phase in Phase for sql in pandas_node.sql if sql.startswith(phase.header)]
+        assert phase_headers == expected_phases
 
     def test_compiled_node_has_dependencies(self, tmp_path: Path):
         project = _make_pandas_project(tmp_path)
@@ -216,3 +228,19 @@ class TestSqlTrouveRegression:
         node_names = {str(n.addresses.physical) for n in output.compiled_nodes}
         assert "mydb.refined.events" in node_names
         assert "mydb.derived.summary" in node_names
+
+
+EXAMPLE_4 = Path(__file__).parents[2] / "examples" / "projects" / "example_4"
+
+
+def test_each_python_artifact_of_a_compile_is_valid_python(tmp_path: Path, monkeypatch):
+    # example_4 holds a PandasTable and a SeedTable. The artifact of each one
+    # holds its code and its plan as comments, and Python must read the file.
+    monkeypatch.setenv("CLAIR_USER", "tester")
+    output = clair.compile(EXAMPLE_4, env="dev")
+    run_dir = write_compile_output(tmp_path, output)
+
+    python_files = sorted(run_dir.rglob("*.py"))
+    assert len(python_files) == 2
+    for python_file in python_files:
+        ast.parse(python_file.read_text(), filename=str(python_file))

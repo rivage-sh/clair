@@ -8,6 +8,7 @@ the owner of the tables that it makes does not depend on the schedule.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -99,3 +100,40 @@ def test_the_runner_sets_the_context_of_each_trouve_even_with_no_role(tmp_path):
     clair.run(project_root, env=make_environment(), adapter=adapter, threads=1)
 
     assert [context["role"] for context in adapter.contexts] == ["PII_ROLE", None]
+
+
+def _write_tested_project(project_root: Path) -> Path:
+    write_project_marker(project_root)
+    (project_root / "db" / "pii").mkdir(parents=True)
+    (project_root / "db" / "pii" / "customers.py").write_text(
+        "from clair import Table, TestNotNull\n"
+        'trouve = Table(sql="select 1 as id", role="PII_ROLE", warehouse="XL_WH",\n'
+        '               statement_timeout_seconds=60, tests=[TestNotNull(column="id")])\n'
+    )
+    (project_root / "db" / "pii" / "customer_count.py").write_text(
+        "from clair import Table, TestNotNull\n"
+        "from db.pii.customers import trouve as customers\n"
+        'trouve = Table(sql=f"select count(*) as n from {customers}", tests=[TestNotNull(column="n")])\n'
+    )
+    (project_root / "db" / "pii" / "untested.py").write_text(
+        'from clair import Table\ntrouve = Table(sql="select 1 as id", role="OTHER_ROLE")\n'
+    )
+    return project_root
+
+
+def test_clair_test_sets_the_session_of_each_trouve_that_it_tests(tmp_path):
+    project_root = _write_tested_project(tmp_path / "project")
+    adapter = RecordingAdapter()
+
+    clair.test(project_root, env=make_environment(), adapter=adapter, threads=1)
+
+    # A Trouve with no test sends nothing, thus it sets no session. The second
+    # Trouve gets the warehouse of the profile, and the role of the session.
+    assert [(context["role"], context["warehouse"]) for context in adapter.contexts] == [
+        ("PII_ROLE", "XL_WH"),
+        (None, make_environment().connection.warehouse),
+    ]
+    tags = [json.loads(query_tag) for query_tag, _timeout in adapter.session_parameters]
+    assert [tag["trouve"] for tag in tags] == ["db.pii.customers", "db.pii.customer_count"]
+    assert len({tag["run_id"] for tag in tags}) == 1
+    assert [timeout for _tag, timeout in adapter.session_parameters] == [60, None]

@@ -60,10 +60,10 @@ def diamond_dag():
 
 
 class TestCounts:
-    """The header counts the models and the sources of the visible nodes."""
+    """The header counts the Trouves and the sources of the visible nodes."""
 
     @pytest.mark.parametrize(
-        ("nodes", "expected_model_count", "expected_source_count"),
+        ("nodes", "expected_trouve_count", "expected_source_count"),
         [
             ([], 0, 0),
             ([("db.s.a", TrouveType.SOURCE)], 0, 1),
@@ -82,10 +82,10 @@ class TestCounts:
         ],
     )
     def test_each_shape_gives_its_counts(
-        self, nodes, expected_model_count, expected_source_count
+        self, nodes, expected_trouve_count, expected_source_count
     ):
         output = render_dag(build_dag_of(nodes))
-        assert output.model_count == expected_model_count
+        assert output.trouve_count == expected_trouve_count
         assert output.source_count == expected_source_count
 
     def test_an_empty_dag_has_no_node(self):
@@ -95,9 +95,9 @@ class TestCounts:
         assert output.no_match is False
 
     def test_the_counts_follow_the_selection(self, chain_dag):
-        """A selector hides db.s.c, thus the model count falls to one."""
+        """A selector hides db.s.c, thus the Trouve count falls to one."""
         output = render_dag(chain_dag, ["db.s.b"])
-        assert output.model_count == 1
+        assert output.trouve_count == 1
         assert output.source_count == 1
 
 
@@ -233,8 +233,15 @@ class TestSelection:
         assert output.roots == []
         assert output.selector == "db.s.absent"
 
-    def test_the_output_keeps_the_first_pattern(self, chain_dag):
-        assert render_dag(chain_dag, ["db.s.b", "db.s.c"]).selector == "db.s.b"
+    def test_the_output_names_each_pattern(self, chain_dag):
+        assert render_dag(chain_dag, ["db.s.b", "db.s.c"]).selector == "db.s.b, db.s.c"
+
+    @pytest.mark.parametrize(
+        ("pattern", "expected_matched"),
+        [("db.s.b+", ["db.s.b", "db.s.c"]), ("+db.s.b", ["db.s.a", "db.s.b"])],
+    )
+    def test_a_pattern_takes_the_graph_operator(self, chain_dag, pattern, expected_matched):
+        assert render_dag(chain_dag, [pattern]).matched_nodes == expected_matched
 
 
 class TestNodeTag:
@@ -297,23 +304,23 @@ class TestHeaderText:
     """The header says the counts, and it names the selector."""
 
     @pytest.mark.parametrize(
-        ("model_count", "source_count", "pattern", "expected"),
+        ("trouve_count", "source_count", "pattern", "expected"),
         [
-            (0, 0, None, "=== Clair DAG: 0 models, 0 sources ==="),
-            (1, 1, None, "=== Clair DAG: 1 model, 1 source ==="),
-            (2, 3, None, "=== Clair DAG: 2 models, 3 sources ==="),
+            (0, 0, None, "=== Clair DAG: 0 Trouves, 0 sources ==="),
+            (1, 1, None, "=== Clair DAG: 1 Trouve, 1 source ==="),
+            (2, 3, None, "=== Clair DAG: 2 Trouves, 3 sources ==="),
             (
                 1,
                 1,
                 "db.s.*",
-                "=== Clair DAG (filtered: db.s.*): 1 model, 1 source ===",
+                "=== Clair DAG (filtered: db.s.*): 1 Trouve, 1 source ===",
             ),
         ],
     )
     def test_each_count_gives_its_header(
-        self, model_count, source_count, pattern, expected
+        self, trouve_count, source_count, pattern, expected
     ):
-        assert format_header(model_count, source_count, pattern) == expected
+        assert format_header(trouve_count, source_count, pattern) == expected
 
 
 class TestRenderedText:
@@ -321,7 +328,7 @@ class TestRenderedText:
 
     def test_a_chain_draws_one_branch_at_each_level(self, chain_dag):
         assert render_dag(chain_dag).render() == (
-            "=== Clair DAG: 2 models, 1 source ===\n"
+            "=== Clair DAG: 2 Trouves, 1 source ===\n"
             "\n"
             "db.s.a  [SOURCE]\n"
             "└── db.s.b  [TABLE]\n"
@@ -330,7 +337,7 @@ class TestRenderedText:
 
     def test_a_diamond_marks_the_second_place_of_the_shared_node(self, diamond_dag):
         assert render_dag(diamond_dag).render() == (
-            "=== Clair DAG: 3 models, 1 source ===\n"
+            "=== Clair DAG: 3 Trouves, 1 source ===\n"
             "\n"
             "db.s.a  [SOURCE]\n"
             "├── db.s.b  [TABLE]\n"
@@ -344,7 +351,7 @@ class TestRenderedText:
             [("db.s.a", TrouveType.SOURCE), ("db.s.x", TrouveType.SOURCE)]
         )
         assert render_dag(dag).render() == (
-            "=== Clair DAG: 0 models, 2 sources ===\n"
+            "=== Clair DAG: 0 Trouves, 2 sources ===\n"
             "\n"
             "db.s.a  [SOURCE]\n"
             "\n"

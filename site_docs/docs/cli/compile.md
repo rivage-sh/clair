@@ -3,7 +3,7 @@
 Resolve the DAG and write the generated SQL to `_clairtifacts/`. The command does not connect to Snowflake.
 
 ```bash
-clair compile --env NAME [--select PATTERN]... [--run-mode MODE] [--sample [--sample-rows N]]
+clair compile --env NAME [--select PATTERN]... [--exclude PATTERN]... [--run-mode MODE] [--sample [--sample-rows N]]
 ```
 
 ## Example
@@ -29,7 +29,7 @@ Each plan shows the staged path: the build at the staging address, a comment tha
 1. Discovers all Trouves in the project
 2. Resolves import references and builds the DAG
 3. Replaces the f-string placeholders with real Snowflake names. It applies the routing entry of `--env`.
-4. Writes one file for each Trouve to `_clairtifacts/<run_id>/`: a `.sql` file for a SQL Trouve, and a `.py` file for a pandas Trouve
+4. Writes one file for each Trouve to `_clairtifacts/<run_id>/`: a `.sql` file for a SQL Trouve, and a `.py` file for a pandas Trouve. The `.py` file holds the Python code at the build phase, and each statement of the plan as a comment
 
 ## Artifact layout
 
@@ -56,6 +56,7 @@ _clairtifacts/
 |------|---------|-------------|
 | `--env` | required | The environment name. It names a key in `~/.clair/environments.yml` and an entry in `__routing__.py`. `CLAIR_ENV` gives it when you omit the flag. |
 | `--select` | all | Pattern that filters the Trouves. It accepts a glob and the `+` graph operator. See [Selectors](../topics/selectors.md). Repeat the flag to add more patterns. |
+| `--exclude` | none | Pattern that removes Trouves after the selection. The syntax is the same as `--select`. |
 | `--run-mode` | `full_refresh` | `full_refresh` or `incremental`. Selects which SQL variant clair generates. |
 | `--sample` | off | Show the SQL of `clair run --sample`. Each Trouve that the run does not build reads its sample. A selected Trouve must write to an address that routing changed. See [Sampled Runs](../topics/sampling.md). |
 | `--sample-rows` | `1000` | The rows of each sample, for a Trouve without a `sample_sql`. It needs `--sample`. |

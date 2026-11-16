@@ -168,7 +168,7 @@ Generated SQL on an incremental run: two statements in the build phase, and one 
 
 ```sql
 -- create the new rows table
-CREATE OR REPLACE TABLE example_3_database.derived.customer_order_summary__clair_new_rows_<run_id> AS (
+CREATE OR REPLACE TRANSIENT TABLE example_3_database.derived.customer_order_summary__clair_new_rows_<run_id> AS (
     select customer_id, count(*) as total_orders, ...
     from example_3_database.refined.orders
     group by customer_id
