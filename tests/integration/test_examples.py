@@ -34,6 +34,7 @@ from typing import ClassVar
 import pytest
 
 import clair
+from clair.adapters.objects import WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
 from clair.environments.environments import Environment
 from clair.trouves.address import TrouveAddress
@@ -127,6 +128,19 @@ class ExampleProjectTests:
                 assert any(
                     str(result.addresses.staging) in s.sql for s in result.statements
                 )
+
+        # A CREATE TABLE AS SELECT returns one status row, thus the count of
+        # the result is 1. The row count of a table is the rows that it holds.
+        table_row_counts = {
+            str(result.addresses.physical): result.row_count
+            for result in summary.succeeded
+            if adapter.object_type(result.addresses.physical) == WarehouseObjectType.TABLE
+        }
+        assert table_row_counts
+        assert table_row_counts == {
+            physical_name: row_count(adapter, TrouveAddress.parse(physical_name))
+            for physical_name in table_row_counts
+        }
 
     def test_the_data_quality_tests_pass(
         self,

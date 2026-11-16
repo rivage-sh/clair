@@ -21,7 +21,8 @@ clair docs --no-browser
 
 ## What the UI shows
 
-- **Interactive DAG** — pan, zoom, and click the nodes to explore the graph
+- **Interactive DAG** — pan, zoom, and click the nodes to explore the graph. A dashed edge
+  is a [test edge](../topics/dag.md): only a `TestSql` of the target reads the source
 - **Sidebar** — a list of all the Trouves. You can search it, and filter it by type (SOURCE / TABLE / VIEW).
 - **Detail panel** — for each selected Trouve:
     - Full name and type

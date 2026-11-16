@@ -332,29 +332,44 @@ class TestLogicalNameValidation:
 
 
 class TestDetectRoutingCollisions:
-    def test_no_collision_returns_empty(self):
-        assert detect_routing_collisions({
-            "analytics.finance.revenue": "OMER_DEV.finance.revenue",
-            "warehouse.orders.daily": "OMER_DEV.orders.daily",
-        }) == []
+    @pytest.mark.parametrize(
+        ("logical_to_physical", "expected_collisions"),
+        [
+            pytest.param({}, [], id="no_trouve"),
+            pytest.param(
+                {"analytics.finance.revenue": "OMER_DEV.finance.revenue"}, [], id="one_trouve"
+            ),
+            pytest.param(
+                {
+                    "analytics.finance.revenue": "OMER_DEV.finance.revenue",
+                    "warehouse.orders.daily": "OMER_DEV.orders.daily",
+                },
+                [],
+                id="two_targets",
+            ),
+            pytest.param(
+                {
+                    "analytics.finance.orders": "OMER_DEV.finance.orders",
+                    "warehouse.finance.orders": "OMER_DEV.finance.orders",
+                },
+                [("OMER_DEV.finance.orders", ["analytics.finance.orders", "warehouse.finance.orders"])],
+                id="one_target",
+            ),
+            # Snowflake stores an unquoted name in upper case: one object.
+            pytest.param(
+                {
+                    "analytics.finance.orders": "OMER_DEV.finance.orders",
+                    "omer_dev.finance.orders": "omer_dev.finance.orders",
+                },
+                [("OMER_DEV.finance.orders", ["analytics.finance.orders", "omer_dev.finance.orders"])],
+                id="one_target_in_two_cases",
+            ),
+        ],
+    )
+    def test_two_trouves_at_one_object_collide(self, logical_to_physical, expected_collisions):
+        physical_addresses = {
+            logical: TrouveAddress.parse(physical)
+            for logical, physical in logical_to_physical.items()
+        }
 
-    def test_collision_gives_the_target_and_the_sources(self):
-        result = detect_routing_collisions({
-            "analytics.finance.orders": "OMER_DEV.finance.orders",
-            "warehouse.finance.orders": "OMER_DEV.finance.orders",
-        })
-        assert len(result) == 1
-        target, sources = result[0]
-        assert target == "OMER_DEV.finance.orders"
-        assert sorted(sources) == [
-            "analytics.finance.orders",
-            "warehouse.finance.orders",
-        ]
-
-    def test_empty_dict_returns_empty(self):
-        assert detect_routing_collisions({}) == []
-
-    def test_single_entry_returns_empty(self):
-        assert detect_routing_collisions(
-            {"analytics.finance.revenue": "OMER_DEV.finance.revenue"}
-        ) == []
+        assert detect_routing_collisions(physical_addresses) == expected_collisions

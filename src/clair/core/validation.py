@@ -233,7 +233,7 @@ def validate_project(project_root: Path, env_name: str) -> ValidationReport:
     collisions: list[RoutingCollision] = []
     if not address_problems:
         logical_to_physical = {
-            str(logical_address): str(route(logical_address, trouve_type, routing))
+            str(logical_address): route(logical_address, trouve_type, routing)
             for logical_address, trouve_type in routable
         }
         collisions = [

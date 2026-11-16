@@ -76,8 +76,10 @@ class Statement(BaseModel):
         query_id: The identifier that the warehouse gave to the query. It is
             None for a statement that the warehouse did not identify.
         query_url: The URL of the query detail page in the warehouse console.
+            None when the adapter cannot make one.
         error: The error message of a statement that failed.
-        row_count: The number of rows that the statement returned or changed.
+        row_count: The rows that the statement wrote: inserted, updated and
+            deleted. A query gives the rows that it returned.
         phase: The phase of the lifecycle that sent the statement. The runner
             sets it on each statement of a run result. None for a statement
             outside the lifecycle of a Trouve.

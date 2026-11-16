@@ -253,7 +253,7 @@ class RunSkip(BaseModel):
 | `effective_run_mode` | success, failure | The mode that clair used, after the `RunConfig` of the Trouve and the fallback to a full refresh. It is `None` for a failure before clair selected it. See [Incrementality](../topics/incrementality.md). |
 | `duration_seconds` | success, failure | The clock time of the statements. |
 | `test_results` | success, failure | The data quality test results of this Trouve. A test that fails on a staged run causes the failure. |
-| `row_count` | success | The rows that the last build statement changed. |
+| `row_count` | success | The rows that the last build statement wrote. A view holds no rows, thus it gives 0. |
 | `error` | failure | The cause of the failure. It is never empty. |
 | `failed_statement` | failure | The `Statement` that failed, or `None`. |
 | `failed_phase` | failure | The `Phase` that failed: the phase of the failed statement, or `Phase.TEST` for a blocking test. `None` for a failure before the plan, such as a session context that clair cannot set. |
@@ -298,9 +298,9 @@ class Statement(BaseModel):
 |--------|-------|
 | `sql` | The text that clair sent, or made and did not send. |
 | `status` | `StatementStatus.SUCCESS`, `FAILURE`, or `NOT_RUN`. A statement after the one that failed has `NOT_RUN`. |
-| `query_id`, `query_url` | The warehouse query ID and the console URL. |
+| `query_id`, `query_url` | The warehouse query ID and the console URL. `query_id` is `None` for a statement that did not get to the warehouse. `query_url` is `None` without a query ID, or when the environment has no `region` or no `account_locator`. |
 | `error` | The error message of a statement that failed. |
-| `row_count` | The rows that the statement returned or changed. |
+| `row_count` | The rows that the statement wrote: inserted, updated and deleted. A query gives the rows that it returned. A DDL statement gives the status row of Snowflake. |
 | `phase` | The `Phase` of the lifecycle that sent the statement. `None` for a statement outside the lifecycle of a Trouve. |
 | `success` | True if the status is `SUCCESS`. |
 

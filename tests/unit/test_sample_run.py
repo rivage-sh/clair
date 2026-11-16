@@ -432,6 +432,37 @@ class TestASampleNeverReachesProduction:
 
         assert raised.value.logical_addresses == ["mart.shop.daily_orders"]
 
+    def test_a_route_that_changes_only_the_case_stops_the_run(self, tmp_path: Path):
+        # Snowflake stores an unquoted name in upper case, thus MART.shop.orders
+        # is the production object mart.shop.orders.
+        upper_case_routing = textwrap.dedent("""\
+            from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
+
+
+            class UpperCaseRouting(RoutingEntry):
+                environment_name: str = "dev"
+
+                def route(self, trouve_address: TrouveAddress, trouve_type: TrouveType) -> TrouveAddress:
+                    return trouve_address.model_copy(
+                        update={"database_name": trouve_address.database_name.upper()}
+                    )
+
+
+            routing = RoutingTable(entries=[UpperCaseRouting()])
+        """)
+        (tmp_path / "__routing__.py").write_text(upper_case_routing)
+        (tmp_path / "mart" / "shop").mkdir(parents=True)
+        (tmp_path / "mart" / "shop" / "orders.py").write_text(
+            'from clair import Table\ntrouve = Table(sql="select 1 as n")\n'
+        )
+        adapter = recording_adapter()
+
+        with pytest.raises(SampleTargetsProductionError) as raised:
+            clair.run(tmp_path, env=make_environment("dev"), adapter=adapter, sample=True)
+
+        assert raised.value.logical_addresses == ["mart.shop.orders"]
+        assert adapter.record.statements == []
+
     def test_a_run_without_a_sample_can_write_to_production(self, project: Path):
         summary = clair.run(project, env=make_environment("prod"), adapter=recording_adapter())
 

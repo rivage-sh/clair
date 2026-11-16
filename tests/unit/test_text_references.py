@@ -6,7 +6,8 @@ import textwrap
 from pathlib import Path
 
 from clair.core.discovery import discover_project
-from clair.core.text_references import TextReferenceLocation, find_text_references
+from clair.core.references import TextReferenceLocation
+from clair.core.text_references import find_text_references
 
 
 def _write_source(root: Path) -> None:
@@ -129,6 +130,25 @@ class TestFindTextReferences:
         assert len(references) == 1
         assert references[0].location == TextReferenceLocation.TEST_SQL
         assert references[0].text_address == "mydb.source.events"
+
+    def test_a_sample_sql_gets_the_same_lint(self, tmp_path: Path):
+        """A sampled run sends the sample_sql, thus an address in it gets the same rule."""
+        _write_source(tmp_path)
+        (tmp_path / "mydb" / "refined").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "mydb" / "refined" / "report.py").write_text(textwrap.dedent("""\
+            from mydb.source.events import trouve as source_events
+            from clair import THIS, Table
+            trouve = Table(
+                sql=f"SELECT * FROM {source_events}",
+                sample_sql=f"SELECT * FROM {THIS} WHERE id IN (SELECT id FROM mydb.source.events)",
+            )
+        """))
+
+        references = find_text_references(discover_project(tmp_path))
+
+        assert [(reference.location, reference.text_address) for reference in references] == [
+            (TextReferenceLocation.SAMPLE, "mydb.source.events")
+        ]
 
     def test_a_pandas_table_has_no_sql_to_read(self, tmp_path: Path):
         """A pandas Trouve names its inputs in a list, thus this lint skips it."""

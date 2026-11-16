@@ -17,7 +17,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from clair.adapters.base import WarehouseAdapter
-from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn
+from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, WarehouseObjectType
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag, addresses_of, get_executable_nodes
 from clair.core.schema_change import read_incremental_columns
@@ -60,7 +60,8 @@ class RunSuccess(_RunResultBase):
         effective_run_mode: The run mode that clair used, after the RunConfig of
             the Trouve and the fallback to a full refresh.
         duration_seconds: The clock time of the statements.
-        row_count: The number of rows that the last build statement changed.
+        row_count: The rows that the last build statement wrote. A view holds
+            no rows, thus it gives 0.
         test_results: The data quality test results of this Trouve. A test that
             fails after a run with no staging does not change the status,
             because the physical object holds the new data.
@@ -738,8 +739,9 @@ def _run_node(
     sent_write_count += len(statements) - build_start
     if failed_statement is not None:
         return stop_writes(failed_statement.error or "unknown error")
-    if plan.build:
-        # The last statement that writes rows gives the count.
+    # The last statement of the build gives the count. A view holds no rows,
+    # and its CREATE VIEW gives one status row, thus a view writes 0.
+    if plan.build and trouve.warehouse_object_type != WarehouseObjectType.VIEW:
         row_count = statements[-1].row_count
 
     configure_start = len(statements)

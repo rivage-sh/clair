@@ -81,3 +81,51 @@ def test_clair_test_reads_the_physical_object_of_each_owner(shared_test_project)
         "select * from db.s.alpha where amount < 0",
         "select * from db.s.beta where amount < 0",
     ]
+
+
+# Each Trouve of the database `db` goes to the database `dev_db` in the dev environment.
+DEV_DATABASE_ROUTING = """\
+from clair import RoutingEntry, RoutingTable, TrouveAddress, TrouveType
+
+
+class DevDatabaseRouting(RoutingEntry):
+    environment_name: str = "dev"
+
+    def route(self, trouve_address: TrouveAddress, trouve_type: TrouveType) -> TrouveAddress:
+        return trouve_address.model_copy(update={"database_name": "dev_db"})
+
+
+routing = RoutingTable(entries=[DevDatabaseRouting()])
+"""
+
+ORDERS_WITH_A_CUSTOMER_TEST = (
+    "from clair import THIS, Table, TestSql\n"
+    "from db.s.customers import trouve as customers\n"
+    "trouve = Table(\n"
+    '    sql=f"select customer_id from {customers}",\n'
+    '    tests=[TestSql(sql=f"select * from {THIS} where customer_id not in '
+    '(select customer_id from {customers})")],\n'
+    ")\n"
+)
+
+
+def test_clair_test_reads_each_other_trouve_at_its_physical_address(tmp_path):
+    # A dev test run must compare the dev orders with the dev customers, not
+    # with the customers of production.
+    project_root = write_project_files(
+        tmp_path,
+        {
+            "__routing__.py": DEV_DATABASE_ROUTING,
+            "db/s/customers.py": 'from clair import Table\ntrouve = Table(sql="select 1 as customer_id")\n',
+            "db/s/orders.py": ORDERS_WITH_A_CUSTOMER_TEST,
+        },
+    )
+
+    summary = clair.test(project_root, env=make_environment(), adapter=RecordingAdapter(), threads=1)
+
+    assert [result.statement.sql for result in summary.results] == [
+        (
+            "select * from dev_db.s.orders where customer_id not in "
+            "(select customer_id from dev_db.s.customers)"
+        )
+    ]

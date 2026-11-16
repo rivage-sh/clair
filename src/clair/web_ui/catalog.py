@@ -26,7 +26,9 @@ def build_catalog(dag: ClairDag, project_root: Path) -> dict:
         project_root: The absolute path of the project root.
 
     Returns:
-        A dict that clair can write as JSON. The server makes the bytes.
+        A dict that clair can write as JSON. The server makes the bytes. Each
+        edge holds its ``EdgeKind``: ``read`` when the build reads the source,
+        ``test`` when only a TestSql reads it.
     """
     trouves_catalog: dict[str, dict] = {}
 
@@ -54,5 +56,8 @@ def build_catalog(dag: ClairDag, project_root: Path) -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "clair_version": __version__,
         "trouves": trouves_catalog,
-        "edges": [{"source": source, "target": target} for source, target in dag.edges],
+        "edges": [
+            {"source": source, "target": target, "kind": kind}
+            for source, target, kind in dag.edges(data="kind")
+        ],
     }

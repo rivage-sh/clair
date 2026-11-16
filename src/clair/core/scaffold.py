@@ -11,17 +11,25 @@ from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.environments.environments import Environment
 from clair.environments.project_routing import ROUTING_FILE_NAME
 
-# ---------------------------------------------------------------------------
-# The file templates.
-# ---------------------------------------------------------------------------
-
-_SOURCE_TROUVE_TEMPLATE = '''\
+_SOURCE_TROUVE_FILE = '''\
 from clair import Source
 
 trouve = Source()
 '''
 
-_ROUTING_TEMPLATE = '''\
+
+def _enum_member_name(env_name: str) -> str:
+    """Give the StrEnum member name of *env_name*, for example ``DEV`` for ``dev``."""
+    member_name = re.sub(r"\W", "_", env_name).upper()
+    if not member_name[:1].isalpha():
+        member_name = f"ENV_{member_name}"
+    return member_name
+
+
+def _routing_file(env_name: str) -> str:
+    """Give the ``__routing__.py`` file: one passthrough entry for *env_name*."""
+    member_name = _enum_member_name(env_name)
+    return f'''\
 """Clair routing -- gives each environment its physical write target.
 
 This file also marks the root of the clair project. Each clair command walks up
@@ -67,45 +75,6 @@ class PassthroughRouting(RoutingEntry):
 routing = RoutingTable(entries=[PassthroughRouting()])
 '''
 
-_ENVIRONMENTS_TEMPLATE = '''\
-# The Clair environments. Each environment has its own connection settings.
-# Routing is not here. It lives in the project __routing__.py file.
-# Reference: https://rivage-sh.github.io/clair/topics/environments/
-
-{env_name}:
-  connection:
-    account: your-org-your-account   # for example, myorg-myaccount
-    user: your@email.com
-    warehouse: your_warehouse
-    # role: your_role                # the default role of the user, if you omit it
-    # region: us-east-1              # necessary for the query URLs
-    # account_locator: abc12345      # necessary for the query URLs
-  authentication:
-    authenticator: externalbrowser   # SSO authentication in a browser
-  threads: 4                         # Trouves that run at one time
-
-# A production environment with key pair authentication:
-# prod:
-#   connection:
-#     account: your-org-your-account
-#     user: ci_service_user
-#     warehouse: your_warehouse
-#     region: us-east-1
-#     account_locator: abc12345
-#   authentication:
-#     private_key_path: ~/.clair/snowflake_key.p8
-#     # private_key_passphrase: your-passphrase   # only if the key is encrypted
-#   threads: 8
-'''
-
-
-def _enum_member_name(env_name: str) -> str:
-    """Give the StrEnum member name of *env_name*, for example ``DEV`` for ``dev``."""
-    member_name = re.sub(r"\W", "_", env_name).upper()
-    if not member_name[:1].isalpha():
-        member_name = f"ENV_{member_name}"
-    return member_name
-
 
 def _write_if_missing(path: Path, content: str) -> bool:
     """Write *content* to *path*. Make each parent directory that is absent.
@@ -126,13 +95,12 @@ def scaffold_project(
     source_schema_name: str,
     source_table_name: str,
     env_name: str,
-    home_dir: Path | None = None,
 ) -> list[tuple[str, str]]:
     """Make a new Clair project in *project_dir*.
 
     The function writes an example source Trouve file and a project
-    ``__routing__.py`` file. It also writes the global
-    ``~/.clair/environments.yml`` file, if that file does not exist.
+    ``__routing__.py`` file. It keeps each file that exists.
+    ``write_environments_yml()`` writes ``~/.clair/environments.yml``.
 
     Args:
         project_dir: The root directory of the new project.
@@ -141,7 +109,6 @@ def scaffold_project(
         source_table_name: The name of the source table file.
         env_name: The environment of the routing entry. It is a top-level key
             of environments.yml.
-        home_dir: A replacement for ``Path.home()``. The tests use it.
 
     Returns:
         A list of ``(status, path)`` tuples. The status is ``"created"`` or
@@ -149,15 +116,10 @@ def scaffold_project(
     """
     project_dir = project_dir.resolve()
 
-    # Each project file, as a (relative_path, template_content) pair.
+    # Each project file, as a (relative_path, content) pair.
     project_files: list[tuple[str, str]] = [
-        (f"{source_database_name}/{source_schema_name}/{source_table_name}.py", _SOURCE_TROUVE_TEMPLATE),
-        (
-            ROUTING_FILE_NAME,
-            _ROUTING_TEMPLATE.format(
-                member_name=_enum_member_name(env_name), env_name=env_name
-            ),
-        ),
+        (f"{source_database_name}/{source_schema_name}/{source_table_name}.py", _SOURCE_TROUVE_FILE),
+        (ROUTING_FILE_NAME, _routing_file(env_name)),
     ]
 
     results: list[tuple[str, str]] = []
@@ -167,15 +129,6 @@ def scaffold_project(
         created = _write_if_missing(full_path, content)
         status = "created" if created else "skipped"
         results.append((status, str(full_path)))
-
-    # The global environments.yml file in ~/.clair/
-    effective_home = home_dir if home_dir is not None else Path.home()
-    environments_path = effective_home / ".clair" / "environments.yml"
-    created = _write_if_missing(
-        environments_path, _ENVIRONMENTS_TEMPLATE.format(env_name=env_name)
-    )
-    status = "created" if created else "skipped"
-    results.append((status, str(environments_path)))
 
     return results
 
