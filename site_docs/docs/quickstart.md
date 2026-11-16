@@ -1,11 +1,16 @@
 # Quickstart
 
-This guide shows you how to build your first clair project and how to run it.
+This page takes you from an empty directory to a first run. You make two source tables
+in Snowflake, write three Trouves that read them, and run the project.
+
+You need [clair](installation.md), a Snowflake account, and a role that can make a
+database.
 
 ## 1. Set up an environment
 
-Run `clair init`. The command asks for an environment name and your Snowflake connection details. It writes
-`~/.clair/environments.yml`, and a `__routing__.py` file with one entry for that environment:
+Run `clair init`. It asks for the connection details of Snowflake, and writes two files:
+`~/.clair/environments.yml` holds the connection, and `__routing__.py` marks the root of
+the project.
 
 ```
 $ clair init
@@ -54,16 +59,45 @@ Next steps:
   3. clair run --env dev
 ```
 
-Each command after this one names the environment with `--env`. Give the name that you
-gave to `clair init`.
+Each command after this one takes `--env dev`.
 
-## 2. Create a project
+!!! warning "The `dev` entry writes to the production names"
+    The entry that `clair init` writes changes no address. Thus `clair run --env dev`
+    writes `refined.products.catalog`, which is also the production name. That is correct
+    for this page. Before you share the project, give `dev` its own database or schema:
+    see [Routing](topics/routing.md).
 
-Each directory level maps to one part of the Snowflake name: `database / schema / table`.
+## 2. Make the source tables
+
+Run this SQL in Snowflake. It makes the two tables that the project reads:
+
+```sql
+CREATE DATABASE IF NOT EXISTS source;
+CREATE SCHEMA IF NOT EXISTS source.products;
+
+CREATE OR REPLACE TABLE source.products.catalog AS
+SELECT * FROM VALUES
+    ('p1', 'blue mug',    'Kitchen', 12.0),
+    ('p2', 'green chair', 'Garden',  80.0),
+    (NULL, 'lost item',   'Misc',     1.0)
+AS t (product_id, name, category, price);
+
+CREATE OR REPLACE TABLE source.products.reviews AS
+SELECT * FROM VALUES
+    ('r1', 'p1', 5, '2026-01-02'::date),
+    ('r2', 'p1', 4, '2026-01-05'::date),
+    ('r3', 'p2', 2, '2026-01-07'::date),
+    ('r4', 'p2', 9, '2026-01-09'::date)
+AS t (review_id, product_id, rating, review_date);
+```
+
+## 3. Write the Trouves
+
+Each directory level gives one part of the Snowflake name: `database / schema / table`.
 
 ```
 my_project/
-├── __routing__.py                 # the project root, and the routing of each environment
+├── __routing__.py
 ├── source/
 │   └── products/
 │       ├── catalog.py             # source.products.catalog
@@ -77,11 +111,11 @@ my_project/
         └── top_reviewed.py        # derived.products.top_reviewed
 ```
 
-## 3. Write your Trouves
-
-**`source/products/catalog.py`** — declares a Snowflake table that already exists:
+A `Source` declares a table that already exists. clair reads it, and never writes it.
+Replace the file that `clair init` wrote:
 
 ```python
+# source/products/catalog.py
 from clair import Column, ColumnType, Source
 
 trouve = Source(
@@ -94,9 +128,8 @@ trouve = Source(
 )
 ```
 
-**`source/products/reviews.py`** — declares a second table that already exists:
-
 ```python
+# source/products/reviews.py
 from clair import Column, ColumnType, Source
 
 trouve = Source(
@@ -109,10 +142,12 @@ trouve = Source(
 )
 ```
 
-**`refined/products/catalog.py`** — cleans and standardises the source:
+A `Table` makes a table from its SQL. Import the upstream Trouve, and put it in the
+f-string. clair replaces it with the Snowflake name, and adds the edge to the DAG.
 
 ```python
-from clair import Table
+# refined/products/catalog.py
+from clair import Table, TestNotNull, TestUnique
 from source.products.catalog import trouve as source_catalog
 
 trouve = Table(
@@ -125,12 +160,12 @@ trouve = Table(
         FROM {source_catalog}
         WHERE product_id IS NOT NULL
     """,
+    tests=[TestUnique(column="product_id"), TestNotNull(column="product_id")],
 )
 ```
 
-**`refined/products/reviews.py`** — cleans the reviews source:
-
 ```python
+# refined/products/reviews.py
 from clair import Table
 from source.products.reviews import trouve as source_reviews
 
@@ -147,9 +182,8 @@ trouve = Table(
 )
 ```
 
-**`derived/products/top_reviewed.py`** — joins and aggregates the refined layer:
-
 ```python
+# derived/products/top_reviewed.py
 from clair import Table
 from refined.products.catalog import trouve as catalog
 from refined.products.reviews import trouve as reviews
@@ -170,26 +204,41 @@ trouve = Table(
 )
 ```
 
-## 4. Compile and run
+## 4. Look at the DAG and the SQL
+
+These commands need no Snowflake connection:
 
 ```bash
 cd my_project
-
-# Read the generated SQL. This does not connect to Snowflake.
+clair dag
 clair compile --env dev
+```
 
-# Run against Snowflake
+`clair dag` prints the tree. `clair compile` writes each statement of the run to
+`_clairtifacts/<run_id>/`, one `.sql` file for each Trouve. Open
+`_clairtifacts/<run_id>/refined/products/catalog.sql`: the build writes to a staging
+table, the tests read that table, and the promotion replaces production.
+
+## 5. Run
+
+```bash
 clair run --env dev
 ```
 
-The `dev` entry of `__routing__.py` changes no address. Thus `clair run --env dev` writes to
-`refined.products.catalog`, which is also the production address. To give `dev` its own
-database or schema, change the `route` method. See [Routing](topics/routing.md).
+clair makes the databases `refined` and `derived`, and builds the three Trouves in order.
+The tests of `refined.products.catalog` run before its promotion. Query the result:
+
+```sql
+SELECT * FROM derived.products.top_reviewed;
+```
+
+The row for `p1` has an `avg_rating` of 4.5. The review with a rating of 9 does not pass
+the filter of `refined.products.reviews`, thus `p2` has an average of 2 and no row.
 
 ## Next steps
 
-- [Pandas-native transformations](topics/pandas-native.md) — write pipeline steps as Python functions
-- [Incrementality](topics/incrementality.md) — APPEND, UPSERT and DELETE_INSERT strategies for large tables
-- [Data quality tests](topics/data-quality-tests.md) — each test type
-- [Selectors](topics/selectors.md) — run only a subset of Trouves
-- [CLI reference](cli/overview.md) — all commands and flags
+- [Trouve](topics/trouve.md) — each kind of Trouve, and its fields
+- [Data quality tests](topics/data-quality-tests.md) — each test type, and the severity
+- [Incrementality](topics/incrementality.md) — APPEND, UPSERT and DELETE_INSERT for large tables
+- [Routing](topics/routing.md) — give each environment its own database or schema
+- [Selectors](topics/selectors.md) — run a part of the project
