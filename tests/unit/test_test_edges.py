@@ -14,7 +14,7 @@ import clair
 from clair.core.dag import EdgeKind, build_dag
 from clair.core.discovery import discover_project
 from clair.core.runner import RunSkip
-from tests.helpers import RecordingAdapter, make_environment, write_project_marker
+from tests.helpers import RecordingAdapter, make_environment, write_project_files
 
 ORDERS_TEST = (
     "from clair import THIS, Table, TestSql\n"
@@ -27,22 +27,13 @@ ORDERS_TEST = (
 )
 
 
-def _write_project(project_root: Path, files: dict[str, str]) -> Path:
-    write_project_marker(project_root)
-    for relative_path, text in files.items():
-        path = project_root / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-    return project_root
-
-
 def _edge_kinds(project_root: Path) -> dict[tuple[str, str], EdgeKind]:
     dag = build_dag(discover_project(project_root))
     return {(source, target): kind for source, target, kind in dag.edges(data="kind")}
 
 
 def test_a_reference_in_a_test_sql_adds_a_test_edge(tmp_path):
-    project_root = _write_project(
+    project_root = write_project_files(
         tmp_path,
         {
             "db/s/customers.py": 'from clair import Table\ntrouve = Table(sql="select 1 as customer_id")\n',
@@ -57,7 +48,7 @@ def test_a_read_edge_wins_against_a_test_edge(tmp_path):
     orders_reads_customers = ORDERS_TEST.replace(
         'sql="select 1 as customer_id"', 'sql=f"select customer_id from {customers}"'
     )
-    project_root = _write_project(
+    project_root = write_project_files(
         tmp_path,
         {
             "db/s/customers.py": 'from clair import Table\ntrouve = Table(sql="select 1 as customer_id")\n',
@@ -76,7 +67,7 @@ def test_a_source_gets_no_test_edge(tmp_path):
         "from db.s.customers import trouve as customers\n"
         'trouve = Source(tests=[TestSql(sql=f"select * from {THIS} join {customers} using (id)")])\n'
     )
-    project_root = _write_project(
+    project_root = write_project_files(
         tmp_path,
         {
             "db/s/customers.py": 'from clair import Table\ntrouve = Table(sql="select 1 as id")\n',
@@ -88,7 +79,7 @@ def test_a_source_gets_no_test_edge(tmp_path):
 
 
 def test_a_failure_of_the_test_dependency_skips_the_dependent(tmp_path):
-    project_root = _write_project(
+    project_root = write_project_files(
         tmp_path,
         {
             "db/s/customers.py": 'from clair import Table\ntrouve = Table(sql="select 1 as customer_id")\n',

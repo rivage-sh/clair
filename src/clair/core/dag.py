@@ -7,7 +7,8 @@ from enum import StrEnum
 
 import networkx as nx
 
-from clair.exceptions import CyclicDependencyError
+from clair.environments.routing import detect_routing_collisions_of_trouves
+from clair.exceptions import CyclicDependencyError, RoutingCollisionError
 from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.trouve import TrouveAbc
 from clair.trouves.trouve_type import TrouveType
@@ -111,8 +112,14 @@ def build_dag(trouves: Sequence[TrouveAbc]) -> ClairDag:
     """Make a directed acyclic graph from the compiled Trouves.
 
     Raises:
+        RoutingCollisionError: If two Trouves have one physical address. A node
+            holds one Trouve, thus the graph would lose the other in silence.
         CyclicDependencyError: If the import graph contains a cycle.
     """
+    collisions = detect_routing_collisions_of_trouves(trouves)
+    if collisions:
+        raise RoutingCollisionError(collisions)
+
     dag = ClairDag()
 
     for trouve in trouves:

@@ -500,7 +500,7 @@ class TestRecompileForSelectionTestSql:
         return tmp_path
 
     def test_discovery_resolves_cross_trouve_placeholder_in_test_sql(self, tmp_path: Path):
-        """After discover_project, TestSql.resolved_sql holds each logical address."""
+        """After discover_project, TestSql.resolved_sql holds the logical address of each other Trouve."""
         from clair.trouves._refs import THIS_PLACEHOLDER
         project = self._make_project_with_test_sql(tmp_path)
         trouves = discover_project(project)
@@ -509,13 +509,14 @@ class TestRecompileForSelectionTestSql:
         test = orders.tests[0]
         assert isinstance(test, TestSql)
 
-        # Discovery replaces the THIS token and each token that points to a
-        # different Trouve. It writes the result to resolved_sql, and it keeps
-        # the tokens in sql.
-        assert "mydb.refined.orders" in test.resolved_sql
+        # Discovery replaces each token that points to a different Trouve. THIS
+        # stays a marker, because the plan decides the object that the test
+        # reads. to_sql() puts that object in.
         assert "mydb.source.customers" in test.resolved_sql
-        assert THIS_PLACEHOLDER not in test.resolved_sql
-        assert THIS_PLACEHOLDER in test.sql
+        assert THIS_PLACEHOLDER in test.resolved_sql
+        assert test.to_sql("mydb.refined.orders__clair_abc").startswith(
+            "SELECT * FROM mydb.refined.orders__clair_abc t"
+        )
 
     def test_recompile_upgrades_cross_trouve_test_sql_refs(self, tmp_path: Path):
         """recompile_for_selection makes TestSql.resolved_sql from the tokens again."""

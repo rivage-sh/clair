@@ -14,7 +14,7 @@ from snowflake.connector.pandas_tools import write_pandas
 from clair.adapters.base import WarehouseAdapter
 from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, WarehouseObject, WarehouseObjectType
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey
-from clair.exceptions import RunError
+from clair.exceptions import RunError, WarehouseConnectionError
 from clair.trouves.address import TrouveAddress
 
 
@@ -45,7 +45,18 @@ class SnowflakeAdapter(WarehouseAdapter):
         return adapter
 
     def connect(self, environment: Environment) -> None:
-        """Connect to Snowflake with the connection and the authentication of the environment."""
+        """Connect to Snowflake with the connection and the authentication of the environment.
+
+        Raises:
+            WarehouseConnectionError: If clair cannot read the key file, or the
+                connector cannot open the connection.
+        """
+        try:
+            self._connect(environment)
+        except Exception as connect_error:
+            raise WarehouseConnectionError(environment.name, connect_error) from connect_error
+
+    def _connect(self, environment: Environment) -> None:
         connection = environment.connection
         authentication = environment.authentication
         self._environment = environment

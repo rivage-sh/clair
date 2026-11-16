@@ -237,12 +237,13 @@ def detect_routing_collisions(
 ) -> list[tuple[str, list[str]]]:
     """Give the (target, sources) pairs for the routing collisions.
 
-    A collision happens when two TABLE or VIEW Trouves go to one physical target.
-    The last write in execution order sets the final state of that target.
+    A collision happens when two Trouves go to one physical target. A SOURCE
+    counts too: a Table that routes onto a Source replaces the data that it
+    reads.
 
     Args:
         logical_to_physical: A map of a logical address to a physical address.
-            It holds each Trouve that is not a SOURCE.
+            It holds each Trouve.
 
     Returns:
         A list of (physical_address, [logical_address, ...]) for each collision.
@@ -268,14 +269,12 @@ def detect_routing_collisions_of_trouves(
     ``discover_project()``, and the other one when you hold the addresses
     already.
 
-    A collision occurs when two Trouves that are not SOURCE Trouves route to
-    one physical address. The result is an empty list when no routing policy is
-    active. Then the logical address and the physical address are equal for
-    each Trouve.
+    The result is an empty list when no routing policy is active. Then the
+    logical address and the physical address are equal for each Trouve.
     """
     logical_to_physical = {
         str(trouve.logical_address): str(trouve.compiled.physical_address)
         for trouve in trouves
-        if trouve.compiled and trouve.type != TrouveType.SOURCE
+        if trouve.compiled
     }
     return detect_routing_collisions(logical_to_physical)

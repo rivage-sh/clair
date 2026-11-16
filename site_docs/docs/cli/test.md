@@ -31,8 +31,9 @@ clair test --env dev --threads 8
   `statement_timeout_seconds`, as in `clair run`.
 - If no selected Trouve has tests, the command writes a log message and stops with success.
 - clair tests more than one Trouve at one time. The tests of one Trouve always run
-  one after the other. Each thread holds a private Snowflake connection, and the
-  output keeps the same order at each thread count. See
+  one after the other. Each thread holds a private Snowflake connection. The log lines
+  come in completion order, and the summary on stdout keeps the order of the
+  selection at each thread count. See
   [Environments](../topics/environments.md).
 
 ## `--sample` mode

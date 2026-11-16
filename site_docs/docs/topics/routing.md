@@ -184,18 +184,20 @@ Run [`clair validate`](../cli/validate.md) to apply your rules to every Trouve w
 
 ## Collision detection
 
-If two TABLE or VIEW Trouves route to the same physical target, clair shows a warning before the run:
+If two Trouves route to the same physical target, `clair compile` and `clair run` stop
+before they send SQL:
 
 ```
-Warning: Clair found 2 routing collisions (env: dev, entry: DeveloperRouting(environment_name='dev', user_variable='CLAIR_USER'))
-
-  dev.orders.daily
-    ↳ refined.orders.daily
-    ↳ analytics.orders.daily
-
-  Fix: give one Trouve a different name, change the routing entry in __routing__.py,
-  or use --select to remove one Trouve from this run.
+Two or more Trouves route to one physical address:
+  dev.orders.daily <- analytics.orders.daily, refined.orders.daily
+Give one Trouve a different name, or change the routing entry in __routing__.py.
 ```
+
+A SOURCE counts too: a Table that routes onto a Source would replace the data that it
+reads. The DAG holds one node for each physical address, thus a run with a collision
+would drop one of the Trouves, and each reader of it would read the other one. A
+`--select` cannot repair it. [`clair validate`](../cli/validate.md) applies the same rule,
+and it reports each collision together with each other problem.
 
 ## One entry for each environment
 

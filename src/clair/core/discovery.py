@@ -65,7 +65,8 @@ from clair.trouves.trouve import (
 )
 
 ARTIFACTS_DIR_NAME = "_clairtifacts"
-_CONFIG_FILES = {"__database_config__.py", "__schema_config__.py"}
+DATABASE_CONFIG_FILE_NAME = "__database_config__.py"
+SCHEMA_CONFIG_FILE_NAME = "__schema_config__.py"
 
 logger = structlog.get_logger()
 
@@ -106,29 +107,61 @@ def _is_trouve_candidate(file_path: Path) -> bool:
     return file_path.suffix == ".py"
 
 
-def _load_config_file(file_path: Path) -> DatabaseDefaults | SchemaDefaults | None:
-    """Give the defaults of one configuration file, or None.
+# The class of the `defaults` object that each configuration file gives.
+_CONFIG_CLASSES: dict[str, type[DatabaseDefaults | SchemaDefaults]] = {
+    DATABASE_CONFIG_FILE_NAME: DatabaseDefaults,
+    SCHEMA_CONFIG_FILE_NAME: SchemaDefaults,
+}
 
-    A configuration file that clair cannot read is never fatal. The Trouve
-    then takes the defaults of the profile.
+# The defaults of each configuration file, by its path.
+DirectoryDefaults = dict[Path, DatabaseDefaults | SchemaDefaults]
+
+
+def _config_files_above(trouve_file: Path) -> list[Path]:
+    """Give the two configuration files that apply to a Trouve file, if they exist."""
+    schema_directory = trouve_file.parent
+    candidates = [
+        schema_directory.parent / DATABASE_CONFIG_FILE_NAME,
+        schema_directory / SCHEMA_CONFIG_FILE_NAME,
+    ]
+    return [path for path in candidates if path.is_file()]
+
+
+def _load_config_files(trouve_files: list[Path]) -> tuple[DirectoryDefaults, list[str]]:
+    """Run each configuration file above a Trouve one time, and give its defaults.
+
+    A configuration file that raises, or that gives no ``defaults`` of its
+    class, is a fault, in the same way as a Trouve file that raises. Each
+    Trouve below it would run with the role, the warehouse and the kind of
+    table of the profile, and no message would tell you.
+
+    Returns:
+        The defaults of each file, and one fault for each file that failed.
     """
-    if not file_path.exists():
-        return None
-    try:
-        module = project_imports.load_support_file(file_path)
-    except Exception as e:  # noqa: BLE001 — the user config code is unknown, but it is never fatal
-        logger.debug("discovery.config_load_error", file=str(file_path), error=str(e))
-        return None
-    if module is None:
-        return None
-    defaults = getattr(module, "defaults", None)
-    if isinstance(defaults, (DatabaseDefaults, SchemaDefaults)):
-        return defaults
-    return None
+    defaults_of_file: DirectoryDefaults = {}
+    errors: list[str] = []
+    config_files = sorted({path for trouve_file in trouve_files for path in _config_files_above(trouve_file)})
+    for config_file in config_files:
+        expected_class = _CONFIG_CLASSES[config_file.name]
+        try:
+            module = project_imports.load_support_file(config_file)
+        except Exception as load_error:  # noqa: BLE001 — the user config code is unknown; clair reports the fault as an error
+            errors.append(f"{config_file}: {type(load_error).__name__}: {load_error}")
+            continue
+        defaults = None if module is None else getattr(module, "defaults", None)
+        if not isinstance(defaults, expected_class):
+            errors.append(
+                f"{config_file}: the file must give `defaults = {expected_class.__name__}(...)`, "
+                f"but `defaults` is {type(defaults).__name__}."
+            )
+            continue
+        defaults_of_file[config_file] = defaults
+    return defaults_of_file, errors
 
 
 def _resolve_config(
     file_path: Path,
+    defaults_of_file: DirectoryDefaults,
     profile_defaults: dict[str, str | None] | None = None,
 ) -> ResolvedConfig:
     """Make the merged config of a Trouve. The function moves up the directory tree.
@@ -154,23 +187,16 @@ def _resolve_config(
         role=profile_role if profile_role and profile_role.strip() else None,
     )
 
-    schema_directory = file_path.parent
-    database_directory = schema_directory.parent
-
-    db_defaults = _load_config_file(database_directory / "__database_config__.py")
-    if isinstance(db_defaults, DatabaseDefaults):
-        config = config.apply(db_defaults)
-
-    schema_defaults = _load_config_file(schema_directory / "__schema_config__.py")
-    if isinstance(schema_defaults, SchemaDefaults):
-        config = config.apply(schema_defaults)
-
+    # The database file comes first, thus the schema file replaces its values.
+    for config_file in _config_files_above(file_path):
+        config = config.apply(defaults_of_file[config_file])
     return config
 
 
 def _trouve_config(
     trouve_obj: TrouveAbc,
     file_path: Path,
+    defaults_of_file: DirectoryDefaults,
     profile_defaults: dict[str, str | None] | None,
 ) -> ResolvedConfig:
     """Make the final config of one Trouve: the directory levels, and then the Trouve.
@@ -179,7 +205,7 @@ def _trouve_config(
     and Snowflake gives no TRANSIENT in the clone of an Iceberg table. Thus a
     transient default of a directory does not apply to them.
     """
-    config = _resolve_config(file_path, profile_defaults).apply(trouve_obj)
+    config = _resolve_config(file_path, defaults_of_file, profile_defaults).apply(trouve_obj)
     table_options = table_options_of(trouve_obj)
     if table_options is None or table_options.iceberg_settings() is not None:
         config.transient = False
@@ -261,6 +287,7 @@ def _compile_trouve(
     logical_addresses: dict[int, TrouveAddress],
     address_of_logical: dict[TrouveAddress, TrouveAddress],
     physical_addresses: dict[int, TrouveAddress],
+    defaults_of_file: DirectoryDefaults,
     profile_defaults: dict[str, str | None] | None,
     run_mode: RunMode | None,
 ) -> None:
@@ -274,7 +301,7 @@ def _compile_trouve(
     logical = logical_addresses[id(trouve_obj)]
     physical = physical_addresses[id(trouve_obj)]
     relative_file_path = file_path.relative_to(project_root)
-    config = _trouve_config(trouve_obj, file_path, profile_defaults)
+    config = _trouve_config(trouve_obj, file_path, defaults_of_file, profile_defaults)
 
     # A sample can read another Trouve, for example a seed of test users. Each
     # run keeps the edge, thus --sample does not change the DAG.
@@ -355,12 +382,11 @@ def _compile_trouve(
         )
 
     # A test reads the tables that its Trouve reads, thus the same map renders
-    # the SQL of each test.
+    # the SQL of each test. THIS stays a marker: the plan decides the object
+    # that the test reads, and two Trouves can share one TestSql object.
     for test in trouve_obj.tests:
         if isinstance(test, TestSql):
-            test.resolved_sql = resolve_sql(
-                test.sql, logical_addresses, this_address=logical
-            )
+            test.resolved_sql = resolve_sql(test.sql, logical_addresses, this_address=None)
 
 
 def _is_read_by_discovery(directory: Path) -> bool:
@@ -497,6 +523,11 @@ def discover_project(
     # it. Thus the fault names the file that ran two times.
     errors.extend(describe_unresolved_tokens(collected, logical_addresses))
 
+    defaults_of_file, config_errors = _load_config_files(
+        [file_path for _, _, file_path, _ in collected]
+    )
+    errors.extend(config_errors)
+
     # A fault stops the run. A file that clair cannot read holds a Trouve that
     # the DAG then misses, and a run would report success after it built fewer
     # tables than the project declares.
@@ -522,6 +553,7 @@ def discover_project(
             logical_addresses=logical_addresses,
             address_of_logical=address_of_logical,
             physical_addresses=physical_addresses,
+            defaults_of_file=defaults_of_file,
             profile_defaults=profile_defaults,
             run_mode=run_mode,
         )

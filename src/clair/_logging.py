@@ -35,11 +35,17 @@ def _multiline_renderer(_logger: Any, _method: str, event_dict: MutableMapping[s
     return f"{header}\n{kv_lines}" if kv_lines else header
 
 
-def configure_logging() -> None:
-    log_format = os.environ.get("CLAIR_LOG_FORMAT", "").lower()
-    use_json = log_format == "json"
+def logs_are_json() -> bool:
+    """Tell you if CLAIR_LOG_FORMAT asks for JSON logs.
 
-    if use_json:
+    JSON logs go to stdout, thus a command then writes no text summary there:
+    a consumer reads one JSON object for each line.
+    """
+    return os.environ.get("CLAIR_LOG_FORMAT", "").lower() == "json"
+
+
+def configure_logging() -> None:
+    if logs_are_json():
         structlog.configure(
             processors=[
                 structlog.stdlib.add_log_level,

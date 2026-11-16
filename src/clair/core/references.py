@@ -49,7 +49,7 @@ _PLACEHOLDER_RE = re.compile(re.escape(TROUVE_PLACEHOLDER_PREFIX) + r"(\d+)")
 def resolve_sql(
     sql: str,
     id_to_address: dict[int, TrouveAddress],
-    this_address: TrouveAddress,
+    this_address: TrouveAddress | None,
     id_to_sampled_reference: dict[int, str] | None = None,
 ) -> str:
     """Render the SQL of the author into SQL with true addresses.
@@ -65,6 +65,9 @@ def resolve_sql(
     no text substitution on the result of the first.
 
     Args:
+        this_address: The address of THIS. None keeps the THIS marker: the SQL
+            of a test reads the object that the plan gives it, a staging object
+            or a physical object, and ``TestSql.to_sql()`` puts that address in.
         id_to_sampled_reference: The subquery of each Trouve that a sampled
             run reads in place of the address. None samples nothing.
 
@@ -77,6 +80,7 @@ def resolve_sql(
             and its message names the file that ran two times.
     """
     sampled_references = id_to_sampled_reference or {}
+    owner_text = "a test" if this_address is None else f"'{this_address}'"
 
     def replace(match: re.Match[str]) -> str:
         object_id = int(match.group(1))
@@ -84,14 +88,14 @@ def resolve_sql(
         address = id_to_address.get(object_id)
         if address is None:
             raise CompileError(
-                f"The SQL of '{this_address}' interpolates a Trouve object "
+                f"The SQL of {owner_text} interpolates a Trouve object "
                 "that clair did not collect, thus clair cannot give it an address."
             )
         if sampled_reference is None:
             return str(address)
         if sql.startswith(".", match.end()):
             raise CompileError(
-                f"The SQL of '{this_address}' qualifies a column with the "
+                f"The SQL of {owner_text} qualifies a column with the "
                 f"reference to '{address}', and a sampled run makes that "
                 "reference a subquery. Give the reference an alias, for "
                 "example `FROM {orders} AS orders`, and write `orders.<column>`."
@@ -99,6 +103,8 @@ def resolve_sql(
         return sampled_reference
 
     result = _PLACEHOLDER_RE.sub(replace, sql)
+    if this_address is None:
+        return result
     return result.replace(THIS_PLACEHOLDER, str(this_address))
 
 
@@ -409,8 +415,8 @@ def recompile_for_selection(
                 }
             )
 
+        # The text does not hold the address of its Trouve, thus two Trouves
+        # can share one TestSql object.
         for test in trouve.tests:
             if isinstance(test, TestSql):
-                test.resolved_sql = resolve_sql(
-                    test.sql, reference_addresses, this_address=this_address
-                )
+                test.resolved_sql = resolve_sql(test.sql, reference_addresses, this_address=None)

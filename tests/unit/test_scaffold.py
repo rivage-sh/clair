@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from clair.core.discovery import discover_project
-from clair.core.scaffold import scaffold_project, write_environments_yml
+from clair.core.scaffold import add_artifacts_to_gitignore, scaffold_project, write_environments_yml
 from clair.environments.environments import Authenticator, load_environment
 from clair.environments.project_routing import load_project_routing
 from clair.environments.routing import route
@@ -143,6 +143,31 @@ class TestDoesNotOverwriteExistingFiles:
         assert environments_path.read_text() == "# existing config\n"
 
 
+class TestGitignore:
+    """`clair init` adds the artifacts directory to .gitignore, and keeps each other line."""
+
+    @pytest.mark.parametrize(
+        ("existing_text", "expected_text", "expected_status"),
+        [
+            pytest.param(None, "/_clairtifacts\n", "created", id="no_file"),
+            pytest.param("venv/\n", "venv/\n/_clairtifacts\n", "updated", id="a_file_of_the_repository"),
+            pytest.param("venv/", "venv/\n/_clairtifacts\n", "updated", id="no_final_line_break"),
+            pytest.param("/_clairtifacts\nvenv/\n", "/_clairtifacts\nvenv/\n", "skipped", id="the_line_exists"),
+        ],
+    )
+    def test_the_artifacts_line_joins_the_file(
+        self, tmp_path: Path, existing_text, expected_text, expected_status
+    ) -> None:
+        gitignore_path = tmp_path / ".gitignore"
+        if existing_text is not None:
+            gitignore_path.write_text(existing_text)
+
+        status, path = add_artifacts_to_gitignore(tmp_path)
+
+        assert (status, path) == (expected_status, gitignore_path)
+        assert gitignore_path.read_text() == expected_text
+
+
 class TestProjectDirCreation:
     def test_creates_project_dir_if_missing(self, tmp_path: Path) -> None:
         project_dir = tmp_path / "brand_new" / "nested" / "project"
@@ -175,3 +200,8 @@ class TestWriteEnvironmentsYml:
     def test_the_file_goes_to_the_clair_directory_of_the_home(self, tmp_path: Path) -> None:
         path = write_environments_yml(make_environment(), home_dir=tmp_path)
         assert path == tmp_path / ".clair" / "environments.yml"
+
+    def test_only_the_owner_reads_the_file(self, tmp_path: Path) -> None:
+        # The file can hold a password, thus no other user reads it.
+        path = write_environments_yml(make_environment(), home_dir=tmp_path)
+        assert path.stat().st_mode & 0o777 == 0o600

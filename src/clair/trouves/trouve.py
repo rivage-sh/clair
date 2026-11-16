@@ -776,6 +776,26 @@ class Table(SqlTrouve, TableOptions):
             )
         return self
 
+    @model_validator(mode="after")
+    def _require_a_mergeable_upsert(self) -> Table:
+        # The MERGE takes its column lists from the declared columns, thus an
+        # Upsert with no column, or with nothing to update or insert, has no
+        # statement. Refuse it here, and not in the first incremental run.
+        if not isinstance(self.incremental_strategy(), Upsert):
+            return self
+        if not self.columns:
+            raise ValueError(
+                "the upsert strategy needs columns on the Trouve, because the MERGE "
+                "names each column. Give columns=[Column(...), ...]."
+            )
+        plan = self.upsert_plan()
+        if not plan.update_column_names and not plan.insert_column_names:
+            raise ValueError(
+                "the upsert strategy has no column to update and no column to insert, "
+                "thus the MERGE does nothing. Give update_columns or insert_columns."
+            )
+        return self
+
     def iceberg_settings(self) -> Iceberg | None:
         """Give the Iceberg settings of this Table, or None for a standard table."""
         return self.iceberg
@@ -819,7 +839,6 @@ class Table(SqlTrouve, TableOptions):
         Raises:
             TrouveNotCompiledError: If discovery did not load this Trouve.
             CompileError: If an incremental run has no built-in strategy.
-            ValueError: If the config asks for UPSERT but has no columns.
         """
         target_address = context.target_address
         if context.effective_mode == RunMode.FULL_REFRESH:
@@ -898,18 +917,24 @@ class Table(SqlTrouve, TableOptions):
 
         Raises:
             TypeError: If the strategy is not Upsert.
-            ValueError: If the Trouve has no column.
         """
         plan = self.upsert_plan()
-        return (
-            f"-- merge the new rows into the target table\n"
-            f"MERGE INTO {target_address} AS {TARGET}\n"
-            f"USING {source_address} AS {SOURCE}\n"
-            f"ON {plan.join_condition}\n"
-            f"WHEN MATCHED THEN UPDATE SET {plan.update_clause}\n"
-            f"WHEN NOT MATCHED THEN INSERT ({plan.insert_clause}) "
-            f"VALUES ({plan.insert_values_clause})"
-        )
+        # Each clause needs one column minimum. A clause with no column leaves
+        # out that case: a row that matches stays as it is, or a new row stays
+        # out. The validator of the Table refuses a plan with no clause.
+        clauses = [
+            f"MERGE INTO {target_address} AS {TARGET}",
+            f"USING {source_address} AS {SOURCE}",
+            f"ON {plan.join_condition}",
+        ]
+        if plan.update_column_names:
+            clauses.append(f"WHEN MATCHED THEN UPDATE SET {plan.update_clause}")
+        if plan.insert_column_names:
+            clauses.append(
+                f"WHEN NOT MATCHED THEN INSERT ({plan.insert_clause}) "
+                f"VALUES ({plan.insert_values_clause})"
+            )
+        return "-- merge the new rows into the target table\n" + "\n".join(clauses)
 
     def delete_replaced_rows_statement(
         self, target_address: TrouveAddress | str, source_address: TrouveAddress | str
@@ -1004,13 +1029,10 @@ class Table(SqlTrouve, TableOptions):
 
         Raises:
             TypeError: If the strategy is not Upsert.
-            ValueError: If the Trouve has no column.
         """
         strategy = self.incremental_strategy()
         if not isinstance(strategy, Upsert):
             raise TypeError("upsert_plan() needs Incremental(strategy=Upsert(...))")
-        if not self.columns:
-            raise ValueError("the upsert strategy needs columns on the Trouve")
 
         all_column_names = [column.name for column in self.columns]
         primary_key_columns = list(strategy.primary_key_columns or [])

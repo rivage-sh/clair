@@ -179,14 +179,58 @@ class TestUpsertPlanColumns:
         ).upsert_plan()
         assert plan.update_column_names == []
 
-    def test_a_trouve_with_no_column_raises(self):
+    @pytest.mark.parametrize(
+        ("columns", "strategy_arguments", "message"),
+        [
+            pytest.param([], {}, "needs columns", id="no_column"),
+            pytest.param(
+                UPSERT_COLUMNS,
+                {"update_columns": [], "insert_columns": []},
+                "no column to update and no column to insert",
+                id="no_clause",
+            ),
+        ],
+    )
+    def test_a_merge_with_no_statement_raises_at_construction(
+        self, columns, strategy_arguments, message
+    ):
+        with pytest.raises(ValueError, match=message):
+            Table(
+                sql=UPSERT_SQL,
+                columns=columns,
+                run_config=Incremental(
+                    strategy=Upsert(primary_key_columns=["id"], **strategy_arguments)
+                ),
+            )
+
+
+class TestMergeClauses:
+    """A MERGE leaves out a clause with no column, because Snowflake refuses an empty list."""
+
+    @pytest.mark.parametrize(
+        ("columns", "strategy_arguments", "has_update", "has_insert"),
+        [
+            pytest.param(UPSERT_COLUMNS, {}, True, True, id="the_default"),
+            pytest.param(
+                [Column(name="id", type=ColumnType.NUMBER)], {}, False, True, id="each_column_is_a_key"
+            ),
+            pytest.param(UPSERT_COLUMNS, {"update_columns": []}, False, True, id="no_update_column"),
+            pytest.param(UPSERT_COLUMNS, {"insert_columns": []}, True, False, id="no_insert_column"),
+        ],
+    )
+    def test_each_clause_needs_a_column(self, columns, strategy_arguments, has_update, has_insert):
         trouve = make_compiled_trouve(
-            columns=[],
-            run_config=Incremental(strategy=Upsert(primary_key_columns=["id"])),
+            sql=UPSERT_SQL,
+            columns=columns,
+            run_config=Incremental(strategy=Upsert(primary_key_columns=["id"], **strategy_arguments)),
         )
         assert isinstance(trouve, Table)
-        with pytest.raises(ValueError, match="the upsert strategy needs columns"):
-            trouve.upsert_plan()
+
+        merge = trouve.merge_statement("db.s.t", "db.s.new_rows")
+
+        assert ("WHEN MATCHED THEN UPDATE SET" in merge) is has_update
+        assert ("WHEN NOT MATCHED THEN INSERT" in merge) is has_insert
+        assert "UPDATE SET \n" not in merge and "INSERT ()" not in merge
 
 
 class TestUpsertPlanJoin:

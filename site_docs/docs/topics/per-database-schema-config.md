@@ -75,6 +75,12 @@ clair resolves the session of each Trouve in this order. A later value replaces 
 The `query_tags` labels merge by key: a lower level replaces the same key, and keeps the
 other keys.
 
+A configuration file that raises, or that gives no `defaults` of its class, stops each
+command that discovers the project, in the same way as a Trouve file that raises:
+`__database_config__.py` must give `DatabaseDefaults`, and `__schema_config__.py` must
+give `SchemaDefaults`. If clair ignored the file, each Trouve below it would run with the
+role, the warehouse and the kind of table of the profile.
+
 If no level sets a role or a warehouse, the Trouve runs with the role and the warehouse
 that the Snowflake session had when it opened: the default role of your user, if the
 environment names no role. A thread runs many Trouves on one session, and clair sets the

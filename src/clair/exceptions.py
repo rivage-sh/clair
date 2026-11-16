@@ -77,6 +77,30 @@ class InvalidRoutingConfigError(ClairError):
         super().__init__(detail)
 
 
+class RoutingCollisionError(InvalidRoutingConfigError):
+    """Clair raises this error when two Trouves route to one physical address.
+
+    The DAG keys each node by its physical address, thus one of the two Trouves
+    would leave the run, and each reader of it would read the other Trouve.
+
+    Attributes:
+        collisions: Each shared physical address, with the logical addresses
+            that route to it.
+    """
+
+    def __init__(self, collisions: list[tuple[str, list[str]]]) -> None:
+        self.collisions = collisions
+        lines = [
+            f"  {physical_address} <- {', '.join(logical_addresses)}"
+            for physical_address, logical_addresses in collisions
+        ]
+        super().__init__(
+            "Two or more Trouves route to one physical address:\n"
+            + "\n".join(lines)
+            + "\nGive one Trouve a different name, or change the routing entry in __routing__.py."
+        )
+
+
 
 class ProjectRootNotFoundError(ClairError):
     """Clair raises this error when the root search finds no project.
@@ -176,6 +200,21 @@ class TrouveFileNotFoundError(ClairError):
         super().__init__(
             f"Clair cannot find the file of this {trouve_class_name}, thus it cannot "
             f"give its logical address. {detail}"
+        )
+
+
+class WarehouseConnectionError(ClairError):
+    """Clair raises this error when it cannot open a connection to the warehouse.
+
+    The cause can be the credentials, a key file that clair cannot read, or the
+    network. The message names the environment and holds the cause.
+    """
+
+    def __init__(self, env_name: str, cause: BaseException) -> None:
+        self.env_name = env_name
+        super().__init__(
+            f"Clair cannot connect to the warehouse of the environment '{env_name}': "
+            f"{type(cause).__name__}: {cause}"
         )
 
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from clair.core.discovery import ARTIFACTS_DIR_NAME
 from clair.environments.environments import Environment
 from clair.environments.project_routing import ROUTING_FILE_NAME
 
@@ -179,6 +180,29 @@ def scaffold_project(
     return results
 
 
+def add_artifacts_to_gitignore(project_dir: Path) -> tuple[str, Path]:
+    """Add the artifacts directory to the ``.gitignore`` of *project_dir*.
+
+    An existing ``.gitignore`` keeps each line that it holds, and gets the new
+    line at the end. A file that names the directory already stays as it is.
+
+    Returns:
+        The status, ``"created"``, ``"updated"`` or ``"skipped"``, and the path.
+    """
+    gitignore_path = project_dir / ".gitignore"
+    artifacts_line = f"/{ARTIFACTS_DIR_NAME}"
+    if not gitignore_path.exists():
+        gitignore_path.write_text(f"{artifacts_line}\n")
+        return "created", gitignore_path
+
+    text = gitignore_path.read_text()
+    if artifacts_line in text.splitlines():
+        return "skipped", gitignore_path
+    separator = "" if not text or text.endswith("\n") else "\n"
+    gitignore_path.write_text(f"{text}{separator}{artifacts_line}\n")
+    return "updated", gitignore_path
+
+
 def write_environments_yml(
     environment: Environment,
     *,
@@ -201,5 +225,8 @@ def write_environments_yml(
     body = yaml.safe_dump({environment.name: settings}, sort_keys=False)
 
     environments_path.parent.mkdir(parents=True, exist_ok=True)
+    # The file can hold a password or a passphrase, thus only its owner reads it.
+    environments_path.touch(mode=0o600, exist_ok=True)
+    environments_path.chmod(0o600)
     environments_path.write_text(header + body)
     return environments_path

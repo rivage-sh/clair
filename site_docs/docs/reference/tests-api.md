@@ -118,9 +118,12 @@ Run with `--sample`: **Yes**
 
 ## `TestSql`
 
-Your own query. Each row that it gives is a failure. Write `{THIS}` for the address
-of the Trouve that holds the test, and an imported Trouve for any other address, as in
-`Trouve.sql`.
+Your own query. Each row that it gives is a failure. Write `{THIS}` for the object
+that the test examines, and an imported Trouve for any other address, as in
+`Trouve.sql`. In a staged run, `{THIS}` is the staging object of the Trouve, thus the
+test reads the candidate before the promotion. In `clair test` and in a run with
+`--no-test`, it is the physical object. Two Trouves can share one `TestSql` object, and
+each one tests its own object.
 
 ```python
 class TestSql(Test):

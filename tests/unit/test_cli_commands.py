@@ -28,7 +28,7 @@ from clair.core.scaffold import write_environments_yml
 from clair.core.test_runner import TestSummary
 from clair.environments.environments import Authenticator, Environment, Password, PrivateKey, load_environment
 from clair.environments.project_routing import load_project_routing
-from clair.exceptions import ClairError, EnvironmentsFileNotFoundError
+from clair.exceptions import ClairError, EnvironmentNotFoundError, EnvironmentsFileNotFoundError
 from clair.trouves.run_config import RunMode
 from clair.trouves.test import TestSeverity
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, ExecutionType
@@ -184,6 +184,53 @@ def _result_of_command(command_name: str) -> RunSummary | TestSummary | CompileO
     if command_name == "test":
         return TestSummary(results=[])
     return _compile_output()
+
+
+def _summary_of_command(command_name: str) -> RunSummary | TestSummary | CompileOutput:
+    """Give a result with one Trouve, thus each command writes a summary."""
+    if command_name == "run":
+        return RunSummary(results=[_run_result()], env_name="dev", run_id="abc")
+    if command_name == "test":
+        return TestSummary(
+            results=[make_test_result("mydb.analytics.orders", test_type="not_null", column_name="id")]
+        )
+    return _compile_output()
+
+
+def _expected_summary(summary: RunSummary | TestSummary | CompileOutput) -> str:
+    if isinstance(summary, CompileOutput):
+        return summary.render_header(summary.trouve_count, summary.source_count, summary.compiled_nodes)
+    return summary.render()
+
+
+class TestTheSummaryOnStdout:
+    """Each command that executes or compiles writes its summary to stdout. JSON logs own stdout."""
+
+    @pytest.mark.parametrize("command_name", ["compile", "run", "test"])
+    def test_a_text_log_gives_the_summary(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path, command_name: str
+    ):
+        monkeypatch.delenv("CLAIR_LOG_FORMAT", raising=False)
+        summary = _summary_of_command(command_name)
+        _give_api(monkeypatch, calls, command_name, result=summary)
+
+        result = CliRunner().invoke(cli, [command_name, "--env", "dev"])
+
+        assert result.exit_code == 0
+        assert _expected_summary(summary) in result.stdout
+
+    @pytest.mark.parametrize("command_name", ["compile", "run", "test"])
+    def test_a_json_log_gives_no_text_summary(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path, command_name: str
+    ):
+        monkeypatch.setenv("CLAIR_LOG_FORMAT", "json")
+        summary = _summary_of_command(command_name)
+        _give_api(monkeypatch, calls, command_name, result=summary)
+
+        result = CliRunner().invoke(cli, [command_name, "--env", "dev"])
+
+        assert result.exit_code == 0
+        assert _expected_summary(summary) not in result.stdout
 
 
 class TestTheEnvironmentOption:
@@ -491,13 +538,20 @@ class TestCompileCommand:
         assert isinstance(calls["env"], Environment)
         assert calls["env"].name == "prod"
 
-    def test_the_command_continues_without_environments_yml(
-        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path
+    @pytest.mark.parametrize(
+        "load_error",
+        [
+            pytest.param(EnvironmentsFileNotFoundError("/home/analyst/.clair/environments.yml"), id="no_file"),
+            pytest.param(EnvironmentNotFoundError("prod", ["dev"]), id="no_entry"),
+        ],
+    )
+    def test_the_command_continues_without_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], tmp_path: Path, load_error: Exception
     ):
         """A compile makes no connection, thus the name alone is enough."""
 
         def fake_load(env_name: str) -> Environment:
-            raise EnvironmentsFileNotFoundError("/home/analyst/.clair/environments.yml")
+            raise load_error
 
         monkeypatch.setattr("clair.cli.main.load_environment", fake_load)
         _give_api(monkeypatch, calls, "compile", result=_compile_output())

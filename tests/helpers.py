@@ -66,6 +66,16 @@ def write_project_marker(project_root: Path) -> Path:
     return project_root
 
 
+def write_project_files(project_root: Path, files: dict[str, str]) -> Path:
+    """Write a project: the marker, then each file of *files* by its path below the root."""
+    write_project_marker(project_root)
+    for relative_path, text in files.items():
+        path = project_root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return project_root
+
+
 def write_layered_project(
     root: Path, database_text: str, schema_text: str, trouve_expression: str
 ) -> Path:

@@ -1,5 +1,5 @@
-from example_4_database.derived.daily_event_counts import trouve as example_4_database_derived_daily_event_counts
-from example_4_database.reference.event_type_labels import trouve as example_4_database_reference_event_type_labels
+from example_4_database.derived.daily_event_counts import trouve as daily_event_counts
+from example_4_database.reference.event_type_labels import trouve as event_type_labels
 
 from clair import Column, ColumnType, Table
 
@@ -10,8 +10,8 @@ trouve = Table(
             counts.event_type,
             labels.label,
             sum(counts.event_count) as total_event_count
-        from {example_4_database_derived_daily_event_counts} as counts
-        left join {example_4_database_reference_event_type_labels} as labels
+        from {daily_event_counts} as counts
+        left join {event_type_labels} as labels
             on labels.event_type = counts.event_type
         group by counts.event_type, labels.label
         order by total_event_count desc
