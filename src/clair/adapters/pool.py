@@ -32,14 +32,22 @@ class AdapterPool:
 
         Raises:
             ValueError: If *size* is less than 1.
+            Exception: Each error of ``new_connection()``. The pool first
+                closes each connection that it opened, because the caller gets
+                no pool to close.
         """
         if size < 1:
             raise ValueError(f"The pool size must be 1 or more, but it is {size}")
 
         # The pool opens size - 1 connections, because the caller supplies one.
-        self._opened: list[WarehouseAdapter] = [
-            adapter.new_connection() for _ in range(size - 1)
-        ]
+        self._opened: list[WarehouseAdapter] = []
+        try:
+            for _ in range(size - 1):
+                self._opened.append(adapter.new_connection())
+        except BaseException:
+            # A keep-alive session stays open until the process ends.
+            self.close()
+            raise
 
         self._first_adapter = adapter
         self._free: queue.SimpleQueue[WarehouseAdapter] = queue.SimpleQueue()

@@ -524,6 +524,27 @@ class TestAdapterPool:
         with pytest.raises(ValueError, match="1 or more"):
             AdapterPool(adapter, size=0)
 
+    def test_a_connection_that_fails_closes_each_connection_before_it(self):
+        # The third new connection fails, for example a closed SSO window. The
+        # caller gets no pool, thus the pool must close the two that it opened.
+        opened: list[RecordingAdapter] = []
+
+        class ThirdConnectionFails(RecordingAdapter):
+            def new_connection(self) -> RecordingAdapter:
+                if len(opened) == 2:
+                    raise ConnectionError("the login failed")
+                connection = RecordingAdapter(self.recorder, self.node_names)
+                opened.append(connection)
+                return connection
+
+        adapter = ThirdConnectionFails(CallRecorder(), [])
+
+        with pytest.raises(ConnectionError, match="the login failed"):
+            AdapterPool(adapter, size=4)
+
+        assert [connection.closed for connection in opened] == [True, True]
+        assert adapter.closed is False
+
 
 class TestParallelTests:
     def test_the_results_keep_the_order_of_selected(self, tmp_path: Path):

@@ -18,5 +18,6 @@ class MirroredUpsertTable(Table):
             self.merge_statement(
                 context.physical_address,
                 self.new_rows_address(context.run_id),
+                context.target_column_names,
             ),
         ]

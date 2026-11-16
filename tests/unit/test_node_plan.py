@@ -347,7 +347,11 @@ class MirroredUpsertTable(Table):
             return super().promote(context)
         return [
             *self.add_column_statements(context.physical_address, context.added_columns),
-            self.merge_statement(context.physical_address, self.new_rows_address(context.run_id)),
+            self.merge_statement(
+                context.physical_address,
+                self.new_rows_address(context.run_id),
+                context.target_column_names,
+            ),
         ]
 
 

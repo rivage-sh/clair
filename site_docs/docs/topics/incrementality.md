@@ -164,9 +164,12 @@ trouve = Table(
 ```
 
 !!! note
-    `Upsert` needs `columns`. clair uses the column list to build the MERGE statement, thus a `Table` with an `Upsert` and no `columns` raises when Python makes it.
+    The MERGE names each column of the target table. Before the run, clair reads the columns
+    from Snowflake, as for an `INSERT`. Thus `columns` is documentation, and a column that you
+    do not declare still gets its value. `clair compile` has no connection, thus it shows the
+    declared `columns`.
 
-Generated SQL on an incremental run: two statements in the build phase, and one in the cleanup phase. A staged run sends them against the staging clone; this example shows a run with `--no-test`, which writes production directly.
+Generated SQL on an incremental run: two statements in the build phase, and one in the cleanup phase. The column names come from Snowflake, thus they are quoted and in upper case. A staged run sends them against the staging clone; this example shows a run with `--no-test`, which writes production directly.
 
 ```sql
 -- create the new rows table
@@ -181,13 +184,13 @@ MERGE INTO example_3_database.derived.customer_order_summary AS target
 USING example_3_database.derived.customer_order_summary__clair_new_rows_<run_id> AS source
 ON target.customer_id = source.customer_id
 WHEN MATCHED THEN UPDATE SET
-    total_orders = source.total_orders,
-    total_amount = source.total_amount,
-    first_order_at = source.first_order_at,
-    last_order_at = source.last_order_at,
-    last_updated_at = source.last_updated_at
-WHEN NOT MATCHED THEN INSERT (customer_id, total_orders, total_amount, first_order_at, last_order_at, last_updated_at)
-    VALUES (source.customer_id, source.total_orders, source.total_amount, source.first_order_at, source.last_order_at, source.last_updated_at)
+    "TOTAL_ORDERS" = source."TOTAL_ORDERS",
+    "TOTAL_AMOUNT" = source."TOTAL_AMOUNT",
+    "FIRST_ORDER_AT" = source."FIRST_ORDER_AT",
+    "LAST_ORDER_AT" = source."LAST_ORDER_AT",
+    "LAST_UPDATED_AT" = source."LAST_UPDATED_AT"
+WHEN NOT MATCHED THEN INSERT ("CUSTOMER_ID", "TOTAL_ORDERS", "TOTAL_AMOUNT", "FIRST_ORDER_AT", "LAST_ORDER_AT", "LAST_UPDATED_AT")
+    VALUES (source."CUSTOMER_ID", source."TOTAL_ORDERS", source."TOTAL_AMOUNT", source."FIRST_ORDER_AT", source."LAST_ORDER_AT", source."LAST_UPDATED_AT")
 
 -- drop the new rows table
 DROP TABLE IF EXISTS example_3_database.derived.customer_order_summary__clair_new_rows_<run_id>
@@ -208,9 +211,9 @@ run_config=Incremental(
 
 ## Column overrides
 
-By default, MATCH updates all the columns that are not primary keys, and NO MATCH inserts all the columns. Give `update_columns` or `insert_columns` to `Upsert` to change this.
+By default, MATCH updates each column of the target table that is not a primary key, and NO MATCH inserts each column. Give `update_columns` or `insert_columns` to `Upsert` to change this.
 
-A clause with no column goes out of the MERGE. A table whose columns are all key columns, or `update_columns=[]`, gets no `WHEN MATCHED`: a row that exists stays as it is, and a new row goes in. `insert_columns=[]` removes `WHEN NOT MATCHED` in the same way. A `Table` with no column in the two lists raises, because its MERGE does nothing.
+A clause with no column goes out of the MERGE. A table whose columns are all key columns, or `update_columns=[]`, gets no `WHEN MATCHED`: a row that exists stays as it is, and a new row goes in. `insert_columns=[]` removes `WHEN NOT MATCHED` in the same way. `update_columns=[]` together with `insert_columns=[]` raises when Python makes the `Table`, because its MERGE does nothing. A MERGE that has no column for other reasons raises when clair makes the plan.
 
 ```python
 run_config=Incremental(

@@ -99,7 +99,7 @@ copy SQL from the source of clair.
 |--------|-------|
 | `create_statement(address)` | The `CREATE OR REPLACE TABLE ... AS` of a full refresh. |
 | `create_new_rows_statement(run_id)` | The table that holds the new rows of this run, at `new_rows_address(run_id)`. |
-| `merge_statement(target_address, source_address)` | The `MERGE` of the `Upsert` strategy. |
+| `merge_statement(target_address, source_address, target_column_names)` | The `MERGE` of the `Upsert` strategy. It names each column of the target. |
 | `delete_replaced_rows_statement(target_address, source_address)` | The `DELETE` of the `DeleteInsert` strategy. |
 | `insert_statement(address, new_rows, target_column_names)` | An `INSERT` that names each column. `new_rows` is a table name, or a subquery in parentheses. |
 | `clone_statement(source_address, clone_address)` | A zero-copy clone. |
@@ -149,6 +149,7 @@ class MirroredUpsertTable(Table):
             self.merge_statement(
                 context.physical_address,
                 self.new_rows_address(context.run_id),
+                context.target_column_names,
             ),
         ]
 ```

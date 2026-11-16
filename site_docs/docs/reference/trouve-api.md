@@ -167,7 +167,7 @@ class Table(SqlTrouve):
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `insert_statement(address, new_rows, target_column_names)` | `str` | An `INSERT` that names each column of the target. `new_rows` is a table name, or a subquery in parentheses. With no `target_column_names`, it names the declared `columns`. |
-| `merge_statement(target_address, source_address)` | `str` | The `MERGE` of the `Upsert` strategy. |
+| `merge_statement(target_address, source_address, target_column_names)` | `str` | The `MERGE` of the `Upsert` strategy. `target_column_names` is `context.target_column_names`: the columns of the target. |
 | `delete_replaced_rows_statement(target_address, source_address)` | `str` | The `DELETE` of the `DeleteInsert` strategy. |
 | `create_new_rows_statement(run_id)` | `str` | The table of the new rows of this run, at `new_rows_address(run_id)`. |
 | `new_rows_address(run_id)` | `str` | The address of the new rows table of an `Upsert` or a `DeleteInsert`. |
