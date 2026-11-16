@@ -231,10 +231,6 @@ def init(project: str | None) -> None:
 
     click.echo("")
     for status, filepath in results:
-        # Hide the environments.yml line. The code above found that file, or
-        # the user gave the values for it.
-        if filepath == str(environments_path):
-            continue
         click.echo(f"  {status}  {filepath}")
     click.echo("")
 

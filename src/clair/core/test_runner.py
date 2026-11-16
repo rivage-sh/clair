@@ -13,7 +13,7 @@ from clair.adapters.base import WarehouseAdapter
 from clair.adapters.objects import Statement, StatementStatus
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag
-from clair.core.references import render_sample
+from clair.core.references import physical_addresses_of, render_sample
 from clair.phase import Phase
 from clair.trouves.address import TrouveAddress
 from clair.trouves.plan import PlanContext, TestQuery, TestResult
@@ -285,11 +285,7 @@ def _sample_subqueries(
     A reference in a ``sample_sql`` reads the physical address of that Trouve,
     because a test run examines the objects that are in the warehouse.
     """
-    physical_addresses = {
-        id(trouve): trouve.compiled.physical_address
-        for trouve in dag.trouves
-        if trouve.compiled is not None
-    }
+    physical_addresses = physical_addresses_of(dag.trouves)
     sample_subqueries: dict[str, str] = {}
     for name in selected:
         trouve = dag.get_trouve(name)

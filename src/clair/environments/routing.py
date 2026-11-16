@@ -233,13 +233,14 @@ def collect_routing_problems(
 
 
 def detect_routing_collisions(
-    logical_to_physical: dict[str, str],
+    logical_to_physical: dict[str, TrouveAddress],
 ) -> list[tuple[str, list[str]]]:
     """Give the (target, sources) pairs for the routing collisions.
 
-    A collision happens when two Trouves go to one physical target. A SOURCE
+    A collision happens when two Trouves go to one physical object. A SOURCE
     counts too: a Table that routes onto a Source replaces the data that it
-    reads.
+    reads. Two addresses that differ only in case name one object, thus they
+    collide. See ``TrouveAddress.resolved_name``.
 
     Args:
         logical_to_physical: A map of a logical address to a physical address.
@@ -247,14 +248,17 @@ def detect_routing_collisions(
 
     Returns:
         A list of (physical_address, [logical_address, ...]) for each collision.
+        The physical address is the one of the first Trouve in the map.
     """
-    target_to_sources: dict[str, list[str]] = {}
+    target_of_name: dict[str, str] = {}
+    sources_of_name: dict[str, list[str]] = {}
     for logical, physical in logical_to_physical.items():
-        target_to_sources.setdefault(physical, []).append(logical)
+        target_of_name.setdefault(physical.resolved_name, str(physical))
+        sources_of_name.setdefault(physical.resolved_name, []).append(logical)
 
     return [
-        (target, sorted(sources))
-        for target, sources in target_to_sources.items()
+        (target_of_name[resolved_name], sorted(sources))
+        for resolved_name, sources in sources_of_name.items()
         if len(sources) > 1
     ]
 
@@ -273,7 +277,7 @@ def detect_routing_collisions_of_trouves(
     logical address and the physical address are equal for each Trouve.
     """
     logical_to_physical = {
-        str(trouve.logical_address): str(trouve.compiled.physical_address)
+        str(trouve.logical_address): trouve.compiled.physical_address
         for trouve in trouves
         if trouve.compiled
     }

@@ -8,7 +8,6 @@ import pytest
 
 from clair.core.discovery import discover_project
 from clair.core.scaffold import add_artifacts_to_gitignore, scaffold_project, write_environments_yml
-from clair.environments.environments import Authenticator, load_environment
 from clair.environments.project_routing import load_project_routing
 from clair.environments.routing import route
 from clair.trouves.trouve_type import TrouveType
@@ -31,10 +30,8 @@ DEFAULT_SOURCE_ARGS = {
 
 
 def _run_scaffold(tmp_path: Path) -> list[tuple[str, str]]:
-    """Run scaffold_project with a false home directory. The real one stays as it is."""
-    project_dir = tmp_path / "my_project"
-    fake_home = tmp_path / "fake_home"
-    return scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
+    """Run scaffold_project in a temporary directory."""
+    return scaffold_project(tmp_path / "my_project", **DEFAULT_SOURCE_ARGS)
 
 
 # ---------------------------------------------------------------------------
@@ -45,55 +42,38 @@ def _run_scaffold(tmp_path: Path) -> list[tuple[str, str]]:
 class TestScaffoldCreatesAllExpectedFiles:
     def test_creates_all_project_files(self, tmp_path: Path) -> None:
         project_dir = tmp_path / "my_project"
-        fake_home = tmp_path / "fake_home"
-        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
+        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS)
 
         for relative_path in EXPECTED_PROJECT_FILES:
             full_path = project_dir / relative_path
             assert full_path.exists(), f"Missing: {relative_path}"
 
-    def test_creates_environments_yml(self, tmp_path: Path) -> None:
-        fake_home = tmp_path / "fake_home"
-        scaffold_project(tmp_path / "proj", **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
-
-        environments_path = fake_home / ".clair" / "environments.yml"
-        assert environments_path.exists()
-
     def test_creates_routing_file(self, tmp_path: Path) -> None:
         project_dir = tmp_path / "my_project"
-        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
+        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS)
 
         assert (project_dir / "__routing__.py").exists()
 
     def test_returns_all_paths_as_created(self, tmp_path: Path) -> None:
         results = _run_scaffold(tmp_path)
 
-        # 1 source Trouve, 1 __routing__.py, and 1 environments.yml file.
-        assert len(results) == 3
+        # 1 source Trouve and 1 __routing__.py file.
+        assert len(results) == 2
         assert all(status == "created" for status, _ in results)
 
 
 class TestFileContents:
     def test_orders_trouve_has_source_type(self, tmp_path: Path) -> None:
         project_dir = tmp_path / "proj"
-        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
+        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS)
 
         (orders,) = discover_project(project_dir)
         assert orders.type == TrouveType.SOURCE
 
-    def test_environments_yml_has_dev_environment(self, tmp_path: Path) -> None:
-        fake_home = tmp_path / "home"
-        scaffold_project(tmp_path / "proj", **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
-
-        environment = load_environment(
-            "dev", environments_path=fake_home / ".clair" / "environments.yml"
-        )
-        assert environment.authentication == Authenticator(authenticator="externalbrowser")
-
     def test_routing_file_gives_a_passthrough_entry_for_dev(self, tmp_path: Path) -> None:
         """The file that clair init writes loads, and it changes no address."""
         project_dir = tmp_path / "proj"
-        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
+        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS)
 
         project_routing = load_project_routing(project_dir, "dev")
 
@@ -109,13 +89,11 @@ class TestFileContents:
     ) -> None:
         """A name other than dev gives an entry for that name, and no entry for dev."""
         project_dir = tmp_path / "proj"
-        fake_home = tmp_path / "home"
         source_args = {**DEFAULT_SOURCE_ARGS, "env_name": env_name}
-        scaffold_project(project_dir, **source_args, home_dir=fake_home)
+        scaffold_project(project_dir, **source_args)
 
         assert load_project_routing(project_dir, env_name).entry is not None
         assert load_project_routing(project_dir, "dev").entry is None
-        load_environment(env_name, environments_path=fake_home / ".clair" / "environments.yml")
 
 
 class TestDoesNotOverwriteExistingFiles:
@@ -125,23 +103,12 @@ class TestDoesNotOverwriteExistingFiles:
         orders_path.parent.mkdir(parents=True)
         orders_path.write_text("# my custom file\n")
 
-        results = scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
+        results = scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS)
 
         assert orders_path.read_text() == "# my custom file\n"
 
         results_dict = {path: status for status, path in results}
         assert results_dict[str(orders_path)] == "skipped"
-
-    def test_skips_existing_environments_yml(self, tmp_path: Path) -> None:
-        fake_home = tmp_path / "home"
-        environments_path = fake_home / ".clair" / "environments.yml"
-        environments_path.parent.mkdir(parents=True)
-        environments_path.write_text("# existing config\n")
-
-        scaffold_project(tmp_path / "proj", **DEFAULT_SOURCE_ARGS, home_dir=fake_home)
-
-        assert environments_path.read_text() == "# existing config\n"
-
 
 class TestGitignore:
     """`clair init` adds the artifacts directory to .gitignore, and keeps each other line."""
@@ -173,7 +140,7 @@ class TestProjectDirCreation:
         project_dir = tmp_path / "brand_new" / "nested" / "project"
         assert not project_dir.exists()
 
-        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS, home_dir=tmp_path / "home")
+        scaffold_project(project_dir, **DEFAULT_SOURCE_ARGS)
 
         assert project_dir.exists()
         assert (project_dir / "source" / "raw" / "orders.py").exists()
@@ -188,7 +155,6 @@ class TestCustomSourceDbName:
             source_schema_name="myschema",
             source_table_name="mytable",
             env_name="dev",
-            home_dir=tmp_path / "home",
         )
 
         assert (project_dir / "mydb" / "myschema" / "mytable.py").exists()

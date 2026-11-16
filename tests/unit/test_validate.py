@@ -17,7 +17,7 @@ from click.testing import CliRunner
 
 import clair
 from clair.cli.main import cli
-from clair.core.text_references import TextReferenceLocation
+from clair.core.references import TextReferenceLocation
 from clair.core.validation import ValidationReport
 from clair.exceptions import ClairError
 from tests.helpers import make_environment, write_project_marker

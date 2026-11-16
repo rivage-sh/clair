@@ -93,3 +93,26 @@ def test_a_failure_of_the_test_dependency_skips_the_dependent(tmp_path):
     orders_result = summary.result("db.s.orders")
     assert isinstance(orders_result, RunSkip)
     assert orders_result.skipped_by == "db.s.customers"
+
+
+def test_the_catalog_gives_the_kind_of_each_edge(tmp_path):
+    # clair docs draws a TEST edge as a dashed line, thus the catalog keeps the kind.
+    project_root = write_project_files(
+        tmp_path,
+        {
+            "db/s/customers.py": 'from clair import Table\ntrouve = Table(sql="select 1 as customer_id")\n',
+            "db/s/orders.py": ORDERS_TEST,
+            "db/s/report.py": (
+                "from clair import Table\n"
+                "from db.s.orders import trouve as orders\n"
+                'trouve = Table(sql=f"select * from {orders}")\n'
+            ),
+        },
+    )
+
+    edges = clair.catalog(project_root)["edges"]
+
+    assert sorted(edges, key=lambda edge: edge["source"]) == [
+        {"source": "db.s.customers", "target": "db.s.orders", "kind": EdgeKind.TEST},
+        {"source": "db.s.orders", "target": "db.s.report", "kind": EdgeKind.READ},
+    ]

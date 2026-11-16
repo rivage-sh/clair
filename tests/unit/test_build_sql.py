@@ -11,10 +11,11 @@ from typing import Any
 
 import pytest
 
+from clair.adapters.objects import WarehouseColumn
 from clair.exceptions import CompileError, TrouveNotCompiledError
 from clair.trouves.address import TrouveAddress
 from clair.trouves.column import Column, ColumnType
-from clair.trouves.plan import NodePlan
+from clair.trouves.plan import NodePlan, PlanContext
 from clair.trouves.run_config import Append, DeleteInsert, Incremental, RunConfig, RunMode, Upsert
 from clair.trouves.trouve import Table, View
 from tests.helpers import build_and_cleanup, compile_trouve, staged_plan, unstaged_plan
@@ -179,29 +180,97 @@ class TestUpsertPlanColumns:
         ).upsert_plan()
         assert plan.update_column_names == []
 
+    def test_two_empty_column_lists_raise_at_construction(self):
+        with pytest.raises(ValueError, match="no column to update and no column to insert"):
+            Table(
+                sql=UPSERT_SQL,
+                columns=UPSERT_COLUMNS,
+                run_config=Incremental(
+                    strategy=Upsert(primary_key_columns=["id"], update_columns=[], insert_columns=[])
+                ),
+            )
+
+    def test_an_upsert_needs_no_declared_column(self):
+        """The run reads the columns of the target, thus columns is documentation."""
+        trouve = Table(
+            sql=UPSERT_SQL, run_config=Incremental(strategy=Upsert(primary_key_columns=["id"]))
+        )
+
+        assert trouve.columns == []
+
+
+# The columns of the target table, as Snowflake gives them. LOADED_AT is not a
+# declared column of make_upsert_trouve().
+TARGET_COLUMN_NAMES = ["ID", "NAME", "VALUE", "LOADED_AT"]
+QUOTED_TARGET_COLUMN_NAMES = ['"ID"', '"NAME"', '"VALUE"', '"LOADED_AT"']
+
+
+class TestUpsertPlanOfTheTarget:
+    """A run gives the columns of the target, and the MERGE names each one, also an undeclared one."""
+
     @pytest.mark.parametrize(
-        ("columns", "strategy_arguments", "message"),
+        ("strategy_arguments", "expected_update", "expected_insert"),
         [
-            pytest.param([], {}, "needs columns", id="no_column"),
             pytest.param(
-                UPSERT_COLUMNS,
-                {"update_columns": [], "insert_columns": []},
-                "no column to update and no column to insert",
-                id="no_clause",
+                {"primary_key_columns": ["id"]},
+                ['"NAME"', '"VALUE"', '"LOADED_AT"'],
+                QUOTED_TARGET_COLUMN_NAMES,
+                id="a_key_in_another_case",
+            ),
+            pytest.param(
+                {"join_sql": "target.id = source.id"},
+                QUOTED_TARGET_COLUMN_NAMES,
+                QUOTED_TARGET_COLUMN_NAMES,
+                id="a_join_of_the_author",
+            ),
+            pytest.param(
+                {"primary_key_columns": ["id"], "update_columns": ["name"], "insert_columns": ["id", "name"]},
+                ["name"],
+                ["id", "name"],
+                id="the_lists_of_the_author",
             ),
         ],
     )
-    def test_a_merge_with_no_statement_raises_at_construction(
-        self, columns, strategy_arguments, message
+    def test_the_plan_names_each_column_of_the_target(
+        self, strategy_arguments, expected_update, expected_insert
     ):
-        with pytest.raises(ValueError, match=message):
-            Table(
-                sql=UPSERT_SQL,
-                columns=columns,
-                run_config=Incremental(
-                    strategy=Upsert(primary_key_columns=["id"], **strategy_arguments)
-                ),
-            )
+        plan = make_upsert_trouve(**strategy_arguments).upsert_plan(TARGET_COLUMN_NAMES)
+
+        assert plan.update_column_names == expected_update
+        assert plan.insert_column_names == expected_insert
+
+    def test_an_incremental_run_merges_each_column_of_the_target(self):
+        trouve = make_upsert_trouve(primary_key_columns=["id"])
+        context = PlanContext(
+            run_id="abc",
+            effective_mode=RunMode.INCREMENTAL,
+            staged=False,
+            physical_address=TrouveAddress.parse("db.schema.my_table"),
+            target_columns=[
+                WarehouseColumn(name=column_name, data_type="NUMBER")
+                for column_name in TARGET_COLUMN_NAMES
+            ],
+        )
+
+        merge = trouve.plan(context).build[1]
+
+        assert 'WHEN NOT MATCHED THEN INSERT ("ID", "NAME", "VALUE", "LOADED_AT")' in merge
+
+    def test_a_merge_with_no_column_raises_when_clair_makes_the_plan(self):
+        trouve = make_upsert_trouve(primary_key_columns=["id"], insert_columns=[])
+
+        with pytest.raises(CompileError, match="has no column to update and no column to insert"):
+            trouve.merge_statement("db.s.t", "db.s.new_rows", ["ID"])
+
+    def test_compile_with_no_declared_column_says_that_the_run_names_the_columns(self):
+        trouve = make_compiled_trouve(
+            sql=UPSERT_SQL, run_config=Incremental(strategy=Upsert(primary_key_columns=["id"]))
+        )
+        assert isinstance(trouve, Table)
+
+        merge = trouve.merge_statement("db.s.t", "db.s.new_rows", None)
+
+        assert merge.endswith("-- clair run names each column of the target table")
 
 
 class TestMergeClauses:
@@ -226,7 +295,7 @@ class TestMergeClauses:
         )
         assert isinstance(trouve, Table)
 
-        merge = trouve.merge_statement("db.s.t", "db.s.new_rows")
+        merge = trouve.merge_statement("db.s.t", "db.s.new_rows", None)
 
         assert ("WHEN MATCHED THEN UPDATE SET" in merge) is has_update
         assert ("WHEN NOT MATCHED THEN INSERT" in merge) is has_insert

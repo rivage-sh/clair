@@ -130,6 +130,61 @@ class TestAPromotedTable:
         assert step.clustering.key == ""
 
 
+def raw_clustering_key(adapter: SnowflakeAdapter, address: TrouveAddress) -> str:
+    """Read the clustering key as Snowflake stores it. It keeps the text and the quotes of the author."""
+    rows = query_rows(
+        adapter,
+        f"SELECT CLUSTERING_KEY "
+        f"FROM {address.database_name}.INFORMATION_SCHEMA.TABLES "
+        f"WHERE TABLE_SCHEMA = '{address.schema_name.upper()}' "
+        f"AND TABLE_NAME = '{address.table_name.upper()}'",
+    )
+    assert len(rows) == 1, rows
+    return str(rows[0][0] or "")
+
+
+# The SQL makes a column with quotes, thus Snowflake keeps its case: orderDate.
+QUOTED_COLUMN_SQL = 'SELECT 1 AS "orderDate", current_timestamp() AS created_at'
+
+
+@pytest.mark.parametrize(
+    ("cluster_by", "expected_error"),
+    [
+        # The author writes the quotes, as in the SQL, and Snowflake finds the column.
+        pytest.param(['"orderDate"', "to_date(created_at)"], None, id="quoted_by_the_author"),
+        # Without the quotes Snowflake reads ORDERDATE, which does not exist.
+        pytest.param(["orderDate"], "invalid identifier", id="not_quoted"),
+    ],
+)
+def test_a_key_on_a_quoted_column_needs_the_quotes_of_the_author(
+    environment: Environment,
+    adapter: SnowflakeAdapter,
+    clair_environment: IntegrationConfig,
+    tmp_path_factory: pytest.TempPathFactory,
+    cluster_by: list[str],
+    expected_error: str | None,
+) -> None:
+    database_name = f"{DATABASE_NAME}_quoted"
+    table_name = "ordered" if expected_error is None else "unordered"
+    trouve_file = (
+        "from clair import Table\n"
+        f"trouve = Table(sql={QUOTED_COLUMN_SQL!r}, cluster_by={cluster_by!r})\n"
+    )
+    project_path = write_refined_project(
+        tmp_path_factory.mktemp(database_name), database_name, {table_name: trouve_file}
+    )
+
+    summary = clair.run(project_path, env=environment)
+
+    if expected_error is None:
+        assert summary.failed == [], [result.error for result in summary.failed]
+        address = physical_address(f"{database_name}.refined.{table_name}", clair_environment.schema_name)
+        assert raw_clustering_key(adapter, address) == 'LINEAR("orderDate", to_date(created_at))'
+    else:
+        (failure,) = summary.failed
+        assert expected_error in failure.error
+
+
 SEED_FILE = """\
 import pandas as pd
 from clair import SeedTable

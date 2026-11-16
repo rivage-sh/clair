@@ -66,7 +66,7 @@ class Append(BaseModel): ...
 
 ### `Upsert`
 
-Merge the new rows: update each row that matches, and insert each other row. It needs `columns` on the Trouve.
+Merge the new rows: update each row that matches, and insert each other row. The MERGE names each column of the target table, as Snowflake gives them before the run. It needs no `columns`.
 
 ```python
 class Upsert(BaseModel):
@@ -80,8 +80,8 @@ class Upsert(BaseModel):
 |-------|---------|-------------|
 | `primary_key_columns` | `None` | The columns to match on. clair generates `target.col = source.col` for each one. |
 | `join_sql` | `None` | Your own match condition, with the aliases `target` and `source`. Use it in place of `primary_key_columns`. |
-| `update_columns` | `None` — each column that is not a key | The columns for `WHEN MATCHED THEN UPDATE SET`. With `join_sql`, the default is each column. |
-| `insert_columns` | `None` — each column | The columns for `WHEN NOT MATCHED THEN INSERT`. |
+| `update_columns` | `None` — each column of the target that is not a key | The columns for `WHEN MATCHED THEN UPDATE SET`. With `join_sql`, the default is each column. |
+| `insert_columns` | `None` — each column of the target | The columns for `WHEN NOT MATCHED THEN INSERT`. |
 
 Give `primary_key_columns` or `join_sql`, and not both.
 

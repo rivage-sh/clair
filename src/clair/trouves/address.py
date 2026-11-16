@@ -122,6 +122,16 @@ class TrouveAddress(BaseModel):
                 dotted_address, first_error_message(exc)
             ) from exc
 
+    @property
+    def resolved_name(self) -> str:
+        """Give the name of the object that Snowflake finds at this address.
+
+        Snowflake stores an unquoted identifier in upper case, thus
+        ``analytics.s.t`` and ``ANALYTICS.s.t`` name one object. Compare this
+        name, and not the address, to know if two addresses name one object.
+        """
+        return str(self).upper()
+
     def __str__(self) -> str:
         return f"{self.database_name}.{self.schema_name}.{self.table_name}"
 

@@ -29,6 +29,9 @@ clair test --env dev --threads 8
 - clair skips SOURCE Trouves. They do not have tests.
 - The tests of a Trouve run with its `role`, its `warehouse`, its `query_tags` and its
   `statement_timeout_seconds`, as in `clair run`.
+- The command builds nothing, thus each test reads the objects of the environment. A
+  `TestSql` that names a different Trouve reads the physical address of that Trouve, which
+  the [routing](../topics/routing.md) entry of `--env` gives.
 - If no selected Trouve has tests, the command writes a log message and stops with success.
 - clair tests more than one Trouve at one time. The tests of one Trouve always run
   one after the other. Each thread holds a private Snowflake connection. The log lines

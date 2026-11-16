@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 import snowflake.connector
 from cryptography.hazmat.primitives import serialization
+from snowflake.connector.cursor import SnowflakeCursor
 from snowflake.connector.pandas_tools import write_pandas
 
 from clair.adapters.base import WarehouseAdapter
@@ -107,16 +108,19 @@ class SnowflakeAdapter(WarehouseAdapter):
             self._statement_running = True
         try:
             cursor.execute(sql)
-            query_id = cursor.sfqid or "unknown"
+            query_id = cursor.sfqid or None
             return Statement(
                 sql=sql,
                 status=StatementStatus.SUCCESS,
                 query_id=query_id,
                 query_url=self._build_query_url(query_id),
                 row_count=cursor.rowcount or 0,
+                written_row_count=_written_row_count_of(cursor),
             )
         except Exception as e:  # noqa: BLE001 — each driver error becomes a Statement that failed
-            query_id = getattr(cursor, "sfqid", None) or "unknown"
+            # A statement that never reached Snowflake, for example after a
+            # network fault, has no query ID.
+            query_id = getattr(cursor, "sfqid", None) or None
             return Statement(
                 sql=sql,
                 status=StatementStatus.FAILURE,
@@ -355,6 +359,7 @@ class SnowflakeAdapter(WarehouseAdapter):
             status=StatementStatus.SUCCESS if success else StatementStatus.FAILURE,
             error="" if success else f"Clair cannot write the DataFrame to {address}",
             row_count=num_rows,
+            written_row_count=num_rows,
         )
 
     def close(self) -> None:
@@ -363,12 +368,18 @@ class SnowflakeAdapter(WarehouseAdapter):
             self._conn.close()
             self._conn = None
 
-    def _build_query_url(self, query_id: str) -> str:
-        """Make the Snowflake console URL for a query ID."""
+    def _build_query_url(self, query_id: str | None) -> str | None:
+        """Make the Snowflake console URL for a query ID.
+
+        The URL needs the region and the account locator of the environment.
+        Without one of them, or without a query ID, there is no URL.
+        """
         assert self._environment is not None
         connection = self._environment.connection
+        if not query_id or not connection.region or not connection.account_locator:
+            return None
         return (
-            f"https://app.snowflake.com/{connection.region or ''}/{connection.account_locator or ''}"
+            f"https://app.snowflake.com/{connection.region}/{connection.account_locator}"
             f"/#/compute/history/queries/{query_id}/detail"
         )
 
@@ -389,6 +400,22 @@ def _read_private_key(authentication: PrivateKey) -> bytes:
 
 # The position of the comment in a row of DESCRIBE TABLE and of DESCRIBE RESULT.
 _DESCRIBE_COMMENT_INDEX = 9
+
+
+def _written_row_count_of(cursor: SnowflakeCursor) -> int:
+    """Give the rows that a statement wrote, from the DML statistics of Snowflake.
+
+    ``cursor.rowcount`` cannot give it: a CREATE TABLE AS SELECT returns one
+    status row, whatever it wrote. Snowflake gives no statistics for a
+    statement that wrote no rows, and for each statement that does not write.
+    """
+    stats = cursor.stats
+    if stats is None:
+        return 0
+    return sum(
+        count or 0
+        for count in (stats.num_rows_inserted, stats.num_rows_updated, stats.num_rows_deleted)
+    )
 
 
 def _columns_of(rows: list[tuple]) -> list[WarehouseColumn]:

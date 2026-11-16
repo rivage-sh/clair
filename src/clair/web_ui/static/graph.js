@@ -73,6 +73,13 @@ var ClairdocsGraph = (function () {
                 "arrow-scale": 0.8,
             },
         },
+        // A TEST edge: only a TestSql of the target reads the source.
+        {
+            selector: 'edge[kind = "test"]',
+            style: {
+                "line-style": "dashed",
+            },
+        },
         // A node in the lineage, with a highlight.
         {
             selector: "node.highlighted",
@@ -166,6 +173,7 @@ var ClairdocsGraph = (function () {
                     id: e.source + "->" + e.target,
                     source: e.source,
                     target: e.target,
+                    kind: e.kind,
                 },
             });
         }

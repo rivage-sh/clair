@@ -52,7 +52,7 @@ Account locator (e.g. abc12345): abc12345
 
 Trouves that run at one time (threads) [4]: 4
 
-Give an example Snowflake table that contains source data (for example source.orders.raw) [source]: source.orders.raw
+Give an example Snowflake table that contains source data (for example source.orders.raw): source.orders.raw
 
   created  /path/to/my_project/source/orders/raw.py
   created  /path/to/my_project/__routing__.py

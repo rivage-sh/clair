@@ -27,15 +27,14 @@ string literal is not a fault: only a true table name is.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from enum import StrEnum
 
 import sqlglot
 import structlog
 from pydantic import BaseModel
 from sqlglot import exp
 
-from clair.trouves.test import TestSql
-from clair.trouves.trouve import SqlTrouve, TrouveAbc
+from clair.core.references import TextReferenceLocation, texts_with_tokens
+from clair.trouves.trouve import TrouveAbc
 
 logger = structlog.get_logger()
 
@@ -46,13 +45,6 @@ _DIALECT = "snowflake"
 # name with fewer parts cannot be a Trouve, thus this module ignores it. A CTE
 # name has one part, and a placeholder token has one part too.
 _ADDRESS_PART_COUNT = 3
-
-
-class TextReferenceLocation(StrEnum):
-    """The part of a Trouve that holds the text."""
-
-    SQL = "sql"
-    TEST_SQL = "test sql"
 
 
 class TextReference(BaseModel):
@@ -101,10 +93,10 @@ def _table_names(sql: str) -> list[str]:
 def find_text_references(trouves: Sequence[TrouveAbc]) -> list[TextReference]:
     """Give each address that a Trouve names as text, and not as a reference.
 
-    The function examines the SQL of each Trouve and the SQL of each TestSql. It
-    reports a name only when that name is the logical address of a Trouve in
-    this project. A name of a table that clair does not hold is correct SQL, and
-    the function ignores it.
+    The function examines each text of ``texts_with_tokens()``: the sample, the
+    SQL, and the SQL of each TestSql. It reports a name only when that name is
+    the logical address of a Trouve in this project. A name of a table that
+    clair does not hold is correct SQL, and the function ignores it.
 
     Args:
         trouves: Each Trouve from discover_project().
@@ -126,14 +118,7 @@ def find_text_references(trouves: Sequence[TrouveAbc]) -> list[TextReference]:
             continue
         own_address = str(trouve.logical_address)
 
-        sources: list[tuple[TextReferenceLocation, str]] = []
-        if isinstance(trouve, SqlTrouve):
-            sources.append((TextReferenceLocation.SQL, trouve.sql))
-        for test in trouve.tests:
-            if isinstance(test, TestSql):
-                sources.append((TextReferenceLocation.TEST_SQL, test.sql))
-
-        for location, sql in sources:
+        for location, sql in texts_with_tokens(trouve):
             for name in _table_names(sql):
                 # A Trouve that names itself as text is the same fault. The THIS
                 # marker gives the correct address for the run.

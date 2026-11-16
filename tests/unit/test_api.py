@@ -11,7 +11,7 @@ import clair
 from clair.environments.environments import Environment
 from clair.exceptions import ResultNotFoundError, RunError
 from clair.trouves.run_config import RunMode
-from tests.helpers import RecordingAdapter, make_environment, success_of
+from tests.helpers import RecordingAdapter, make_environment, success_of, write_project_files
 
 DAILY_ORDERS = "analytics.revenue.daily_orders"
 
@@ -120,6 +120,24 @@ class TestRun:
         result = success_of(summary, DAILY_ORDERS)
         assert [s for s in result.statements if s.query_id]
         assert result.row_count == 42
+
+    @pytest.mark.parametrize(
+        ("trouve_class", "expected_row_count"),
+        [("Table", RecordingAdapter().write_row_count), ("View", 0)],
+    )
+    def test_the_row_count_is_the_rows_that_the_build_wrote(
+        self, tmp_path: Path, environment: Environment, trouve_class: str, expected_row_count: int
+    ):
+        # A CREATE VIEW gives one status row, and a view holds no rows. The
+        # warehouse holds nothing, thus the View is a new object.
+        project_root = write_project_files(
+            tmp_path,
+            {"db/s/report.py": f'from clair import {trouve_class}\ntrouve = {trouve_class}(sql="select 1 as n")\n'},
+        )
+
+        summary = clair.run(project_root, env=environment, adapter=RecordingAdapter(existing_tables=[]), test=False)
+
+        assert success_of(summary, "db.s.report").row_count == expected_row_count
 
     def test_it_writes_no_file(self, project: Path, environment: Environment):
         """A notebook that gives no writer leaves the project as it was."""

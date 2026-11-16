@@ -145,7 +145,7 @@ A run with `--no-test` has no staging step. An incremental run then adds the row
 
 ## A clustered table
 
-`cluster_by` on a `Table`, a `PandasTable` or a `SeedTable` gives the table a clustering key. Each part is a column name or an SQL expression. Snowflake then reclusters the table in the background, and a query that filters on the key reads fewer micro-partitions. Automatic Clustering costs credits, thus give a key to a large table only.
+`cluster_by` on a `Table`, a `PandasTable` or a `SeedTable` gives the table a clustering key. Each part is a column name or an SQL expression, and clair sends it as you write it. A column that your SQL makes with quotes, such as `"orderDate"`, needs the same quotes here: `cluster_by=[orderDate]`. Snowflake then reclusters the table in the background, and a query that filters on the key reads fewer micro-partitions. Automatic Clustering costs credits, thus give a key to a large table only.
 
 ```python
 trouve = Table(

@@ -256,12 +256,17 @@ def test_a_failed_cleanup_runs_the_next_cleanup_and_keeps_the_node_a_success() -
 
 
 def test_the_row_count_comes_from_the_last_build_statement() -> None:
+    # The last build statement is a SELECT, which writes no rows. The ALTER of
+    # the configure phase after it gives 42 in this adapter, and must not count.
     adapter = RecordingAdapter(select_row_count=7, write_row_count=42)
+    build_plan = PLAN.model_copy(
+        update={"build": ["insert into x select 1", "select 'build two'"], "configure": ["alter table x"]}
+    )
 
-    result = run_plan(adapter, node_plan=PLAN.model_copy(update={"configure": ["alter table x"]}))
+    result = run_plan(adapter, node_plan=build_plan)
 
     assert isinstance(result, RunSuccess)
-    assert result.row_count == 7
+    assert result.row_count == 0
 
 
 def test_the_runner_gives_the_queries_of_the_test_phase_to_the_tests() -> None:
@@ -347,7 +352,11 @@ class MirroredUpsertTable(Table):
             return super().promote(context)
         return [
             *self.add_column_statements(context.physical_address, context.added_columns),
-            self.merge_statement(context.physical_address, self.new_rows_address(context.run_id)),
+            self.merge_statement(
+                context.physical_address,
+                self.new_rows_address(context.run_id),
+                context.target_column_names,
+            ),
         ]
 
 

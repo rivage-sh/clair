@@ -75,6 +75,9 @@ class UpsertPlan(BaseModel):
         join_condition: The ON condition of the MERGE.
         update_column_names: The columns that a row that matches receives.
         insert_column_names: The columns that a row that does not match gets.
+
+    Each column name is as the SQL writes it: a name from the warehouse is
+    quoted, and a name of the author stays as the author wrote it.
     """
 
     join_condition: str
@@ -778,18 +781,12 @@ class Table(SqlTrouve, TableOptions):
 
     @model_validator(mode="after")
     def _require_a_mergeable_upsert(self) -> Table:
-        # The MERGE takes its column lists from the declared columns, thus an
-        # Upsert with no column, or with nothing to update or insert, has no
-        # statement. Refuse it here, and not in the first incremental run.
-        if not isinstance(self.incremental_strategy(), Upsert):
+        # The run reads the columns of the target, thus most MERGE column lists
+        # exist only at run time. Two empty lists of the author are known now.
+        strategy = self.incremental_strategy()
+        if not isinstance(strategy, Upsert):
             return self
-        if not self.columns:
-            raise ValueError(
-                "the upsert strategy needs columns on the Trouve, because the MERGE "
-                "names each column. Give columns=[Column(...), ...]."
-            )
-        plan = self.upsert_plan()
-        if not plan.update_column_names and not plan.insert_column_names:
+        if strategy.update_columns == [] and strategy.insert_columns == []:
             raise ValueError(
                 "the upsert strategy has no column to update and no column to insert, "
                 "thus the MERGE does nothing. Give update_columns or insert_columns."
@@ -863,7 +860,9 @@ class Table(SqlTrouve, TableOptions):
         if isinstance(strategy, Upsert):
             return [
                 self.create_new_rows_statement(context.run_id),
-                self.merge_statement(target_address, new_rows_address),
+                self.merge_statement(
+                    target_address, new_rows_address, context.target_column_names
+                ),
             ]
         if isinstance(strategy, DeleteInsert):
             return [
@@ -907,26 +906,47 @@ class Table(SqlTrouve, TableOptions):
             f"{self.sql_for(RunMode.INCREMENTAL)}\n)"
         )
 
-    def merge_statement(self, target_address: TrouveAddress | str, source_address: TrouveAddress | str) -> str:
+    def merge_statement(
+        self,
+        target_address: TrouveAddress | str,
+        source_address: TrouveAddress | str,
+        target_column_names: list[str] | None,
+    ) -> str:
         """Give the MERGE of the Upsert strategy: update each row that matches, insert each other row.
 
         Args:
             target_address: The table that receives the rows.
             source_address: The table that holds the new rows, for example
                 ``new_rows_address(run_id)``.
+            target_column_names: The columns of the target, from the warehouse.
+                ``PlanContext.target_column_names`` gives them. See
+                ``upsert_plan()``.
 
         Raises:
             TypeError: If the strategy is not Upsert.
+            CompileError: If the MERGE has no column to update and no column
+                to insert.
         """
-        plan = self.upsert_plan()
-        # Each clause needs one column minimum. A clause with no column leaves
-        # out that case: a row that matches stays as it is, or a new row stays
-        # out. The validator of the Table refuses a plan with no clause.
+        plan = self.upsert_plan(target_column_names)
         clauses = [
             f"MERGE INTO {target_address} AS {TARGET}",
             f"USING {source_address} AS {SOURCE}",
             f"ON {plan.join_condition}",
         ]
+        # Each clause needs one column minimum. A clause with no column leaves
+        # out that case: a row that matches stays as it is, or a new row stays
+        # out. A MERGE with no clause does nothing.
+        if not plan.update_column_names and not plan.insert_column_names:
+            if target_column_names is None and not self.columns:
+                return (
+                    "-- merge the new rows into the target table\n"
+                    + "\n".join(clauses)
+                    + "\n-- clair run names each column of the target table"
+                )
+            raise CompileError(
+                f"The MERGE of {self.logical_address} has no column to update and no "
+                "column to insert, thus it does nothing. Give update_columns or insert_columns."
+            )
         if plan.update_column_names:
             clauses.append(f"WHEN MATCHED THEN UPDATE SET {plan.update_clause}")
         if plan.insert_column_names:
@@ -1018,14 +1038,26 @@ class Table(SqlTrouve, TableOptions):
         """
         return f"{self.require_compiled().physical_address}{NEW_ROWS_SUFFIX}{run_id}"
 
-    def upsert_plan(self) -> UpsertPlan:
+    def upsert_plan(self, target_column_names: list[str] | None = None) -> UpsertPlan:
         """Give the decisions that the MERGE of an UPSERT run needs.
 
         The plan holds the columns and the join, and it holds no SQL text. Thus
         a caller reads which column clair updates, and it parses no statement.
 
+        By default the MERGE updates and inserts each column of the target, as
+        the incremental run reads it from the warehouse, and the UPDATE leaves
+        out each key column. A declared column list can name only a part of
+        the table, and the MERGE would then insert NULL in each other column.
+
+        Args:
+            target_column_names: The columns of the target, from the warehouse.
+                The plan quotes each one, because the warehouse gives the exact
+                name. None uses the declared columns, as the author writes them:
+                ``clair compile`` has no connection.
+
         Returns:
-            The plan of the MERGE.
+            The plan of the MERGE. ``update_columns`` and ``insert_columns``
+            of the strategy replace the defaults.
 
         Raises:
             TypeError: If the strategy is not Upsert.
@@ -1034,8 +1066,14 @@ class Table(SqlTrouve, TableOptions):
         if not isinstance(strategy, Upsert):
             raise TypeError("upsert_plan() needs Incremental(strategy=Upsert(...))")
 
-        all_column_names = [column.name for column in self.columns]
-        primary_key_columns = list(strategy.primary_key_columns or [])
+        if target_column_names is None:
+            column_names = [column.name for column in self.columns]
+            all_column_names = column_names
+        else:
+            column_names = target_column_names
+            all_column_names = [quote_column_name(column_name) for column_name in column_names]
+        # Snowflake reads an unquoted key name without case sensitivity.
+        key_names = {key_name.upper() for key_name in strategy.primary_key_columns or []}
 
         if strategy.update_columns is not None:
             update_column_names = list(strategy.update_columns)
@@ -1045,9 +1083,9 @@ class Table(SqlTrouve, TableOptions):
             update_column_names = all_column_names
         else:
             update_column_names = [
-                column_name
-                for column_name in all_column_names
-                if column_name not in set(primary_key_columns)
+                column_reference
+                for column_name, column_reference in zip(column_names, all_column_names, strict=True)
+                if column_name.upper() not in key_names
             ]
 
         if strategy.insert_columns is not None:

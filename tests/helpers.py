@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 import pandas as pd
+from snowflake.connector.cursor import QueryResultStats
 
 from clair.adapters.base import WarehouseAdapter
 from clair.adapters.objects import Statement, StatementStatus, WarehouseColumn, WarehouseObject, WarehouseObjectType
@@ -499,12 +500,15 @@ class RecordingAdapter(WarehouseAdapter):
                 )
 
         is_select = sql.lstrip().upper().startswith("SELECT")
+        # Snowflake gives no DML statistics for a view: it holds no rows.
+        writes_rows = not is_select and " VIEW " not in f" {sql.upper()} "
         return Statement(
             sql=sql,
             status=StatementStatus.SUCCESS,
             query_id=query_id,
             query_url=query_url,
             row_count=self.select_row_count if is_select else self.write_row_count,
+            written_row_count=self.write_row_count if writes_rows else 0,
         )
 
     def execute(self, sql: str) -> Statement:
@@ -747,14 +751,34 @@ def executed_sql(result: RunSuccess | RunFailure) -> list[str]:
 
 
 class FakeCursor:
-    """A cursor that gives fixed rows, or raises. It records the SQL that it got."""
+    """A cursor that gives fixed rows, or raises. It records the SQL that it got.
 
-    def __init__(self, rows: list[tuple], error: Exception | None = None) -> None:
+    Args:
+        rows: The rows of each result.
+        error: The error that each execute() raises, or None.
+        stats: The DML statistics of the statement. None is a query or a
+            DDL statement, which gives none.
+        sfqid: The query ID. None is a statement that never reached Snowflake.
+    """
+
+    def __init__(
+        self,
+        rows: list[tuple],
+        error: Exception | None = None,
+        stats: QueryResultStats | None = None,
+        sfqid: str | None = "fake-query-id",
+    ) -> None:
         self.rows = rows
         self.error = error
+        self.stats = stats
+        self.sfqid = sfqid
         self.sql = ""
         self.executed: list[str] = []
         self.closed = False
+
+    @property
+    def rowcount(self) -> int:
+        return len(self.rows)
 
     def execute(self, sql: str) -> None:
         self.sql = sql
@@ -764,9 +788,6 @@ class FakeCursor:
 
     def fetchone(self) -> tuple | None:
         return self.rows[0] if self.rows else None
-
-    # The identifier of the last query, which DESCRIBE RESULT reads.
-    sfqid = "fake-query-id"
 
     def fetchall(self) -> list[tuple]:
         return list(self.rows)

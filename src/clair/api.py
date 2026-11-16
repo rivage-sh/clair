@@ -54,7 +54,7 @@ from clair.core.artifacts import (
 from clair.core.compiler import CompileOutput, build_compile_output
 from clair.core.dag import ClairDag, build_dag
 from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
-from clair.core.references import recompile_for_selection
+from clair.core.references import recompile_for_selection, recompile_tests_for_test_run
 from clair.core.runner import RunCancellation, RunResult, RunSummary, run_project
 from clair.core.selector import expand_selectors
 from clair.core.test_runner import SampleScope, TestSummary, run_test_queries, run_tests
@@ -435,10 +435,13 @@ class RunHandle:
             self._complete = True
             return
 
-        # An empty account_locator leaves each query URL empty.
-        if not self._environment.connection.account_locator:
+        # A query URL needs the region and the account locator.
+        connection = self._environment.connection
+        if not connection.region or not connection.account_locator:
             logger.warning(
-                "run.no_account_locator", env=env_name, detail="Clair cannot show the query URLs."
+                "run.no_query_urls",
+                env=env_name,
+                detail="Clair cannot show the query URLs. Give region and account_locator in environments.yml.",
             )
 
         sample_scope = SampleScope.RUN_INPUTS if self._sample else SampleScope.NONE
@@ -641,8 +644,9 @@ def _refuse_a_sampled_production_write(
 ) -> None:
     """Stop a sampled run that would write to a production address.
 
-    A Trouve writes to production when routing gives it its logical address.
-    A SOURCE writes nothing, thus it is never a fault.
+    A Trouve writes to production when routing gives it its logical address,
+    in each case: Snowflake finds one object at both names. A SOURCE writes
+    nothing, thus it is never a fault.
 
     Raises:
         SampleTargetsProductionError: If a selected Trouve writes to its
@@ -653,7 +657,7 @@ def _refuse_a_sampled_production_write(
         trouve = dag.get_trouve(node_name)
         if trouve.type == TrouveType.SOURCE or trouve.compiled is None:
             continue
-        if trouve.compiled.physical_address == trouve.logical_address:
+        if trouve.compiled.physical_address.resolved_name == trouve.logical_address.resolved_name:
             production_addresses.append(str(trouve.logical_address))
     if production_addresses:
         raise SampleTargetsProductionError(env_name, sorted(production_addresses))
@@ -703,7 +707,8 @@ def test(
 
     # `environment` names the object, and `env` names the argument.
     environment = env
-    project_root, env_name, _, dag = _discover(project_dir, environment)
+    project_root, env_name, trouves, dag = _discover(project_dir, environment)
+    recompile_tests_for_test_run(trouves)
 
     # Keep each SOURCE, thus a selector can match a SOURCE. run_tests skips it.
     selected = _select_nodes(dag, select, exclude, keep_sources=True)

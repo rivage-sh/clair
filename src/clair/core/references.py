@@ -31,6 +31,7 @@ from __future__ import annotations
 import functools
 import re
 from collections.abc import Callable, Sequence
+from enum import StrEnum
 from pathlib import Path
 
 from clair.core.project_imports import names_of_files_that_ran_two_times
@@ -124,17 +125,30 @@ def detect_imports(
     return imports
 
 
-def texts_with_tokens(trouve: TrouveAbc) -> list[str]:
-    """Give each SQL text of the author that can hold a reference token.
+class TextReferenceLocation(StrEnum):
+    """The part of a Trouve that holds an SQL text of the author."""
+
+    SAMPLE = "sample"
+    SQL = "sql"
+    TEST_SQL = "test sql"
+
+
+def texts_with_tokens(trouve: TrouveAbc) -> list[tuple[TextReferenceLocation, str]]:
+    """Give each SQL text of the author that can hold a reference, with its location.
 
     Each text is the source, before clair renders it: the sample, the SQL, and
-    the SQL of each TestSql. Add a new SQL field of a Trouve here, thus the
-    token guard reads it too.
+    the SQL of each TestSql. The token guard and the lint for an address as
+    text both read this list. Add a new SQL field of a Trouve here, thus both
+    read it.
     """
-    texts = [trouve.sample(DEFAULT_SAMPLE_ROWS)]
+    texts = [(TextReferenceLocation.SAMPLE, trouve.sample(DEFAULT_SAMPLE_ROWS))]
     if isinstance(trouve, SqlTrouve):
-        texts.append(trouve.sql)
-    texts.extend(test.sql for test in trouve.tests if isinstance(test, TestSql))
+        texts.append((TextReferenceLocation.SQL, trouve.sql))
+    texts.extend(
+        (TextReferenceLocation.TEST_SQL, test.sql)
+        for test in trouve.tests
+        if isinstance(test, TestSql)
+    )
     return texts
 
 
@@ -160,7 +174,7 @@ def describe_unresolved_tokens(
     for trouve_obj, logical_address, file_path, _ in collected:
         if any(
             int(match.group(1)) not in id_to_address
-            for text in texts_with_tokens(trouve_obj)
+            for _, text in texts_with_tokens(trouve_obj)
             for match in _PLACEHOLDER_RE.finditer(text)
         ):
             faulty.append((logical_address, file_path))
@@ -219,6 +233,34 @@ def _reference_addresses_for_selection(
         else:
             reference_addresses[id(trouve)] = trouve.logical_address
     return reference_addresses
+
+
+def physical_addresses_of(trouves: Sequence[TrouveAbc]) -> dict[int, TrouveAddress]:
+    """Give the physical address of each compiled Trouve, keyed by the object id.
+
+    ``clair test`` builds nothing, thus it examines the objects that the
+    routing entry of the environment names: each reference reads there.
+    """
+    return {
+        id(trouve): trouve.compiled.physical_address
+        for trouve in trouves
+        if trouve.compiled is not None
+    }
+
+
+def recompile_tests_for_test_run(trouves: Sequence[TrouveAbc]) -> None:
+    """Resolve the SQL of each TestSql for ``clair test``: each reference reads its physical address.
+
+    Discovery resolves each reference to the logical production address. A
+    test run in a dev environment would then compare the dev object with
+    production. ``clair run`` gets its addresses from
+    ``recompile_for_selection()``, and ``clair test`` gets them here.
+    """
+    physical_addresses = physical_addresses_of(trouves)
+    for trouve in trouves:
+        for test in trouve.tests:
+            if isinstance(test, TestSql):
+                test.resolved_sql = resolve_sql(test.sql, physical_addresses, this_address=None)
 
 
 def resolve_sql_by_logical_address(

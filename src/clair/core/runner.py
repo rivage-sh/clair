@@ -60,7 +60,8 @@ class RunSuccess(_RunResultBase):
         effective_run_mode: The run mode that clair used, after the RunConfig of
             the Trouve and the fallback to a full refresh.
         duration_seconds: The clock time of the statements.
-        row_count: The number of rows that the last build statement changed.
+        row_count: The rows that the last build statement wrote. A view holds
+            no rows, thus it gives 0.
         test_results: The data quality test results of this Trouve. A test that
             fails after a run with no staging does not change the status,
             because the physical object holds the new data.
@@ -731,7 +732,7 @@ def _run_node(
         if write_statement is None:
             return stop_writes(write_error)
         record(write_statement, Phase.BUILD)
-        row_count = write_statement.row_count
+        row_count = write_statement.written_row_count
 
     build_start = len(statements)
     failed_statement = execute_phase(Phase.BUILD)
@@ -739,8 +740,8 @@ def _run_node(
     if failed_statement is not None:
         return stop_writes(failed_statement.error or "unknown error")
     if plan.build:
-        # The last statement that writes rows gives the count.
-        row_count = statements[-1].row_count
+        # The last statement of the build gives the count.
+        row_count = statements[-1].written_row_count
 
     configure_start = len(statements)
     failed_statement = execute_phase(Phase.CONFIGURE)
