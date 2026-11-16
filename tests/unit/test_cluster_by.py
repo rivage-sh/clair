@@ -76,6 +76,26 @@ class TestTheOption:
         assert table_options is not None
         assert table_options.cluster_by == CLUSTER_BY
 
+    @pytest.mark.parametrize(
+        ("cluster_by", "expected_key"),
+        [
+            pytest.param(["order_date"], "order_date", id="a_column"),
+            pytest.param(["to_date(created_at)"], "to_date(created_at)", id="an_expression"),
+            # A column that the SQL made with quotes keeps its case only in quotes.
+            pytest.param(['"orderDate"'], '"orderDate"', id="a_quoted_column"),
+            pytest.param(['"orderDate"', "to_date(created_at)"], '"orderDate", to_date(created_at)', id="both"),
+        ],
+    )
+    def test_clair_sends_each_part_of_the_key_as_the_author_wrote_it(
+        self, cluster_by: list[str], expected_key: str
+    ):
+        """Each part is SQL: clair quotes nothing, thus an expression stays an expression."""
+        (statement,) = full_refresh_table(cluster_by).cluster_by_statements(
+            PHYSICAL_ADDRESS, incremental=False
+        )
+
+        assert statement.splitlines()[-1] == f"ALTER TABLE {PHYSICAL_ADDRESS} CLUSTER BY ({expected_key})"
+
     def test_a_table_has_no_key_by_default(self):
         assert Table(sql="SELECT 1 AS id").cluster_by == []
 
