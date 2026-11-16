@@ -253,7 +253,8 @@ Each Trouve holds these attributes. A `Source` holds these only.
 | `physical_address` | `TrouveAddress` | The address that the routing entry of the run gives. clair writes there. |
 | `file_path` | `Path` | The path of the Trouve file, relative to the project root |
 | `module_name` | `str` | The module name of the Trouve file |
-| `imports` | `list[str]` | The logical addresses of the upstream Trouves |
+| `imports` | `list[str]` | The logical addresses of the upstream Trouves that the build reads |
+| `test_imports` | `list[str]` | The logical addresses of the Trouves that a `TestSql` of this Trouve reads. Each one is a DAG edge of the kind `TEST`. A `Source` holds none, because clair runs no test of a `Source`. See [DAG](../topics/dag.md). |
 | `config` | `ResolvedConfig` | The session of the Trouve, after clair applied the schema and the database defaults |
 
 The backend of the Trouve adds its own attributes. Thus `self.compiled` in a `Table`

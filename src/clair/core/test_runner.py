@@ -172,7 +172,11 @@ def run_test_queries(
         sql = query.sql
         try:
             if sample_subquery is not None and queried_address is not None:
-                pattern = re.compile(re.escape(f"FROM {queried_address}"), re.IGNORECASE)
+                # The lookahead stops a longer name: db.s.orders_archive is
+                # not the object that the test examines.
+                pattern = re.compile(
+                    re.escape(f"FROM {queried_address}") + r"(?![\w$])", re.IGNORECASE
+                )
                 # A function as the replacement keeps a backslash of a
                 # sample_sql as text, and not as a group reference.
                 sql = pattern.sub(lambda _match: f"FROM {sample_subquery}", sql)

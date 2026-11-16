@@ -86,7 +86,7 @@ def _load_routing_table(path: Path) -> RoutingTable:
 
     if not hasattr(module, ROUTING_TABLE_ATTRIBUTE):
         raise InvalidRoutingFileError(
-            str(path), f"the file must define a '{ROUTING_TABLE_ATTRIBUTE}' dict"
+            str(path), f"the file must define '{ROUTING_TABLE_ATTRIBUTE} = RoutingTable(...)'"
         )
 
     table = getattr(module, ROUTING_TABLE_ATTRIBUTE)

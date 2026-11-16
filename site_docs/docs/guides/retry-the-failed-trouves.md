@@ -41,12 +41,13 @@ Trouve upstream of it failed. It holds no Trouve that succeeded.
 ## From the command line
 
 `clair run` writes the complete `RunSummary` to `_clairtifacts/<run_id>/run_summary.json`
-at the end of the run. A run id starts with the time, thus the last directory in name
-order is the newest run.
+at the end of the run. A run id starts with the time, thus the last summary in name
+order is the newest run. `clair compile` writes its directories there too, and they hold
+no summary, thus the search reads the summary files only.
 
 ```bash
 clair run --env prod --run-mode incremental || {
-    summary="$(ls -d _clairtifacts/*/ | sort | tail -1)run_summary.json"
+    summary="$(ls _clairtifacts/*/run_summary.json | sort | tail -1)"
     selection=$(jq -r '.results[]
         | select(.status != "success")
         | .addresses.logical
