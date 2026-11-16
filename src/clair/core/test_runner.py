@@ -347,22 +347,7 @@ def run_tests(
         else {}
     )
 
-    if threads == 1:
-        results: list[TestResult] = []
-        for name in selected:
-            results.extend(
-                _run_trouve_tests(
-                    name,
-                    dag,
-                    adapter,
-                    sample_scope,
-                    sample_subqueries.get(name),
-                    run_id,
-                    environment_name,
-                )
-            )
-        return results
-
+    # One thread gives a pool of one: the adapter of the caller, and no new connection.
     pool = AdapterPool(adapter, threads)
 
     def test_one(name: str) -> list[TestResult]:

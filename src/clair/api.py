@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Generator, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple, Self
@@ -134,6 +135,38 @@ def _select_nodes(
         excluded = set(expand_selectors(dag, exclude))
         selected = [n for n in selected if n not in excluded]
     return selected
+
+
+def _thread_count(threads: int | None, environment: Environment, trouve_count: int) -> int:
+    """Give the number of threads of a run or a test run.
+
+    The caller replaces the thread count of the environment. A connection that
+    no Trouve uses gives nothing, thus the count stays at the number of
+    Trouves. A connection costs one login, not credits: Snowflake bills the
+    warehouse per second while it runs, and an idle session starts no warehouse.
+    """
+    wanted_count = threads if threads is not None else environment.threads
+    return min(wanted_count, trouve_count)
+
+
+@contextmanager
+def _connection(
+    environment: Environment, adapter: WarehouseAdapter | None
+) -> Generator[WarehouseAdapter]:
+    """Give the adapter of the caller, or connect a SnowflakeAdapter and close it at the end.
+
+    The caller keeps the ownership of an adapter that it gives, thus clair
+    closes only the adapter that it opened.
+    """
+    if adapter is not None:
+        yield adapter
+        return
+    snowflake_adapter = SnowflakeAdapter()
+    snowflake_adapter.connect(environment)
+    try:
+        yield snowflake_adapter
+    finally:
+        snowflake_adapter.close()
 
 
 class _DiscoveredProject(NamedTuple):
@@ -329,7 +362,7 @@ class RunHandle:
         run_mode: RunMode,
         test: bool,
         sample: bool,
-        threads: int,
+        threads: int | None,
         adapter: WarehouseAdapter | None,
     ) -> None:
         self.run_id = run_id
@@ -340,7 +373,6 @@ class RunHandle:
         self._sample = sample
         self._threads = threads
         self._adapter = adapter
-        self._owns_adapter = adapter is None
         self._results: list[RunResult] = []
         self._result_generator: Generator[RunResult] | None = None
         self._complete = False
@@ -404,24 +436,13 @@ class RunHandle:
         return self._cancellation.is_cancelled
 
     def close(self) -> None:
-        """Stop the run, and close each connection that the handle opened."""
+        """Stop the run, and close each connection that the handle opened.
+
+        The close of the generator ends the ``with`` block of ``_execute``,
+        thus the thread pool and the connection close too.
+        """
         if self._result_generator is not None:
-            # The finally block of run_project closes the thread pool.
             self._result_generator.close()
-        self._close_adapter()
-
-    def _close_adapter(self) -> None:
-        if self._owns_adapter and self._adapter is not None:
-            self._adapter.close()
-            self._adapter = None
-
-    def _connect(self) -> WarehouseAdapter:
-        """Give the adapter of the caller, or make a SnowflakeAdapter and connect it."""
-        if self._adapter is None:
-            snowflake_adapter = SnowflakeAdapter()
-            snowflake_adapter.connect(self._environment)
-            self._adapter = snowflake_adapter
-        return self._adapter
 
     def _execute(self) -> Generator[RunResult]:
         project_root, env_name, _, dag = self._plan.project
@@ -449,13 +470,9 @@ class RunHandle:
                 dag.get_trouve(node_name), queries, node_adapter, sample_scope=sample_scope
             )
 
-        # A connection that no Trouve uses gives nothing. A connection costs one
-        # login, not credits: Snowflake bills the warehouse per second while it
-        # runs, and an idle session starts no warehouse.
-        thread_count = min(self._threads, len(selected))
+        thread_count = _thread_count(self._threads, self._environment, len(selected))
 
-        try:
-            warehouse_adapter = self._connect()
+        with _connection(self._environment, self._adapter) as warehouse_adapter:
             logger.info(
                 "run.start",
                 run_id=self.run_id,
@@ -481,10 +498,6 @@ class RunHandle:
                 self._results.append(result)
                 yield result
             self._complete = True
-        finally:
-            # A generator cannot close itself, thus this block closes the
-            # adapter only. close() closes the generator.
-            self._close_adapter()
 
         summary = self.summary
         logger.info(
@@ -550,8 +563,7 @@ def start_run(
         run_mode=run_mode,
         test=test,
         sample=sample,
-        # The caller replaces the thread count of the environment.
-        threads=threads if threads is not None else env.threads,
+        threads=threads,
         adapter=adapter,
     )
 
@@ -708,8 +720,6 @@ def test(
 
     # `environment` names the object, and `env` names the argument.
     environment = env
-    # The caller replaces the thread count of the environment.
-    thread_count = threads if threads is not None else environment.threads
     project_root, env_name, _, dag = _discover(project_dir, environment)
 
     # Keep each SOURCE, thus a selector can match a SOURCE. run_tests skips it.
@@ -718,16 +728,9 @@ def test(
         logger.info("test.no_trouves_selected")
         return TestSummary(results=[])
 
-    warehouse_adapter = adapter
-    owns_adapter = warehouse_adapter is None
-    if warehouse_adapter is None:
-        warehouse_adapter = SnowflakeAdapter()
-        warehouse_adapter.connect(environment)
+    thread_count = _thread_count(threads, environment, len(selected))
 
-    # A connection that no Trouve uses gives nothing, and it costs one login.
-    thread_count = min(thread_count, len(selected))
-
-    try:
+    with _connection(environment, adapter) as warehouse_adapter:
         logger.info(
             "test.start",
             env=env_name,
@@ -747,9 +750,6 @@ def test(
                 environment_name=env_name,
             )
         )
-    finally:
-        if owns_adapter:
-            warehouse_adapter.close()
 
     if not summary.results:
         logger.info("test.no_tests_found")
