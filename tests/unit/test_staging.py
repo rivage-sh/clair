@@ -4,15 +4,27 @@ from __future__ import annotations
 
 from typing import TypeVar
 
+import pandas as pd
 import pytest
 
 from clair.core.compiler import build_statements
 from clair.core.staging import STAGING_SUFFIX, StagingAddressError, make_staging_address
 from clair.environments.routing import TrouveAddress
+from clair.trouves.pandas_table import PandasTable
+from clair.trouves.plan import PlanContext
 from clair.trouves.run_config import Append, Incremental, RunMode, Upsert
 from clair.trouves.statements import view_promote_statement
 from clair.trouves.trouve import Table, TrouveAbc, View
-from tests.helpers import build_and_cleanup, compile_trouve, staged_plan, unstaged_plan
+from tests.helpers import (
+    TEST_ADDRESS,
+    RecordingAdapter,
+    build_and_cleanup,
+    compile_trouve,
+    executed_sql,
+    run_one_trouve,
+    staged_plan,
+    unstaged_plan,
+)
 
 RUN_ID = "0195aabbccddeeff0011223344556677"
 
@@ -63,16 +75,15 @@ class TestStagingAddress:
 
 
 class TestPromoteStatements:
-    def test_table_is_cloned_into_place_carrying_grants(self):
+    def test_table_is_cloned_into_place(self):
         statement = "\n".join(
             _compile(Table(sql="SELECT 1 AS id"), "db.s.t").clone_promote_statements(
                 _address("db.s.t__staging"), _address("db.s.t")
             )
         )
-        assert "CREATE OR REPLACE TABLE db.s.t CLONE db.s.t__staging COPY GRANTS" in statement
+        assert "CREATE OR REPLACE TABLE db.s.t CLONE db.s.t__staging" in statement
 
     def test_table_promotion_does_not_depend_on_the_target_existing(self):
-        """COPY GRANTS copies from the replaced table, or the clone source if there is none."""
         statement = "\n".join(
             _compile(Table(sql="SELECT 1 AS id"), "db.s.t").clone_promote_statements(
                 _address("db.s.t__staging"), _address("db.s.t")
@@ -82,9 +93,9 @@ class TestPromoteStatements:
         assert "SWAP WITH" not in statement
         assert "RENAME TO" not in statement
 
-    def test_view_is_recreated_carrying_grants(self):
+    def test_view_is_recreated(self):
         statement = view_promote_statement(_address("db.s.v"), "SELECT 1 AS id")
-        assert "CREATE OR REPLACE VIEW db.s.v COPY GRANTS AS" in statement
+        assert "CREATE OR REPLACE VIEW db.s.v AS" in statement
         assert "SELECT 1 AS id" in statement
 
     def test_drop_staging_uses_matching_object_type(self):
@@ -167,10 +178,9 @@ class TestStagingCompilePlan:
         staging = _staging_name("db.s.orders", RUN_ID)
         assert statements[0].startswith("-- ── build")
         assert f"CREATE OR REPLACE TABLE {staging}" in statements[0]
-        # The promotion names the type test, then clones the tested table into position.
+        # The promotion clones the tested table into position.
         assert statements[1].startswith("-- ── promote · when should_promote() gives True")
-        assert "of a type other than TABLE, clair stops here" in statements[1]
-        assert f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging} COPY GRANTS" in statements[1]
+        assert f"CREATE OR REPLACE TABLE db.s.orders CLONE {staging}" in statements[1]
         assert statements[2].startswith("-- ── retire · after the promotion")
         assert f"DROP TABLE IF EXISTS {staging}" in statements[2]
 
@@ -186,14 +196,63 @@ class TestStagingCompilePlan:
         assert "CLONE db.s.orders" in statements[0]
 
     def test_plan_without_staging_is_the_plain_build(self):
-        # The plan holds the build, and one comment in front of it. A run with
-        # no staging writes the physical address directly, thus it can stop
-        # before the build, and the comment tells the reader of the plan.
+        # The plan holds the build, after the header of its phase.
         trouve = _compile(Table(sql="SELECT 1 AS id"), "db.s.orders")
         statements = build_statements(
             trouve, RunMode.FULL_REFRESH, RUN_ID, use_staging=False
         )
         (build,) = build_and_cleanup(unstaged_plan(trouve, RunMode.FULL_REFRESH, RUN_ID))
         assert len(statements) == 1
-        assert "of a type other than TABLE, clair stops here" in statements[0]
         assert statements[0].endswith(build)
+
+
+
+AUDITOR_GRANT = f"GRANT SELECT ON TABLE {TEST_ADDRESS} TO ROLE auditor"
+
+
+class AuditedTable(Table):
+    """The override of staging.md#grants: give a grant on one object again after each write."""
+
+    def document(self, context: PlanContext) -> list[str]:
+        return [
+            *super().document(context),
+            f"GRANT SELECT ON TABLE {context.physical_address} TO ROLE auditor",
+        ]
+
+
+class AuditedPandasTable(PandasTable):
+    """The same override on a DataFrame Trouve, whose write_pandas drops the table."""
+
+    def document(self, context: PlanContext) -> list[str]:
+        return [
+            *super().document(context),
+            f"GRANT SELECT ON TABLE {context.physical_address} TO ROLE auditor",
+        ]
+
+
+def _audit_rows() -> pd.DataFrame:
+    return pd.DataFrame({"id": [1]})
+
+
+@pytest.mark.parametrize(
+    "trouve",
+    [AuditedTable(sql="SELECT 1 AS id"), AuditedPandasTable(transform=_audit_rows)],
+    ids=["table", "pandas_table"],
+)
+@pytest.mark.parametrize("use_staging", [True, False], ids=["staged", "no_test"])
+def test_a_document_override_grants_again_after_the_last_write_of_production(trouve, use_staging):
+    # Clair keeps a grant on one object only where can. The
+    # document phase runs on production after the promotion, or after the
+    # write of a run with no staging, thus an override there gives the grant
+    # back on each path, also after a write_pandas that dropped the table.
+    result = run_one_trouve(trouve, RecordingAdapter(), use_staging=use_staging)
+    statements = executed_sql(result)
+
+    production_writes = [
+        index
+        for index, sql in enumerate(statements)
+        if sql != AUDITOR_GRANT
+        and (f"TABLE {TEST_ADDRESS} " in sql or sql == f"-- write_dataframe {TEST_ADDRESS}")
+    ]
+    assert production_writes, "the run wrote nothing to production"
+    assert statements.index(AUDITOR_GRANT) > max(production_writes)

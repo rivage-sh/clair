@@ -310,6 +310,25 @@ class SnowflakeAdapter(WarehouseAdapter):
         finally:
             cursor.close()
 
+    def reset_session(self) -> None:
+        """Give the session back the settings that it had before clair set the session of a Trouve.
+
+        UNSET gives back the query tag and the timeout of the account or the
+        user. An empty query tag would hide a tag of the user. A session on
+        which clair set no context changes nothing.
+        """
+        if self._conn is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+        if self._opening_context is None:
+            return
+
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute("ALTER SESSION UNSET QUERY_TAG, STATEMENT_TIMEOUT_IN_SECONDS")
+        finally:
+            cursor.close()
+        self.set_context()
+
     def read_table(
         self, address: TrouveAddress, sample_query: str | None = None
     ) -> pd.DataFrame:

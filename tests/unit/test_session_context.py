@@ -137,3 +137,42 @@ def test_clair_test_sets_the_session_of_each_trouve_that_it_tests(tmp_path):
     assert [tag["trouve"] for tag in tags] == ["db.pii.customers", "db.pii.customer_count"]
     assert len({tag["run_id"] for tag in tags}) == 1
     assert [timeout for _tag, timeout in adapter.session_parameters] == [60, None]
+
+
+@pytest.mark.parametrize("operation", [clair.run, clair.test], ids=["run", "test"])
+@pytest.mark.parametrize("threads", [1, 2])
+def test_the_adapter_of_the_caller_gets_its_session_back(tmp_path, operation, threads):
+    # The caller keeps the ownership of the adapter that it gives. After the
+    # operation, its next query must not run with the role, the warehouse, the
+    # query tag or the timeout of the last Trouve.
+    project_root = _write_tested_project(tmp_path / "project")
+    adapter = RecordingAdapter()
+
+    operation(project_root, env=make_environment(), adapter=adapter, threads=threads)
+
+    if threads == 1:
+        assert adapter.session_parameters, "the operation set no session on the adapter"
+    assert adapter.session_reset_positions == [len(adapter.session_parameters)]
+
+
+def test_the_snowflake_adapter_gives_back_the_opening_session():
+    adapter, cursor = _adapter_with_opening_context()
+    adapter.set_session_parameters(query_tag='{"trouve": "db.pii.customers"}', statement_timeout_seconds=60)
+    adapter.set_context(role="PII_ROLE", warehouse="XL_WH")
+    cursor.executed.clear()
+
+    adapter.reset_session()
+
+    assert cursor.executed == [
+        "ALTER SESSION UNSET QUERY_TAG, STATEMENT_TIMEOUT_IN_SECONDS",
+        f"USE ROLE {OPENING_ROLE}",
+        f"USE WAREHOUSE {OPENING_WAREHOUSE}",
+    ]
+
+
+def test_the_snowflake_adapter_changes_nothing_when_clair_set_no_session():
+    adapter, cursor = _adapter_with_opening_context()
+
+    adapter.reset_session()
+
+    assert cursor.executed == []

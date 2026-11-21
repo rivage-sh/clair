@@ -335,6 +335,15 @@ assert "1 succeeded" in output
 assert summary.succeeded_count == 1
 ```
 
+**A test states what stays true as more PRs land.** Each test runs on each later change, thus it must name a property that a future change can break: a behaviour that a user depends on, or a rule of the design. A check that one change happened is not a test. If a PR removes a clause, a `grep` shows it one time, in the PR. A test that asserts the clause is absent pins the text, guards no behaviour, and costs each later run.
+
+```python
+# Bad — the PR removed COPY GRANTS, and this test only remembers that day.
+assert not any("COPY GRANTS" in sql for sql in statements)
+# Good — the behaviour that a user depends on, in the warehouse.
+assert "SELECT" in privileges_on(adapter, production_address)  # the future grant
+```
+
 **Cover the common case and the edges.** Think through the boundaries before you write:
 empty, one, many, a duplicate, a cycle, a missing optional field, the wrong type, the
 error path. A suite that tests only the happy path gives false confidence.

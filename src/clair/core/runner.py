@@ -28,7 +28,7 @@ from clair.trouves.address import NodeAddresses, TrouveAddress
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.plan import PlanContext, TestQuery, TestResult
 from clair.trouves.run_config import Incremental, RunMode
-from clair.trouves.statements import WarehouseComments, type_change_error
+from clair.trouves.statements import WarehouseComments
 from clair.trouves.trouve import MaterializedTrouve, Table
 from clair.trouves.trouve_type import TrouveType
 
@@ -434,12 +434,6 @@ def _rejection_error(
             f"the tests failed. {context.physical_address} keeps its data. "
             f"The rejected candidate stays at {staging_address}"
         )
-    type_error = trouve.type_change_error(context)
-    if type_error is not None:
-        return (
-            f"the tests passed, but clair does not promote: {type_error}. "
-            f"The tested candidate stays at {staging_address}"
-        )
     return (
         f"should_promote() gave False. {context.physical_address} keeps its data. "
         f"The candidate stays at {staging_address}"
@@ -584,16 +578,6 @@ def _run_node(
         current_object = adapter.describe_object(addresses.physical)
     except ClairError as describe_error:
         return failure(str(describe_error))
-
-    # A run with no staging writes the physical address directly, thus it has no
-    # candidate to keep. A Trouve that changed its type stops before any write.
-    # A staged run builds and tests first, and should_promote() stops it.
-    if staging_address is None:
-        type_error = type_change_error(
-            current_object, trouve.warehouse_object_type, addresses.physical
-        )
-        if type_error is not None:
-            return failure(type_error)
 
     effective_mode = trouve.effective_mode(run_mode, current_object)
     if run_mode == RunMode.INCREMENTAL and effective_mode == RunMode.FULL_REFRESH and isinstance(trouve, Table) and isinstance(trouve.run_config, Incremental):
@@ -772,6 +756,9 @@ def _run_node(
     if not trouve.should_promote(context, test_results):
         return finish(_rejection_error(trouve, context, test_results), downstream_ok=False)
 
+    # The promotion first drops an object of another type. Until the statement
+    # after those drops succeeds, production does not hold the tested data.
+    type_drop_count = len(trouve.type_change_statements(context))
     promotion_statements = [
         *((Phase.PROMOTE, sql) for sql in plan.promote),
         *((Phase.DOCUMENT, sql) for sql in plan.document),
@@ -785,6 +772,15 @@ def _run_node(
             return finish(
                 f"the tests passed, but the promotion failed: {error}. "
                 f"The candidate stays at {staging_address}",
+                downstream_ok=False,
+            )
+        if statement_index <= type_drop_count:
+            # The DROP of the object of the old type succeeded, and the
+            # statement that makes the new object failed.
+            return finish(
+                f"clair dropped the object of the old type at {addresses.physical}, but the "
+                f"promotion failed: {error}. {addresses.physical} holds no object now. "
+                f"The candidate stays at {staging_address}. Run clair again",
                 downstream_ok=False,
             )
         # The first statement of the promotion succeeded, thus the physical

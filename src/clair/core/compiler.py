@@ -16,7 +16,6 @@ from clair.trouves.address import NodeAddresses
 from clair.trouves.dataframe_trouve import DataframeTrouve
 from clair.trouves.plan import NodePlan, PlanContext
 from clair.trouves.run_config import RunMode
-from clair.trouves.statements import type_change_comment
 from clair.trouves.trouve import ExecutionType, MaterializedTrouve, SqlTrouve
 from clair.trouves.trouve_type import TrouveType
 
@@ -153,7 +152,6 @@ def render_plan(trouve: MaterializedTrouve, context: PlanContext, plan: NodePlan
     The header goes on the first statement of its phase, thus each item stays
     one statement. A phase with no statement gets no header.
     """
-    type_comment = type_change_comment(trouve.warehouse_object_type, context.physical_address)
     test_statements = [
         f"-- {query.label}"
         + (f" ({query.column_name})" if query.column_name else "")
@@ -166,21 +164,13 @@ def render_plan(trouve: MaterializedTrouve, context: PlanContext, plan: NodePlan
         for phase in Phase
         if context.staged or phase not in (Phase.TEST, Phase.PROMOTE)
     ]
-    # The type test comes before the first statement that writes production:
-    # the promotion of a staged run, and the first statement of a run without one.
-    type_comment_phase = Phase.PROMOTE if context.staged else next(
-        (phase for phase in phases if plan.statements_of(phase)), None
-    )
 
     statements: list[str] = []
     for phase in phases:
         phase_statements = test_statements if phase == Phase.TEST else plan.statements_of(phase)
         for statement_index, sql in enumerate(phase_statements):
             if statement_index == 0:
-                header = phase.header
-                if phase == type_comment_phase:
-                    header = f"{header}\n{type_comment}"
-                sql = f"{header}\n{sql}"
+                sql = f"{phase.header}\n{sql}"
             statements.append(sql)
     return statements
 

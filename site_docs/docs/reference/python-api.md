@@ -117,7 +117,9 @@ not build: the `sample_sql` of the Trouve, or `sample_rows` rows. clair raises
 its logical address. See [Sampled Runs](../topics/sampling.md).
 
 Give `adapter` to keep one connection open for many calls. Clair then closes no
-connection. The default makes a `SnowflakeAdapter`, connects it, and closes it.
+connection. At the end, clair gives the session back its role, its warehouse, its query
+tag and its timeout, thus the next query of the caller does not run with the settings of
+the last Trouve. The default makes a `SnowflakeAdapter`, connects it, and closes it.
 A parallel run opens one more connection for each other thread, and it closes
 each of those.
 

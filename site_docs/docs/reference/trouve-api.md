@@ -174,7 +174,7 @@ class Table(SqlTrouve):
 | `clone_statement(source_address, clone_address)` | `str` | A zero-copy clone. |
 | `add_column_statements(address, added_columns)` | `list[str]` | One `ALTER TABLE ... ADD COLUMN` for each column. |
 | `cluster_by_statements(address, incremental=...)` | `list[str]` | The `ALTER` that sets or drops the clustering key. |
-| `clone_promote_statements(staging_address, physical_address)` | `list[str]` | The default promotion: a clone with `COPY GRANTS`. |
+| `clone_promote_statements(staging_address, physical_address)` | `list[str]` | The default promotion: a clone. The new object gets the future grants of its schema. |
 
 Each method gives SQL text, and sends nothing. Use them in an override of a phase. See
 [The building blocks](../guides/control-the-lifecycle.md#the-building-blocks).

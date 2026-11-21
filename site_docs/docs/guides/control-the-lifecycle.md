@@ -19,11 +19,11 @@ a phase can be empty.
 
 | # | Phase | What it does | The default | When it runs |
 |---|-------|--------------|-------------|--------------|
-| 1 | `prepare` | Makes the target ready for the build. | An incremental `Table` clones production to the staging address, and adds each new column. | Each run |
+| 1 | `prepare` | Makes the target ready for the build. | An incremental `Table` clones production to the staging address, and adds each new column. A run with `--no-test` drops an object of another type at the physical address. | Each run |
 | 2 | `build` | Writes the rows. | `CREATE OR REPLACE TABLE ... AS`, or the statements of the incremental strategy. | Each run |
 | 3 | `configure` | Sets the properties of the table after the write. | The clustering key. | Each run |
 | 4 | `test` | Gives the data quality tests as queries. Each row of a result is a failure. | One query for each test of the Trouve. | Each run with tests |
-| 5 | `promote` | Makes production hold the tested data. | `CREATE OR REPLACE TABLE <physical> CLONE <staging> COPY GRANTS`. A `View` makes the view again. | A staged run, when `should_promote()` gives `True` |
+| 5 | `promote` | Makes production hold the tested data. | `CREATE OR REPLACE TABLE <physical> CLONE <staging>`. A `View` makes the view again. | A staged run, when `should_promote()` gives `True` |
 | 6 | `document` | Writes the docs as Snowflake comments on production. | Each comment that differs from the `docs`. | Each run |
 | 7 | `retire` | Deals with the promoted staging object. | `DROP TABLE IF EXISTS <staging>`. | A staged run, after a promotion |
 | 8 | `cleanup` | Removes each object that this run made for itself. | The new rows table of an `Upsert` or a `DeleteInsert`. | Each run, last, also after a failure and a cancel |
@@ -33,7 +33,7 @@ Two policy methods decide, and send no SQL:
 | Method | When clair calls it | The default |
 |--------|---------------------|-------------|
 | `effective_mode(requested_mode, current_object)` | Before `plan()`. | `INCREMENTAL` when the command line asks for it, the `run_config` is `Incremental`, and production holds a table. Else `FULL_REFRESH`. |
-| `should_promote(context, test_results)` | After the tests of a staged run. | `True` when no blocking test failed, and production holds no object of a different type. |
+| `should_promote(context, test_results)` | After the tests of a staged run. | `True` when no blocking test failed. |
 
 `plan()` gives a `NodePlan`, with one field for each phase:
 
@@ -294,7 +294,6 @@ The compiled file names each phase, in the order of the run. For `MirroredUpsert
 
 ```sql
 -- ── promote · when should_promote() gives True ──────────────
--- object type: if <physical> holds an object of a type other than TABLE, clair stops here and writes nothing to it
 -- merge the new rows into the target table
 MERGE INTO <physical> AS target
 USING <physical>__clair_new_rows_<run_id> AS source

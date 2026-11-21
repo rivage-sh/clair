@@ -249,7 +249,7 @@ dtypes and the rows, and each SQL statement of the plan is a comment:
 #   2     purchase     Purchase           True
 
 # ── promote · when should_promote() gives True ──────────────
-# CREATE OR REPLACE TABLE omer.reference.event_type_labels CLONE omer.reference.event_type_labels__clair_<run_id> COPY GRANTS
+# CREATE OR REPLACE TABLE omer.reference.event_type_labels CLONE omer.reference.event_type_labels__clair_<run_id>
 ```
 
 For the field tables, read the [Trouve API](../reference/trouve-api.md).

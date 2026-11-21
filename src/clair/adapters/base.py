@@ -81,6 +81,20 @@ class WarehouseAdapter(ABC):
         )
         self.set_context(warehouse=config.warehouse, role=config.role)
 
+    def reset_session(self) -> None:
+        """Give the session back the settings that it had before clair set the session of a Trouve.
+
+        A caller can give its own adapter to ``clair.run()`` or ``clair.test()``,
+        and it keeps the ownership of that adapter. The pool calls this method on
+        it at the end, thus the next query of the caller does not run with the
+        role, the warehouse, the query tag or the timeout of the last Trouve.
+
+        The default gives back the opening role and warehouse, an empty query
+        tag, and the timeout of the account or the user.
+        """
+        self.set_session_parameters(query_tag="", statement_timeout_seconds=None)
+        self.set_context()
+
     @abstractmethod
     def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
         """Give the type and the comment of the object at the address, or None if it holds none.

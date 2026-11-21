@@ -24,18 +24,58 @@ clair gives each Trouve three addresses, and uses these three names everywhere:
 
 1. **Build at the staging address.** Clair materializes the Trouve as `<table>__clair_<run_id>`, beside the physical object in the same database and the same schema.
 2. **Test the staging object.** The data quality tests of the Trouve examine the staging object, and not the physical object.
-3. **Promote after the tests pass.** For a `TABLE`, clair runs `CREATE OR REPLACE TABLE <physical> CLONE <staging> COPY GRANTS`. Snowflake does this in the metadata, so the time does not grow with the table size. Clair then drops the staging copy. For a `VIEW`, clair runs `CREATE OR REPLACE VIEW ... COPY GRANTS`.
+3. **Promote after the tests pass.** For a `TABLE`, clair runs `CREATE OR REPLACE TABLE <physical> CLONE <staging>`. Snowflake does this in the metadata, so the time does not grow with the table size. Clair then drops the staging copy. For a `VIEW`, clair runs `CREATE OR REPLACE VIEW ...`. The new object gets the future grants of its schema: see [Grants](#grants).
 4. **Keep the candidate after a failure.** The physical object keeps the data that it had. Clair does not drop the staging object — see [After a failure](#after-a-failure). The Trouve gets the FAILED status, and clair skips each Trouve downstream of it.
 
 Clair promotes each node immediately after the tests of that node, and before the next node starts. A dependent thus reads its upstream at the physical address that its SQL names. You never write `__clair_` in a Trouve file.
 
 ## Grants
 
-The promotion uses `COPY GRANTS`, and this is necessary. Snowflake attaches a privilege to the *object*, and not to the name. An `ALTER TABLE ... SWAP WITH ...` moves the grants of a table to the staging name, and leaves the production name with only the grants of the staging object. Clair would remove each privilege that an administrator granted on the target, on each run.
+Clair supports one model of access control: **future grants on the schema**. Each object in one schema has the same sensitivity, and access to a schema is all or nothing: a role reads each object of the schema, or none. Give each role its access to the schema:
 
-`COPY GRANTS` copies each privilege except `OWNERSHIP` from the object that Snowflake replaces. If the physical object does not exist, Snowflake copies from the clone source. The first run thus needs no different statement.
+```sql
+GRANT USAGE ON SCHEMA analytics.finance TO ROLE finance_reader;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA analytics.finance TO ROLE finance_reader;
+GRANT SELECT ON FUTURE VIEWS IN SCHEMA analytics.finance TO ROLE finance_reader;
+```
 
-`OWNERSHIP` is the exception. It goes to the role that runs clair. If a different role owns the production object, the promotion changes the owner.
+Snowflake attaches a privilege to the *object*, and not to the name, and clair makes a new object on each run. A future grant belongs to the schema, thus each new object gets its privileges when Snowflake makes it, and no statement of clair carries a grant. If two tables need different access, they go in two schemas. The directory tree of a project gives the schemas, thus `tree` shows the access model.
+
+This is a position. Clair takes others of the same kind: for example, it has no freshness checks, because freshness is metadata about the data, and not a part of the transformation. In the same way, clair builds objects, and the access to them is a fact of the schema. dbt supports a grant on one object, with `copy_grants` and the `grants` config. Clair does not, and its statements stay simple: no statement copies a grant, on any path.
+
+### What each statement keeps
+
+A probe in Snowflake gave these results, in a schema with a future grant of SELECT, and a grant of INSERT on each existing table:
+
+| The statement | The future grant | The grant on the object |
+|---|---|---|
+| `CREATE` of a new table, view or clone | Kept | — |
+| `CREATE OR REPLACE`, with `AS` or `CLONE` | Kept | Lost |
+| `CREATE OR REPLACE ... COPY GRANTS` | Kept | Kept |
+| `ALTER TABLE ... SWAP WITH` | Kept | Lost |
+| `write_pandas` with `overwrite=True` | Kept | Lost |
+
+Each statement thus works with future grants. Clair sends the second row: the build, the promotion of a staged run, and the build of a run with `--no-test`, for each kind of Trouve. A grant on one object therefore goes at the next run that replaces production.
+
+`OWNERSHIP` of each new object goes to the role that runs clair.
+
+### Give a grant on one object yourself
+
+Clair does not stop you. If you must keep a grant on one object, give it again in the `document` phase. Clair runs that phase on the physical object, after the promotion of a staged run and after the write of a run with `--no-test`, for a SQL Trouve and for a DataFrame Trouve:
+
+```python
+from clair import PlanContext, Table
+
+
+class AuditedTable(Table):
+    def document(self, context: PlanContext) -> list[str]:
+        return [
+            *super().document(context),
+            f"GRANT SELECT ON TABLE {context.physical_address} TO ROLE auditor",
+        ]
+```
+
+The same override works on a subclass of `PandasTable` or `SeedTable`. To copy each grant of the old object in place of one grant that you name, override `promote()` and add `COPY GRANTS` to its statement. See [Control the lifecycle of a Trouve](../guides/control-the-lifecycle.md).
 
 ## An incremental Trouve
 
@@ -53,7 +93,7 @@ SELECT * FROM ( ... )
 SELECT ... FROM db.schema.orders__clair_<run_id> ...
 
 -- ── promote · when should_promote() gives True
-CREATE OR REPLACE TABLE db.schema.orders CLONE db.schema.orders__clair_<run_id> COPY GRANTS
+CREATE OR REPLACE TABLE db.schema.orders CLONE db.schema.orders__clair_<run_id>
 
 -- ── retire · after the promotion
 DROP TABLE IF EXISTS db.schema.orders__clair_<run_id>
@@ -68,31 +108,21 @@ Snowflake makes a clone in the metadata, so this step takes constant time for a 
 
 ## A Trouve that changes its type
 
-Change a `Table` to a `View`, or the reverse, and the next run stops before the promotion. A change between a standard table and an [Iceberg table](#an-iceberg-table) does the same. You drop the old object, and the run after that makes the new one.
+Change a `Table` to a `View`, or the reverse, and the next run drops the old object and makes the new one. A change between a standard table and an [Iceberg table](#an-iceberg-table) does the same.
 
-Snowflake replaces an object with an object of the same type only. `CREATE OR REPLACE VIEW` against a name that holds a table raises `Object '<name>' already exists.` The only repair is a drop, and a drop removes each grant on the object. The role that runs clair often cannot grant them again — for example in a managed access schema. Clair therefore does not drop the object. The person who changed the type decides about the grants.
+Snowflake replaces an object with an object of the same type only. `CREATE OR REPLACE VIEW` against a name that holds a table raises `Object '<name>' already exists.` Thus the old object must go first. A drop removes each grant on the object, but clair supports [future grants](#grants) only: the new object gets the grants of its schema again, and the drop loses nothing that the schema does not give back.
 
-The run does these steps:
+A staged run does these steps:
 
 1. It builds the candidate at the staging address, and runs the data quality tests on it, as usual.
-2. It asks the warehouse for the type of the object at the physical address. The type is different, so the Trouve fails, and clair skips each Trouve downstream of it.
-3. The physical object and its grants do not change. The tested candidate stays at the staging address, for your examination.
+2. If a blocking test fails, it stops. The old object stays at the physical address, with its data.
+3. If the tests pass, the promotion sends `DROP <old type> IF EXISTS <physical>`, then makes the new object from the candidate.
 
-The error names the drop to run:
+The DROP and the statement after it are two statements, because Snowflake has no statement that replaces one type with another. If the second one fails, the physical address holds no object, and the error says so. The tested candidate stays at the staging address, and the next run makes the object again.
 
-```text
-db.schema.orders holds the type TABLE, and the Trouve now makes the type VIEW.
-Snowflake cannot replace one type with the other. Clair does not drop the TABLE,
-because a drop removes each grant on it. Run DROP TABLE db.schema.orders, then
-run clair again.
-The tested candidate stays at db.schema.orders__clair_<run_id>
-```
+A run with `--no-test` has no staging step. It sends the DROP before its first write. If the build then fails, the address holds no object.
 
-After the drop, the address holds nothing, and the next run takes the usual path.
-
-A run with no data quality tests has no staging step, thus it has no candidate to keep. It stops before it writes anything.
-
-`clair compile` opens no warehouse connection, thus it cannot know the type that the address holds. The plan shows the condition as a comment: `-- object type: if <address> holds an object of a type other than TABLE, clair stops here and writes nothing to it`.
+`clair compile` opens no warehouse connection, thus it cannot know the type that the address holds, and its plan shows no DROP.
 
 ## A transient table
 
@@ -131,12 +161,12 @@ When you change the option of a table that exists:
 | Permanent to transient | The table becomes transient. | The table becomes transient, and keeps its rows. |
 | Transient to permanent | The table becomes permanent. | The run stops at the clone, and writes nothing. |
 
-The promotion uses `COPY GRANTS`, thus each change keeps the grants.
+The promotion makes a new object, thus each change gets the future grants of the schema.
 
-The incremental run that stops gives `Transient object cannot be cloned to a permanent object.` Run a full refresh, if the SQL can make each row again. If it cannot, make the table permanent yourself, and keep its rows and its grants:
+The incremental run that stops gives `Transient object cannot be cloned to a permanent object.` Run a full refresh, if the SQL can make each row again. If it cannot, make the table permanent yourself, and keep its rows:
 
 ```sql
-CREATE OR REPLACE TABLE db.schema.events COPY GRANTS AS SELECT * FROM db.schema.events
+CREATE OR REPLACE TABLE db.schema.events AS SELECT * FROM db.schema.events
 ```
 
 Then run clair again. The incremental run clones a permanent table into a permanent one.
@@ -209,13 +239,13 @@ trouve = Table(
 
 With no `external_volume`, Snowflake takes the default of the schema, the database or the account. Without one of those, it uses `SNOWFLAKE_MANAGED`, its own storage. Snowflake makes the base location of the files from the table name, thus each staging table has its own files.
 
-Snowflake builds, clones and promotes an Iceberg table in the same way as a standard table. Each statement says `ICEBERG TABLE`: the build `CREATE OR REPLACE ICEBERG TABLE ... CATALOG = 'SNOWFLAKE' AS (...)`, the clone of an incremental run, the promotion, and each `ALTER`. The promotion uses `COPY GRANTS`.
+Snowflake builds, clones and promotes an Iceberg table in the same way as a standard table. Each statement says `ICEBERG TABLE`: the build `CREATE OR REPLACE ICEBERG TABLE ... CATALOG = 'SNOWFLAKE' AS (...)`, the clone of an incremental run, the promotion, and each `ALTER`.
 
 - Only a `Table` accepts `iceberg`. A `PandasTable` and a `SeedTable` write through `write_pandas`, which makes a standard table only.
 - A `Table` cannot be `transient` and Iceberg. Snowflake gives no `TRANSIENT` in the clone of an Iceberg table, and each run clones.
 - An Iceberg table accepts fewer data types than a standard table. For example, a timestamp must have the scale 6 or less, thus cast `CURRENT_TIMESTAMP()` to `TIMESTAMP_NTZ(6)`. Snowflake stops the build with the column name.
 
-Snowflake cannot replace a standard table with an Iceberg table, or the reverse. A Trouve that changes its kind thus stops before the promotion, as a change from a TABLE to a VIEW does: the error names the drop to run, and the tested candidate stays. An incremental run of an Iceberg Trouve against a standard table makes a full refresh candidate, because the clone of a standard table cannot make an Iceberg table.
+Snowflake cannot replace a standard table with an Iceberg table, or the reverse. A Trouve that changes its kind thus drops the old table before the promotion, as a change from a TABLE to a VIEW does: see [A Trouve that changes its type](#a-trouve-that-changes-its-type). An incremental run of an Iceberg Trouve against a standard table makes a full refresh candidate, because the clone of a standard table cannot make an Iceberg table.
 
 ## The plan
 

@@ -90,7 +90,7 @@ Give `iceberg=Iceberg()` to make a Snowflake-managed Iceberg table. See [An Iceb
 
 A VIEW is the same as a TABLE, but clair runs `CREATE OR REPLACE VIEW`. A VIEW cannot use incremental strategies.
 
-You can change the type of a Trouve. The next run stops, and tells you to drop the object of the old type, because a drop removes its grants — see [A Trouve that changes its type](staging.md#a-trouve-that-changes-its-type).
+You can change the type of a Trouve. The next run drops the object of the old type, and makes the new one — see [A Trouve that changes its type](staging.md#a-trouve-that-changes-its-type).
 
 ```python
 # reports/orders/recent.py  →  reports.orders.recent

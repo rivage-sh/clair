@@ -117,14 +117,14 @@ def test_a_full_refresh_run_never_holds_the_filter(tmp_path):
 
 def test_a_table_that_was_a_view_builds_its_candidate_with_each_row(tmp_path):
     # The address holds a view, thus the incremental run has no base table. The
-    # candidate is a full refresh, and the promotion then stops on the type.
+    # candidate is a full refresh, and the promotion drops the view first.
     project_root = _write_project(tmp_path / "project", APPEND)
     adapter = RecordingAdapter(existing_views=[TARGET])
 
     summary = _run(project_root, adapter, RunMode.INCREMENTAL)
 
     result = summary.result(TARGET)
-    assert isinstance(result, RunFailure)
+    assert isinstance(result, RunSuccess), result
     assert result.effective_run_mode == RunMode.FULL_REFRESH
     assert INCREMENTAL_FILTER not in _build_sql_of(result)
 

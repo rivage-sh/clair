@@ -22,7 +22,7 @@ import clair
 from clair import TrouveAddress
 from clair.adapters.objects import WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunFailure, RunSuccess, RunSummary
+from clair.core.runner import RunSuccess, RunSummary
 from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
@@ -102,11 +102,10 @@ class TestAnIcebergTable:
         assert runs.incremental.object_type == WarehouseObjectType.ICEBERG_TABLE
         assert runs.incremental.ids == [1, 2]
 
-    def test_a_change_to_a_standard_table_stops_and_keeps_the_iceberg_table(
+    def test_a_change_to_a_standard_table_drops_the_iceberg_table_and_makes_a_table(
         self, runs: _Runs
     ) -> None:
         result = runs.to_standard.summary.result(LOGICAL_NAME)
-        assert isinstance(result, RunFailure)
-        assert "Run DROP ICEBERG TABLE" in result.error
-        assert runs.to_standard.object_type == WarehouseObjectType.ICEBERG_TABLE
-        assert runs.to_standard.ids == [1, 2]
+        assert isinstance(result, RunSuccess), result
+        assert runs.to_standard.object_type == WarehouseObjectType.TABLE
+        assert runs.to_standard.ids == [3]

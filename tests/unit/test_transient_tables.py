@@ -95,7 +95,7 @@ class TestThePlan:
         assert contains_statement(statements, f"CREATE OR REPLACE {keyword} {STAGING_ADDRESS} AS")
         assert contains_statement(
             statements,
-            f"CREATE OR REPLACE {keyword} {PHYSICAL_ADDRESS} CLONE {STAGING_ADDRESS} COPY GRANTS",
+            f"CREATE OR REPLACE {keyword} {PHYSICAL_ADDRESS} CLONE {STAGING_ADDRESS}",
         )
 
     def test_a_staged_incremental_run_clones_into_the_kind(self, transient: bool):
@@ -109,7 +109,7 @@ class TestThePlan:
         )
         assert contains_statement(
             statements,
-            f"CREATE OR REPLACE {keyword} {PHYSICAL_ADDRESS} CLONE {STAGING_ADDRESS} COPY GRANTS",
+            f"CREATE OR REPLACE {keyword} {PHYSICAL_ADDRESS} CLONE {STAGING_ADDRESS}",
         )
 
     def test_a_full_refresh_with_no_staging_makes_the_kind(self, transient: bool):
@@ -136,7 +136,7 @@ class TestTheRun:
         )
         assert contains_statement(
             sql_texts,
-            f"CREATE OR REPLACE {keyword} {PHYSICAL_ADDRESS} CLONE {STAGING_ADDRESS} COPY GRANTS",
+            f"CREATE OR REPLACE {keyword} {PHYSICAL_ADDRESS} CLONE {STAGING_ADDRESS}",
         )
 
     def test_a_seed_writes_and_promotes_the_kind(self, transient: bool):
@@ -151,7 +151,7 @@ class TestTheRun:
         assert contains_statement(
             executed_sql(result),
             f"CREATE OR REPLACE {table_keyword_of(transient)} {PHYSICAL_ADDRESS} "
-            f"CLONE {STAGING_ADDRESS} COPY GRANTS",
+            f"CLONE {STAGING_ADDRESS}",
         )
 
 
@@ -206,7 +206,7 @@ class TestTheDirectoryDefault:
         )
         assert contains_statement(
             statements,
-            f"CREATE OR REPLACE TRANSIENT TABLE {physical_address} CLONE {staging_address} COPY GRANTS",
+            f"CREATE OR REPLACE TRANSIENT TABLE {physical_address} CLONE {staging_address}",
         )
 
     @pytest.mark.parametrize(
