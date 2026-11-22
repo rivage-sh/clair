@@ -5,7 +5,11 @@ from __future__ import annotations
 import queue
 import threading
 
+import structlog
+
 from clair.adapters.base import WarehouseAdapter
+
+logger = structlog.get_logger()
 
 
 class AdapterPool:
@@ -46,7 +50,7 @@ class AdapterPool:
                 self._opened.append(adapter.new_connection())
         except BaseException:
             # A keep-alive session stays open until the process ends.
-            self.close()
+            self._close_opened()
             raise
 
         self._first_adapter = adapter
@@ -88,11 +92,20 @@ class AdapterPool:
         return adapter
 
     def close(self) -> None:
-        """Close each connection that the pool opened.
+        """Close each connection that the pool opened, and give the caller its session back.
 
         The pool does not close the adapter that the caller supplied, because
-        the caller keeps the ownership of it.
+        the caller keeps the ownership of it. A thread set the session of each
+        Trouve on it, thus the pool resets that session. A reset that fails
+        writes a warning, and does not hide the result of the run.
         """
+        self._close_opened()
+        try:
+            self._first_adapter.reset_session()
+        except Exception as reset_error:  # noqa: BLE001 — the run is complete, and its result stays correct
+            logger.warning("pool.session_reset_failure", error=str(reset_error))
+
+    def _close_opened(self) -> None:
         for extra_adapter in self._opened:
             extra_adapter.close()
         self._opened = []

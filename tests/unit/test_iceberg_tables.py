@@ -3,7 +3,8 @@
 The staging flow stays as it is: Snowflake builds, clones and promotes an
 Iceberg table in the same way as a standard table. Snowflake cannot replace a
 standard table with an Iceberg table, or the reverse, thus a change of kind
-stops before the promotion, as a change between a TABLE and a VIEW does.
+drops the old table before the promotion, as a change between a TABLE and a
+VIEW does.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from pydantic import ValidationError
 
 from clair.adapters.objects import WarehouseColumn
 from clair.core.compiler import build_statements
-from clair.core.runner import RunFailure, RunSuccess
+from clair.core.runner import RunSuccess
 from clair.core.staging import make_staging_address
 from clair.trouves.address import TrouveAddress
 from clair.trouves.pandas_table import PandasTable
@@ -35,7 +36,7 @@ STAGING_ADDRESS = make_staging_address(PHYSICAL_ADDRESS, TEST_RUN_ID)
 ID = WarehouseColumn(name="ID", data_type="NUMBER(38,0)")
 LABEL = WarehouseColumn(name="LABEL", data_type="VARCHAR(16777216)")
 
-PROMOTION = f"CREATE OR REPLACE ICEBERG TABLE {PHYSICAL_ADDRESS} CLONE {STAGING_ADDRESS} COPY GRANTS"
+PROMOTION = f"CREATE OR REPLACE ICEBERG TABLE {PHYSICAL_ADDRESS} CLONE {STAGING_ADDRESS}"
 CLONE = f"CREATE OR REPLACE ICEBERG TABLE {STAGING_ADDRESS} CLONE {PHYSICAL_ADDRESS}"
 
 
@@ -132,13 +133,6 @@ class TestThePlan:
         assert contains_statement(statements, f"ALTER ICEBERG TABLE {PHYSICAL_ADDRESS} RESUME RECLUSTER")
         assert not contains_statement(statements, "ALTER TABLE")
 
-    def test_the_comment_names_the_iceberg_type(self):
-        statements = build_statements(
-            compile_trouve(iceberg_table()), RunMode.FULL_REFRESH, TEST_RUN_ID
-        )
-
-        assert contains_statement(statements, "of a type other than ICEBERG TABLE")
-
 
 class TestTheRun:
     def test_an_incremental_run_on_an_iceberg_table_stays_incremental(self):
@@ -187,26 +181,34 @@ class TestTheRun:
         ],
         ids=["standard to iceberg", "iceberg to standard"],
     )
-    def test_a_change_of_kind_stops_before_the_promotion_and_names_the_drop(
+    def test_a_change_of_kind_drops_the_old_table_before_the_promotion(
         self, trouve: Table, adapter: RecordingAdapter, old_type: str, new_type: str
     ):
         result = run_one_trouve(trouve, adapter)
 
-        assert isinstance(result, RunFailure)
-        assert f"holds the type {old_type}, and the Trouve now makes the type {new_type}" in result.error
-        assert f"Run DROP {old_type} {TEST_ADDRESS}" in result.error
-        assert not contains_statement(executed_sql(result), f"{PHYSICAL_ADDRESS} CLONE")
+        assert isinstance(result, RunSuccess), result
+        statements = executed_sql(result)
+        drop_index = next(
+            index for index, sql in enumerate(statements)
+            if sql.endswith(f"DROP {old_type} IF EXISTS {TEST_ADDRESS}")
+        )
+        promote_index = next(
+            index for index, sql in enumerate(statements)
+            if f"CREATE OR REPLACE {new_type} {PHYSICAL_ADDRESS} CLONE" in sql
+        )
+        assert drop_index == promote_index - 1
 
-    def test_an_incremental_change_of_kind_builds_from_the_sql_then_stops(self):
+    def test_an_incremental_change_of_kind_builds_from_the_sql_then_replaces_the_table(self):
         # The clone of a standard table cannot make an Iceberg table. The run
-        # thus builds a full refresh candidate, and the promotion stops.
+        # thus builds a full refresh candidate, and the promotion drops the
+        # standard table first.
         adapter = RecordingAdapter(table_columns=[ID], query_columns=[ID], existing_tables=[TEST_ADDRESS])
 
         result = run_one_trouve(
             iceberg_table(incremental=True), adapter, run_mode=RunMode.INCREMENTAL
         )
 
-        assert isinstance(result, RunFailure)
+        assert isinstance(result, RunSuccess), result
         assert result.effective_run_mode == RunMode.FULL_REFRESH
         assert not contains_statement(executed_sql(result), CLONE)
-        assert "Run DROP TABLE" in result.error
+        assert contains_statement(executed_sql(result), f"DROP TABLE IF EXISTS {TEST_ADDRESS}")

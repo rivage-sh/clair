@@ -430,6 +430,8 @@ class RecordingAdapter(WarehouseAdapter):
         self.environment: Environment | None = None
         self.contexts: list[dict[str, str | None]] = []
         self.session_parameters: list[tuple[str, int | None]] = []
+        # The length of session_parameters at each reset_session() call.
+        self.session_reset_positions: list[int] = []
         self.is_open = True
         self.written_addresses: list[str] = []
         self.transient_addresses: list[str] = []
@@ -522,6 +524,9 @@ class RecordingAdapter(WarehouseAdapter):
         self, query_tag: str, statement_timeout_seconds: int | None
     ) -> None:
         self.session_parameters.append((query_tag, statement_timeout_seconds))
+
+    def reset_session(self) -> None:
+        self.session_reset_positions.append(len(self.session_parameters))
 
     def describe_object(self, address: TrouveAddress) -> WarehouseObject | None:
         self.described_addresses.append(str(address))

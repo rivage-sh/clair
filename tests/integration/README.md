@@ -117,12 +117,10 @@ staging table itself. Clair then promotes both with the same clone.
 ### The grants test
 
 `GRANT SELECT ON FUTURE TABLES IN DATABASE` gives SELECT to the test role on
-each new table. The promotion makes a new object, so Snowflake gives SELECT
-again on its own. A test that asks for SELECT therefore passes even when
-`COPY GRANTS` does nothing.
-
-Give a privilege with no future grant, for example INSERT. Then the promotion
-is the one path that can carry the privilege over, and the test can fail.
+each new table. Clair supports future grants and no grant on one object (see
+`site_docs/docs/topics/staging.md#grants`), thus a grants test asks for SELECT
+after a run that replaces production. A grant on one object, for example
+INSERT, does not survive a run, and no test asks for it.
 
 ## The source tables
 

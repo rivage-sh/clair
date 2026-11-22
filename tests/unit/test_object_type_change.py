@@ -1,10 +1,10 @@
-"""The tests of a Trouve that changes between a TABLE and a VIEW.
+"""The tests of a Trouve that changes between a TABLE, an ICEBERG TABLE and a VIEW.
 
-Snowflake replaces an object with an object of the same type only. Clair does
-not drop the old object, because a drop removes each grant on it. A staged run
-builds and tests the candidate, then stops before the promotion and keeps the
-candidate. A run with no staging stops before any write. The error names the
-drop that a person must run.
+Snowflake replaces an object with an object of the same type only, thus clair
+drops the old object first. Clair supports future grants on the schema, so the
+new object gets its grants again. A staged run builds and tests the candidate,
+and drops the old object only when it promotes. A run with no staging drops it
+before its first write.
 """
 
 from __future__ import annotations
@@ -20,10 +20,8 @@ from clair.core.staging import make_staging_address
 from clair.environments.routing import TrouveAddress
 from clair.exceptions import RunError
 from clair.trouves.pandas_table import PandasTable
-from clair.trouves.plan import TestQuery
 from clair.trouves.run_config import Append, Incremental, RunMode
 from clair.trouves.seed_table import SeedTable
-from clair.trouves.test import TestNotNull
 from clair.trouves.trouve import (
     Table,
     View,
@@ -43,11 +41,21 @@ ADDRESS = "analytics.revenue.orders"
 # for a physical statement by its address alone also finds the staging one.
 # Each statement carries a comment that names its step, so the tests match that.
 SEED_CLONE = "clone the target"
-PROMOTE_TABLE = "promote the tested table"
-PROMOTE_VIEW = "promote the tested view"
+PROMOTE = "-- staging: promote the tested"
+
 
 def _staging_address(address: str = ADDRESS) -> str:
     return str(make_staging_address(TrouveAddress.parse(address), RUN_ID))
+
+
+def _index_of_drop(result: RunSuccess | RunFailure, old_type_name: str) -> int:
+    """Give the position of the DROP of the old object, among the statements that clair sent."""
+    (drop_index,) = [
+        index
+        for index, sql in enumerate(executed_sql(result))
+        if sql.endswith(f"DROP {old_type_name} IF EXISTS {ADDRESS}")
+    ]
+    return drop_index
 
 
 def _drops_of_the_physical_object(result: RunSuccess | RunFailure) -> list[str]:
@@ -59,6 +67,38 @@ def _drops_of_the_physical_object(result: RunSuccess | RunFailure) -> list[str]:
     ]
 
 
+def _dataframe_trouves() -> list[PandasTable | SeedTable]:
+    return [
+        PandasTable(transform=lambda: pd.DataFrame({"id": [1]})),
+        SeedTable(dataframe=pd.DataFrame({"id": [1]})),
+    ]
+
+
+# Each case: the Trouve, an adapter whose physical address holds the old type,
+# and the name of the old type.
+TYPE_CHANGES = [
+    pytest.param(View(sql="SELECT 1 AS id"), lambda: RecordingAdapter(), "TABLE", id="table to view"),
+    pytest.param(
+        Table(sql="SELECT 1 AS id"),
+        lambda: RecordingAdapter(existing_views=[ADDRESS]),
+        "VIEW",
+        id="view to table",
+    ),
+    pytest.param(
+        _dataframe_trouves()[0],
+        lambda: RecordingAdapter(existing_views=[ADDRESS]),
+        "VIEW",
+        id="view to pandas table",
+    ),
+    pytest.param(
+        _dataframe_trouves()[1],
+        lambda: RecordingAdapter(existing_views=[ADDRESS]),
+        "VIEW",
+        id="view to seed table",
+    ),
+]
+
+
 class TestWantedObjectType:
     def test_a_table_trouve_wants_a_table(self):
         assert Table(sql="SELECT 1 AS id").warehouse_object_type == WarehouseObjectType.TABLE
@@ -68,151 +108,69 @@ class TestWantedObjectType:
 
 
 class TestStagedRun:
-    def test_a_table_that_becomes_a_view_stops_before_the_promotion(self):
-        # RecordingAdapter answers TABLE for each address, thus the physical
-        # address holds a table and the Trouve asks for a view.
-        adapter = RecordingAdapter()
-        result = run_one_trouve(View(sql="SELECT 1 AS id"), adapter)
+    @pytest.mark.parametrize(("trouve", "make_adapter", "old_type_name"), TYPE_CHANGES)
+    def test_the_promotion_drops_the_old_object_then_makes_the_new_one(
+        self, trouve: Table | View | PandasTable | SeedTable, make_adapter, old_type_name: str
+    ):
+        result = run_one_trouve(trouve, make_adapter())
 
-        assert isinstance(result, RunFailure)
-        assert f"{ADDRESS} holds the type TABLE, and the Trouve now makes the type VIEW" in result.error
-        assert f"Run DROP TABLE {ADDRESS}" in result.error
-        assert not [sql for sql in executed_sql(result) if PROMOTE_VIEW in sql]
-        assert _drops_of_the_physical_object(result) == []
+        assert isinstance(result, RunSuccess), result
+        statements = executed_sql(result)
+        (promote_index,) = [index for index, sql in enumerate(statements) if PROMOTE in sql]
+        assert _index_of_drop(result, old_type_name) == promote_index - 1
 
-    def test_a_view_that_becomes_a_table_stops_before_the_promotion(self):
-        adapter = RecordingAdapter(existing_views=[ADDRESS])
-        result = run_one_trouve(Table(sql="SELECT 1 AS id"), adapter)
-
-        assert isinstance(result, RunFailure)
-        assert f"{ADDRESS} holds the type VIEW, and the Trouve now makes the type TABLE" in result.error
-        assert f"Run DROP VIEW {ADDRESS}" in result.error
-        assert not [sql for sql in executed_sql(result) if PROMOTE_TABLE in sql]
-        assert _drops_of_the_physical_object(result) == []
-
-    def test_the_candidate_is_built_and_tested_and_kept(self):
-        # A person who reads the error can query a tested candidate, so the
-        # stop comes after the build and after the tests.
-        adapter = RecordingAdapter(existing_views=[ADDRESS])
-        tested_queries: list[TestQuery] = []
-        result = run_one_trouve(
-            Table(sql="SELECT 1 AS id", tests=[TestNotNull(column="id")]),
-            adapter,
-            tested_queries=tested_queries,
-        )
-
-        assert isinstance(result, RunFailure)
-        assert f"CREATE OR REPLACE TABLE {_staging_address()}" in executed_sql(result)[0]
-        (tested_query,) = tested_queries
-        assert f"FROM {_staging_address()}" in tested_query.sql
-        assert f"The tested candidate stays at {_staging_address()}" in result.error
-        # Clair drops the staging object only after a promotion.
-        assert not [sql for sql in executed_sql(result) if "DROP" in sql]
-
-    def test_a_failed_test_reports_the_test_and_not_the_type(self):
-        # The tests come first. A candidate that fails them is the first fault
-        # to fix, and the type of the address does not matter yet.
-        adapter = RecordingAdapter()
-        result = run_one_trouve(
-            View(sql="SELECT 1 AS id"),
-            adapter,
-            tests_passed=False,
-        )
+    @pytest.mark.parametrize(("trouve", "make_adapter", "old_type_name"), TYPE_CHANGES)
+    def test_a_failed_test_drops_nothing(
+        self, trouve: Table | View | PandasTable | SeedTable, make_adapter, old_type_name: str
+    ):
+        # The old object stays in production until a candidate passes its tests.
+        result = run_one_trouve(trouve, make_adapter(), tests_passed=False)
 
         assert isinstance(result, RunFailure)
         assert "the tests failed" in result.error
-        assert "holds a TABLE" not in result.error
+        assert _drops_of_the_physical_object(result) == []
 
-    def test_a_type_that_does_not_change_promotes(self):
-        adapter = RecordingAdapter()
+    def test_a_failed_promotion_after_the_drop_says_that_production_holds_nothing(self):
+        adapter = RecordingAdapter(existing_views=[ADDRESS], fail_on=["promote the tested table"])
         result = run_one_trouve(Table(sql="SELECT 1 AS id"), adapter)
 
+        assert isinstance(result, RunFailure)
+        assert f"{ADDRESS} holds no object now" in result.error
+        assert f"The candidate stays at {_staging_address()}" in result.error
+
+    @pytest.mark.parametrize(
+        ("trouve", "adapter"),
+        [
+            (Table(sql="SELECT 1 AS id"), RecordingAdapter()),
+            (View(sql="SELECT 1 AS id"), RecordingAdapter(existing_tables=[])),
+        ],
+        ids=["same type", "no object"],
+    )
+    def test_an_object_of_the_same_type_or_none_gets_no_drop(self, trouve, adapter):
+        result = run_one_trouve(trouve, adapter)
+
         assert isinstance(result, RunSuccess)
-        assert [sql for sql in executed_sql(result) if PROMOTE_TABLE in sql]
-
-    def test_an_address_that_holds_nothing_promotes(self):
-        # After the person drops the old object, the next run takes this path.
-        adapter = RecordingAdapter(existing_tables=[])
-        result = run_one_trouve(View(sql="SELECT 1 AS id"), adapter)
-
-        assert isinstance(result, RunSuccess)
-        assert [sql for sql in executed_sql(result) if PROMOTE_VIEW in sql]
-
-    def test_the_failure_is_in_the_log(self):
-        adapter = RecordingAdapter()
-        with capture_logs() as log_entries:
-            run_one_trouve(View(sql="SELECT 1 AS id"), adapter)
-
-        failures = [e for e in log_entries if e["event"] == "run.node.failure"]
-        assert len(failures) == 1
-        assert f"Run DROP TABLE {ADDRESS}" in failures[0]["error"]
+        assert _drops_of_the_physical_object(result) == []
 
 
 class TestRunWithNoStaging:
-    def test_a_type_change_stops_before_any_write(self):
-        adapter = RecordingAdapter(existing_views=[ADDRESS])
-        result = run_one_trouve(
-            Table(sql="SELECT 1 AS id"),
-            adapter,
-            use_staging=False,
-        )
+    @pytest.mark.parametrize(("trouve", "make_adapter", "old_type_name"), TYPE_CHANGES)
+    def test_the_drop_comes_before_the_first_write(
+        self, trouve: Table | View | PandasTable | SeedTable, make_adapter, old_type_name: str
+    ):
+        adapter = make_adapter()
+        result = run_one_trouve(trouve, adapter, use_staging=False)
 
-        assert isinstance(result, RunFailure)
-        assert f"Run DROP VIEW {ADDRESS}" in result.error
-        # No staging step, thus no candidate to keep, and no word about one.
-        assert "candidate" not in result.error
-        assert result.statements == []
+        assert isinstance(result, RunSuccess), result
+        assert _index_of_drop(result, old_type_name) == 0
+        if adapter.written_addresses:
+            assert adapter.written_addresses == [ADDRESS]
 
-    def test_a_type_that_does_not_change_builds(self):
-        adapter = RecordingAdapter()
-        result = run_one_trouve(
-            Table(sql="SELECT 1 AS id"),
-            adapter,
-            use_staging=False,
-        )
+    def test_a_type_that_does_not_change_builds_with_no_drop(self):
+        result = run_one_trouve(Table(sql="SELECT 1 AS id"), RecordingAdapter(), use_staging=False)
 
         assert isinstance(result, RunSuccess)
         assert f"CREATE OR REPLACE TABLE {ADDRESS}" in executed_sql(result)[0]
-
-
-def _dataframe_trouves() -> list[PandasTable | SeedTable]:
-    return [
-        PandasTable(transform=lambda: pd.DataFrame({"id": [1]})),
-        SeedTable(dataframe=pd.DataFrame({"id": [1]})),
-    ]
-
-
-class TestDataframeTrouve:
-    """A pandas Trouve writes with ``write_pandas``, but the type test is the same.
-
-    Against an address that holds a view, ``write_pandas(overwrite=True)`` fails
-    with a Snowflake error that does not name the cause. The runner must stop
-    first, with the same error as a SQL Trouve.
-    """
-
-    @pytest.mark.parametrize("trouve", _dataframe_trouves(), ids=["PandasTable", "SeedTable"])
-    def test_a_staged_run_writes_the_candidate_and_stops_before_the_promotion(
-        self, trouve: PandasTable | SeedTable
-    ):
-        adapter = RecordingAdapter(existing_views=[ADDRESS])
-        result = run_one_trouve(trouve, adapter)
-
-        assert isinstance(result, RunFailure)
-        assert f"{ADDRESS} holds the type VIEW, and the Trouve now makes the type TABLE" in result.error
-        assert f"Run DROP VIEW {ADDRESS}" in result.error
-        assert adapter.written_addresses == [_staging_address()]
-        assert not [sql for sql in executed_sql(result) if PROMOTE_TABLE in sql]
-        assert _drops_of_the_physical_object(result) == []
-
-    @pytest.mark.parametrize("trouve", _dataframe_trouves(), ids=["PandasTable", "SeedTable"])
-    def test_a_run_with_no_staging_writes_nothing(self, trouve: PandasTable | SeedTable):
-        adapter = RecordingAdapter(existing_views=[ADDRESS])
-        result = run_one_trouve(trouve, adapter, use_staging=False)
-
-        assert isinstance(result, RunFailure)
-        assert f"Run DROP VIEW {ADDRESS}" in result.error
-        assert adapter.written_addresses == []
-        assert result.statements == []
 
 
 class TestOneReadForEachNode:
@@ -248,17 +206,17 @@ class TestIncrementalFallback:
             run_config=Incremental(strategy=Append()),
         )
 
-    def test_a_view_at_the_address_builds_a_full_candidate_and_stops(self):
+    def test_a_view_at_the_address_builds_a_full_table_and_replaces_the_view(self):
         # An incremental run needs a base table, and a view is not one. Clair
-        # builds the full table as the candidate, tests it, and then stops,
-        # because the address holds a view.
+        # builds the full table as the candidate, tests it, drops the view, and
+        # promotes the table.
         adapter = RecordingAdapter(existing_views=[ADDRESS])
         with capture_logs() as log_entries:
             result = run_one_trouve(
                 self._incremental_trouve(), adapter, run_mode=RunMode.INCREMENTAL
             )
 
-        assert isinstance(result, RunFailure)
+        assert isinstance(result, RunSuccess), result
         assert result.effective_run_mode == RunMode.FULL_REFRESH
         fallbacks = [
             e for e in log_entries if e["event"] == "run.node.incremental_fallback"
@@ -268,7 +226,7 @@ class TestIncrementalFallback:
         # A clone of a view into a table is an error in Snowflake, thus the
         # plan must hold no seed clone.
         assert not [sql for sql in executed_sql(result) if SEED_CLONE in sql]
-        assert f"Run DROP VIEW {ADDRESS}" in result.error
+        assert _index_of_drop(result, "VIEW") >= 0
 
     def test_an_address_that_holds_nothing_changes_the_run_to_a_full_refresh(self):
         adapter = RecordingAdapter(existing_tables=[])

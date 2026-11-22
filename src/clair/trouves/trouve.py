@@ -58,7 +58,7 @@ from clair.trouves.statements import (
     comment_statements,
     drop_statement,
     quote_column_name,
-    type_change_error,
+    type_change_statements,
     view_promote_statement,
 )
 from clair.trouves.test import AnyTest
@@ -243,7 +243,7 @@ class TableOptions(TableDefaults):
     def clone_promote_statements(
         self, staging_address: TrouveAddress, physical_address: TrouveAddress
     ) -> list[str]:
-        """Give the CREATE OR REPLACE ... CLONE ... COPY GRANTS that replaces production."""
+        """Give the CREATE OR REPLACE ... CLONE that replaces production."""
         return clone_promote_statements(
             staging_address,
             physical_address,
@@ -554,12 +554,9 @@ class MaterializedTrouve(TrouveAbc[CompiledT_co], ABC):
     def should_promote(self, context: PlanContext, test_results: list[TestResult]) -> bool:
         """Tell the runner to promote the tested candidate. A staged run only.
 
-        The default promotes when no blocking test failed, and production holds
-        no object of a different type.
+        The default promotes when no blocking test failed.
         """
-        if any(test_result.is_blocking for test_result in test_results):
-            return False
-        return self.type_change_error(context) is None
+        return not any(test_result.is_blocking for test_result in test_results)
 
     # ── the plan ──────────────────────────────────────────────────────────
     def plan(self, context: PlanContext) -> NodePlan:
@@ -582,8 +579,15 @@ class MaterializedTrouve(TrouveAbc[CompiledT_co], ABC):
 
     # ── the phases ────────────────────────────────────────────────────────
     def prepare(self, context: PlanContext) -> list[str]:
-        """Make the target ready for the build. The default sends nothing."""
-        return []
+        """Make the target ready for the build.
+
+        A run with ``--no-test`` writes production directly, thus it drops an
+        object of another type at the physical address first. A staged run
+        drops it in ``promote()``, after the tests.
+        """
+        if context.staged:
+            return []
+        return self.type_change_statements(context)
 
     @abstractmethod
     def build(self, context: PlanContext) -> list[str]:
@@ -606,10 +610,16 @@ class MaterializedTrouve(TrouveAbc[CompiledT_co], ABC):
         ]
 
     def promote(self, context: PlanContext) -> list[str]:
-        """Make production hold the tested data. The default replaces production with a clone."""
+        """Make production hold the tested data. The default replaces production with a clone.
+
+        An object of another type at the physical address gets a DROP first.
+        """
         table_options = table_options_of(self)
         assert table_options is not None, "a View gives its own promote()"
-        return table_options.clone_promote_statements(context.target_address, context.physical_address)
+        return [
+            *self.type_change_statements(context),
+            *table_options.clone_promote_statements(context.target_address, context.physical_address),
+        ]
 
     def document(self, context: PlanContext) -> list[str]:
         """Write the docs as comments on production. The default writes only a text that differs."""
@@ -645,9 +655,9 @@ class MaterializedTrouve(TrouveAbc[CompiledT_co], ABC):
         table_options = table_options_of(self)
         return "VIEW" if table_options is None else table_options.object_keyword
 
-    def type_change_error(self, context: PlanContext) -> str | None:
-        """Give the error when production holds an object of a different type, or None."""
-        return type_change_error(
+    def type_change_statements(self, context: PlanContext) -> list[str]:
+        """Give the DROP of an object of another type at the physical address, or no statement."""
+        return type_change_statements(
             context.current_object, self.warehouse_object_type, context.physical_address
         )
 
@@ -747,8 +757,11 @@ class View(SqlTrouve):
         return [self.create_statement(context.target_address)]
 
     def promote(self, context: PlanContext) -> list[str]:
-        """Make the view again at the production address, with the grants of the old view."""
-        return [view_promote_statement(context.physical_address, self.full_refresh_sql())]
+        """Make the view again at the production address, after the DROP of an object of another type."""
+        return [
+            *self.type_change_statements(context),
+            view_promote_statement(context.physical_address, self.full_refresh_sql()),
+        ]
 
 
 class Table(SqlTrouve, TableOptions):
@@ -806,8 +819,8 @@ class Table(SqlTrouve, TableOptions):
         An incremental run adds to the rows of a table. Two conditions give it
         none: the address holds nothing, and the address holds a view because
         the Trouve was a View before. Both give ``FULL_REFRESH``. For the view,
-        the full refresh builds and tests a candidate, and the promotion then
-        stops, because the address holds an object of the old type.
+        the full refresh builds and tests a candidate, and the promotion drops
+        the view first.
         """
         if requested_mode != RunMode.INCREMENTAL or not isinstance(self.run_config, Incremental):
             return RunMode.FULL_REFRESH
@@ -824,7 +837,7 @@ class Table(SqlTrouve, TableOptions):
         time. Each new column goes onto the target, thus a test that fails
         leaves the physical table as it was.
         """
-        statements: list[str] = []
+        statements = super().prepare(context)
         if context.staged and context.effective_mode == RunMode.INCREMENTAL:
             statements.append(self.clone_statement(context.physical_address, context.target_address))
         statements.extend(self.add_column_statements(context.target_address, context.added_columns))

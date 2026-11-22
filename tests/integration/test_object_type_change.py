@@ -2,17 +2,17 @@
 
 Snowflake replaces an object with an object of the same type only. Against a
 different type ``CREATE OR REPLACE`` raises ``Object '<name>' already exists.``
-Clair does not drop the old object, because a drop removes each grant on it.
-The run builds and tests the candidate, stops before the promotion, and names
-the drop that a person must run.
+Clair therefore drops the old object first. Clair supports future grants on the
+schema, thus the new object gets its grants again.
 
 These tests are the proof of the feature, because the fault lives in Snowflake
 and no fake adapter shows it. Each test class runs one Trouve three times:
 
 1. As the first type. The run makes the object.
-2. As the second type. The run stops, and the object keeps the first type.
-3. As the second type again, after the test runs the drop from the error. The
-   address is empty, thus the run makes the object of the second type.
+2. As the second type, in a staged run. The promotion drops the old object, and
+   makes the object of the second type.
+3. As the first type again, with ``test=False``. The build drops the object of
+   the second type before it writes.
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ import pytest
 import clair
 from clair.adapters.objects import WarehouseObjectType
 from clair.adapters.snowflake import SnowflakeAdapter
-from clair.core.runner import RunFailure, RunSuccess, RunSummary
-from clair.core.staging import make_staging_address
+from clair.core.runner import RunSuccess, RunSummary
 from clair.environments.environments import Environment
+from clair.trouves.address import TrouveAddress
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import (
@@ -35,7 +35,7 @@ from tests.integration.projects import (
     CI_ROUTING_FILE,
     physical_address,
 )
-from tests.integration.warehouse import execute
+from tests.integration.warehouse import privileges_on
 
 pytestmark = pytest.mark.integration
 
@@ -75,7 +75,7 @@ def _rewrite_trouve(project_path: Path, database_name: str, trouve_type: str) ->
 
 
 class _TypeChangeRuns(NamedTuple):
-    """The three runs, and the types that the warehouse held between them.
+    """The three runs, and the type and the privileges that the warehouse held after each one.
 
     The fixture runs all three runs before the first test starts. A test that
     asks the warehouse after the fixture sees the last state only, so the
@@ -86,13 +86,23 @@ class _TypeChangeRuns(NamedTuple):
     type_after_first_run: WarehouseObjectType | None
     second: RunSummary
     type_after_second_run: WarehouseObjectType | None
-    candidate_type_after_second_run: WarehouseObjectType | None
+    privileges_after_second_run: set[str]
     third: RunSummary
     type_after_third_run: WarehouseObjectType | None
+    privileges_after_third_run: set[str]
+
+
+def _table_privileges(
+    adapter: SnowflakeAdapter, address: TrouveAddress, object_type: WarehouseObjectType | None
+) -> set[str]:
+    """Give the privileges on a table. The future grant of the setup covers tables only."""
+    if object_type != WarehouseObjectType.TABLE:
+        return set()
+    return privileges_on(adapter, address)
 
 
 class _TypeChangeCase:
-    """One Trouve that changes from FIRST_TYPE to SECOND_TYPE."""
+    """One Trouve that changes from FIRST_TYPE to SECOND_TYPE, and back."""
 
     DATABASE_NAME: str = ""
     FIRST_TYPE: str = ""
@@ -110,7 +120,7 @@ class _TypeChangeCase:
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> _TypeChangeRuns:
-        """Run the first type, change the type, run, drop by hand, run again."""
+        """Run the first type, the second type staged, then the first type with no staging."""
         project_path = _write_project(
             tmp_path_factory.mktemp(self.DATABASE_NAME),
             self.DATABASE_NAME,
@@ -124,23 +134,24 @@ class _TypeChangeCase:
         _rewrite_trouve(project_path, self.DATABASE_NAME, self.SECOND_TYPE)
         second = clair.run(project_path, env=environment, run_mode=RunMode.FULL_REFRESH)
         type_after_second_run = adapter.object_type(address)
-        candidate_type_after_second_run = adapter.object_type(
-            make_staging_address(address, second.run_id)
-        )
+        privileges_after_second_run = _table_privileges(adapter, address, type_after_second_run)
 
-        # The person reads the error and runs the drop that it names.
-        execute(adapter, f"DROP {self.FIRST_TYPE} {address}")
-        third = clair.run(project_path, env=environment, run_mode=RunMode.FULL_REFRESH)
+        _rewrite_trouve(project_path, self.DATABASE_NAME, self.FIRST_TYPE)
+        third = clair.run(
+            project_path, env=environment, run_mode=RunMode.FULL_REFRESH, test=False
+        )
         type_after_third_run = adapter.object_type(address)
+        privileges_after_third_run = _table_privileges(adapter, address, type_after_third_run)
 
         return _TypeChangeRuns(
             first,
             type_after_first_run,
             second,
             type_after_second_run,
-            candidate_type_after_second_run,
+            privileges_after_second_run,
             third,
             type_after_third_run,
+            privileges_after_third_run,
         )
 
     def test_the_first_run_makes_the_object_of_the_first_type(
@@ -148,39 +159,36 @@ class _TypeChangeCase:
     ) -> None:
         result = runs.first.result(self.logical_name)
 
-        assert result is not None
         assert isinstance(result, RunSuccess), result
         assert runs.type_after_first_run == WarehouseObjectType[self.FIRST_TYPE]
 
-    def test_the_second_run_fails_and_names_the_drop(
-        self, runs: _TypeChangeRuns, clair_environment: IntegrationConfig
+    def test_a_staged_run_replaces_the_object_with_the_second_type(
+        self, runs: _TypeChangeRuns
     ) -> None:
         result = runs.second.result(self.logical_name)
-        address = physical_address(self.logical_name, clair_environment.schema_name)
 
-        assert result is not None, "the second run holds no result for the Trouve"
-        assert isinstance(result, RunFailure)
-        assert f"Run DROP {self.FIRST_TYPE} {address}" in result.error
+        assert isinstance(result, RunSuccess), result
+        assert runs.type_after_second_run == WarehouseObjectType[self.SECOND_TYPE]
 
-    def test_the_second_run_keeps_the_object_of_the_first_type(
-        self, runs: _TypeChangeRuns
-    ) -> None:
-        """Clair sends no drop, so each grant on the object stays."""
-        assert runs.type_after_second_run == WarehouseObjectType[self.FIRST_TYPE]
-
-    def test_the_second_run_keeps_a_tested_candidate_of_the_second_type(
-        self, runs: _TypeChangeRuns
-    ) -> None:
-        assert runs.candidate_type_after_second_run == WarehouseObjectType[self.SECOND_TYPE]
-
-    def test_after_the_drop_the_next_run_makes_the_second_type(
+    def test_a_run_with_no_staging_replaces_the_object_with_the_first_type_again(
         self, runs: _TypeChangeRuns
     ) -> None:
         result = runs.third.result(self.logical_name)
 
-        assert result is not None
         assert isinstance(result, RunSuccess), result
-        assert runs.type_after_third_run == WarehouseObjectType[self.SECOND_TYPE]
+        assert runs.type_after_third_run == WarehouseObjectType[self.FIRST_TYPE]
+
+    def test_a_new_table_gets_the_future_grant(self, runs: _TypeChangeRuns) -> None:
+        privileges_of_each_new_table = [
+            privileges
+            for privileges, object_type in (
+                (runs.privileges_after_second_run, runs.type_after_second_run),
+                (runs.privileges_after_third_run, runs.type_after_third_run),
+            )
+            if object_type == WarehouseObjectType.TABLE
+        ]
+        assert privileges_of_each_new_table, "no run made a table"
+        assert all("SELECT" in privileges for privileges in privileges_of_each_new_table)
 
 
 class TestATableThatBecomesAView(_TypeChangeCase):

@@ -252,7 +252,7 @@ default statements of a `Table`.
 | 2 | `build` | `CREATE OR REPLACE TABLE <staging> AS (...)`, or the same statement for a VIEW | `INSERT INTO <staging>`, or the statements of the `MERGE` or the `DELETE` |
 | 3 | `configure` | The clustering key | The clustering key |
 | 4 | `test` | The tests of the Trouve, against the staging object | The same |
-| 5 | `promote`, after each blocking test passes | `CREATE OR REPLACE TABLE <physical> CLONE <staging> COPY GRANTS` | The same statement |
+| 5 | `promote`, after each blocking test passes | `CREATE OR REPLACE TABLE <physical> CLONE <staging>`, after a `DROP` of an object of another type | The same statements |
 | 6 | `document` | The `docs` as comments on the physical object | Each comment that differs |
 | 7 | `retire`, after the promotion | `DROP TABLE IF EXISTS <staging>` | The same |
 | 8 | `cleanup`, always | Nothing | `DROP TABLE IF EXISTS` the new rows table |
@@ -272,9 +272,9 @@ time is constant for a table of any size. An incremental Trouve therefore gets a
 of its target to change, at no copy cost, and a rejected candidate costs you nothing but
 the divergence.
 
-The promotion uses `COPY GRANTS`, and not `SWAP`. Snowflake attaches a privilege to the
-object and not to the name, thus a `SWAP` moves the production grants to the staging name.
-[Staging](staging.md#grants) gives the complete reason.
+The promotion copies no grant. Clair supports future grants on the schema, and the clone is
+a new object, thus it gets them. [Staging](staging.md#grants) gives the position, what each
+statement keeps, and the override for a grant on one object.
 
 ### The mode of each node
 

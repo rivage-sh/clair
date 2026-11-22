@@ -376,7 +376,7 @@ The effective mode of that node is `FULL_REFRESH`, and its SQL obeys the effecti
 
 If Snowflake cannot tell clair whether the table exists, the Trouve fails and clair writes nothing. A table that clair cannot see is not a table that does not exist.
 
-A Trouve that changes from a `VIEW` to an incremental `TABLE` has no base table either, because the address holds a view. Clair builds and tests a full refresh candidate, then stops before the promotion, and tells you to drop the view — see [A Trouve that changes its type](staging.md#a-trouve-that-changes-its-type).
+A Trouve that changes from a `VIEW` to an incremental `TABLE` has no base table either, because the address holds a view. Clair builds and tests a full refresh candidate, then the promotion drops the view and makes the table — see [A Trouve that changes its type](staging.md#a-trouve-that-changes-its-type).
 
 ## Choose the mode at the command line
 

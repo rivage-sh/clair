@@ -2,14 +2,14 @@
 
 A mock adapter shows the keyword in the SQL. Only the warehouse shows the
 kind of the table that the statements make, and which change of kind keeps the
-rows and the grants. Snowflake clones a permanent table into a transient one,
+rows and the future grant of the database. Snowflake clones a permanent table into a transient one,
 but it does not clone a transient table into a permanent one.
 
 The fixture runs one incremental Trouve four times:
 
-1. Permanent. The table is permanent, and the test grants INSERT on it.
+1. Permanent. The table is permanent.
 2. Transient, incremental. The clone makes the table transient. It keeps the
-   rows and the grant.
+   rows, and the new object gets the future grant.
 3. Permanent, incremental. The clone of a transient table into a permanent one
    fails. The table keeps its kind and its rows.
 4. Permanent, full refresh. The table becomes permanent, from the SQL.
@@ -29,7 +29,7 @@ from clair.environments.environments import Environment
 from clair.trouves.run_config import RunMode
 from tests.integration.config import IntegrationConfig
 from tests.integration.projects import physical_address, write_refined_project
-from tests.integration.warehouse import execute, privileges_on, query_rows
+from tests.integration.warehouse import privileges_on, query_rows
 
 pytestmark = pytest.mark.integration
 
@@ -103,8 +103,6 @@ class TestAChangeOfKind:
             )
 
         permanent = run(1, transient=False, run_mode=RunMode.INCREMENTAL)
-        # No future grant covers INSERT, thus only COPY GRANTS can keep it.
-        execute(adapter, f"GRANT INSERT ON TABLE {address} TO ROLE {clair_environment.role}")
         to_transient = run(2, transient=True, run_mode=RunMode.INCREMENTAL)
         to_permanent_incremental = run(3, transient=False, run_mode=RunMode.INCREMENTAL)
         to_permanent_full_refresh = run(3, transient=False, run_mode=RunMode.FULL_REFRESH)
@@ -121,7 +119,7 @@ class TestAChangeOfKind:
 
     def test_the_change_to_transient_keeps_the_rows_and_the_grants(self, runs: _Runs) -> None:
         assert runs.to_transient.ids == [1, 2]
-        assert "INSERT" in runs.to_transient.privileges
+        assert "SELECT" in runs.to_transient.privileges
 
     def test_an_incremental_run_cannot_make_a_transient_table_permanent(self, runs: _Runs) -> None:
         result = runs.to_permanent_incremental.summary.result(LOGICAL_NAME)
@@ -137,7 +135,7 @@ class TestAChangeOfKind:
         assert isinstance(result, RunSuccess), result
         assert not runs.to_permanent_full_refresh.transient
         assert runs.to_permanent_full_refresh.ids == [3]
-        assert "INSERT" in runs.to_permanent_full_refresh.privileges
+        assert "SELECT" in runs.to_permanent_full_refresh.privileges
 
 
 SEED_FILE = """\

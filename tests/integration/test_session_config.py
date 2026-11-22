@@ -73,3 +73,46 @@ class TestTheSession:
         result = summary.result(SLOW)
         assert isinstance(result, RunFailure)
         assert "timeout" in result.error.lower()
+
+
+CALLER_DATABASE_NAME = "session_of_the_caller"
+
+
+class TestTheSessionOfTheCaller:
+    def test_the_adapter_of_the_caller_gets_its_session_back(
+        self,
+        environment: Environment,
+        tmp_path_factory: pytest.TempPathFactory,
+        workspace_prefix: str,
+    ) -> None:
+        """The caller keeps its adapter, thus the session must not keep the settings of a Trouve."""
+        project_path = write_refined_project(
+            tmp_path_factory.mktemp(CALLER_DATABASE_NAME),
+            CALLER_DATABASE_NAME,
+            {
+                "tagged": (
+                    "from clair import Table\n"
+                    'trouve = Table(sql="SELECT 1 AS id", query_tags={"team": "finance"},\n'
+                    "               statement_timeout_seconds=3600)\n"
+                ),
+            },
+        )
+        caller_adapter = SnowflakeAdapter.connected(environment)
+        try:
+            summary = clair.run(
+                project_path, env=environment, adapter=caller_adapter, test=False, threads=1
+            )
+            assert summary.failed == []
+
+            # SHOW PARAMETERS gives (key, value, default, level, description, type).
+            ((_key, query_tag, *_query_tag_rest),) = query_rows(
+                caller_adapter, "SHOW PARAMETERS LIKE 'QUERY_TAG' IN SESSION"
+            )
+            ((_key, _value, _default, timeout_level, *_timeout_rest),) = query_rows(
+                caller_adapter, "SHOW PARAMETERS LIKE 'STATEMENT_TIMEOUT_IN_SECONDS' IN SESSION"
+            )
+        finally:
+            caller_adapter.close()
+
+        assert query_tag == ""
+        assert timeout_level != "SESSION"

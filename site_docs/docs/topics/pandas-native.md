@@ -155,7 +155,7 @@ def top_rated(catalog: pd.DataFrame, reviews: pd.DataFrame) -> pd.DataFrame:
     ...
 
 # ── promote · when should_promote() gives True ──────────────
-# CREATE OR REPLACE TABLE derived.products.top_rated CLONE derived.products.top_rated__clair_<run_id> COPY GRANTS
+# CREATE OR REPLACE TABLE derived.products.top_rated CLONE derived.products.top_rated__clair_<run_id>
 
 # ── retire · after the promotion ────────────────────────────
 # DROP TABLE IF EXISTS derived.products.top_rated__clair_<run_id>

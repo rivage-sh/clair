@@ -3,7 +3,7 @@
 Clair writes each Trouve to a staging address, runs the data quality tests
 there, and gives the data its physical address only after each test passes.
 A mock adapter shows the statements that clair sends. It cannot show that
-Snowflake accepts them, that ``COPY GRANTS`` keeps a privilege, or that the
+Snowflake accepts them, that a new object gets the future grant, or that the
 physical table holds the rows of yesterday after a test failed. These tests do.
 
 Each test calls `clair.run()` and reads the `RunSummary`. The summary names the
@@ -37,7 +37,6 @@ from tests.integration.staging_project import (
     write_probe_project,
 )
 from tests.integration.warehouse import (
-    execute,
     privileges_on,
     query_rows,
     row_count,
@@ -459,48 +458,44 @@ class TestAPandasTableThatFails:
         assert row_count(adapter, staging) == 5
 
 
-class TestThePromotionKeepsTheGrants:
-    """``COPY GRANTS`` is the reason that clair clones instead of a SWAP."""
+class TestEachPathKeepsTheFutureGrant:
+    """Clair supports future grants on the schema, and no grant on one object (staging.md#grants)."""
 
-    DATABASE_NAME = "staging_grants_database"
-
-    def test_a_grant_on_the_physical_table_survives_the_next_run(
+    @pytest.mark.parametrize(
+        ("use_staging", "database_name"),
+        [(True, "staging_grants_database"), (False, "staging_grants_unstaged_database")],
+        ids=["staged", "no_test"],
+    )
+    def test_production_holds_the_future_grant_after_each_run(
         self,
+        use_staging: bool,
+        database_name: str,
         clair_environment: IntegrationConfig,
         environment: Environment,
         adapter: SnowflakeAdapter,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
-        """Snowflake attaches a privilege to the object, and not to the name.
+        """Each run replaces production with a new object, and Snowflake gives it the future grant.
 
-        The promotion replaces the object. Without ``COPY GRANTS`` the new
-        object would hold OWNERSHIP only, and clair would remove each privilege
-        that an administrator granted, on each run.
-
-        The test grants INSERT, and it must stay INSERT. The setup script runs
-        ``GRANT SELECT ON FUTURE TABLES IN DATABASE`` for this role, thus
-        Snowflake gives SELECT to each new table on its own. A test on SELECT
-        therefore passes even when ``COPY GRANTS`` does nothing. No future grant
-        covers INSERT, so only the promotion can carry it over.
+        The setup script runs ``GRANT SELECT ON FUTURE TABLES IN DATABASE`` for
+        this role. The second run replaces the object that the first run made:
+        by the promotion of a staged run, or by the build of a run with
+        ``test=False``.
         """
         schema_name = clair_environment.schema_name
-        role = clair_environment.role
         project_path = write_probe_project(
-            tmp_path_factory.mktemp("staging_grants"),
-            self.DATABASE_NAME,
+            tmp_path_factory.mktemp(database_name),
+            database_name,
             minimum_rows=PASSING_LIMIT,
         )
-        checked = checked_address(self.DATABASE_NAME, schema_name)
+        checked = checked_address(database_name, schema_name)
 
-        _make_source_rows(adapter, self.DATABASE_NAME, schema_name, rows=3)
-        clair.run(project_path, env=environment)
+        _make_source_rows(adapter, database_name, schema_name, rows=3)
+        clair.run(project_path, env=environment, test=use_staging)
+        summary = clair.run(project_path, env=environment, test=use_staging)
 
-        execute(adapter, f"grant insert on table {checked} to role {role}")
-        assert "INSERT" in privileges_on(adapter, checked)
-
-        clair.run(project_path, env=environment)
-
-        assert "INSERT" in privileges_on(adapter, checked)
+        assert summary.failed == []
+        assert "SELECT" in privileges_on(adapter, checked)
 
 
 class TestTheTestFalseFlag:

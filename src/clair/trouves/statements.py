@@ -12,7 +12,11 @@ Staging. Snowflake can test a table only after the table exists, thus clair
 writes each Trouve to ``<table>__clair_<run_id>`` first, tests it there, and
 then promotes it. An incremental Trouve first gets a zero-copy clone of the
 physical table, because the incremental statements need a base. The default
-promotion is ``CREATE OR REPLACE TABLE <physical> CLONE <staging> COPY GRANTS``.
+promotion is ``CREATE OR REPLACE TABLE <physical> CLONE <staging>``.
+
+Grants. Clair supports future grants on the schema, and no grant on one object.
+Each object that a statement makes gets the future grants of its schema, thus
+no statement here copies a grant.
 Snowflake does this in the metadata, so the time does not grow with the size
 of the table. A Snowflake feature that attaches to the object, such as Time
 Travel or a stream, starts again at each promotion, because the promotion makes
@@ -199,17 +203,9 @@ def clone_promote_statements(
 ) -> list[str]:
     """Give the statements that replace the physical table with a clone of the tested table.
 
-    ``COPY GRANTS`` makes this operation safe against a production object.
-    Without it clair removes each privilege that an administrator granted on
-    the target, because Snowflake attaches a privilege to the object and not to
-    the name. An ``ALTER TABLE ... SWAP WITH`` moves the grants to the staging
-    name and leaves the physical address bare. With ``COPY GRANTS`` Snowflake
-    copies each privilege except OWNERSHIP from the object that it replaces. If
-    the physical object does not exist, Snowflake copies from the clone source.
-
-    OWNERSHIP is the exception. It goes to the role that runs clair. ``SWAP``
-    has the same result, so this is not a new fault, but a target that a
-    different role owns changes owner.
+    The clone is a new object, thus it gets the future grants of the schema,
+    and it loses each grant on the object that it replaces. The role that runs
+    clair owns it.
 
     Args:
         staging_address: The table that holds the tested data.
@@ -226,7 +222,7 @@ def clone_promote_statements(
         (
             f"-- staging: promote the tested table\n"
             f"CREATE OR REPLACE {table_keyword} {physical_address} "
-            f"CLONE {staging_address} COPY GRANTS"
+            f"CLONE {staging_address}"
         )
     ]
     if clustered:
@@ -246,7 +242,7 @@ def view_promote_statement(physical_address: TrouveAddress, resolved_sql: str) -
     """
     return (
         f"-- staging: promote the tested view\n"
-        f"CREATE OR REPLACE VIEW {physical_address} COPY GRANTS AS (\n"
+        f"CREATE OR REPLACE VIEW {physical_address} AS (\n"
         f"{resolved_sql.strip()}\n)"
     )
 
@@ -330,53 +326,37 @@ def comment_statements(
     return statements
 
 
-def type_change_comment(object_type: WarehouseObjectType, physical_address: TrouveAddress) -> str:
-    """Give the comment that tells a reader of the plan about the type test.
-
-    ``clair compile`` opens no warehouse connection, thus it cannot know the type
-    that the physical address holds now. The comment names the condition, so a
-    reader of the compiled SQL knows that the run can stop here.
-    """
-    return (
-        f"-- object type: if {physical_address} holds an object of a type other than "
-        f"{object_type.value.upper()}, clair stops here and writes nothing to it"
-    )
-
-
-def type_change_error(
+def type_change_statements(
     current_object: WarehouseObject | None,
     wanted_type: WarehouseObjectType,
     physical_address: TrouveAddress,
-) -> str | None:
-    """Give the error that stops a Trouve whose type differs from the object at its address.
+) -> list[str]:
+    """Give the DROP of the object at the physical address, when its type differs from the Trouve.
 
     A warehouse replaces an object with an object of the same type only. A
     Trouve that changes between a TABLE, an ICEBERG TABLE and a VIEW thus needs
-    a drop of the old object. Clair does not send that drop. A drop removes each
-    privilege on the object, and the role of the run often cannot grant them
-    again, for example in a managed access schema. The person who changed the
-    type must drop the object, and decide about the grants.
+    a drop of the old object first. Clair supports future grants on the schema,
+    thus the new object gets its grants again, and the drop loses nothing that
+    the schema does not give back.
 
     Args:
         current_object: The object at the physical address, as the runner read
-            it at the start of the node. None means that the address holds nothing.
+            it at the start of the node. None means that the address holds
+            nothing, or that the plan is offline.
         wanted_type: The type that the Trouve makes.
         physical_address: The address that clair writes to.
 
     Returns:
-        The error message, or None when the address holds nothing or an object
+        One DROP, or no statement when the address holds nothing or an object
         of the correct type.
     """
-    current_type = None if current_object is None else current_object.object_type
-    if current_type is None or current_type == wanted_type:
-        return None
-
-    old_type_name = current_type.value.upper()
-    new_type_name = wanted_type.value.upper()
-    return (
-        f"{physical_address} holds the type {old_type_name}, and the Trouve now "
-        f"makes the type {new_type_name}. Snowflake cannot replace one type with the other. "
-        f"Clair does not drop the {old_type_name}, because a drop removes each "
-        f"grant on it. Run DROP {old_type_name} {physical_address}, then run "
-        f"clair again"
-    )
+    if current_object is None or current_object.object_type == wanted_type:
+        return []
+    old_type_name = current_object.object_type.value.upper()
+    return [
+        (
+            f"-- object type: drop the {old_type_name}, because the Trouve now makes a "
+            f"{wanted_type.value.upper()}\n"
+            f"DROP {old_type_name} IF EXISTS {physical_address}"
+        )
+    ]
