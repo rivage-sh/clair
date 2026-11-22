@@ -62,6 +62,9 @@ class PlanContext(BaseModel):
             table does not have.
         current_comments: The comments of the production object before the
             run. None means a new object, or offline.
+        test_sample: The subquery that the test phase reads in place of
+            ``target_address``: the sample of ``clair test --sample``. None
+            reads the object.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -76,6 +79,7 @@ class PlanContext(BaseModel):
     target_columns: list[WarehouseColumn] | None = None
     added_columns: list[WarehouseColumn] = []
     current_comments: WarehouseComments | None = None
+    test_sample: str | None = None
 
     @property
     def target_address(self) -> TrouveAddress:
@@ -85,6 +89,13 @@ class PlanContext(BaseModel):
         with ``--no-test``.
         """
         return self.staging_address or self.physical_address
+
+    @property
+    def tested_relation(self) -> str:
+        """The relation that the test phase reads: ``test_sample``, or else ``target_address``."""
+        if self.test_sample is not None:
+            return self.test_sample
+        return str(self.target_address)
 
     @property
     def target_column_names(self) -> list[str] | None:
@@ -124,8 +135,8 @@ class TestQuery(BaseModel):
     sql: str
 
     @classmethod
-    def of(cls, test: Test, test_index: int, address: TrouveAddress) -> TestQuery:
-        """Give the query of one test of the Trouve, against the object at *address*."""
+    def of(cls, test: Test, test_index: int, address: TrouveAddress | str) -> TestQuery:
+        """Give the query of one test of the Trouve, against *address*: an address, or a sample subquery."""
         return cls(
             test_index=test_index,
             label=test.label,

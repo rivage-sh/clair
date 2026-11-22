@@ -236,8 +236,9 @@ class TestQuery(BaseModel):
     sql: str
 ```
 
-`TestQuery.of(test, test_index, address)` gives the query of one `Test` against an address.
-The default `test()` phase gives one for each test of the Trouve.
+`TestQuery.of(test, test_index, address)` gives the query of one `Test` against an address or a
+sample subquery. The default `test()` phase gives one for each test of the Trouve, against
+`context.tested_relation`.
 
 ## `CompiledAttributes`
 

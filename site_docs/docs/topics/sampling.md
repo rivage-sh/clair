@@ -164,3 +164,10 @@ A test that passes then decides the promotion, as in each run. See [Staging](sta
 
 `clair test --sample` builds nothing. Each test reads the sample of its own Trouve, from
 the same `Trouve.sample()`, and skips the same tests. See [clair test](../cli/test.md).
+
+In a `TestSql` with `run_with_sample=True`, each `{THIS}` becomes that sample, at any place
+in the SQL: after a `FROM`, after a `JOIN`, or in a subquery. Two `{THIS}` read two
+samples. Give the Trouve a `sample_sql` that filters on a key, and the two samples hold the
+same rows. A reference to another Trouve reads each of its rows, as in the tests of
+`clair run --sample`. A sampled `{THIS}` cannot qualify a column: write
+`FROM {THIS} AS orders` and `orders.<column>`.

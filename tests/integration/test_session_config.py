@@ -116,3 +116,42 @@ class TestTheSessionOfTheCaller:
 
         assert query_tag == ""
         assert timeout_level != "SESSION"
+
+    def test_the_caller_gets_its_own_query_tag_and_timeout_back(
+        self,
+        environment: Environment,
+        tmp_path_factory: pytest.TempPathFactory,
+        workspace_prefix: str,
+    ) -> None:
+        """A notebook that tags its own session keeps its tag and its timeout after a run."""
+        project_path = write_refined_project(
+            tmp_path_factory.mktemp(CALLER_DATABASE_NAME),
+            CALLER_DATABASE_NAME,
+            {
+                "tagged": (
+                    "from clair import Table\n"
+                    'trouve = Table(sql="SELECT 1 AS id", query_tags={"team": "finance"},\n'
+                    "               statement_timeout_seconds=3600)\n"
+                ),
+            },
+        )
+        caller_adapter = SnowflakeAdapter.connected(environment)
+        try:
+            query_rows(caller_adapter, "ALTER SESSION SET QUERY_TAG = 'notebook'")
+            query_rows(caller_adapter, "ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = 600")
+            summary = clair.run(
+                project_path, env=environment, adapter=caller_adapter, test=False, threads=1
+            )
+            assert summary.failed == []
+
+            ((_key, query_tag, *_query_tag_rest),) = query_rows(
+                caller_adapter, "SHOW PARAMETERS LIKE 'QUERY_TAG' IN SESSION"
+            )
+            ((_key, timeout, *_timeout_rest),) = query_rows(
+                caller_adapter, "SHOW PARAMETERS LIKE 'STATEMENT_TIMEOUT_IN_SECONDS' IN SESSION"
+            )
+        finally:
+            caller_adapter.close()
+
+        assert query_tag == "notebook"
+        assert timeout == "600"

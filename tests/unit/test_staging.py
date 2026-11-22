@@ -8,11 +8,13 @@ import pandas as pd
 import pytest
 
 from clair.core.compiler import build_statements
+from clair.core.dag import build_dag, get_executable_nodes
+from clair.core.runner import RunFailure, run_project
 from clair.core.staging import STAGING_SUFFIX, StagingAddressError, make_staging_address
 from clair.environments.routing import TrouveAddress
 from clair.trouves.pandas_table import PandasTable
 from clair.trouves.plan import PlanContext
-from clair.trouves.run_config import Append, Incremental, RunMode, Upsert
+from clair.trouves.run_config import Append, DeleteInsert, Incremental, RunMode, Upsert
 from clair.trouves.statements import view_promote_statement
 from clair.trouves.trouve import Table, TrouveAbc, View
 from tests.helpers import (
@@ -256,3 +258,33 @@ def test_a_document_override_grants_again_after_the_last_write_of_production(tro
     ]
     assert production_writes, "the run wrote nothing to production"
     assert statements.index(AUDITOR_GRANT) > max(production_writes)
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [Upsert(primary_key_columns=["id"]), DeleteInsert(primary_key_columns=["id"])],
+    ids=["upsert", "delete_insert"],
+)
+@pytest.mark.parametrize("use_staging", [True, False], ids=["staged", "no_test"])
+def test_a_name_too_long_for_the_new_rows_table_fails_before_any_sql(strategy, use_staging):
+    # The staging name of this table fits in 255 characters. The new rows name
+    # has a longer suffix, thus Snowflake would reject it after the clone.
+    table_name = "x" * (MAX_IDENTIFIER_LENGTH - len(STAGING_SUFFIX) - len(RUN_ID))
+    trouve = compile_trouve(
+        Table(sql="SELECT 1 AS id", run_config=Incremental(strategy=strategy)),
+        f"db.schema.{table_name}",
+    )
+    dag = build_dag([trouve])
+
+    (result,) = run_project(
+        dag,
+        get_executable_nodes(dag),
+        RecordingAdapter(),
+        run_mode=RunMode.INCREMENTAL,
+        run_id=RUN_ID,
+        test_node=lambda _name, _queries, _adapter: [],
+        use_staging=use_staging,
+    )
+
+    assert isinstance(result, RunFailure)
+    assert result.statements == []

@@ -695,12 +695,21 @@ def _run_node(
     write_statements = [(phase, sql) for phase in write_phases for sql in plan.statements_of(phase)]
     sent_write_count = 0
     row_count = 0
+    # A run with no staging drops an object of another type first, in prepare.
+    unstaged_drop_count = 0 if staging_address is not None else len(trouve.type_change_statements(context))
 
     def stop_writes(error: str) -> _NodeOutcome:
         """Record each write statement that clair did not send, and give the failure."""
         statements.extend(
             Statement(sql=sql, phase=phase) for phase, sql in write_statements[sent_write_count:]
         )
+        drops = statements[:unstaged_drop_count]
+        if unstaged_drop_count and all(statement.success for statement in drops):
+            return finish(
+                f"clair dropped the object of the old type at {addresses.physical}, but the "
+                f"write failed: {error}. {addresses.physical} holds no object now. Run clair again",
+                downstream_ok=False,
+            )
         return finish(f"{error}{staging_note}", downstream_ok=False)
 
     failed_statement = execute_phase(Phase.PREPARE)

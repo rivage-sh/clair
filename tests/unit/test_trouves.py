@@ -552,11 +552,14 @@ class TestUniqueValidation:
         assert test.label == "unique"
 
     def test_sql_generation(self):
+        # A NULL is not a value, thus two NULLs are no duplicate. dbt's unique
+        # test filters them in the same way.
         test = TestUnique(column="user_id")
         sql = test.to_sql("db.schema.orders")
         assert sql == (
             "SELECT user_id, COUNT(*) "
             "FROM db.schema.orders "
+            "WHERE user_id IS NOT NULL "
             "GROUP BY user_id "
             "HAVING COUNT(*) > 1"
         )

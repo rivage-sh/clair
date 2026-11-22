@@ -101,7 +101,11 @@ class Test(BaseModel, ABC):
 
 
 class TestUnique(Test):
-    """A test that a column has no duplicate value."""
+    """A test that a column has no duplicate value.
+
+    A NULL is not a value, thus two NULLs are no duplicate, as in the unique
+    test of dbt. ``TestNotNull`` rejects a NULL.
+    """
 
     type: Literal["unique"] = "unique"
     column: str
@@ -110,6 +114,7 @@ class TestUnique(Test):
         return (
             f"SELECT {self.column}, COUNT(*) "
             f"FROM {physical_address} "
+            f"WHERE {self.column} IS NOT NULL "
             f"GROUP BY {self.column} "
             f"HAVING COUNT(*) > 1"
         )

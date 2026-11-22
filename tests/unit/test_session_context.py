@@ -28,11 +28,43 @@ OPENING_ROLE = "TRANSFORMER"
 OPENING_WAREHOUSE = "COMPUTE_WH"
 
 
-def _adapter_with_opening_context() -> tuple[SnowflakeAdapter, FakeCursor]:
+def _parameter_row(name: str, value: str, level: str) -> tuple[str, ...]:
+    """Give a row of SHOW PARAMETERS: (key, value, default, level, description, type)."""
+    return (name, value, "", level, "", "STRING")
+
+
+def _adapter_with_opening_context(
+    query_tag: str | None = None, timeout_seconds: int | None = None
+) -> tuple[SnowflakeAdapter, FakeCursor]:
+    """Give an adapter whose session opens with the role, the warehouse and the parameters.
+
+    A parameter of None is not set on the session: SHOW PARAMETERS gives the
+    value of the account, and an empty level.
+    """
     adapter = SnowflakeAdapter()
-    cursor = FakeCursor([(OPENING_ROLE, OPENING_WAREHOUSE)])
+    tag_row = _parameter_row(
+        "QUERY_TAG", query_tag or "", "" if query_tag is None else "SESSION"
+    )
+    timeout_row = _parameter_row(
+        "STATEMENT_TIMEOUT_IN_SECONDS",
+        str(timeout_seconds or 172800),
+        "" if timeout_seconds is None else "SESSION",
+    )
+    cursor = FakeCursor(
+        [],
+        answers={
+            "SELECT CURRENT_ROLE()": [(OPENING_ROLE, OPENING_WAREHOUSE)],
+            "SHOW PARAMETERS LIKE 'QUERY_TAG'": [tag_row],
+            "SHOW PARAMETERS LIKE 'STATEMENT_TIMEOUT_IN_SECONDS'": [timeout_row],
+        },
+    )
     adapter._conn = cast(Any, FakeConnection(cursor))
     return adapter, cursor
+
+
+def _session_changes(cursor: FakeCursor) -> list[str]:
+    """Give each statement that changes the session, and leave out each read."""
+    return [sql for sql in cursor.executed if sql.startswith(("ALTER SESSION", "USE "))]
 
 
 def _use_statements(cursor: FakeCursor) -> list[str]:
@@ -163,10 +195,45 @@ def test_the_snowflake_adapter_gives_back_the_opening_session():
 
     adapter.reset_session()
 
-    assert cursor.executed == [
-        "ALTER SESSION UNSET QUERY_TAG, STATEMENT_TIMEOUT_IN_SECONDS",
+    assert _session_changes(cursor) == [
+        "ALTER SESSION UNSET QUERY_TAG",
+        "ALTER SESSION UNSET STATEMENT_TIMEOUT_IN_SECONDS",
         f"USE ROLE {OPENING_ROLE}",
         f"USE WAREHOUSE {OPENING_WAREHOUSE}",
+    ]
+
+
+def test_the_snowflake_adapter_gives_back_the_query_tag_and_the_timeout_of_the_caller():
+    # A notebook can tag its own session. After a run, its next query must
+    # carry its own tag and timeout, and not the values of the account.
+    adapter, cursor = _adapter_with_opening_context(query_tag="notebook", timeout_seconds=600)
+    adapter.set_session_parameters(query_tag='{"trouve": "db.pii.customers"}', statement_timeout_seconds=60)
+    adapter.set_context(role="PII_ROLE")
+    cursor.executed.clear()
+
+    adapter.reset_session()
+
+    assert _session_changes(cursor)[:2] == [
+        "ALTER SESSION SET QUERY_TAG = 'notebook'",
+        "ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = 600",
+    ]
+
+
+def test_a_use_role_of_the_caller_between_two_runs_stays_after_the_second_run():
+    # The opening role is the role before each run, and not before the first
+    # run: the caller can change it between two runs.
+    adapter, cursor = _adapter_with_opening_context()
+    adapter.set_context(role="PII_ROLE")
+    adapter.reset_session()
+    cursor.answers["SELECT CURRENT_ROLE()"] = [("ANALYST", OPENING_WAREHOUSE)]
+    cursor.executed.clear()
+
+    adapter.set_context()
+    adapter.reset_session()
+
+    assert [sql for sql in _session_changes(cursor) if sql.startswith("USE ROLE")] == [
+        "USE ROLE ANALYST",
+        "USE ROLE ANALYST",
     ]
 
 

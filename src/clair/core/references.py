@@ -95,18 +95,35 @@ def resolve_sql(
         if sampled_reference is None:
             return str(address)
         if sql.startswith(".", match.end()):
-            raise CompileError(
-                f"The SQL of {owner_text} qualifies a column with the "
-                f"reference to '{address}', and a sampled run makes that "
-                "reference a subquery. Give the reference an alias, for "
-                "example `FROM {orders} AS orders`, and write `orders.<column>`."
-            )
+            raise _qualified_sample_error(owner_text, f"the reference to '{address}'")
         return sampled_reference
 
     result = _PLACEHOLDER_RE.sub(replace, sql)
     if this_address is None:
         return result
     return result.replace(THIS_PLACEHOLDER, str(this_address))
+
+
+def _qualified_sample_error(owner_text: str, reference_text: str) -> CompileError:
+    """Give the error of a sampled reference that qualifies a column. A subquery cannot qualify one."""
+    return CompileError(
+        f"The SQL of {owner_text} qualifies a column with {reference_text}, and a "
+        "sampled run makes that reference a subquery. Give the reference an alias, "
+        "for example `FROM {orders} AS orders`, and write `orders.<column>`."
+    )
+
+
+def reject_a_qualified_sampled_this(test: TestSql, trouve_address: TrouveAddress) -> None:
+    """Stop a sampled test whose ``{THIS}`` qualifies a column.
+
+    ``clair test --sample`` makes each ``{THIS}`` of a test the sample of its
+    Trouve, thus the rule of a sampled reference applies to it.
+
+    Raises:
+        CompileError: If ``{THIS}.<column>`` is in the SQL of the test.
+    """
+    if f"{THIS_PLACEHOLDER}." in test.resolved_sql:
+        raise _qualified_sample_error(f"a test of '{trouve_address}'", "{THIS}")
 
 
 def detect_imports(

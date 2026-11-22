@@ -12,7 +12,9 @@ The command finds four faults:
 - An address that an author writes as text, which makes no DAG edge.
 - A build plan that clair cannot make, or that ignores the staging address.
   ``Trouve.plan()`` needs no connection, thus the command calls it for each run
-  mode that a Trouve can reach. An override of a phase gets the same test.
+  mode that a Trouve can reach, for each type of Trouve, at the routed address
+  that a run writes to. An override of a phase gets the same test, and the name
+  of each object that the run makes for itself gets the address rules.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from pydantic import BaseModel
 
 from clair.core.compiler import offline_plan_context
 from clair.core.discovery import discover_project
+from clair.core.staging import PLACEHOLDER_RUN_ID, StagingAddressError
 from clair.core.text_references import TextReference, find_text_references
 from clair.environments.project_routing import (
     describe_unnamed_environment,
@@ -34,13 +37,10 @@ from clair.environments.routing import (
     detect_routing_collisions,
     route,
 )
+from clair.trouves.address import TrouveAddress
 from clair.trouves.plan import PlanContext
 from clair.trouves.run_config import RunMode
-from clair.trouves.trouve import SqlTrouve, TrouveAbc
-
-# The run_id of each plan that validation makes. No statement runs, thus the
-# value only needs to make a valid staging address.
-VALIDATION_RUN_ID = "validate"
+from clair.trouves.trouve import MaterializedTrouve, TrouveAbc
 
 
 class RoutingAddressProblem(BaseModel):
@@ -84,7 +84,9 @@ class BuildPlanProblem(BaseModel):
 
 
 def collect_build_plan_problems(trouves: list[TrouveAbc]) -> list[BuildPlanProblem]:
-    """Make the plan of each SQL Trouve for each run that it can get, and report each fault.
+    """Make the plan of each Trouve for each run that it can get, and report each fault.
+
+    Each Trouve must hold its physical address, as in a run.
 
     A run with tests writes to the staging address, and a run without tests
     writes to the physical address. Thus clair makes each plan with each target
@@ -94,14 +96,25 @@ def collect_build_plan_problems(trouves: list[TrouveAbc]) -> list[BuildPlanProbl
     """
     problems: list[BuildPlanProblem] = []
     for trouve in trouves:
-        if not isinstance(trouve, SqlTrouve) or trouve.compiled is None:
+        if not isinstance(trouve, MaterializedTrouve) or trouve.compiled is None:
             continue
         logical_address = str(trouve.logical_address)
         seen: set[tuple[RunMode, bool]] = set()
         for run_mode in RunMode:
             for staged in (True, False):
                 try:
-                    context = offline_plan_context(trouve, run_mode, VALIDATION_RUN_ID, staged)
+                    context = offline_plan_context(trouve, run_mode, PLACEHOLDER_RUN_ID, staged)
+                except StagingAddressError as naming_error:
+                    # The staging name does not depend on the run mode.
+                    if any(problem.staged == staged and problem.detail == str(naming_error) for problem in problems):
+                        continue
+                    problems.append(BuildPlanProblem(
+                        logical_address=logical_address,
+                        run_mode=run_mode,
+                        staged=staged,
+                        detail=str(naming_error),
+                    ))
+                    continue
                 except Exception as error:  # noqa: BLE001 — effective_mode() is user code, and it can raise anything
                     problems.append(BuildPlanProblem(
                         logical_address=logical_address,
@@ -126,7 +139,7 @@ def collect_build_plan_problems(trouves: list[TrouveAbc]) -> list[BuildPlanProbl
     return problems
 
 
-def _build_plan_fault(trouve: SqlTrouve, context: PlanContext) -> str | None:
+def _build_plan_fault(trouve: MaterializedTrouve, context: PlanContext) -> str | None:
     """Give the fault of one plan, or None if the plan is correct."""
     try:
         plan = trouve.plan(context)
@@ -229,8 +242,11 @@ def validate_project(project_root: Path, env_name: str) -> ValidationReport:
     ]
 
     # A collision test needs a physical address for each Trouve. One bad address
-    # means that clair cannot make them, thus the collision test waits.
+    # means that clair cannot make them, thus the collision test waits. The build
+    # plans wait too: a run writes to the physical address, and a run object
+    # name comes from it.
     collisions: list[RoutingCollision] = []
+    build_plan_problems: list[BuildPlanProblem] = []
     if not address_problems:
         logical_to_physical = {
             str(logical_address): route(logical_address, trouve_type, routing)
@@ -244,6 +260,9 @@ def validate_project(project_root: Path, env_name: str) -> ValidationReport:
                 logical_to_physical
             )
         ]
+        build_plan_problems = collect_build_plan_problems(
+            _at_physical_addresses(discovered, logical_to_physical)
+        )
 
     return ValidationReport(
         env_name=env_name,
@@ -253,11 +272,25 @@ def validate_project(project_root: Path, env_name: str) -> ValidationReport:
         address_problems=address_problems,
         collisions=collisions,
         text_references=find_text_references(discovered),
-        build_plan_problems=collect_build_plan_problems(discovered),
+        build_plan_problems=build_plan_problems,
         unnamed_environment_warning=describe_unnamed_environment(
             project_routing, env_name
         ),
     )
+
+
+def _at_physical_addresses(
+    trouves: list[TrouveAbc], logical_to_physical: dict[str, TrouveAddress]
+) -> list[TrouveAbc]:
+    """Give a copy of each compiled Trouve that holds its routed physical address, as in a run."""
+    routed_trouves: list[TrouveAbc] = []
+    for trouve in trouves:
+        if trouve.compiled is None:
+            continue
+        physical_address = logical_to_physical[str(trouve.logical_address)]
+        routed_compiled = trouve.compiled.model_copy(update={"physical_address": physical_address})
+        routed_trouves.append(trouve.model_copy(update={"compiled": routed_compiled}))
+    return routed_trouves
 
 
 def format_validation_report(report: ValidationReport) -> str:

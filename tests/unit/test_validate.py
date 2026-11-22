@@ -18,8 +18,11 @@ from click.testing import CliRunner
 import clair
 from clair.cli.main import cli
 from clair.core.references import TextReferenceLocation
+from clair.core.staging import STAGING_SUFFIX, StagingAddressError, new_run_id
 from clair.core.validation import ValidationReport
-from clair.exceptions import ClairError
+from clair.exceptions import ClairError, InvalidRoutingConfigError
+from clair.trouves.run_config import RunMode
+from clair.trouves.trouve import NEW_ROWS_SUFFIX
 from tests.helpers import make_environment, write_project_marker
 
 # Every routing file in these tests needs an entry class. This prelude gives one.
@@ -94,6 +97,39 @@ COLLIDING_ENTRY = """
 
 
     routing = RoutingTable(entries=[SharedRouting()])
+"""
+
+
+# A routing entry that adds "_dev" to the table name.
+TABLE_SUFFIX_ENTRY = """
+    class TableSuffixRouting(RoutingEntry):
+        environment_name: str = "dev"
+
+        def route(
+            self, trouve_address: TrouveAddress, trouve_type: TrouveType
+        ) -> TrouveAddress:
+            return trouve_address.model_copy(update={
+                "table_name": f"{trouve_address.table_name}_dev"
+            })
+
+
+    routing = RoutingTable(entries=[TableSuffixRouting()])
+"""
+
+
+def copying_entry(update_source: str) -> str:
+    """Give a routing entry that copies each address with *update_source*, as routing.md shows."""
+    return f"""
+    class CopyingRouting(RoutingEntry):
+        environment_name: str = "dev"
+
+        def route(
+            self, trouve_address: TrouveAddress, trouve_type: TrouveType
+        ) -> TrouveAddress:
+            return trouve_address.model_copy(update={update_source})
+
+
+    routing = RoutingTable(entries=[CopyingRouting()])
 """
 
 
@@ -399,6 +435,111 @@ class TestBuildPlans:
         shutil.copytree(example_3, project_root)
 
         assert clair.validate(project_root, env="dev").build_plan_problems == []
+
+
+# Snowflake permits 255 characters for each object name.
+MAX_IDENTIFIER_LENGTH = 255
+
+
+def _name_one_character_too_long_for(suffix: str) -> str:
+    """Give a table name that breaks the limit by one character when a run adds *suffix* and the run id."""
+    return "x" * (MAX_IDENTIFIER_LENGTH - len(suffix) - len(new_run_id()) + 1)
+
+
+class TestRunObjectNames:
+    """clair validate rejects each run object name that clair run and clair compile reject."""
+
+    @pytest.mark.parametrize(
+        ("suffix", "run_config_source", "expected_plans"),
+        [
+            pytest.param(STAGING_SUFFIX, "FullRefresh()", [("full_refresh", True)], id="staging"),
+            pytest.param(
+                NEW_ROWS_SUFFIX,
+                'Incremental(strategy=Upsert(primary_key_columns=["x"]))',
+                [("incremental", False), ("incremental", True)],
+                id="new_rows",
+            ),
+        ],
+    )
+    def test_a_run_object_name_too_long_is_a_problem(
+        self, project_with_trouves: Path, suffix: str, run_config_source: str, expected_plans
+    ):
+        table_name = _name_one_character_too_long_for(suffix)
+        (project_with_trouves / "analytics" / "finance" / f"{table_name}.py").write_text(
+            "from clair import FullRefresh, Incremental, Table, Upsert\n\n"
+            f'trouve = Table(sql="SELECT 1 AS x", run_config={run_config_source})\n'
+        )
+
+        report = clair.validate(project_with_trouves, env="dev")
+
+        address = f"analytics.finance.{table_name}"
+        assert build_plan_faults(report) == [
+            (address, run_mode, staged) for run_mode, staged in expected_plans
+        ]
+        with pytest.raises(StagingAddressError):
+            clair.compile(project_with_trouves, env="dev", run_mode=RunMode.INCREMENTAL)
+
+
+    @pytest.mark.parametrize(
+        "trouve_source",
+        [
+            'Table(sql="SELECT 1 AS x")',
+            'View(sql="SELECT 1 AS x")',
+            'SeedTable(dataframe=pd.DataFrame({"x": [1]}))',
+            'PandasTable(transform=lambda: pd.DataFrame({"x": [1]}))',
+        ],
+        ids=["table", "view", "seed_table", "pandas_table"],
+    )
+    def test_each_type_of_trouve_gets_the_check(self, project_with_trouves: Path, trouve_source: str):
+        table_name = _name_one_character_too_long_for(STAGING_SUFFIX)
+        (project_with_trouves / "analytics" / "finance" / f"{table_name}.py").write_text(
+            "import pandas as pd\n"
+            "from clair import PandasTable, SeedTable, Table, View\n\n"
+            f"trouve = {trouve_source}\n"
+        )
+
+        report = clair.validate(project_with_trouves, env="dev")
+
+        assert build_plan_faults(report) == [(f"analytics.finance.{table_name}", "full_refresh", True)]
+
+    def test_the_check_reads_the_routed_address(self, project_with_trouves: Path):
+        # The logical name fits the staging suffix exactly. The routing entry
+        # makes it longer, and clair run writes to the routed address.
+        write_routing(project_with_trouves, TABLE_SUFFIX_ENTRY)
+        table_name = _name_one_character_too_long_for(STAGING_SUFFIX)[:-1]
+        (project_with_trouves / "analytics" / "finance" / f"{table_name}.py").write_text(
+            'from clair import Table\n\ntrouve = Table(sql="SELECT 1 AS x")\n'
+        )
+
+        report = clair.validate(project_with_trouves, env="dev")
+
+        assert build_plan_faults(report) == [(f"analytics.finance.{table_name}", "full_refresh", True)]
+        with pytest.raises(StagingAddressError):
+            clair.compile(project_with_trouves, env="dev")
+
+
+class TestAnEntryThatCopiesTheAddress:
+    """model_copy does not validate, thus clair validates each address that an entry gives."""
+
+    @pytest.mark.parametrize(
+        "update_source",
+        ['{"database_name": "analytics-dev"}', '{"table_name": "x" * 256}'],
+        ids=["a_dash", "too_long"],
+    )
+    def test_a_bad_copied_address_is_a_problem_on_each_path(
+        self, project_with_trouves: Path, update_source: str
+    ):
+        write_routing(project_with_trouves, copying_entry(update_source))
+
+        report = clair.validate(project_with_trouves, env="dev")
+
+        assert problem_addresses(report) == [
+            "analytics.finance.revenue",
+            "analytics.reports.revenue",
+            "source.raw.orders",
+        ]
+        with pytest.raises(InvalidRoutingConfigError):
+            clair.compile(project_with_trouves, env="dev")
 
 
 class TestProblemCount:

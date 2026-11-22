@@ -9,11 +9,9 @@ from clair.core.dag import build_dag
 from clair.core.test_runner import (
     SampleScope,
     TestSummary,
-    run_test_queries,
     run_tests,
 )
 from clair.trouves._refs import THIS_PLACEHOLDER
-from clair.trouves.plan import TestQuery
 from clair.trouves.test import (
     THIS,
     TestNotNull,
@@ -40,6 +38,10 @@ def _make_trouve_with_tests(
         make_trouve(trouve_type, raw_sql, tests=tests), physical_address, imports=imports
     )
 
+
+
+SAMPLE_ROWS = 10
+SAMPLE_OF_ORDERS = f"(SELECT * FROM db.s.orders LIMIT {SAMPLE_ROWS})"
 
 
 class TestRunTests:
@@ -487,35 +489,67 @@ class TestSampleScope:
 
 
     @pytest.mark.parametrize(
-        ("query_sql", "expected_sql"),
+        ("test_sql", "expected_sql"),
         [
             pytest.param(
-                "select * from db.s.orders where id is null",
-                "select * FROM (SAMPLE) where id is null",
-                id="the_object",
+                f"SELECT * FROM {THIS} WHERE id IS NULL",
+                f"SELECT * FROM {SAMPLE_OF_ORDERS} WHERE id IS NULL",
+                id="after_from",
             ),
             pytest.param(
-                "select * from db.s.orders_archive where id is null",
-                "select * from db.s.orders_archive where id is null",
-                id="a_longer_name",
+                f"SELECT o.id FROM db.s.customers AS c JOIN {THIS} AS o ON o.cid = c.id",
+                f"SELECT o.id FROM db.s.customers AS c JOIN {SAMPLE_OF_ORDERS} AS o ON o.cid = c.id",
+                id="after_join",
+            ),
+            pytest.param(
+                f"SELECT *\nFROM\n    {THIS}\nWHERE id IS NULL",
+                f"SELECT *\nFROM\n    {SAMPLE_OF_ORDERS}\nWHERE id IS NULL",
+                id="after_a_line_break",
+            ),
+            pytest.param(
+                "SELECT * FROM db.s.orders_archive WHERE id IS NULL",
+                "SELECT * FROM db.s.orders_archive WHERE id IS NULL",
+                id="an_address_as_text",
             ),
         ],
     )
-    def test_the_sample_replaces_the_object_only(self, query_sql: str, expected_sql: str):
-        trouve = _make_trouve_with_tests("db.s.orders", TrouveType.TABLE, [TestUnique(column="id")])
+    def test_each_this_of_a_sampled_test_reads_the_sample(self, test_sql: str, expected_sql: str):
+        # clair test --sample samples the Trouve under test at its token, as
+        # clair run --sample samples a reference. Thus the place of {THIS} in
+        # the SQL does not matter, and an address that the author types as text
+        # stays as it is.
+        test = TestSql(sql=test_sql, resolved_sql=test_sql, run_with_sample=True)
+        trouve = _make_trouve_with_tests("db.s.orders", TrouveType.TABLE, [test])
         adapter = RecordingAdapter()
-        query = TestQuery(test_index=0, label="sql", sql=query_sql)
 
-        run_test_queries(
-            trouve,
-            [query],
+        run_tests(
+            build_dag([trouve]),
+            ["db.s.orders"],
             adapter,
             sample_scope=SampleScope.TEST_QUERIES,
-            sample_subquery="(SAMPLE)",
-            queried_address="db.s.orders",
+            sample_rows=SAMPLE_ROWS,
         )
 
         assert adapter.record.statements == [expected_sql]
+
+    def test_a_sampled_this_that_qualifies_a_column_fails_the_test(self):
+        # A subquery cannot qualify a column, as in clair run --sample.
+        test_sql = f"SELECT {THIS}.id FROM {THIS} WHERE {THIS}.id IS NULL"
+        test = TestSql(sql=test_sql, resolved_sql=test_sql, run_with_sample=True)
+        trouve = _make_trouve_with_tests("db.s.orders", TrouveType.TABLE, [test])
+        adapter = RecordingAdapter()
+
+        (result,) = run_tests(
+            build_dag([trouve]),
+            ["db.s.orders"],
+            adapter,
+            sample_scope=SampleScope.TEST_QUERIES,
+            sample_rows=SAMPLE_ROWS,
+        )
+
+        assert result.is_blocking
+        assert "alias" in result.error
+        assert adapter.record.statements == []
 
 
 class TestTestSql:

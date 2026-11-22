@@ -178,7 +178,7 @@ To make the passthrough deliberate, write an entry that gives the address back, 
 
 ## Validation
 
-`TrouveAddress` validates every name that it holds. A name must start with a letter or an underscore, hold only letters, digits, underscores or dollar signs, and stay under 255 characters. This applies to the logical addresses that your directories give, and to the physical addresses that your rules build.
+`TrouveAddress` validates every name that it holds. A name must start with a letter or an underscore, hold only letters, digits, underscores or dollar signs, and stay under 255 characters. This applies to the logical addresses that your directories give, and to the physical addresses that your rules build. `model_copy` does not validate, thus clair applies the rules again to each address that a `route` method gives.
 
 Run [`clair validate`](../cli/validate.md) to apply your rules to every Trouve without a Snowflake connection.
 
