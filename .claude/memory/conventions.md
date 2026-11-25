@@ -269,6 +269,23 @@ else:
 The `None` needs no annotation: the type checker infers `str` after the block, because the
 `else` always raises.
 
+**Report errors as a compiler does.** An operation that examines a project — discovery,
+`clair validate`, `clair compile` — follows two rules. Omer set them on 2026-11-25.
+
+1. **Report each independent fault of one phase together, and stop before the next
+   phase.** Each Trouve file is an independent unit: a bad name in one file tells clair
+   nothing about the import of a different file, thus discovery collects both. A later
+   phase that needs the result of an earlier phase does not run when that phase failed.
+   For example, `clair validate` makes no build plan while a routing problem exists,
+   because a plan needs the physical address.
+2. **Report no fault that is only a consequence of an earlier fault.** Do not guess
+   what fails after the user repairs a fault. A fault that a broken node causes stays
+   silent, in the same way that a compiler suppresses the cascade after a syntax error.
+
+Thus a loop over independent units appends each fault to a list and continues, and it
+raises one error that holds the list at the end of the phase. `ProjectDiscoveryError`
+is the model.
+
 **Build a generated file with an f-string, not a placeholder.** When a function writes a
 file of code — a fixture project, a scaffold, a CI configuration — give the function a
 parameter for each value that changes, and return an f-string. Do not write a constant
