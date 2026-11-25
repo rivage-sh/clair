@@ -85,12 +85,16 @@ class SeedTable(DataframeTrouve):
                 f"each column name of the DataFrame must be a string, found: {names}"
             )
 
+        # write_pandas writes each name unquoted, and Snowflake stores an
+        # unquoted name in upper case. Thus two names that differ in case only
+        # are one column in the warehouse.
         seen: set[str] = set()
         duplicates: list[str] = []
         for column_name in column_names:
-            if column_name in seen and column_name not in duplicates:
+            warehouse_name = column_name.upper()
+            if warehouse_name in seen and column_name not in duplicates:
                 duplicates.append(column_name)
-            seen.add(column_name)
+            seen.add(warehouse_name)
         if duplicates:
             raise ValueError(
                 f"the DataFrame has a duplicate column name: {', '.join(duplicates)}"

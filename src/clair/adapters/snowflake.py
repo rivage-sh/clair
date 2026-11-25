@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pandas as pd
 import snowflake.connector
@@ -18,6 +18,23 @@ from clair.environments.environments import Authenticator, Environment, Password
 from clair.exceptions import RunError, WarehouseConnectionError
 from clair.trouves.address import TrouveAddress
 
+# The session parameters that clair sets for each Trouve, and gives back at the end.
+_QUERY_TAG = "QUERY_TAG"
+_STATEMENT_TIMEOUT = "STATEMENT_TIMEOUT_IN_SECONDS"
+
+
+class _OpeningSession(NamedTuple):
+    """The session before clair set the session of a Trouve.
+
+    A parameter value of None means that the session set no value of its own,
+    thus it has the value of the user or the account.
+    """
+
+    role: str | None
+    warehouse: str | None
+    query_tag: str | None
+    statement_timeout: str | None
+
 
 class SnowflakeAdapter(WarehouseAdapter):
     """The Snowflake warehouse adapter. It uses snowflake-connector-python."""
@@ -25,9 +42,10 @@ class SnowflakeAdapter(WarehouseAdapter):
     def __init__(self) -> None:
         self._conn: snowflake.connector.SnowflakeConnection | None = None
         self._environment: Environment | None = None
-        # The role and the warehouse that the session had before clair sent a
-        # USE statement. set_context() reads them one time.
-        self._opening_context: tuple[str | None, str | None] | None = None
+        # The session before clair changed it. The first change reads it, and
+        # reset_session() gives it back and forgets it, thus a change that the
+        # caller makes between two runs is the start of the next run.
+        self._opening_session: _OpeningSession | None = None
 
         # True while execute() waits for a statement. cancel() reads it from
         # another thread.
@@ -269,15 +287,11 @@ class SnowflakeAdapter(WarehouseAdapter):
 
         cursor = self._conn.cursor()
         try:
-            if self._opening_context is None:
-                cursor.execute("SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE()")
-                opening_row = cursor.fetchone()
-                self._opening_context = (
-                    (opening_row[0], opening_row[1]) if opening_row else (None, None)
-                )
-            opening_role, opening_warehouse = self._opening_context
-            wanted_role = role if role and role.strip() else opening_role
-            wanted_warehouse = warehouse if warehouse and warehouse.strip() else opening_warehouse
+            opening_session = self._read_opening_session(cursor)
+            wanted_role = role if role and role.strip() else opening_session.role
+            wanted_warehouse = (
+                warehouse if warehouse and warehouse.strip() else opening_session.warehouse
+            )
             if wanted_role:
                 cursor.execute(f"USE ROLE {wanted_role}")
             if wanted_warehouse:
@@ -297,15 +311,15 @@ class SnowflakeAdapter(WarehouseAdapter):
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
-        escaped_tag = query_tag.replace("\\", "\\\\").replace("'", "\\'")
         cursor = self._conn.cursor()
         try:
-            cursor.execute(f"ALTER SESSION SET QUERY_TAG = '{escaped_tag}'")
+            self._read_opening_session(cursor)
+            cursor.execute(_set_parameter_statement(_QUERY_TAG, _string_literal(query_tag)))
             if statement_timeout_seconds is None:
-                cursor.execute("ALTER SESSION UNSET STATEMENT_TIMEOUT_IN_SECONDS")
+                cursor.execute(f"ALTER SESSION UNSET {_STATEMENT_TIMEOUT}")
             else:
                 cursor.execute(
-                    f"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = {statement_timeout_seconds}"
+                    _set_parameter_statement(_STATEMENT_TIMEOUT, str(statement_timeout_seconds))
                 )
         finally:
             cursor.close()
@@ -313,21 +327,54 @@ class SnowflakeAdapter(WarehouseAdapter):
     def reset_session(self) -> None:
         """Give the session back the settings that it had before clair set the session of a Trouve.
 
-        UNSET gives back the query tag and the timeout of the account or the
-        user. An empty query tag would hide a tag of the user. A session on
-        which clair set no context changes nothing.
+        A query tag or a timeout that the session set itself gets its value
+        back. UNSET gives back the value of the account or the user for each
+        other one: an empty query tag would hide a tag of the user. A session
+        on which clair set nothing changes nothing.
         """
         if self._conn is None:
             raise RuntimeError("Not connected. Call connect() first.")
-        if self._opening_context is None:
+        opening_session = self._opening_session
+        if opening_session is None:
             return
 
-        cursor = self._conn.cursor()
+        query_tag_sql = None
+        if opening_session.query_tag is not None:
+            query_tag_sql = _string_literal(opening_session.query_tag)
+        opening_values = {
+            _QUERY_TAG: query_tag_sql,
+            _STATEMENT_TIMEOUT: opening_session.statement_timeout,
+        }
+
         try:
-            cursor.execute("ALTER SESSION UNSET QUERY_TAG, STATEMENT_TIMEOUT_IN_SECONDS")
+            cursor = self._conn.cursor()
+            try:
+                for parameter_name, value_sql in opening_values.items():
+                    if value_sql is None:
+                        cursor.execute(f"ALTER SESSION UNSET {parameter_name}")
+                    else:
+                        cursor.execute(_set_parameter_statement(parameter_name, value_sql))
+            finally:
+                cursor.close()
+            self.set_context()
         finally:
-            cursor.close()
-        self.set_context()
+            # The next run reads the session again, also after a reset that failed.
+            self._opening_session = None
+
+    def _read_opening_session(self, cursor: SnowflakeCursor) -> _OpeningSession:
+        """Give the session before clair changed it. The first call reads it from Snowflake."""
+        if self._opening_session is not None:
+            return self._opening_session
+        cursor.execute("SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE()")
+        context_row = cursor.fetchone()
+        role, warehouse = (context_row[0], context_row[1]) if context_row else (None, None)
+        self._opening_session = _OpeningSession(
+            role=role,
+            warehouse=warehouse,
+            query_tag=_session_value(cursor, _QUERY_TAG),
+            statement_timeout=_session_value(cursor, _STATEMENT_TIMEOUT),
+        )
+        return self._opening_session
 
     def read_table(
         self, address: TrouveAddress, sample_query: str | None = None
@@ -415,6 +462,29 @@ def _read_private_key(authentication: PrivateKey) -> bytes:
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+
+
+def _string_literal(text: str) -> str:
+    """Give the text as a Snowflake string literal."""
+    escaped_text = text.replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{escaped_text}'"
+
+
+def _set_parameter_statement(parameter_name: str, value_sql: str) -> str:
+    return f"ALTER SESSION SET {parameter_name} = {value_sql}"
+
+
+def _session_value(cursor: SnowflakeCursor, parameter_name: str) -> str | None:
+    """Give the value that the session itself set for a parameter, or None.
+
+    SHOW PARAMETERS gives (key, value, default, level, description, type). The
+    level is SESSION only for a value that the session set.
+    """
+    cursor.execute(f"SHOW PARAMETERS LIKE '{parameter_name}' IN SESSION")
+    parameter_row = cursor.fetchone()
+    if parameter_row is None or str(parameter_row[3]).upper() != "SESSION":
+        return None
+    return str(parameter_row[1])
 
 
 # The position of the comment in a row of DESCRIBE TABLE and of DESCRIBE RESULT.

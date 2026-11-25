@@ -21,7 +21,8 @@ Each test also takes `severity: TestSeverity = TestSeverity.ERROR`. See
 
 ## `TestUnique`
 
-Assert that a column has no duplicate values.
+Assert that a column has no duplicate values. A NULL is not a value, thus two NULLs are no
+duplicate, as in the `unique` test of dbt. Add `TestNotNull` to reject a NULL.
 
 ```python
 class TestUnique(Test):
@@ -37,6 +38,7 @@ Generated SQL:
 ```sql
 SELECT order_id, COUNT(*)
 FROM mydb.myschema.mytable
+WHERE order_id IS NOT NULL
 GROUP BY order_id
 HAVING COUNT(*) > 1
 ```

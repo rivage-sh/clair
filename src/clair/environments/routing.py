@@ -140,11 +140,13 @@ def describe_routing(routing: RoutingEntry | None) -> str:
 def _apply_routing(
     logical_address: TrouveAddress, trouve_type: TrouveType, routing: RoutingEntry
 ) -> TrouveAddress:
-    """Run one routing entry and confirm that it gave an address.
+    """Run one routing entry and confirm that it gave a valid address.
 
-    The entry builds a ``TrouveAddress``, so the address rules apply already.
-    This function adds the context that the address alone does not hold: which
-    entry ran, and which Trouve it ran on.
+    ``model_copy(update=...)`` makes an address with no validation, and
+    routing.md shows it, thus this function applies the address rules to the
+    result. Each operation routes through here, thus a bad physical address
+    stops each one before any SQL. The error adds the context that the address
+    alone does not hold: which entry ran, and which Trouve it ran on.
     """
     entry_text = f"The routing entry `{describe_routing(routing)}`"
     try:
@@ -166,7 +168,13 @@ def _apply_routing(
             f"{entry_text} gave {type(physical_address).__name__} for "
             f"'{logical_address}'. A route method must give a TrouveAddress."
         )
-    return physical_address
+    try:
+        return TrouveAddress.model_validate(physical_address.model_dump())
+    except ValidationError as exc:
+        raise InvalidRoutingConfigError(
+            f"{entry_text} built a bad address for '{logical_address}': "
+            f"{first_error_message(exc)}"
+        ) from exc
 
 
 def route(

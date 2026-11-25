@@ -41,7 +41,6 @@ from pathlib import Path
 from typing import NamedTuple, Self
 
 import structlog
-import uuid6
 
 from clair.adapters.base import WarehouseAdapter
 from clair.adapters.snowflake import SnowflakeAdapter
@@ -57,6 +56,7 @@ from clair.core.discovery import ARTIFACTS_DIR_NAME, discover_project
 from clair.core.references import recompile_for_selection, recompile_tests_for_test_run
 from clair.core.runner import RunCancellation, RunResult, RunSummary, run_project
 from clair.core.selector import expand_selectors
+from clair.core.staging import new_run_id
 from clair.core.test_runner import SampleScope, TestSummary, run_test_queries, run_tests
 from clair.core.validation import ValidationReport, validate_project
 from clair.environments.environments import Environment
@@ -278,7 +278,7 @@ def compile(
         sample_rows=sample_rows,
     )
     project_root, env_name, _, dag = plan.project
-    run_id = uuid6.uuid7().hex
+    run_id = new_run_id()
 
     source_count = sum(1 for n in dag.nodes if dag.get_trouve(n).type == TrouveType.SOURCE)
     logger.info(
@@ -545,7 +545,7 @@ def start_run(
     return RunHandle(
         plan,
         environment=env,
-        run_id=uuid6.uuid7().hex,
+        run_id=new_run_id(),
         run_mode=run_mode,
         test=test,
         sample=sample,
@@ -734,7 +734,7 @@ def test(
                 sample_scope=SampleScope.TEST_QUERIES if sample else SampleScope.NONE,
                 sample_rows=sample_rows,
                 threads=thread_count,
-                run_id=uuid6.uuid7().hex,
+                run_id=new_run_id(),
                 environment_name=env_name,
             )
         )

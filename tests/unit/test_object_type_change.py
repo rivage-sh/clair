@@ -166,6 +166,34 @@ class TestRunWithNoStaging:
         if adapter.written_addresses:
             assert adapter.written_addresses == [ADDRESS]
 
+    @pytest.mark.parametrize(
+        ("trouve", "adapter"),
+        [
+            (
+                Table(sql="SELECT 1 AS id"),
+                RecordingAdapter(existing_views=[ADDRESS], fail_on=[f"CREATE OR REPLACE TABLE {ADDRESS}"]),
+            ),
+            (
+                _dataframe_trouves()[0],
+                RecordingAdapter(existing_views=[ADDRESS], write_error=RuntimeError("no stage")),
+            ),
+        ],
+        ids=["table", "pandas table"],
+    )
+    def test_a_failed_write_after_the_drop_says_that_production_holds_nothing(self, trouve, adapter):
+        # The staged path tells the same fact when its promotion fails.
+        result = run_one_trouve(trouve, adapter, use_staging=False)
+
+        assert isinstance(result, RunFailure)
+        assert f"{ADDRESS} holds no object now" in result.error
+
+    def test_a_failed_drop_does_not_say_that_production_holds_nothing(self):
+        adapter = RecordingAdapter(existing_views=[ADDRESS], fail_on=[f"DROP VIEW IF EXISTS {ADDRESS}"])
+        result = run_one_trouve(Table(sql="SELECT 1 AS id"), adapter, use_staging=False)
+
+        assert isinstance(result, RunFailure)
+        assert "holds no object now" not in result.error
+
     def test_a_type_that_does_not_change_builds_with_no_drop(self):
         result = run_one_trouve(Table(sql="SELECT 1 AS id"), RecordingAdapter(), use_staging=False)
 

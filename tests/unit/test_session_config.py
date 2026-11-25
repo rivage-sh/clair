@@ -109,11 +109,16 @@ class TestTheRun:
         assert [context["warehouse"] for context in adapter.contexts] == ["big_wh"]
 
 
+def _session_changes(executed: list[str]) -> list[str]:
+    """Give each ALTER SESSION, and leave out the reads of the opening session."""
+    return [sql for sql in executed if sql.startswith("ALTER SESSION")]
+
+
 class TestSnowflakeSessionParameters:
     def test_a_timeout_sets_the_parameter(self):
         adapter, cursor = snowflake_adapter_that_answers([])
         adapter.set_session_parameters('{"app": "clair"}', 90)
-        assert cursor.executed == [
+        assert _session_changes(cursor.executed) == [
             """ALTER SESSION SET QUERY_TAG = '{"app": "clair"}'""",
             "ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = 90",
         ]
@@ -126,4 +131,6 @@ class TestSnowflakeSessionParameters:
     def test_a_quote_in_the_tag_stays_inside_the_string(self):
         adapter, cursor = snowflake_adapter_that_answers([])
         adapter.set_session_parameters('{"team": "o\'brien"}', None)
-        assert cursor.executed[0] == """ALTER SESSION SET QUERY_TAG = '{"team": "o\\'brien"}'"""
+        assert _session_changes(cursor.executed)[0] == (
+            """ALTER SESSION SET QUERY_TAG = '{"team": "o\\'brien"}'"""
+        )

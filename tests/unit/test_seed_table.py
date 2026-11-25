@@ -78,8 +78,13 @@ class TestSeedTableValidation:
         with pytest.raises(ValidationError, match="must be a string"):
             SeedTable(dataframe=pd.DataFrame({0: [1], "code": ["US"]}))
 
-    def test_a_duplicate_column_name_is_rejected(self):
-        frame = pd.DataFrame([[1, 2]], columns=pd.Index(["code", "code"]))
+    @pytest.mark.parametrize(
+        "column_names", [["code", "code"], ["code", "Code"]], ids=["same_case", "other_case"]
+    )
+    def test_a_duplicate_column_name_is_rejected(self, column_names):
+        # Clair writes each name unquoted, and Snowflake stores an unquoted
+        # name in upper case. Thus "code" and "Code" are one column there.
+        frame = pd.DataFrame([[1, 2]], columns=pd.Index(column_names))
 
         with pytest.raises(ValidationError, match="duplicate column name"):
             SeedTable(dataframe=frame)

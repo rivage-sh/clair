@@ -764,6 +764,8 @@ class FakeCursor:
         stats: The DML statistics of the statement. None is a query or a
             DDL statement, which gives none.
         sfqid: The query ID. None is a statement that never reached Snowflake.
+        answers: The rows of each statement that starts with a key. A
+            statement that matches no key gives *rows*.
     """
 
     def __init__(
@@ -772,30 +774,36 @@ class FakeCursor:
         error: Exception | None = None,
         stats: QueryResultStats | None = None,
         sfqid: str | None = "fake-query-id",
+        answers: dict[str, list[tuple]] | None = None,
     ) -> None:
         self.rows = rows
         self.error = error
         self.stats = stats
         self.sfqid = sfqid
+        self.answers = dict(answers or {})
         self.sql = ""
         self.executed: list[str] = []
         self.closed = False
+        self._result_rows = rows
 
     @property
     def rowcount(self) -> int:
-        return len(self.rows)
+        return len(self._result_rows)
 
     def execute(self, sql: str) -> None:
         self.sql = sql
         self.executed.append(sql)
         if self.error is not None:
             raise self.error
+        self._result_rows = next(
+            (rows for prefix, rows in self.answers.items() if sql.startswith(prefix)), self.rows
+        )
 
     def fetchone(self) -> tuple | None:
-        return self.rows[0] if self.rows else None
+        return self._result_rows[0] if self._result_rows else None
 
     def fetchall(self) -> list[tuple]:
-        return list(self.rows)
+        return list(self._result_rows)
 
     def close(self) -> None:
         self.closed = True

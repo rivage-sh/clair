@@ -30,6 +30,7 @@ from typing_extensions import TypeVar
 
 from clair.adapters.objects import WarehouseColumn, WarehouseObject, WarehouseObjectType
 from clair.core import project_imports
+from clair.core.staging import make_run_scoped_address
 from clair.environments.project_routing import find_project_root, routing_entry_of
 from clair.environments.routing import route
 from clair.exceptions import CompileError, TrouveFileNotFoundError, TrouveNotCompiledError
@@ -603,9 +604,9 @@ class MaterializedTrouve(TrouveAbc[CompiledT_co], ABC):
         )
 
     def test(self, context: PlanContext) -> list[TestQuery]:
-        """Give one query for each test of the Trouve, against ``context.target_address``."""
+        """Give one query for each test of the Trouve, against ``context.tested_relation``."""
         return [
-            TestQuery.of(test, test_index, context.target_address)
+            TestQuery.of(test, test_index, context.tested_relation)
             for test_index, test in enumerate(self.tests)
         ]
 
@@ -1048,8 +1049,13 @@ class Table(SqlTrouve, TableOptions):
 
         Args:
             run_id: The unique identifier of this clair run.
+
+        Raises:
+            StagingAddressError: If the table name of the new rows table
+                breaks an identifier rule.
         """
-        return f"{self.require_compiled().physical_address}{NEW_ROWS_SUFFIX}{run_id}"
+        physical_address = self.require_compiled().physical_address
+        return str(make_run_scoped_address(physical_address, NEW_ROWS_SUFFIX, run_id))
 
     def upsert_plan(self, target_column_names: list[str] | None = None) -> UpsertPlan:
         """Give the decisions that the MERGE of an UPSERT run needs.

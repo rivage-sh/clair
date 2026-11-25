@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from concurrent.futures import ThreadPoolExecutor
 from enum import StrEnum
 
@@ -13,12 +12,12 @@ from clair.adapters.base import WarehouseAdapter
 from clair.adapters.objects import Statement, StatementStatus
 from clair.adapters.pool import AdapterPool
 from clair.core.dag import ClairDag
-from clair.core.references import physical_addresses_of, render_sample
+from clair.core.references import physical_addresses_of, reject_a_qualified_sampled_this, render_sample
 from clair.phase import Phase
 from clair.trouves.address import TrouveAddress
 from clair.trouves.plan import PlanContext, TestQuery, TestResult
 from clair.trouves.run_config import RunMode
-from clair.trouves.test import TestSeverity
+from clair.trouves.test import TestSeverity, TestSql
 from clair.trouves.trouve import DEFAULT_SAMPLE_ROWS, MaterializedTrouve, TrouveAbc
 from clair.trouves.trouve_type import TrouveType
 
@@ -137,8 +136,6 @@ def run_test_queries(
     queries: list[TestQuery],
     adapter: WarehouseAdapter,
     sample_scope: SampleScope = SampleScope.NONE,
-    sample_subquery: str | None = None,
-    queried_address: str | None = None,
 ) -> list[TestResult]:
     """Execute the test queries of one Trouve, and give one result for each query.
 
@@ -148,14 +145,11 @@ def run_test_queries(
 
     Args:
         trouve: The Trouve that the queries test.
-        queries: The test queries, from ``Trouve.test()``.
+        queries: The test queries, from ``Trouve.test()``. A query of
+            ``clair test --sample`` reads the sample already.
         adapter: The warehouse adapter of the thread that calls this function.
         sample_scope: The part of the data that the tests see. Each scope
             except NONE skips each query with ``run_with_sample`` False.
-        sample_subquery: The subquery that each query reads in place of
-            *queried_address*, or None to read the object.
-        queried_address: The address that the queries read. Clair replaces
-            ``FROM <queried_address>`` with the sample subquery.
     """
     physical_address = trouve.require_compiled().physical_address
     results: list[TestResult] = []
@@ -171,15 +165,6 @@ def run_test_queries(
             continue
         sql = query.sql
         try:
-            if sample_subquery is not None and queried_address is not None:
-                # The lookahead stops a longer name: db.s.orders_archive is
-                # not the object that the test examines.
-                pattern = re.compile(
-                    re.escape(f"FROM {queried_address}") + r"(?![\w$])", re.IGNORECASE
-                )
-                # A function as the replacement keeps a backslash of a
-                # sample_sql as text, and not as a group reference.
-                sql = pattern.sub(lambda _match: f"FROM {sample_subquery}", sql)
             statement = adapter.execute(sql)
             if not statement.success:
                 logger.warning("test.query_error", trouve=str(physical_address), test_type=query.label, column=query.column_name, error=statement.error, query_id=statement.query_id)
@@ -201,18 +186,29 @@ def run_test_queries(
     return results
 
 
-def test_queries_of(trouve: MaterializedTrouve, address: TrouveAddress) -> list[TestQuery]:
+def test_queries_of(
+    trouve: MaterializedTrouve, address: TrouveAddress, test_sample: str | None = None
+) -> list[TestQuery]:
     """Give the test queries of a Trouve against the object at *address*, as ``clair test`` runs them.
 
     ``clair test`` reads an object that exists, and makes no plan of a run.
-    Thus the context holds the address only.
+    Thus the context holds the address, and the sample of ``clair test
+    --sample``. The test phase puts the sample in place of each ``{THIS}``.
+
+    Raises:
+        CompileError: If a sampled ``TestSql`` qualifies a column with ``{THIS}``.
     """
+    if test_sample is not None:
+        for test in trouve.tests:
+            if isinstance(test, TestSql) and test.is_run_with_sample:
+                reject_a_qualified_sampled_this(test, address)
     context = PlanContext(
         run_id="",
         effective_mode=RunMode.FULL_REFRESH,
         staged=False,
         offline=True,
         physical_address=address,
+        test_sample=test_sample,
     )
     return trouve.test(context)
 
@@ -256,9 +252,8 @@ def _run_trouve_tests(
     if not isinstance(trouve, MaterializedTrouve) or not trouve.tests:
         return []
     compiled = trouve.require_compiled()
-    queried_address = str(compiled.physical_address)
     try:
-        queries = test_queries_of(trouve, compiled.physical_address)
+        queries = test_queries_of(trouve, compiled.physical_address, sample_subquery)
     except Exception as plan_error:  # noqa: BLE001 — test() can be user code, and it can raise anything
         return _failed_results(
             trouve, f"{type(trouve).__name__}.test() raised {type(plan_error).__name__}: {plan_error}"
@@ -270,9 +265,7 @@ def _run_trouve_tests(
         )
     except Exception as session_error:  # noqa: BLE001 — each adapter fault becomes a failed TestResult
         return _failed_results(trouve, f"Clair cannot set the session context: {session_error}")
-    return run_test_queries(
-        trouve, queries, adapter, sample_scope, sample_subquery, queried_address
-    )
+    return run_test_queries(trouve, queries, adapter, sample_scope)
 
 
 def _sample_subqueries(

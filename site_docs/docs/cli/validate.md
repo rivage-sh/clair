@@ -25,6 +25,8 @@ clair validate --env prod
 - No two Trouves go to one physical target.
 - No Trouve names a different Trouve as text. See below.
 - clair can make the build plan of each Trouve, for each run mode that it can get. See below.
+- Each name that a run makes for itself is a valid Snowflake identifier: the staging object, and
+  the new rows table of an `Upsert` or a `DeleteInsert`.
 
 ## An address that is text
 
@@ -65,11 +67,16 @@ because Snowflake owns the SQL syntax.
 
 ## A build plan that clair cannot make
 
-`Trouve.plan()` needs no connection, thus `clair validate` calls it on each SQL Trouve. It
-calls it for each run mode that `effective_mode()` can give, with staging and without
-staging, because `clair run` stages a Trouve only when it runs the tests. Two faults are
-problems:
+`Trouve.plan()` needs no connection, thus `clair validate` calls it on each Trouve: a `Table`,
+a `View`, a `PandasTable` and a `SeedTable`. It calls it for each run mode that
+`effective_mode()` can give, with staging and without staging, because `clair run` stages a
+Trouve only when it runs the tests. Each plan gets the physical address that the routing
+entry gives, and a run id of the length of a real one, thus each name has its length in a
+run. A routing problem stops this test, because the plan needs the physical address. Three
+faults are problems:
 
+- A name that the run makes for itself breaks an identifier rule. The staging name and the
+  new rows name add a suffix and the run id to the table name. Give the Trouve a shorter name.
 - `plan()` raises. Example: `Incremental()` with no strategy on a `Table` that does not
   override `build()`, or a bug in an override.
 - The `build` phase gets a target address, and no statement names it. A staged plan then
@@ -81,7 +88,7 @@ offline test as a built-in strategy.
 
 ```
   ✗ analytics.finance.revenue
-    The incremental plan, with staging: the build phase got the target address analytics.finance.revenue__clair_validate, and no statement names it. The plan then writes to a different object, and a staged run writes to the physical object before the tests run. Write to `context.target_address`.
+    The incremental plan, with staging: the build phase got the target address analytics.finance.revenue__clair_00000000000000000000000000000000, and no statement names it. The plan then writes to a different object, and a staged run writes to the physical object before the tests run. Write to `context.target_address`.
 ```
 
 ## Output

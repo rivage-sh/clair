@@ -84,6 +84,8 @@ connection, thus a pull request shows the complete plan.
 | `physical_address` | The production address. |
 | `staging_address` | The address of the candidate, or `None` when `staged` is `False`. |
 | `target_address` | The address that `prepare`, `build`, `configure` and `test` write and read: the staging address of a staged run, else the physical address. |
+| `test_sample` | The sample subquery that `test` reads in place of `target_address`, in `clair test --sample`. Else `None`. |
+| `tested_relation` | What `test` reads: `test_sample`, else `target_address`. Give it to `TestQuery.of()`. |
 | `current_object` | The object at the physical address before the run, with its type and its comment. `None` when the address holds nothing. |
 | `target_columns` | The columns of the production table, in the order of the warehouse. An incremental run only. |
 | `added_columns` | The columns that the SQL gives, and that the production table does not have. |
@@ -312,7 +314,7 @@ test query and its outcome:
 -- ── test · a blocking test that fails stops the promotion ────
 -- statement 4/7: success, query ID 01b2...
 -- unique (customer_id), ERROR: passed
-SELECT customer_id, COUNT(*) FROM <staging> GROUP BY customer_id HAVING COUNT(*) > 1
+SELECT customer_id, COUNT(*) FROM <staging> WHERE customer_id IS NOT NULL GROUP BY customer_id HAVING COUNT(*) > 1
 ```
 
 A failure names its phase. The summary of `clair run` says `FAILED in promote`, and
