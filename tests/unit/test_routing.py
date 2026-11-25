@@ -16,7 +16,7 @@ from clair.environments.routing import (
     detect_routing_collisions,
     route,
 )
-from clair.exceptions import InvalidRoutingConfigError, InvalidTrouveAddressError
+from clair.exceptions import InvalidRoutingConfigError, InvalidTrouveAddressError, ProjectDiscoveryError
 from clair.trouves.trouve_type import TrouveType
 from tests.helpers import (
     DatabaseOverrideRouting,
@@ -316,7 +316,7 @@ class TestLogicalNameValidation:
             "from clair import Table, TrouveType\n\n"
             'trouve = Table(sql="SELECT 1 AS x")\n'
         )
-        with pytest.raises(InvalidTrouveAddressError, match="my-db"):
+        with pytest.raises(ProjectDiscoveryError, match="my-db"):
             discover_project(tmp_path, routing=None)
 
     def test_a_good_directory_name_passes_discovery(self, tmp_path):

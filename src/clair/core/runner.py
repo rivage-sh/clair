@@ -777,13 +777,13 @@ def _run_node(
         if statement.success:
             continue
         error = statement.error or "unknown error"
-        if statement_index == 0:
+        if phase == Phase.PROMOTE and statement_index == 0:
             return finish(
                 f"the tests passed, but the promotion failed: {error}. "
                 f"The candidate stays at {staging_address}",
                 downstream_ok=False,
             )
-        if statement_index <= type_drop_count:
+        if phase == Phase.PROMOTE and statement_index <= type_drop_count:
             # The DROP of the object of the old type succeeded, and the
             # statement that makes the new object failed.
             return finish(
@@ -792,9 +792,20 @@ def _run_node(
                 f"The candidate stays at {staging_address}. Run clair again",
                 downstream_ok=False,
             )
-        # The first statement of the promotion succeeded, thus the physical
-        # address holds the tested data. The object is not yet in the state that
-        # the Trouve declares.
+        if phase == Phase.PROMOTE:
+            # The statement that moves the data can be the first, as the CLONE
+            # before a RESUME RECLUSTER, or the last, as the MERGE of an override
+            # after its ALTER. Clair does not know which one it is.
+            return finish(
+                f"the tests passed, but statement {statement_index + 1} of the promotion "
+                f"failed: {error}. {addresses.physical} holds the result of each statement "
+                f"before it. The candidate stays at {staging_address}. "
+                f"The statement that failed: {sql.splitlines()[-1]}",
+                downstream_ok=False,
+            )
+        # Each statement of the promotion succeeded, thus the physical address
+        # holds the tested data. The object is not yet in the state that the
+        # Trouve declares.
         return finish(
             f"{addresses.physical} holds the tested data, but a statement after "
             f"the promotion failed: {error}. Run it again: {sql.splitlines()[-1]}",

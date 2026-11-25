@@ -830,6 +830,22 @@ class TestAFaultStopsDiscovery:
 
         assert len(fault.value.faults) == 2
 
+    def test_a_name_that_makes_no_address_is_one_fault_of_many(self, tmp_path: Path):
+        """validate.md: each name makes a valid address, and clair reports every problem at once."""
+        for relative_path in ("mydb/myschema/bad-one.py", "bad-db/myschema/orders.py"):
+            _write_trouve(tmp_path, relative_path)
+        (tmp_path / "mydb" / "myschema" / "broken.py").write_text(
+            "import a_module_that_nobody_installed\n"
+        )
+
+        with pytest.raises(ProjectDiscoveryError) as fault:
+            discover_project(tmp_path)
+
+        faults = fault.value.faults
+        assert len(faults) == 3
+        assert any("bad-one.py" in text for text in faults)
+        assert any(str(Path("bad-db", "myschema", "orders.py")) in text for text in faults)
+
 
 class TestTheLogicalAddress:
     """The file alone decides the logical address. No discovery and no environment take part."""

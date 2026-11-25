@@ -57,7 +57,7 @@ def plan(self, context: PlanContext) -> NodePlan:
 |-------|-------------------|
 | `prepare`, `build`, `configure` | The node fails, and clair sends no more of these statements. Production keeps its data. A staged run keeps the candidate at the staging address. |
 | `test` | A query that fails counts as a failed test. |
-| `promote` | The node fails, and the candidate stays. If the first statement succeeded, the error tells you that production holds the tested data, and it names the statement to run again. |
+| `promote` | The node fails, and the candidate stays. If a statement before it succeeded, the error tells you that production holds the result of those statements, and it names the statement that failed. clair does not know which statement of an override moves the data. |
 | `document` | The node fails. Production holds the new data, and the error names the statement to run again. |
 | `retire` | clair writes `run.node.staging_drop_failed` to the log. The node stays a success. |
 | `cleanup` | clair writes `run.node.cleanup_failure` to the log, and executes the next cleanup statement. The node keeps its status. |

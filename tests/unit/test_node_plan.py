@@ -234,6 +234,29 @@ def test_a_failed_first_promote_statement_keeps_the_candidate() -> None:
     assert executed_plan_statements(adapter) == [*WRITE_STATEMENTS, *PLAN.promote, *PLAN.cleanup]
 
 
+@pytest.mark.parametrize(
+    ("promote", "failed_statement", "production_holds_the_tested_data"),
+    [
+        (["select 'promote'"], "select 'promote'", False),
+        (["select 'promote one'", "select 'promote two'"], "select 'promote two'", False),
+        (["select 'promote'"], "select 'document'", True),
+        ([], "select 'document'", True),
+    ],
+    ids=["first_promote", "later_promote", "document", "document_of_an_empty_promote"],
+)
+def test_the_error_of_a_failed_promotion_says_what_production_holds(
+    promote: list[str], failed_statement: str, production_holds_the_tested_data: bool
+) -> None:
+    node_plan = PLAN.model_copy(update={"promote": promote})
+
+    result = run_plan(RecordingAdapter(fail_on=[failed_statement]), node_plan=node_plan)
+
+    assert isinstance(result, RunFailure)
+    holds_message = f"{PHYSICAL_ADDRESS} holds the tested data"
+    assert (holds_message in result.error) == production_holds_the_tested_data
+    assert (STAGING_ADDRESS in result.error) != production_holds_the_tested_data
+
+
 def test_a_failed_retire_keeps_the_node_a_success() -> None:
     adapter = RecordingAdapter(fail_on=PLAN.retire)
 

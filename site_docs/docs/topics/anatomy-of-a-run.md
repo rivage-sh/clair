@@ -100,8 +100,9 @@ with a parse error that names the token and nothing else.
 ### A file that clair cannot read stops the run
 
 A Trouve file that raises at import time — a name that does not exist, a package that
-nobody installed, two files that import each other — stops discovery. clair raises
-`ProjectDiscoveryError`, and the error names each file and each cause.
+nobody installed, two files that import each other — stops discovery. A Trouve file whose
+path makes no valid address stops it too. clair raises `ProjectDiscoveryError`, and the
+error names each file and each cause.
 
 clair does not skip the file and continue. A skip removes the Trouve from the DAG, and the
 run then builds fewer tables than the project declares and reports success. The error

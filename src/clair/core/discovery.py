@@ -44,6 +44,7 @@ from clair.environments.routing import (
 )
 from clair.exceptions import (
     DiscoveryError,
+    InvalidTrouveAddressError,
     NotAProjectRootError,
     ProjectDiscoveryError,
 )
@@ -503,9 +504,15 @@ def discover_project(
             errors.append(shallow)
             continue
 
-        collected.append(
-            (trouve_obj, TrouveAddress.from_file_path(file_path), file_path, module_name)
-        )
+        # A name that makes no address is one fault of many, thus clair
+        # validate reports each of them together.
+        try:
+            logical_address = TrouveAddress.from_file_path(file_path)
+        except InvalidTrouveAddressError as address_error:
+            errors.append(f"{file_path}: {address_error}")
+            continue
+
+        collected.append((trouve_obj, logical_address, file_path, module_name))
 
     # Phase A: make the logical address and the physical address of each Trouve.
     # The logical address comes from the file path. DAG edges and selectors use it.
