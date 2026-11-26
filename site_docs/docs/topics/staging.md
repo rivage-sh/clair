@@ -187,7 +187,7 @@ trouve = Table(
 A clone copies the clustering key, but Snowflake suspends Automatic Clustering on the clone. Each promotion is a clone, thus clair adds two statements:
 
 1. After the build, `ALTER TABLE <staging> CLUSTER BY (...)`. A key that Snowflake rejects stops the node before the promotion.
-2. After the promotion, `ALTER TABLE <physical> RESUME RECLUSTER`. If this statement fails, the physical table holds the tested data, and the node fails with the statement to run again.
+2. After the promotion, `ALTER TABLE <physical> RESUME RECLUSTER`. If this statement fails, the node fails. The error names the clone as a statement that changed the physical table, and names the `RESUME RECLUSTER` as the statement that failed.
 
 The key goes on with an `ALTER`, and not in the `CREATE TABLE ... AS SELECT`, because Snowflake asks for the column definitions in a CTAS that clusters.
 
@@ -214,7 +214,7 @@ ALTER VIEW <physical> SET COMMENT = 'The orders, one row each.'
 ALTER VIEW <physical> ALTER COLUMN order_id COMMENT 'The order ID.'
 ```
 
-The comments go onto the physical object, and not onto the staging object, because a promotion of a view is a `CREATE OR REPLACE VIEW`, and it removes each comment. If a comment statement fails, the physical object holds the tested data, and the node fails with the statement to run again. A run with `--no-test` writes the comments after the build.
+The comments go onto the physical object, and not onto the staging object, because a promotion of a view is a `CREATE OR REPLACE VIEW`, and it removes each comment. If a comment statement fails, the node fails. The error names each promotion statement that changed the physical object, and the comment statement that failed. A run with `--no-test` writes the comments after the build.
 
 Clair cleans a triple-quoted `docs` text as Python cleans a docstring: it removes the first and the last empty line, and the common indent.
 
@@ -264,7 +264,7 @@ Clair keeps each object. It drops a staging object only after a promotion.
 |-----------|---------------------|--------------------|
 | The build | Keeps its data | Clair keeps it, if the build made it |
 | A data quality test | Keeps its data | Clair keeps it. It is the rejected candidate. |
-| The promotion | Keeps its data | Clair keeps it. It holds the tested data. |
+| The promotion | Holds the result of each statement that succeeded. The error names them. | Clair keeps it. It holds the tested data. |
 
 In each condition the Trouve gets the FAILED status, clair skips each dependent, and `clair run` stops with the status code 1. The error message names the staging object, thus you can query it:
 

@@ -331,7 +331,7 @@ waits for the node that failed.
 |---|---|---|---|
 | A statement fails | Keeps its data | FAILED. The message names the staging object. | They run |
 | A test fails | Keeps its data | FAILED. The staging object is the rejected candidate. | They run |
-| The promotion fails | Keeps its data | FAILED. The tested data stays at the staging address. | They run |
+| The promotion fails | Holds the result of each promotion statement that succeeded | FAILED. The message names each of those statements. The tested data stays at the staging address. | They run |
 | An upstream node failed | Keeps its data | SKIPPED, with the name of the node that failed | They run |
 
 `clair run` stops with the status code 1 if one node failed. Each `SKIPPED` result names
