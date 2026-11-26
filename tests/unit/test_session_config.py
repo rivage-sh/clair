@@ -76,10 +76,16 @@ class TestTheFields:
         with pytest.raises(ValidationError, match="Give each label another key"):
             SessionConfig(query_tags={reserved_key: "x"})
 
-    @pytest.mark.parametrize("timeout", [0, -1])
-    def test_a_timeout_must_be_positive(self, timeout):
+    # Snowflake rejects a STATEMENT_TIMEOUT_IN_SECONDS above 604800, the seconds of 7 days.
+    # A probe in OBADDOUR on 2026-11-25 gave "Must be between 0 and 604,800" for 604801.
+    @pytest.mark.parametrize("timeout", [0, -1, 604_801])
+    def test_a_timeout_outside_the_range_of_snowflake_fails_at_construction(self, timeout):
         with pytest.raises(ValidationError):
             Table(sql="select 1", statement_timeout_seconds=timeout)
+
+    @pytest.mark.parametrize("timeout", [1, 604_800])
+    def test_a_timeout_inside_the_range_of_snowflake_is_valid(self, timeout):
+        assert Table(sql="select 1", statement_timeout_seconds=timeout).statement_timeout_seconds == timeout
 
     def test_the_query_tag_is_json_with_the_keys_of_clair_and_the_labels(self):
         config = ResolvedConfig(query_tags={"team": "finance"})

@@ -12,6 +12,7 @@ from clair.exceptions import (
     EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
     InvalidEnvironmentError,
+    InvalidEnvironmentsFileError,
 )
 
 DEFAULT_ENVIRONMENTS_PATH = Path.home() / ".clair" / "environments.yml"
@@ -172,6 +173,8 @@ def load_environment(
     Raises:
         EnvironmentsFileNotFoundError: If environments.yml does not exist.
         EnvironmentNotFoundError: If environments.yml has no such environment.
+        InvalidEnvironmentsFileError: If the file is not YAML, or it is not a
+            map of environment names.
         InvalidEnvironmentError: If the environment block holds an unknown key.
     """
     path = environments_path or DEFAULT_ENVIRONMENTS_PATH
@@ -179,16 +182,33 @@ def load_environment(
     if not path.exists():
         raise EnvironmentsFileNotFoundError(str(path))
 
-    with open(path) as f:
-        raw = yaml.safe_load(f)
+    try:
+        with open(path) as environments_file:
+            raw = yaml.safe_load(environments_file)
+    except yaml.YAMLError as yaml_error:
+        raise InvalidEnvironmentsFileError(str(path), str(yaml_error)) from yaml_error
 
+    # An empty file holds no environment.
+    if raw is None:
+        raw = {}
     if not isinstance(raw, dict):
-        raise EnvironmentsFileNotFoundError(str(path))
+        raise InvalidEnvironmentsFileError(
+            str(path), f"the file must map each environment name to a block, but it holds a {type(raw).__name__}"
+        )
 
     if env_name not in raw:
-        raise EnvironmentNotFoundError(env_name, [str(k) for k in raw])
+        raise EnvironmentNotFoundError(env_name, [str(key) for key in raw])
 
-    env_data: dict[str, Any] = raw[env_name]
+    env_data: Any = raw[env_name]
+    if not isinstance(env_data, dict):
+        raise InvalidEnvironmentError(
+            env_name, str(path), f"the block must map each key to a value, but it is {type(env_data).__name__}"
+        )
+    # The key of the block gives the name, thus a second name would disagree with it.
+    if "name" in env_data:
+        raise InvalidEnvironmentError(
+            env_name, str(path), f"'name': remove it. The key '{env_name}' of the block gives the name."
+        )
 
     try:
         return Environment(name=env_name, **env_data)

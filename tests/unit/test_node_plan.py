@@ -230,8 +230,46 @@ def test_a_failed_first_promote_statement_keeps_the_candidate() -> None:
     result = run_plan(adapter)
 
     assert isinstance(result, RunFailure)
-    assert "the promotion failed" in result.error
+    assert f"{PHYSICAL_ADDRESS} keeps its data" in result.error
     assert executed_plan_statements(adapter) == [*WRITE_STATEMENTS, *PLAN.promote, *PLAN.cleanup]
+
+
+# Each case: the promote phase of the plan, the statement that fails, the
+# statements before it that change production, and the staging flag. A run with
+# --no-test writes production from its first statement.
+@pytest.mark.parametrize(
+    ("promote", "failed_statement", "changed_production", "staged"),
+    [
+        (["select 'promote'"], "select 'promote'", [], True),
+        (["select 'promote one'", "select 'promote two'"], "select 'promote two'", ["select 'promote one'"], True),
+        (["select 'promote'"], "select 'document'", ["select 'promote'"], True),
+        ([], "select 'document'", [], True),
+        (["select 'promote'"], "select 'build two'", ["select 'prepare'", "select 'build one'"], False),
+        (["select 'promote'"], "select 'document'", WRITE_STATEMENTS, False),
+    ],
+    ids=[
+        "first_promote",
+        "later_promote",
+        "document",
+        "document_of_an_empty_promote",
+        "no_test_build",
+        "no_test_document",
+    ],
+)
+def test_the_error_names_each_statement_that_changed_production(
+    promote: list[str], failed_statement: str, changed_production: list[str], staged: bool
+) -> None:
+    node_plan = PLAN.model_copy(update={"promote": promote})
+
+    result = run_plan(RecordingAdapter(fail_on=[failed_statement]), node_plan=node_plan, staged=staged)
+
+    assert isinstance(result, RunFailure)
+    plan_statements = [*node_plan.write_statements, *promote, *node_plan.document]
+    named_statements = [sql for sql in plan_statements if sql != failed_statement and sql in result.error]
+    assert named_statements == changed_production
+    assert f"The statement that failed: {failed_statement}" in result.error
+    assert (f"{PHYSICAL_ADDRESS} keeps its data" in result.error) == (not changed_production)
+    assert (STAGING_ADDRESS in result.error) == staged
 
 
 def test_a_failed_retire_keeps_the_node_a_success() -> None:

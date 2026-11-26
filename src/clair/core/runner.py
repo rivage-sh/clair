@@ -414,6 +414,63 @@ def _write_dataframe(
     return statement, ""
 
 
+# The phases that write the physical object. A staged run writes it only when it
+# promotes. A run with --no-test writes it from its first statement.
+_STAGED_PRODUCTION_PHASES = frozenset({Phase.PROMOTE, Phase.DOCUMENT})
+_UNSTAGED_PRODUCTION_PHASES = frozenset({Phase.PREPARE, Phase.BUILD, Phase.CONFIGURE, Phase.DOCUMENT})
+
+# The maximum length of one statement in an error message.
+_MAX_STATEMENT_TEXT_LENGTH = 160
+
+
+def _statement_text(sql: str) -> str:
+    """Give the SQL of a statement on one line, without its comment lines, for an error message."""
+    code_lines = [line.strip() for line in sql.splitlines() if not line.strip().startswith("--")]
+    text = " ".join(line for line in code_lines if line)
+    if len(text) > _MAX_STATEMENT_TEXT_LENGTH:
+        return text[: _MAX_STATEMENT_TEXT_LENGTH - 1] + "…"
+    return text
+
+
+def _describe_failure(
+    statements: list[Statement],
+    error: str,
+    production_phases: frozenset[Phase],
+    addresses: NodeAddresses,
+) -> str:
+    """Give the error of a node that stopped in a phase that can change production.
+
+    The text holds facts of the record only: the statement that failed, and each
+    statement before it that changed the physical object. Clair does not know
+    which statement of a plan moves the data, because a user can override each
+    phase. Thus the text makes no other claim about production.
+    """
+    sent = [statement for statement in statements if statement.status != StatementStatus.NOT_RUN]
+    failed = sent[-1] if sent and not sent[-1].success else None
+    physical_address = addresses.physical
+
+    sentences: list[str] = []
+    if failed is not None and failed.phase is not None:
+        position = sum(1 for statement in sent if statement.phase == failed.phase)
+        sentences.append(f"statement {position} of {failed.phase.value} failed: {error.rstrip('. ')}")
+    else:
+        sentences.append(error.rstrip(". "))
+
+    changed = [statement for statement in sent if statement.success and statement.phase in production_phases]
+    if changed:
+        before_it = " before it" if failed is not None else ""
+        listed = "; ".join(_statement_text(statement.sql) for statement in changed)
+        sentences.append(f"These statements changed {physical_address}{before_it}: {listed}")
+    else:
+        sentences.append(f"No statement changed {physical_address}, thus {physical_address} keeps its data")
+
+    if addresses.staging is not None:
+        sentences.append(f"The candidate stays at {addresses.staging}")
+    if failed is not None:
+        sentences.append(f"The statement that failed: {_statement_text(failed.sql)}")
+    return ". ".join(sentences)
+
+
 def _cancelled_before_promotion(addresses: NodeAddresses) -> str:
     """Give the error of a node that built its candidate, and stopped before the promotion."""
     return (
@@ -695,22 +752,19 @@ def _run_node(
     write_statements = [(phase, sql) for phase in write_phases for sql in plan.statements_of(phase)]
     sent_write_count = 0
     row_count = 0
-    # A run with no staging drops an object of another type first, in prepare.
-    unstaged_drop_count = 0 if staging_address is not None else len(trouve.type_change_statements(context))
 
     def stop_writes(error: str) -> _NodeOutcome:
         """Record each write statement that clair did not send, and give the failure."""
+        # A run with no staging writes production, thus its error names each
+        # statement that changed production. A staged run wrote the candidate only.
+        if staging_address is None:
+            message = _describe_failure(statements, error, _UNSTAGED_PRODUCTION_PHASES, addresses)
+        else:
+            message = f"{error}{staging_note}"
         statements.extend(
             Statement(sql=sql, phase=phase) for phase, sql in write_statements[sent_write_count:]
         )
-        drops = statements[:unstaged_drop_count]
-        if unstaged_drop_count and all(statement.success for statement in drops):
-            return finish(
-                f"clair dropped the object of the old type at {addresses.physical}, but the "
-                f"write failed: {error}. {addresses.physical} holds no object now. Run clair again",
-                downstream_ok=False,
-            )
-        return finish(f"{error}{staging_note}", downstream_ok=False)
+        return finish(message, downstream_ok=False)
 
     failed_statement = execute_phase(Phase.PREPARE)
     sent_write_count = len(statements)
@@ -747,7 +801,10 @@ def _run_node(
     if staging_address is None:
         failed_statement = execute_phase(Phase.DOCUMENT)
         if failed_statement is not None:
-            return finish(failed_statement.error or "unknown error", downstream_ok=False)
+            message = _describe_failure(
+                statements, failed_statement.error or "unknown error", _UNSTAGED_PRODUCTION_PHASES, addresses
+            )
+            return finish(message, downstream_ok=False)
         downstream_ok = True
         if test_node is not None:
             test_results.extend(test_node(name, plan.test, adapter))
@@ -765,43 +822,15 @@ def _run_node(
     if not trouve.should_promote(context, test_results):
         return finish(_rejection_error(trouve, context, test_results), downstream_ok=False)
 
-    # The promotion first drops an object of another type. Until the statement
-    # after those drops succeeds, production does not hold the tested data.
-    type_drop_count = len(trouve.type_change_statements(context))
-    promotion_statements = [
-        *((Phase.PROMOTE, sql) for sql in plan.promote),
-        *((Phase.DOCUMENT, sql) for sql in plan.document),
-    ]
-    for statement_index, (phase, sql) in enumerate(promotion_statements):
-        statement = execute(sql, phase)
-        if statement.success:
-            continue
-        error = statement.error or "unknown error"
-        if statement_index == 0:
-            return finish(
-                f"the tests passed, but the promotion failed: {error}. "
-                f"The candidate stays at {staging_address}",
-                downstream_ok=False,
+    for phase in (Phase.PROMOTE, Phase.DOCUMENT):
+        failed_statement = execute_phase(phase)
+        if failed_statement is not None:
+            message = _describe_failure(
+                statements, failed_statement.error or "unknown error", _STAGED_PRODUCTION_PHASES, addresses
             )
-        if statement_index <= type_drop_count:
-            # The DROP of the object of the old type succeeded, and the
-            # statement that makes the new object failed.
-            return finish(
-                f"clair dropped the object of the old type at {addresses.physical}, but the "
-                f"promotion failed: {error}. {addresses.physical} holds no object now. "
-                f"The candidate stays at {staging_address}. Run clair again",
-                downstream_ok=False,
-            )
-        # The first statement of the promotion succeeded, thus the physical
-        # address holds the tested data. The object is not yet in the state that
-        # the Trouve declares.
-        return finish(
-            f"{addresses.physical} holds the tested data, but a statement after "
-            f"the promotion failed: {error}. Run it again: {sql.splitlines()[-1]}",
-            downstream_ok=False,
-        )
+            return finish(message, downstream_ok=False)
 
-    # The physical address now holds the tested data. A fault in the retire
+    # Each statement of promote and document succeeded. A fault in the retire
     # phase makes clutter, not a wrong table, thus the node keeps the SUCCESS
     # status.
     for sql in plan.retire:

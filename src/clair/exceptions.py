@@ -38,6 +38,15 @@ class EnvironmentsFileNotFoundError(ClairError):
         )
 
 
+class InvalidEnvironmentsFileError(ClairError):
+    """Clair raises this error when environments.yml exists, but clair cannot read it."""
+
+    def __init__(self, path: str, detail: str) -> None:
+        self.path = path
+        self.detail = detail
+        super().__init__(f"Clair cannot read environments.yml at {path}: {detail}")
+
+
 class InvalidTrouveAddressError(ClairError):
     """Clair raises this error when a name is not a valid Trouve address."""
 

@@ -96,7 +96,7 @@ the next Trouve, and the owner of each table does not depend on the order of the
 | `warehouse` | `str \| None` | The Snowflake warehouse |
 | `role` | `str \| None` | The Snowflake role |
 | `query_tags` | `dict[str, str]` | Labels that clair adds to the query tag. See [The query tag](#the-query-tag). |
-| `statement_timeout_seconds` | `int \| None` | Snowflake cancels a statement that runs longer. `None` keeps the value of the account or the user. |
+| `statement_timeout_seconds` | `int \| None` | Snowflake cancels a statement that runs longer. `None` keeps the value of the account or the user. The value is from 1 to 604800, the seconds of 7 days. A value outside that range fails when Python makes the object. |
 | `transient` | `bool \| None` | `True` makes each table a TRANSIENT table. With no level that sets it, the table is permanent. Only a `Table`, a `PandasTable` and a `SeedTable` take it. A View, a Source and an Iceberg table ignore the value of a directory. See [A transient table](staging.md#a-transient-table). |
 
 If you do not set a field, it stays `None`. clair then uses the value from the level above.

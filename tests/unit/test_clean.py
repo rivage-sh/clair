@@ -75,6 +75,8 @@ class TestRunIdToTime:
             pytest.param("z" * 32, id="not_hex"),
             pytest.param("", id="empty"),
             pytest.param("0" * 33, id="too_long"),
+            # An md5 name: 32 hex characters, and a time after the year 9999.
+            pytest.param("f" * 32, id="hex_beyond_the_last_date"),
         ],
     )
     def test_a_name_that_is_not_a_run_id_gives_none(self, run_id: str):
@@ -205,6 +207,15 @@ class TestSelectRunsToRemove:
         (artifacts_dir / "notes").mkdir()
         runs = find_artifact_runs(artifacts_dir)
         assert [run.run_id for run in select_runs_to_remove(runs, None)] == ["notes"]
+
+    def test_a_hex_name_that_is_not_a_run_stays_after_a_clean_with_a_cutoff(self, tmp_path: Path):
+        foreign_directory = tmp_path / "_clairtifacts" / ("f" * 32)
+        foreign_directory.mkdir(parents=True)
+
+        output = clair.clean(tmp_path, before="7d", now=NOW)
+
+        assert output.runs == []
+        assert foreign_directory.is_dir()
 
     def test_an_absent_directory_gives_no_run(self, tmp_path: Path):
         assert find_artifact_runs(tmp_path / "_clairtifacts") == []

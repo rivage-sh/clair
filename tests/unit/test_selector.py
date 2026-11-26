@@ -125,6 +125,9 @@ def dag():
         ("db.*.orders", {"db.analytics.orders"}),
         ("*.*.*", {"db.raw.source_a", "db.raw.source_b", "db.analytics.orders", "db.analytics.revenue"}),
         ("otherdb.*.*", set()),
+        # selectors.md: `*` matches a dot too, thus a shorter pattern selects a database or a schema.
+        ("db.*", {"db.raw.source_a", "db.raw.source_b", "db.analytics.orders", "db.analytics.revenue"}),
+        ("db.ana*", {"db.analytics.orders", "db.analytics.revenue"}),
     ],
 )
 def test_a_glob_matches_the_logical_address(dag, pattern, expected):

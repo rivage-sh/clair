@@ -111,9 +111,11 @@ def run_id_to_time(run_id: str) -> datetime | None:
         return None
     try:
         milliseconds = int(run_id[:_RUN_ID_TIME_LENGTH], 16)
-    except ValueError:
+        # A hex name that clair did not make, for example an md5 name, can give
+        # a time after the last date that Python holds.
+        return datetime.fromtimestamp(milliseconds / 1000, tz=UTC)
+    except (ValueError, OverflowError):
         return None
-    return datetime.fromtimestamp(milliseconds / 1000, tz=UTC)
 
 
 def parse_before_spec(spec: str, now: datetime) -> datetime:

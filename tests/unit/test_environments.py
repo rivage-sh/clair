@@ -21,9 +21,11 @@ from clair.environments.environments import (
     load_environment,
 )
 from clair.exceptions import (
+    ClairError,
     EnvironmentNotFoundError,
     EnvironmentsFileNotFoundError,
     InvalidEnvironmentError,
+    InvalidEnvironmentsFileError,
 )
 from tests.helpers import make_environment
 
@@ -128,6 +130,22 @@ class TestLoadEnvironment:
         with pytest.raises(EnvironmentsFileNotFoundError):
             load_environment("dev", environments_path=tmp_path / "nonexistent.yml")
 
+    @pytest.mark.parametrize(
+        ("text", "expected_error"),
+        [
+            pytest.param("dev:\n  connection: [unclosed\n", InvalidEnvironmentsFileError, id="bad_yaml"),
+            pytest.param("- dev\n", InvalidEnvironmentsFileError, id="a_list"),
+            pytest.param("", EnvironmentNotFoundError, id="an_empty_file"),
+        ],
+    )
+    def test_a_file_that_exists_and_holds_no_environment_names_its_fault(
+        self, tmp_path: Path, text: str, expected_error: type[ClairError]
+    ):
+        path = tmp_path / "environments.yml"
+        path.write_text(text)
+        with pytest.raises(expected_error):
+            load_environment("dev", environments_path=path)
+
 
 class TestABlockThatClairRejects:
     """Each block below loaded before, and clair then made a silent choice, or failed at the connection."""
@@ -168,6 +186,19 @@ class TestABlockThatClairRejects:
     def test_the_block_raises_and_names_the_key(self, tmp_path: Path, block: str, expected_message: str):
         path = write_one_environment(tmp_path, block)
         with pytest.raises(InvalidEnvironmentError, match=expected_message):
+            load_environment("dev", environments_path=path)
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            pytest.param("", id="an_empty_block"),
+            pytest.param("  - account\n", id="a_list"),
+            pytest.param(CONNECTION_BLOCK + "  authentication:\n    password: p\n  name: prod\n", id="a_name_key"),
+        ],
+    )
+    def test_a_block_that_is_no_environment_raises_a_clair_error(self, tmp_path: Path, block: str):
+        path = write_one_environment(tmp_path, block)
+        with pytest.raises(InvalidEnvironmentError):
             load_environment("dev", environments_path=path)
 
     def test_the_error_of_an_unknown_key_names_the_routing_file(self, tmp_path: Path):

@@ -55,10 +55,10 @@ def plan(self, context: PlanContext) -> NodePlan:
 
 | Phase | A statement fails |
 |-------|-------------------|
-| `prepare`, `build`, `configure` | The node fails, and clair sends no more of these statements. Production keeps its data. A staged run keeps the candidate at the staging address. |
+| `prepare`, `build`, `configure` | The node fails, and clair sends no more of these statements. A staged run keeps the candidate at the staging address, and production keeps its data. A run with `--no-test` writes production, thus the error names each statement that changed it. |
 | `test` | A query that fails counts as a failed test. |
-| `promote` | The node fails, and the candidate stays. If the first statement succeeded, the error tells you that production holds the tested data, and it names the statement to run again. |
-| `document` | The node fails. Production holds the new data, and the error names the statement to run again. |
+| `promote` | The node fails, and the candidate stays. The error names the statement that failed, and each statement of `promote` and `document` that changed production before it. When no statement changed production, the error says that production keeps its data. |
+| `document` | The same as `promote`. |
 | `retire` | clair writes `run.node.staging_drop_failed` to the log. The node stays a success. |
 | `cleanup` | clair writes `run.node.cleanup_failure` to the log, and executes the next cleanup statement. The node keeps its status. |
 

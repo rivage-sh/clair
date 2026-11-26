@@ -18,6 +18,9 @@ from clair._version import __version__
 # a cost report can trust them.
 QUERY_TAG_KEYS = frozenset({"app", "clair_version", "run_id", "environment", "trouve"})
 
+# Snowflake rejects a STATEMENT_TIMEOUT_IN_SECONDS above 7 days.
+MAX_STATEMENT_TIMEOUT_SECONDS = 604_800
+
 
 class SessionConfig(BaseModel):
     """The session settings that a database, a schema, or a Trouve can set.
@@ -29,13 +32,16 @@ class SessionConfig(BaseModel):
             statement, for example ``{"team": "finance"}``. A key of a lower
             level replaces the same key of a higher level.
         statement_timeout_seconds: Snowflake cancels a statement that runs
-            longer. None keeps the value of the account or the user.
+            longer. None keeps the value of the account or the user. The
+            maximum is 604800, the seconds of 7 days.
     """
 
     warehouse: str | None = None
     role: str | None = None
     query_tags: dict[str, str] = {}
-    statement_timeout_seconds: int | None = Field(default=None, gt=0)
+    statement_timeout_seconds: int | None = Field(
+        default=None, gt=0, le=MAX_STATEMENT_TIMEOUT_SECONDS
+    )
 
     @field_validator("query_tags")
     @classmethod

@@ -100,8 +100,9 @@ with a parse error that names the token and nothing else.
 ### A file that clair cannot read stops the run
 
 A Trouve file that raises at import time — a name that does not exist, a package that
-nobody installed, two files that import each other — stops discovery. clair raises
-`ProjectDiscoveryError`, and the error names each file and each cause.
+nobody installed, two files that import each other — stops discovery. A Trouve file whose
+path makes no valid address stops it too. clair raises `ProjectDiscoveryError`, and the
+error names each file and each cause.
 
 clair does not skip the file and continue. A skip removes the Trouve from the DAG, and the
 run then builds fewer tables than the project declares and reports success. The error
@@ -330,7 +331,7 @@ waits for the node that failed.
 |---|---|---|---|
 | A statement fails | Keeps its data | FAILED. The message names the staging object. | They run |
 | A test fails | Keeps its data | FAILED. The staging object is the rejected candidate. | They run |
-| The promotion fails | Keeps its data | FAILED. The tested data stays at the staging address. | They run |
+| The promotion fails | Holds the result of each promotion statement that succeeded | FAILED. The message names each of those statements. The tested data stays at the staging address. | They run |
 | An upstream node failed | Keeps its data | SKIPPED, with the name of the node that failed | They run |
 
 `clair run` stops with the status code 1 if one node failed. Each `SKIPPED` result names

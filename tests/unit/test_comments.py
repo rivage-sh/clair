@@ -321,5 +321,5 @@ class TestTheRun:
 
         assert isinstance(result, RunFailure)
         assert index_of(executed_sql(result), PROMOTE_TABLE) > -1
-        assert f"{PHYSICAL_ADDRESS} holds the tested data" in result.error
+        assert f"CLONE {STAGING_ADDRESS}" in result.error.split("The statement that failed")[0]
         assert TABLE_COMMENT in result.error

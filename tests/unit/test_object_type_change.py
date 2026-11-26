@@ -130,12 +130,12 @@ class TestStagedRun:
         assert "the tests failed" in result.error
         assert _drops_of_the_physical_object(result) == []
 
-    def test_a_failed_promotion_after_the_drop_says_that_production_holds_nothing(self):
+    def test_a_failed_promotion_after_the_drop_names_the_drop(self):
         adapter = RecordingAdapter(existing_views=[ADDRESS], fail_on=["promote the tested table"])
         result = run_one_trouve(Table(sql="SELECT 1 AS id"), adapter)
 
         assert isinstance(result, RunFailure)
-        assert f"{ADDRESS} holds no object now" in result.error
+        assert f"These statements changed {ADDRESS} before it: DROP VIEW IF EXISTS {ADDRESS}" in result.error
         assert f"The candidate stays at {_staging_address()}" in result.error
 
     @pytest.mark.parametrize(
@@ -180,19 +180,20 @@ class TestRunWithNoStaging:
         ],
         ids=["table", "pandas table"],
     )
-    def test_a_failed_write_after_the_drop_says_that_production_holds_nothing(self, trouve, adapter):
-        # The staged path tells the same fact when its promotion fails.
+    def test_a_failed_write_after_the_drop_names_the_drop(self, trouve, adapter):
+        # The staged path names the drop too when its promotion fails.
         result = run_one_trouve(trouve, adapter, use_staging=False)
 
         assert isinstance(result, RunFailure)
-        assert f"{ADDRESS} holds no object now" in result.error
+        assert f"DROP VIEW IF EXISTS {ADDRESS}" in result.error
+        assert f"{ADDRESS} keeps its data" not in result.error
 
-    def test_a_failed_drop_does_not_say_that_production_holds_nothing(self):
+    def test_a_failed_drop_says_that_production_keeps_its_data(self):
         adapter = RecordingAdapter(existing_views=[ADDRESS], fail_on=[f"DROP VIEW IF EXISTS {ADDRESS}"])
         result = run_one_trouve(Table(sql="SELECT 1 AS id"), adapter, use_staging=False)
 
         assert isinstance(result, RunFailure)
-        assert "holds no object now" not in result.error
+        assert f"{ADDRESS} keeps its data" in result.error
 
     def test_a_type_that_does_not_change_builds_with_no_drop(self):
         result = run_one_trouve(Table(sql="SELECT 1 AS id"), RecordingAdapter(), use_staging=False)
